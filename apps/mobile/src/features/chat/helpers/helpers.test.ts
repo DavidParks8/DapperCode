@@ -801,6 +801,68 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(helpers.getDraftScopeKey(undefined)).toBe(helpers.CHAT_NEW_DRAFT_KEY);
   });
 
+  it('parses, isolates, and orders bridge scheduled prompt state', () => {
+    expect(helpers.parseBridgeThreadSchedulesState(null)).toBeNull();
+    expect(helpers.parseBridgeThreadSchedulesState({ threadId: ' ' })).toBeNull();
+    expect(
+      helpers.parseBridgeThreadSchedulesState({
+        threadId: ' thread ',
+        schedules: [
+          {
+            scheduleId: 'later',
+            threadId: 'thread',
+            promptPreview: 'Later\r\nprompt',
+            promptBytes: 13,
+            scheduledFor: '2026-08-31T16:00:00.000Z',
+            createdAt: '2026-08-29T20:00:00.000Z',
+            status: 'retrying',
+            retryAttempt: 2,
+          },
+          {
+            scheduleId: 'other-thread',
+            threadId: 'other',
+            promptPreview: 'Do not leak',
+            promptBytes: 11,
+            scheduledFor: '2026-08-29T22:00:00.000Z',
+            createdAt: '2026-08-29T20:00:00.000Z',
+            status: 'scheduled',
+            retryAttempt: 0,
+          },
+          {
+            scheduleId: 'earlier',
+            threadId: 'thread',
+            promptPreview: 'Earlier prompt',
+            promptBytes: 14,
+            scheduledFor: '2026-08-30T16:00:00.000Z',
+            createdAt: '2026-08-29T20:00:00.000Z',
+            status: 'queued',
+            retryAttempt: 1,
+          },
+          {
+            scheduleId: 'invalid',
+            threadId: 'thread',
+            promptPreview: 'Invalid',
+            promptBytes: 7,
+            scheduledFor: 'tomorrow',
+            createdAt: '2026-08-29T20:00:00.000Z',
+            status: 'scheduled',
+            retryAttempt: 0,
+          },
+        ],
+      }),
+    ).toEqual({
+      threadId: 'thread',
+      schedules: [
+        expect.objectContaining({ scheduleId: 'earlier', status: 'queued' }),
+        expect.objectContaining({
+          scheduleId: 'later',
+          promptPreview: 'Later\nprompt',
+          status: 'retrying',
+        }),
+      ],
+    });
+  });
+
   it('gates queue steering only on bridge capability and queue ownership state', () => {
     const base = {
       hasQueuedMessage: true,

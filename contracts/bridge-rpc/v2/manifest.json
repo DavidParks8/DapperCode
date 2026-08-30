@@ -38,6 +38,7 @@
     "bridge/thread/queue/read",
     "bridge/thread/queue/send",
     "bridge/thread/queue/steer",
+    "bridge/thread/schedules/read",
     "bridge/ui/dismiss",
     "bridge/ui/present",
     "bridge/ui/resolve",
@@ -81,6 +82,7 @@
     "bridge/thread/list/stream/batch",
     "bridge/thread/list/stream/error",
     "bridge/thread/queue/updated",
+    "bridge/thread/schedules/updated",
     "bridge/ui.dismiss",
     "bridge/ui.present",
     "bridge/ui.resolved",
@@ -617,6 +619,21 @@
       "submissionId": "submission-00000000-0000-4000-8000-000000000001",
       "threadId": "thread-1",
       "disposition": "queued"
+    },
+    "threadSchedules": {
+      "threadId": "thread-1",
+      "schedules": [
+        {
+          "scheduleId": "00000000-0000-4000-8000-000000000002",
+          "threadId": "thread-1",
+          "promptPreview": "Review the deployment checklist.",
+          "promptBytes": 32,
+          "scheduledFor": "2026-09-01T16:00:00Z",
+          "createdAt": "2026-08-29T21:00:00Z",
+          "status": "scheduled",
+          "retryAttempt": 0
+        }
+      ]
     },
     "agentMessageQueue": {
       "threadId": "agent-alpha:child",

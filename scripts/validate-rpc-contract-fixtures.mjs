@@ -166,6 +166,12 @@ if (
   fail('filesystem truncation fixture');
 if (!fixtures.submission.submissionId || !fixtures.submission.threadId) fail('submission fixture');
 if (
+  fixtures.threadSchedules.threadId !== 'thread-1' ||
+  fixtures.threadSchedules.schedules.length !== 1 ||
+  fixtures.threadSchedules.schedules[0].status !== 'scheduled'
+)
+  fail('thread schedules fixture');
+if (
   fixtures.agentMessageQueue.items.length !== 1 ||
   fixtures.agentMessageQueue.items[0].agentMessage?.direction !== 'received' ||
   fixtures.agentMessageQueue.items[0].agentMessage?.disposition !== 'queued'

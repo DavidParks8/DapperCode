@@ -63,8 +63,14 @@ type TestMessageInput = Omit<ApiChatMessage, 'role' | 'content'> & {
 
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(true) }));
 
+const renderedMessages = new Set<ReactTestRenderer>();
+
 afterEach(() => {
   act(() => {
+    for (const tree of renderedMessages) {
+      tree.unmount();
+    }
+    renderedMessages.clear();
     getDefaultStore().set(responseUsageOverlayAtom, null);
   });
 });
@@ -2123,7 +2129,9 @@ function renderMessage(
   act(() => {
     tree = renderer.create(renderMessageElement(message, props));
   });
-  return expectValue(tree) as QueryableRenderer;
+  const rendered = expectValue(tree) as QueryableRenderer;
+  renderedMessages.add(rendered);
+  return rendered;
 }
 
 function renderMessageElement(

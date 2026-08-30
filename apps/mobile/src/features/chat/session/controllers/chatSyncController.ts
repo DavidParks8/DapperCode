@@ -11,7 +11,7 @@ import {
   isChatLikelyRunning,
 } from '../../helpers/helpers';
 
-type ChatSyncApi = Pick<HostBridgeApiClient, 'getChat' | 'readThreadQueue'>;
+type ChatSyncApi = Pick<HostBridgeApiClient, 'getChat' | 'readThreadQueue' | 'readThreadSchedules'>;
 
 export interface ChatSyncAssessment {
   terminal: boolean;
@@ -63,6 +63,10 @@ export class ChatSyncController {
 
   readQueue(threadId: string) {
     return this.api.readThreadQueue(threadId);
+  }
+
+  readSchedules(threadId: string) {
+    return this.api.readThreadSchedules(threadId);
   }
 }
 

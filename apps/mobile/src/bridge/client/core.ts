@@ -14,6 +14,7 @@ import type {
   AgentId,
   ApprovalPolicy,
   BridgeCapabilities,
+  BridgeThreadSchedulesState,
   BridgeThreadQueueActionResponse,
   BridgeThreadQueueState,
   BrowserPreviewDiscoveryResponse,
@@ -188,6 +189,7 @@ export abstract class HostBridgeApiClientCore {
   abstract interruptTurn(threadId: string, turnId: string): Promise<void>;
   abstract interruptLatestTurn(threadId: string): Promise<string | null>;
   abstract readThreadQueue(threadId: string): Promise<BridgeThreadQueueState>;
+  abstract readThreadSchedules(threadId: string): Promise<BridgeThreadSchedulesState>;
   abstract steerQueuedThreadMessage(
     threadId: string,
     itemId: string,

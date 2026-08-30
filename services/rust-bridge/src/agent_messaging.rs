@@ -35,6 +35,7 @@ use crate::acp::runtime::McpTransportPreference;
 use crate::bridge_protocol::BridgeQueueService;
 use crate::resource_limits::QUEUE_MAX_CONTENT_BYTES;
 use crate::runtime_backend::RuntimeBackend;
+use crate::scheduled_prompts::{ScheduledPromptError, ScheduledPromptService};
 
 pub(crate) const AGENT_MESSAGE_ENVELOPE_VERSION: u32 = 1;
 pub(crate) const SEND_AGENT_MESSAGE_TOOL: &str = "send_agent_message";
@@ -46,7 +47,7 @@ const MAX_MCP_CREDENTIALS: usize = 4_096;
 const MAX_MCP_PROTOCOL_SESSIONS: usize = 512;
 const MAX_MCP_SESSIONS_PER_CREDENTIAL: usize = 4;
 const MAX_AGENT_MESSAGE_BODY_BYTES: usize = 48 * 1024;
-const MAX_MCP_REQUEST_BYTES: usize = MAX_AGENT_MESSAGE_BODY_BYTES * 6 + 16 * 1024;
+const MAX_MCP_REQUEST_BYTES: usize = QUEUE_MAX_CONTENT_BYTES * 6 + 16 * 1024;
 const MCP_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const MCP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const MCP_SESSION_HEADER: HeaderName = HeaderName::from_static("mcp-session-id");
@@ -622,6 +623,7 @@ impl McpCredentialStore {
 
 pub(crate) struct AgentMessagingService {
     config: AgentMessagingMcpConfig,
+    scheduler: Arc<ScheduledPromptService>,
     cancellation: CancellationToken,
     task: tokio::task::JoinHandle<()>,
 }
@@ -630,6 +632,7 @@ impl AgentMessagingService {
     pub(crate) async fn start(
         backend: Weak<RuntimeBackend>,
         queue: Weak<BridgeQueueService>,
+        scheduler: Arc<ScheduledPromptService>,
     ) -> Result<Self, String> {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -645,6 +648,7 @@ impl AgentMessagingService {
         let state = Arc::new(AgentMessagingRouterState {
             backend,
             queue,
+            scheduler: scheduler.clone(),
             credentials: credentials.clone(),
             legacy_sessions: Arc::new(Mutex::new(HashMap::new())),
             message_url: format!("{base_url}/message"),
@@ -694,6 +698,7 @@ impl AgentMessagingService {
                 format!("{base_url}/sse"),
                 credentials,
             ),
+            scheduler,
             cancellation,
             task,
         })
@@ -714,12 +719,14 @@ impl AgentMessagingService {
             task.abort();
             let _ = task.await;
         }
+        self.scheduler.shutdown().await;
     }
 }
 
 struct AgentMessagingRouterState {
     backend: Weak<RuntimeBackend>,
     queue: Weak<BridgeQueueService>,
+    scheduler: Arc<ScheduledPromptService>,
     credentials: Arc<McpCredentialStore>,
     legacy_sessions: Arc<Mutex<HashMap<String, LegacySseSession>>>,
     message_url: String,
@@ -794,6 +801,24 @@ struct SendAgentMessageArguments {
 struct SendAgentMessageResult {
     message_id: String,
     disposition: AgentMessageDisposition,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SchedulePromptArguments {
+    #[schemars(description = "Text prompt to deliver to this ACP session")]
+    prompt: String,
+    #[schemars(
+        description = "Absolute RFC 3339 timestamp strictly in the future; offsets are accepted and the stored value is normalized to UTC"
+    )]
+    scheduled_for: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CancelScheduledPromptArguments {
+    #[schemars(description = "scheduleId returned by schedule_prompt or list_scheduled_prompts")]
+    schedule_id: String,
 }
 
 #[tool_router]
@@ -897,13 +922,59 @@ impl AgentMessagingMcpHandler {
             disposition,
         })
     }
+
+    #[tool(
+        description = "Schedule one text prompt for this ACP session at an absolute future RFC 3339 timestamp. The schedule is durable across bridge restarts and scheduledFor is returned in UTC"
+    )]
+    async fn schedule_prompt(
+        &self,
+        Parameters(arguments): Parameters<SchedulePromptArguments>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let (_, caller_thread_id) = self.active_caller()?;
+        let scheduled = self
+            .state
+            .scheduler
+            .schedule(
+                &caller_thread_id,
+                arguments.prompt,
+                &arguments.scheduled_for,
+            )
+            .await
+            .map_err(scheduled_prompt_tool_error)?;
+        json_tool_result(scheduled)
+    }
+
+    #[tool(
+        description = "List pending scheduled prompts owned by this ACP session, including scheduled, queued, and retrying delivery status"
+    )]
+    async fn list_scheduled_prompts(&self) -> Result<CallToolResult, ErrorData> {
+        let (_, caller_thread_id) = self.active_caller()?;
+        json_tool_result(self.state.scheduler.list(&caller_thread_id).await)
+    }
+
+    #[tool(
+        description = "Cancel one pending prompt owned by this ACP session. A valid ID belonging to another session is reported as not_found"
+    )]
+    async fn cancel_scheduled_prompt(
+        &self,
+        Parameters(arguments): Parameters<CancelScheduledPromptArguments>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let (_, caller_thread_id) = self.active_caller()?;
+        let cancelled = self
+            .state
+            .scheduler
+            .cancel(&caller_thread_id, &arguments.schedule_id)
+            .await
+            .map_err(scheduled_prompt_tool_error)?;
+        json_tool_result(cancelled)
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for AgentMessagingMcpHandler {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Use these tools only for explicit one-way communication with direct parent and sub-agent sessions. list_agent_relations omits this session's own thread ID; only its parent.threadId and children[].threadId values are valid send_agent_message recipients.",
+            "Use messaging tools only for explicit one-way communication with direct parent and sub-agent sessions. Scheduled-prompt tools operate only on this authenticated ACP session and accept one-time absolute RFC 3339 timestamps.",
         )
     }
 }
@@ -929,6 +1000,13 @@ fn json_tool_result(value: impl Serialize) -> Result<CallToolResult, ErrorData> 
 
 fn agent_relation_tool_error(error: AgentRelationError) -> ErrorData {
     ErrorData::invalid_params(error.to_string(), None)
+}
+
+fn scheduled_prompt_tool_error(error: ScheduledPromptError) -> ErrorData {
+    match error {
+        ScheduledPromptError::Invalid(message) => ErrorData::invalid_params(message, None),
+        ScheduledPromptError::Internal(message) => ErrorData::internal_error(message, None),
+    }
 }
 
 async fn authenticate_mcp_request(
@@ -1279,6 +1357,10 @@ fn contains_reserved_agent_message_marker(value: &str) -> bool {
     value.contains(ENVELOPE_PREFIX.trim_end()) || value.contains(ENVELOPE_SUFFIX.trim_start())
 }
 
+pub(crate) fn text_contains_reserved_agent_message_marker(value: &str) -> bool {
+    contains_reserved_agent_message_marker(value)
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -1333,6 +1415,52 @@ mod tests {
             AgentRelationKind::SubAgent.inverse(),
             AgentRelationKind::Parent
         );
+    }
+
+    #[tokio::test]
+    async fn authenticated_handler_routes_scheduled_prompt_tools_to_its_active_session() {
+        let credentials = Arc::new(McpCredentialStore::default());
+        let config = AgentMessagingMcpConfig::new(
+            "http://unused".into(),
+            "http://unused".into(),
+            credentials.clone(),
+        );
+        let pending = config.stage_credential("agent").unwrap();
+        let token = pending.token.clone();
+        let thread_id = crate::acp::identity::AgentSessionId::new("agent", "scheduled-owner")
+            .unwrap()
+            .encode();
+        config
+            .activate_credential(pending, &thread_id)
+            .expect("credential activates");
+        let scheduler = ScheduledPromptService::inert_for_test();
+        let handler = AgentMessagingMcpHandler::new(
+            AuthenticatedMcpCredential {
+                token,
+                agent_id: "agent".to_string(),
+            },
+            Arc::new(AgentMessagingRouterState {
+                backend: Weak::new(),
+                queue: Weak::new(),
+                scheduler: scheduler.clone(),
+                credentials,
+                legacy_sessions: Arc::new(Mutex::new(HashMap::new())),
+                message_url: "http://unused/message".to_string(),
+            }),
+        );
+
+        handler
+            .schedule_prompt(Parameters(SchedulePromptArguments {
+                prompt: "future work".to_string(),
+                scheduled_for: (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339(),
+            }))
+            .await
+            .expect("schedule_prompt path succeeds");
+        handler
+            .list_scheduled_prompts()
+            .await
+            .expect("list_scheduled_prompts path succeeds");
+        assert_eq!(scheduler.list(&thread_id).await.len(), 1);
     }
 
     #[test]
@@ -1646,6 +1774,7 @@ mod tests {
         let service = AgentMessagingService::start(
             Weak::<RuntimeBackend>::new(),
             Weak::<BridgeQueueService>::new(),
+            ScheduledPromptService::inert_for_test(),
         )
         .await
         .expect("shared MCP listener starts");
@@ -1701,6 +1830,7 @@ mod tests {
         let service = AgentMessagingService::start(
             Weak::<RuntimeBackend>::new(),
             Weak::<BridgeQueueService>::new(),
+            ScheduledPromptService::inert_for_test(),
         )
         .await
         .expect("shared MCP listener starts");
@@ -1738,6 +1868,29 @@ mod tests {
             manager.sessions.read().await.len(),
             MAX_MCP_SESSIONS_PER_CREDENTIAL
         );
+        let tools = client
+            .post(config.http_url.clone())
+            .header(AUTHORIZATION, &authorization)
+            .header(MCP_SESSION_HEADER.as_str(), &session_ids[0])
+            .header("mcp-protocol-version", "2025-03-26")
+            .header("accept", "application/json, text/event-stream")
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 98,
+                "method": "tools/list",
+            }))
+            .send()
+            .await
+            .expect("tools/list response");
+        assert_eq!(tools.status(), StatusCode::OK);
+        let tools = tools.text().await.expect("tools/list body");
+        for name in [
+            "schedule_prompt",
+            "list_scheduled_prompts",
+            "cancel_scheduled_prompt",
+        ] {
+            assert!(tools.contains(name), "missing MCP tool schema for {name}");
+        }
 
         let replacement = initialize_http_session(&client, &config, &authorization, 99).await;
         assert_eq!(replacement.status(), StatusCode::OK);
@@ -1819,6 +1972,7 @@ mod tests {
         let service = AgentMessagingService::start(
             Weak::<RuntimeBackend>::new(),
             Weak::<BridgeQueueService>::new(),
+            ScheduledPromptService::inert_for_test(),
         )
         .await
         .expect("shared MCP listener starts");

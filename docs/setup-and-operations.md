@@ -150,7 +150,7 @@ live in a central per-user data directory:
     agents.json                typed ACP manifest with digest
     bridge.log
     runtime/                   legacy ownership data retained for safe migration
-    state/                     session index, bounded agent-message journal, push registry
+    state/                     session index, scheduler, retirement, idempotency and push state
     attachments/               mobile uploads
 ```
 
@@ -164,6 +164,57 @@ in bridge memory and are revoked when their ACP session is replaced, deleted, or
 and pending-steer activities are marked `cancelled` after a bridge restart because their in-memory
 payloads do not survive the process; an envelope recovered from ACP history reconciles the
 corresponding activity to `sent`.
+
+`scheduled-prompts.json` is a separate private, bounded scheduler state file. It contains prompt text,
+the owning ACP thread ID, UTC delivery time, retry metadata, and cancellation intent; it never
+contains MCP credentials. The bridge fails startup rather than accepting malformed or oversized
+scheduler state. At startup its single worker immediately catches up overdue prompts. Temporary
+dispatch failures retry indefinitely with capped exponential backoff, and a busy session receives the
+prompt through the ordinary queue rather than steering its active turn.
+
+Scheduling is available only to an authenticated active ACP session through the bridge-owned
+`schedule_prompt`, `list_scheduled_prompts`, and `cancel_scheduled_prompt` MCP tools. Timestamps must
+be absolute RFC 3339 values strictly in the future when admitted and are normalized to UTC. A session
+can have at most 100 pending schedules, each prompt uses the existing 64 KiB queue content limit, and
+agents can list or cancel only their own schedules. DapperCode intentionally exposes no mobile UI or
+WebSocket method that creates, edits, or cancels schedules. The mobile chat composer shows the
+selected thread's pending schedules read-only. It hydrates them through
+`bridge/thread/schedules/read` and converges on complete-list
+`bridge/thread/schedules/updated` notifications.
+
+The scheduler keeps due-but-queued records until the queue has a durable sent receipt. If the bridge
+stops first, the in-memory queue item is recreated with the same deterministic submission ID; if the
+receipt was already durable, restart suppresses a duplicate. Cancellation is persisted before a
+queued item is removed, so a restart completes an interrupted cancellation instead of redispatching
+it.
+
+`thread-retirements.json` is the private, versioned, bounded deletion journal. Each versioned entry
+records the manager's authoritative thread family in a `prepared` phase before ACP deletion begins.
+The bridge first takes the global queue-admission write barrier and drains every previously admitted
+dispatch or scheduling operation. While still holding that barrier, the manager locks and rechecks
+the complete indexed family; the bridge then durably records that exact family and installs its
+scheduler and queue guards before releasing the barrier. It never fences an initial family and later
+expands it. Existing schedules and queue state remain durable in this phase. Only a failure
+definitively known to occur before ACP deletion is invoked clears the prepared entry. Once ACP
+deletion has been invoked, an error or task abort conservatively preserves the `prepared` entry for
+startup reconciliation because the delete may have taken effect; in-memory retiring guards are
+released when the owned deletion task ends.
+
+Immediately after ACP confirms deletion, the entry atomically advances to `deleted` with the same
+authoritative frozen family. Queue idempotency and scheduler state are then cleaned idempotently with
+bounded exponential-backoff retries. The entry is cleared only after both stores converge, then
+empty queue and schedule snapshots are published. The shared admission fence atomically transitions
+the retiring family to permanent in-memory deleted-thread tombstones, so delayed canonical events
+and retained queue or steer tasks cannot recreate runtime after cleanup.
+
+On startup the bridge rejects malformed phases, unknown versions, and oversized journals. A
+`deleted` entry resumes cleanup before the scheduled-prompt worker can dispatch. A `prepared` entry
+is reconciled against the ACP runtime and durable session index: confirmed-live families preserve
+their work and roll back the entry, confirmed-absent families advance to `deleted`, and mixed or
+indeterminate results fail startup with the journal intact. Recovery installs deleted-thread
+tombstones before it finishes a confirmed deletion and clears the journal. This also handles a crash
+after only one store was cleaned. If shutdown interrupts a permanently failing transition or cleanup
+write, shutdown remains bounded and leaves the journal intact for the next startup.
 
 Bridge bearer tokens are **not** in `config.json`. macOS stores distinct workspace tokens together
 under Keychain service `dev.dappercode.desktop`, account `bridge-auth-vault:v1`. Windows uses the
@@ -202,9 +253,9 @@ dormant workspace and continues the same submission.
 
 The default pool admits at most 12 workers and retains at most two idle workers. A worker must be
 idle for a full 60-second grace period before it is LRU-eligible. It is never idle while it has a
-connected client, active or admitting run, queued message, pending steer, approval, user input,
-preview session, in-flight request, or other queue transition. A failed activity probe also fails
-closed as busy. Runs that were admitted continue after the phone disconnects.
+connected client, active or admitting run, queued or scheduled prompt, pending steer, approval, user
+input, preview session, in-flight request, or other queue transition. A failed activity probe also
+fails closed as busy. Runs that were admitted continue after the phone disconnects.
 
 The worker owns replay while it is warm. If it retires, durable session snapshots remain in the
 profile state directory; the next worker has a new stream identity, so the existing mobile

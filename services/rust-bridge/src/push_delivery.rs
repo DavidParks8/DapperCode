@@ -600,6 +600,7 @@ mod tests {
             &'a self,
             _thread_id: &'a str,
             _turn_start: &'a Value,
+            _source_turn_id: &'a str,
         ) -> BoxFuture<'a, Result<String, String>> {
             Box::pin(async { Err("unused".to_string()) })
         }

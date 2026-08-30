@@ -872,6 +872,13 @@ pub(super) async fn handle_bridge_method(
             serde_json::to_value(state.queue.read_queue(&request.thread_id).await)
                 .map_err(|error| BridgeError::server(&error.to_string()))
         }
+        "bridge/thread/schedules/read" => {
+            let request: BridgeThreadSchedulesReadRequest =
+                serde_json::from_value(params.unwrap_or_else(|| json!({})))
+                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+            serde_json::to_value(state.scheduler.read(&request.thread_id).await)
+                .map_err(|error| BridgeError::server(&error.to_string()))
+        }
         "bridge/thread/queue/send" => {
             let mut request: BridgeThreadQueueSendRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))

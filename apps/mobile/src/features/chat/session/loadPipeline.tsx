@@ -11,6 +11,7 @@ import {
   isChatLikelyRunning,
   resolveSettledActivity,
   retireOpeningChatActivity,
+  parseBridgeThreadSchedulesState,
 } from '../helpers/helpers';
 import { getTranscriptContinuationState } from '../transcript/controllers/continuationController';
 import { resolveEquivalentChat } from '../state/chatState';
@@ -55,15 +56,46 @@ function queueThreadQueueRead(params: {
         cacheThreadQueueState(chatId, queueState);
       }
     })
-    .catch(() => {});
+    .catch((error: unknown) => {
+      console.warn(`Could not read queued messages for thread ${chatId}.`, error);
+    });
 }
 
-function shouldPreserveRuntimeStateForLoad(
-  options: LoadChatOptions | undefined,
-  chatId: string,
-  currentChatId: string | null,
-): boolean {
-  return Boolean(options?.preserveRuntimeState && chatId === currentChatId);
+function queueThreadSchedulesRead(params: {
+  requestId: number;
+  chatId: string;
+  loadChatRequestRef: MainScreenChatLoadPipelineContext['loadChatRequestRef'];
+  deletedThreadIdsRef: MainScreenChatLoadPipelineContext['deletedThreadIdsRef'];
+  threadRuntimeSnapshotsRef: MainScreenChatLoadPipelineContext['threadRuntimeSnapshotsRef'];
+  chatSyncController: MainScreenChatLoadPipelineContext['chatSyncController'];
+  cacheThreadSchedulesState: MainScreenChatLoadPipelineContext['cacheThreadSchedulesState'];
+}): void {
+  const {
+    requestId,
+    chatId,
+    loadChatRequestRef,
+    deletedThreadIdsRef,
+    threadRuntimeSnapshotsRef,
+    chatSyncController,
+    cacheThreadSchedulesState,
+  } = params;
+  const expectedSchedules = threadRuntimeSnapshotsRef.current[chatId]?.scheduledPrompts;
+  void chatSyncController
+    .readSchedules(chatId)
+    .then((value) => {
+      const schedulesState = parseBridgeThreadSchedulesState(value);
+      if (
+        schedulesState?.threadId === chatId &&
+        isCurrentLoadRequest(loadChatRequestRef, requestId) &&
+        !deletedThreadIdsRef.current.has(chatId) &&
+        threadRuntimeSnapshotsRef.current[chatId]?.scheduledPrompts === expectedSchedules
+      ) {
+        cacheThreadSchedulesState(chatId, schedulesState);
+      }
+    })
+    .catch((error: unknown) => {
+      console.warn(`Could not read scheduled prompts for thread ${chatId}.`, error);
+    });
 }
 
 function setLoadedChatSelection(params: {
@@ -249,10 +281,8 @@ function applyLoadedChat(params: {
     setStoppingTurn,
     setActivity,
   } = params;
-  const shouldPreserveRuntimeState = shouldPreserveRuntimeStateForLoad(
-    options,
-    chatId,
-    chatIdRef.current,
+  const shouldPreserveRuntimeState = Boolean(
+    options?.preserveRuntimeState && chatId === chatIdRef.current,
   );
 
   setLoadedChatSelection({
@@ -396,10 +426,12 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
     applyThreadRuntimeSnapshot,
     autoEnabledPlanTurnIdByThreadRef,
     cacheThreadQueueState,
+    cacheThreadSchedulesState,
     cacheThreadTurnState,
     chatIdRef,
     chatSyncController,
     clearRunWatchdog,
+    deletedThreadIdsRef,
     hadCommandRef,
     loadChatRequestRef,
     mergeChatWithPendingOptimisticMessages,
@@ -436,6 +468,15 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
           loadChatRequestRef,
           chatSyncController,
           cacheThreadQueueState,
+        });
+        queueThreadSchedulesRead({
+          requestId,
+          chatId,
+          loadChatRequestRef,
+          deletedThreadIdsRef,
+          threadRuntimeSnapshotsRef,
+          chatSyncController,
+          cacheThreadSchedulesState,
         });
         const loadedChat = await chatSyncController.load(chatId);
         const chat = mergeChatWithPendingOptimisticMessages(loadedChat);
@@ -498,9 +539,11 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
       applyThreadRuntimeSnapshot,
       autoEnabledPlanTurnIdByThreadRef,
       cacheThreadQueueState,
+      cacheThreadSchedulesState,
       cacheThreadTurnState,
       chatIdRef,
       clearRunWatchdog,
+      deletedThreadIdsRef,
       hadCommandRef,
       loadChatRequestRef,
       mergeChatWithPendingOptimisticMessages,

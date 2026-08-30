@@ -149,7 +149,13 @@ function handleThreadDeletedEvent(
 ): void {
   const params = toRecord(event.params);
   const threadId = extractNotificationThreadId(params);
-  if (!threadId || threadId !== currentId) {
+  if (!threadId) {
+    return;
+  }
+
+  context.api.forgetChat(threadId);
+  context.forgetThreadRuntimeState(threadId);
+  if (threadId !== currentId) {
     return;
   }
 

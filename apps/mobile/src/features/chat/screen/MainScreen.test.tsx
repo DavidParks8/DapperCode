@@ -49,7 +49,8 @@ import {
 import { startNewChatAtom } from '@shell/navigation/actions';
 import { pendingBrowserTargetUrlAtom } from '../../browser/state/browser';
 import { agentThreadMenuVisibleAtom } from '../state/modals';
-import { selectedChatAtom } from '../state/session';
+import { selectedChatAtom, selectedChatIdAtom } from '../state/session';
+import { threadRuntimeSnapshotsAtom } from '../state/runtime';
 import { activeTurnIdAtom } from '../state/turn';
 import { liveAssistantByThreadAtom } from '../state/turn';
 import { createAgUiThreadMessageState } from '@bridge/agui/agUiMessages';
@@ -308,6 +309,7 @@ function MainRouteShell() {
       }),
       listApprovals: jest.fn().mockResolvedValue([]),
       readThreadQueue: jest.fn().mockResolvedValue(emptyQueue),
+      readThreadSchedules: jest.fn().mockResolvedValue({ threadId: chat.id, schedules: [] }),
       resolveApproval: jest.fn().mockResolvedValue({ ok: true }),
       resolveUserInput: jest.fn().mockResolvedValue({ ok: true }),
       steerQueuedThreadMessage: jest.fn().mockResolvedValue({ ok: true, queue: emptyQueue }),
@@ -890,6 +892,246 @@ function MainRouteShell() {
       });
       await pressLabel(root, 'Cancel queued message');
       expect(api.cancelQueuedThreadMessage).toHaveBeenCalledWith(chat.id, 'queued-1');
+      act(() => tree.unmount());
+    });
+
+    it('reads pending schedules when the selected chat loads', async () => {
+      const api = createApi();
+      (api.readThreadSchedules as jest.Mock).mockResolvedValueOnce({
+        threadId: chat.id,
+        schedules: [
+          {
+            scheduleId: 'scheduled-load',
+            threadId: chat.id,
+            promptPreview: 'Loaded schedule preview',
+            promptBytes: 23,
+            scheduledFor: '2026-08-30T16:00:00.000Z',
+            createdAt: '2026-08-29T20:00:00.000Z',
+            status: 'scheduled',
+            retryAttempt: 0,
+          },
+        ],
+      });
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+
+      expect(api.readThreadSchedules).toHaveBeenCalledWith(chat.id);
+      expect(hasText(tree.root as Queryable, 'Loaded schedule preview')).toBe(true);
+      act(() => tree.unmount());
+    });
+
+    it('logs background queue and schedule read failures', async () => {
+      const api = createApi();
+      const queueError = new Error('queue read failed');
+      const schedulesError = new Error('schedule read failed');
+      (api.readThreadQueue as jest.Mock).mockRejectedValueOnce(queueError);
+      (api.readThreadSchedules as jest.Mock).mockRejectedValueOnce(schedulesError);
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+
+      expect(warn).toHaveBeenCalledWith(
+        `Could not read queued messages for thread ${chat.id}.`,
+        queueError,
+      );
+      expect(warn).toHaveBeenCalledWith(
+        `Could not read scheduled prompts for thread ${chat.id}.`,
+        schedulesError,
+      );
+      warn.mockRestore();
+      act(() => tree.unmount());
+    });
+
+    it('replay recovery converges schedules despite an unrelated runtime update', async () => {
+      const api = createApi();
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const root = tree.root as Queryable;
+      const schedule = (
+        scheduleId: string,
+        threadId: string,
+        prompt: string,
+        scheduledFor: string,
+      ) => ({
+        scheduleId,
+        threadId,
+        promptPreview: prompt,
+        promptBytes: prompt.length,
+        scheduledFor,
+        createdAt: '2026-08-29T20:00:00.000Z',
+        status: 'scheduled',
+        retryAttempt: 0,
+      });
+
+      await emitWs({
+        method: 'bridge/thread/schedules/updated',
+        params: {
+          threadId: 'other-thread',
+          schedules: [
+            schedule('other', 'other-thread', 'Other thread schedule', '2026-08-30T15:00:00.000Z'),
+          ],
+        },
+      });
+      expect(hasText(root, 'Other thread schedule')).toBe(false);
+
+      await emitWs({
+        method: 'bridge/thread/schedules/updated',
+        params: {
+          threadId: chat.id,
+          schedules: [
+            schedule('later', chat.id, 'Later schedule', '2026-08-31T16:00:00.000Z'),
+            schedule('earlier', chat.id, 'Earliest schedule', '2026-08-30T16:00:00.000Z'),
+          ],
+        },
+      });
+      expect(hasText(root, 'Earliest schedule')).toBe(true);
+      expect(hasText(root, 'Later schedule')).toBe(false);
+      expect(hasText(root, '+1 more')).toBe(true);
+
+      let resolveSchedules!: (value: { threadId: string; schedules: [] }) => void;
+      (api.readThreadSchedules as jest.Mock).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSchedules = resolve;
+          }),
+      );
+      await emitWs({
+        method: 'bridge/events/snapshotRequired',
+        params: { reason: 'replayTruncated', resumeAfterEventId: 45 },
+      });
+      await emitWs({
+        method: 'bridge/thread/queue/updated',
+        params: {
+          ...emptyQueue,
+          items: [
+            {
+              id: 'unrelated-queue-update',
+              createdAt: '2026-08-29T20:00:01.000Z',
+              content: 'Runtime changed while schedules loaded.',
+            },
+          ],
+        },
+      });
+      await act(async () => {
+        resolveSchedules({ threadId: chat.id, schedules: [] });
+        for (let index = 0; index < 20; index += 1) {
+          await Promise.resolve();
+        }
+      });
+      expect(hasText(root, 'Earliest schedule')).toBe(false);
+      expect(hasText(root, '+1 more')).toBe(false);
+      act(() => tree.unmount());
+    });
+
+    it('does not let a stale replay schedule read undo a newer complete-list notification', async () => {
+      const api = createApi();
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const root = tree.root as Queryable;
+      const staleSchedule = {
+        scheduleId: 'stale-replay',
+        threadId: chat.id,
+        promptPreview: 'Stale replay schedule',
+        promptBytes: 21,
+        scheduledFor: '2026-08-30T16:00:00.000Z',
+        createdAt: '2026-08-29T20:00:00.000Z',
+        status: 'scheduled',
+        retryAttempt: 0,
+      };
+      await emitWs({
+        method: 'bridge/thread/schedules/updated',
+        params: { threadId: chat.id, schedules: [staleSchedule] },
+      });
+      expect(hasText(root, 'Stale replay schedule')).toBe(true);
+
+      let resolveSchedules!: (value: {
+        threadId: string;
+        schedules: Array<typeof staleSchedule>;
+      }) => void;
+      (api.readThreadSchedules as jest.Mock).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSchedules = resolve;
+          }),
+      );
+      await emitWs({
+        method: 'bridge/events/snapshotRequired',
+        params: { reason: 'replayTruncated', resumeAfterEventId: 46 },
+      });
+      await emitWs({
+        method: 'bridge/thread/schedules/updated',
+        params: { threadId: chat.id, schedules: [] },
+      });
+      expect(hasText(root, 'Stale replay schedule')).toBe(false);
+      await act(async () => {
+        resolveSchedules({ threadId: chat.id, schedules: [staleSchedule] });
+        for (let index = 0; index < 20; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(hasText(root, 'Stale replay schedule')).toBe(false);
+      act(() => tree.unmount());
+    });
+
+    it('does not let a stale load response restore a schedule removed by notification', async () => {
+      const api = createApi();
+      let resolveSchedules!: (value: {
+        threadId: string;
+        schedules: Array<Record<string, unknown>>;
+      }) => void;
+      const initialRead = new Promise<{
+        threadId: string;
+        schedules: Array<Record<string, unknown>>;
+      }>((resolve) => {
+        resolveSchedules = resolve;
+      });
+      (api.readThreadSchedules as jest.Mock).mockReturnValueOnce(initialRead);
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const root = tree.root as Queryable;
+
+      await emitWs({
+        method: 'bridge/thread/schedules/updated',
+        params: { threadId: chat.id, schedules: [] },
+      });
+      await act(async () => {
+        resolveSchedules({
+          threadId: chat.id,
+          schedules: [
+            {
+              scheduleId: 'stale',
+              threadId: chat.id,
+              promptPreview: 'Stale delivered schedule',
+              promptBytes: 24,
+              scheduledFor: '2026-08-30T16:00:00.000Z',
+              createdAt: '2026-08-29T20:00:00.000Z',
+              status: 'scheduled',
+              retryAttempt: 0,
+            },
+          ],
+        });
+        await initialRead;
+        await Promise.resolve();
+      });
+
+      expect(hasText(root, 'Stale delivered schedule')).toBe(false);
       act(() => tree.unmount());
     });
 
@@ -2007,6 +2249,7 @@ function MainRouteShell() {
       listPendingApprovals: jest.fn().mockResolvedValue([]),
       listApprovals: jest.fn().mockResolvedValue([]),
       readThreadQueue: jest.fn().mockResolvedValue(emptyQueue),
+      readThreadSchedules: jest.fn().mockResolvedValue({ threadId: rootChat.id, schedules: [] }),
       createChatIdempotent: jest.fn().mockResolvedValue({
         ...rootChat,
         id: 'thread-created',
@@ -3848,6 +4091,7 @@ function MainRouteShell() {
       }),
       listApprovals: jest.fn().mockResolvedValue([]),
       readThreadQueue: jest.fn().mockResolvedValue(emptyQueue),
+      readThreadSchedules: jest.fn().mockResolvedValue({ threadId, schedules: [] }),
       dismissBridgeUiSurface: jest.fn().mockResolvedValue({ ok: true, id: 'surface', threadId }),
       resolveBridgeUiSurface: jest.fn().mockResolvedValue({ ok: true }),
     };
@@ -4450,6 +4694,208 @@ function MainRouteShell() {
       await unmount(tree);
     });
 
+    it('purges a deleted non-selected thread from live recovery state', async () => {
+      const api = createApi();
+      const { tree, store } = await renderMain({ api });
+      let rejectDeletedRecovery!: (reason: Error) => void;
+      (api.getChat as jest.Mock).mockImplementation((requestedThreadId: string) =>
+        requestedThreadId === otherThreadId
+          ? new Promise<Chat>((_resolve, reject) => {
+              rejectDeletedRecovery = reject;
+            })
+          : Promise.resolve(chat),
+      );
+      await act(async () => {
+        store.set(threadRuntimeSnapshotsAtom, {
+          [otherThreadId]: {
+            activity: { tone: 'running', title: 'Working' },
+            scheduledPrompts: [],
+            updatedAtMs: Date.now(),
+          },
+        });
+        store.set(liveAssistantByThreadAtom, {
+          [otherThreadId]: {
+            ...createAgUiThreadMessageState(),
+            messages: [],
+          },
+        });
+        store.set(relatedAgentThreadsAtom, [
+          { ...chat, id: otherThreadId, title: 'Deleted agent' },
+        ]);
+        await Promise.resolve();
+      });
+
+      (api.rememberChat as jest.Mock).mockClear();
+      (api.getChat as jest.Mock).mockClear();
+      (api.listLoadedChatIds as jest.Mock).mockResolvedValue([otherThreadId]);
+      await emit({
+        method: 'bridge/events/snapshotRequired',
+        params: { reason: 'replayTruncated', resumeAfterEventId: 87 },
+      });
+      expect(api.getChat).toHaveBeenCalledWith(otherThreadId, { forceRefresh: true });
+      await emit({ method: 'thread/deleted', params: { threadId: otherThreadId } });
+
+      expect(api.forgetChat).toHaveBeenCalledWith(otherThreadId);
+      expect(store.get(threadRuntimeSnapshotsAtom)[otherThreadId]).toBeUndefined();
+      expect(store.get(liveAssistantByThreadAtom)[otherThreadId]).toBeUndefined();
+      expect(store.get(relatedAgentThreadsAtom)).toEqual([]);
+      expect(hasText(tree.root as Queryable, 'Event thread')).toBe(true);
+
+      await act(async () => {
+        rejectDeletedRecovery(new Error('deleted recovery read failed'));
+        for (let index = 0; index < 10; index += 1) {
+          await Promise.resolve();
+        }
+      });
+      const deletedRecoveryReads = () =>
+        (api.getChat as jest.Mock).mock.calls.filter(([id]) => id === otherThreadId).length;
+      expect(deletedRecoveryReads()).toBe(1);
+      await act(async () => {
+        jest.advanceTimersByTime(1_000);
+        for (let index = 0; index < 10; index += 1) {
+          await Promise.resolve();
+        }
+      });
+      expect(deletedRecoveryReads()).toBe(1);
+      expect(
+        (api.readThreadQueue as jest.Mock).mock.calls.filter(([id]) => id === otherThreadId),
+      ).toHaveLength(1);
+      expect(
+        (api.readThreadSchedules as jest.Mock).mock.calls.filter(([id]) => id === otherThreadId),
+      ).toHaveLength(1);
+      expect(api.rememberChat).not.toHaveBeenCalledWith(
+        expect.objectContaining({ id: otherThreadId }),
+      );
+      await unmount(tree);
+    });
+
+    it('keeps a deleted thread tombstoned across runtime reads, notifications, and recovery', async () => {
+      const api = createApi();
+      let resolveQueue!: (value: BridgeThreadQueueState) => void;
+      let resolveSchedules!: (value: {
+        threadId: string;
+        schedules: Array<Record<string, unknown>>;
+      }) => void;
+      const pendingQueue = new Promise<BridgeThreadQueueState>((resolve) => {
+        resolveQueue = resolve;
+      });
+      const pendingSchedules = new Promise<{
+        threadId: string;
+        schedules: Array<Record<string, unknown>>;
+      }>((resolve) => {
+        resolveSchedules = resolve;
+      });
+      (api.readThreadQueue as jest.Mock).mockReturnValueOnce(pendingQueue);
+      (api.readThreadSchedules as jest.Mock).mockReturnValueOnce(pendingSchedules);
+      const { tree, store } = await renderMain({ api });
+      const staleQueue = {
+        ...emptyQueue,
+        items: [
+          {
+            id: 'deleted-thread-queue-item',
+            createdAt: '2026-08-29T20:00:00.000Z',
+            content: 'Must stay deleted',
+          },
+        ],
+      };
+      const staleSchedule = {
+        scheduleId: 'deleted-thread-schedule',
+        threadId,
+        promptPreview: 'Must stay deleted',
+        promptBytes: 17,
+        scheduledFor: '2026-08-30T16:00:00.000Z',
+        createdAt: '2026-08-29T20:00:00.000Z',
+        status: 'scheduled',
+        retryAttempt: 0,
+      };
+
+      await act(async () => {
+        store.set(threadRuntimeSnapshotsAtom, {
+          [threadId]: {
+            activity: { tone: 'idle', title: 'Ready' },
+            updatedAtMs: Date.now(),
+          },
+        });
+        store.set(selectedChatIdAtom, otherThreadId);
+        await Promise.resolve();
+      });
+      await emit({ method: 'thread/deleted', params: { threadId } });
+      expect(store.get(threadRuntimeSnapshotsAtom)[threadId]).toBeUndefined();
+
+      await act(async () => {
+        resolveQueue(staleQueue);
+        resolveSchedules({ threadId, schedules: [staleSchedule] });
+        await pendingQueue;
+        await pendingSchedules;
+        for (let index = 0; index < 10; index += 1) {
+          await Promise.resolve();
+        }
+      });
+      expect(store.get(threadRuntimeSnapshotsAtom)[threadId]).toBeUndefined();
+
+      for (const event of [
+        {
+          method: 'thread/tokenUsage/updated',
+          params: { thread_id: threadId, total_tokens: 10, model_context_window: 100 },
+        },
+        {
+          method: 'item/started',
+          params: {
+            threadId,
+            item: { type: 'commandExecution', command: 'must not recreate runtime' },
+          },
+        },
+        {
+          method: 'bridge/thread/queue/updated',
+          params: staleQueue,
+        },
+        {
+          method: 'bridge/thread/schedules/updated',
+          params: { threadId, schedules: [staleSchedule] },
+        },
+      ]) {
+        await emit(event);
+      }
+      expect(store.get(threadRuntimeSnapshotsAtom)[threadId]).toBeUndefined();
+
+      const legitimateThreadId = 'thread-created-after-delete';
+      await emit({
+        method: 'bridge/thread/queue/updated',
+        params: { ...emptyQueue, threadId: legitimateThreadId },
+      });
+      expect(store.get(threadRuntimeSnapshotsAtom)[legitimateThreadId]).toBeDefined();
+
+      (api.getChat as jest.Mock).mockClear();
+      (api.readThreadQueue as jest.Mock).mockClear();
+      (api.readThreadSchedules as jest.Mock).mockClear();
+      (api.listLoadedChatIds as jest.Mock).mockResolvedValue([threadId, legitimateThreadId]);
+      (api.getChat as jest.Mock).mockImplementation((requestedThreadId: string) =>
+        Promise.resolve({ ...chat, id: requestedThreadId }),
+      );
+      (api.readThreadQueue as jest.Mock).mockImplementation((requestedThreadId: string) =>
+        Promise.resolve({ ...emptyQueue, threadId: requestedThreadId }),
+      );
+      (api.readThreadSchedules as jest.Mock).mockImplementation((requestedThreadId: string) =>
+        Promise.resolve({ threadId: requestedThreadId, schedules: [] }),
+      );
+      await emit({
+        method: 'bridge/events/snapshotRequired',
+        params: { reason: 'replayTruncated', resumeAfterEventId: 91 },
+      });
+      await act(async () => {
+        for (let index = 0; index < 10; index += 1) {
+          await Promise.resolve();
+        }
+      });
+      expect(api.getChat).not.toHaveBeenCalledWith(threadId, { forceRefresh: true });
+      expect(api.readThreadQueue).not.toHaveBeenCalledWith(threadId);
+      expect(api.readThreadSchedules).not.toHaveBeenCalledWith(threadId);
+      expect(api.getChat).toHaveBeenCalledWith(legitimateThreadId, { forceRefresh: true });
+      expect(store.get(threadRuntimeSnapshotsAtom)[threadId]).toBeUndefined();
+      expect(store.get(threadRuntimeSnapshotsAtom)[legitimateThreadId]).toBeDefined();
+      await unmount(tree);
+    });
+
     it('leaves a deleted session without closing an open session list', async () => {
       const { tree, store } = await renderMain();
       const closeDrawer = jest.fn();
@@ -5002,6 +5448,7 @@ function MainRouteShell() {
       listApprovals: jest.fn().mockResolvedValue([]),
       listPendingUserInputs: jest.fn().mockResolvedValue([]),
       readThreadQueue: jest.fn().mockResolvedValue(emptyQueue),
+      readThreadSchedules: jest.fn().mockResolvedValue({ threadId: baseChat.id, schedules: [] }),
       listWorkspaceRoots: jest.fn().mockResolvedValue({
         bridgeRoot: '/workspace',
         allowOutsideRootCwd: false,
@@ -6266,6 +6713,7 @@ function MainRouteShell() {
       listApprovals: jest.fn().mockResolvedValue([]),
       listPendingUserInputs: jest.fn().mockResolvedValue([]),
       readThreadQueue: jest.fn().mockResolvedValue(emptyQueue),
+      readThreadSchedules: jest.fn().mockResolvedValue({ threadId, schedules: [] }),
       listWorkspaceRoots: jest.fn().mockResolvedValue({
         bridgeRoot: '/workspace',
         allowOutsideRootCwd: false,

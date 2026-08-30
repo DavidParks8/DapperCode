@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -159,34 +159,24 @@ impl HarnessAdapter for OpenCodeHarnessAdapter {
                 return Err(HarnessError::Http(response.status()));
             }
 
-            let mut list_url = session_url(context, None)?;
-            list_url
-                .query_pairs_mut()
-                .append_pair("directory", context.cwd.to_string_lossy().as_ref())
-                .append_pair("limit", "2048");
-            let response = timed_send(context.http.get(list_url)).await?;
-            if !response.status().is_success() {
-                return Err(HarnessError::Http(response.status()));
-            }
-            let bytes = bounded_body(response).await?;
-            let listed = serde_json::from_slice::<Vec<OpenCodeSessionRow>>(&bytes)
-                .map_err(|error| HarnessError::InvalidResponse(error.to_string()))?;
-            let affected = request
-                .affected_session_ids
-                .iter()
-                .map(String::as_str)
-                .collect::<HashSet<_>>();
-            if listed
-                .iter()
-                .any(|session| affected.contains(session.id.as_str()))
-            {
-                return Err(HarnessError::InvalidResponse(
-                    "session is still listed after deletion".to_string(),
-                ));
+            for affected_session_id in &request.affected_session_ids {
+                if opencode_session_exists(context, affected_session_id).await? {
+                    return Err(HarnessError::InvalidResponse(
+                        "session still exists after deletion".to_string(),
+                    ));
+                }
             }
             Ok(())
         }
         .boxed()
+    }
+
+    fn session_exists<'a>(
+        &'a self,
+        context: &'a SessionContext,
+    ) -> BoxFuture<'a, Result<bool, HarnessError>> {
+        async move { opencode_session_exists(context, &context.session_id.to_string()).await }
+            .boxed()
     }
 
     fn steer<'a>(
@@ -514,6 +504,31 @@ async fn opencode_messages(
     }
     let bytes = bounded_body(response).await?;
     serde_json::from_slice(&bytes).map_err(|error| HarnessError::InvalidResponse(error.to_string()))
+}
+
+async fn opencode_session_exists(
+    context: &SessionContext,
+    session_id: &str,
+) -> Result<bool, HarnessError> {
+    let mut url = session_url(context, Some(session_id))?;
+    url.query_pairs_mut()
+        .append_pair("directory", context.cwd.to_string_lossy().as_ref());
+    let response = timed_send(context.http.get(url)).await?;
+    if response.status() == StatusCode::NOT_FOUND {
+        return Ok(false);
+    }
+    if !response.status().is_success() {
+        return Err(HarnessError::Http(response.status()));
+    }
+    let bytes = bounded_body(response).await?;
+    let session = serde_json::from_slice::<OpenCodeSessionRow>(&bytes)
+        .map_err(|error| HarnessError::InvalidResponse(error.to_string()))?;
+    if session.id != session_id {
+        return Err(HarnessError::InvalidResponse(
+            "session lookup returned a different session".to_string(),
+        ));
+    }
+    Ok(true)
 }
 
 fn session_url(context: &SessionContext, session_id: Option<&str>) -> Result<Url, HarnessError> {
@@ -880,17 +895,19 @@ mod tests {
             affected_session_ids: vec!["source".to_string()],
         };
 
-        let app = Router::new()
-            .route(
-                "/session/source",
-                delete(|| async { StatusCode::NOT_FOUND }),
-            )
-            .route("/session", get(|| async { Json(serde_json::json!([])) }));
+        let app = Router::new().route(
+            "/session/source",
+            delete(|| async { StatusCode::NOT_FOUND }).get(|| async { StatusCode::NOT_FOUND }),
+        );
         let (context, server) = fixture_context(app, "source").await;
         adapter
             .delete(&context, request())
             .await
             .expect("not found is already deleted");
+        assert!(!adapter
+            .session_exists(&context)
+            .await
+            .expect("empty catalog confirms absence"));
         server.abort();
 
         let app = Router::new().route(
@@ -904,12 +921,10 @@ mod tests {
         ));
         server.abort();
 
-        let app = Router::new()
-            .route("/session/source", delete(|| async { StatusCode::OK }))
-            .route(
-                "/session",
-                get(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
-            );
+        let app = Router::new().route(
+            "/session/source",
+            delete(|| async { StatusCode::OK }).get(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+        );
         let (context, server) = fixture_context(app, "source").await;
         assert!(matches!(
             adapter.delete(&context, request()).await,
@@ -917,18 +932,89 @@ mod tests {
         ));
         server.abort();
 
-        let app = Router::new()
-            .route("/session/source", delete(|| async { StatusCode::OK }))
-            .route(
-                "/session",
-                get(|| async { Json(serde_json::json!([{"id": "source"}])) }),
-            );
+        let app = Router::new().route(
+            "/session/source",
+            delete(|| async { StatusCode::OK })
+                .get(|| async { Json(serde_json::json!({"id": "source"})) }),
+        );
         let (context, server) = fixture_context(app, "source").await;
+        assert!(adapter
+            .session_exists(&context)
+            .await
+            .expect("catalog confirms the session is live"));
         assert!(matches!(
             adapter.delete(&context, request()).await,
             Err(HarnessError::InvalidResponse(_))
         ));
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn opencode_session_exists_uses_the_exact_session_endpoint() {
+        let adapter = OpenCodeHarnessAdapter;
+        let exact_calls = Arc::new(AtomicUsize::new(0));
+        let observed_exact_calls = exact_calls.clone();
+        let app = Router::new()
+            .route(
+                "/session",
+                get(|| async {
+                    Json(
+                        (0..2048)
+                            .map(|index| serde_json::json!({"id": format!("other-{index}")}))
+                            .collect::<Vec<_>>(),
+                    )
+                }),
+            )
+            .route(
+                "/session/source",
+                get(
+                    move |axum::extract::Query(query): axum::extract::Query<
+                        HashMap<String, String>,
+                    >| {
+                        let exact_calls = observed_exact_calls.clone();
+                        async move {
+                            assert!(query
+                                .get("directory")
+                                .is_some_and(|value| !value.is_empty()));
+                            exact_calls.fetch_add(1, Ordering::SeqCst);
+                            Json(serde_json::json!({"id": "source"}))
+                        }
+                    },
+                ),
+            );
+        let (context, server) = fixture_context(app, "source").await;
+
+        assert!(adapter
+            .session_exists(&context)
+            .await
+            .expect("exact endpoint confirms the session despite a saturated catalog"));
+        assert_eq!(exact_calls.load(Ordering::SeqCst), 1);
+        server.abort();
+
+        for (status, body, expected) in [
+            (StatusCode::NOT_FOUND, "", "absent"),
+            (StatusCode::OK, "{}", "malformed"),
+            (StatusCode::INTERNAL_SERVER_ERROR, "", "failure"),
+        ] {
+            let app = Router::new().route(
+                "/session/source",
+                get(move || async move { (status, body) }),
+            );
+            let (context, server) = fixture_context(app, "source").await;
+            let result = adapter.session_exists(&context).await;
+            match expected {
+                "absent" => assert!(!result.expect("404 is definitive absence")),
+                "malformed" => {
+                    assert!(matches!(result, Err(HarnessError::InvalidResponse(_))))
+                }
+                "failure" => assert!(matches!(
+                    result,
+                    Err(HarnessError::Http(StatusCode::INTERNAL_SERVER_ERROR))
+                )),
+                _ => unreachable!(),
+            }
+            server.abort();
+        }
     }
 
     #[tokio::test]

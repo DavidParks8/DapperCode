@@ -766,6 +766,19 @@ pub(super) struct BridgeThreadQueueReadRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct BridgeThreadSchedulesReadRequest {
+    pub(super) thread_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct BridgeThreadSchedulesState {
+    pub(super) thread_id: String,
+    pub(super) schedules: Vec<crate::scheduled_prompts::ScheduledPromptSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct BridgeThreadQueueSendRequest {
     pub(super) thread_id: String,
     pub(super) submission_id: String,
@@ -875,7 +888,7 @@ pub(super) struct BridgeThreadQueueActionResponse {
     pub(super) queue: BridgeThreadQueueState,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(super) struct BridgeThreadQueueRuntime {
     pub(super) items: VecDeque<BridgeQueuedMessageEntry>,
     pub(super) pending_steers: VecDeque<BridgeQueuedMessageEntry>,
@@ -896,6 +909,7 @@ pub(super) struct BridgeThreadQueueRuntime {
     pub(super) pending_user_input_ids: HashSet<String>,
     pub(super) pending_completion_event_ids: Vec<u64>,
     pub(super) last_error: Option<BridgeThreadQueueError>,
+    pub(super) last_error_submission_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -922,12 +936,27 @@ pub(super) struct BridgeQueueService {
     pub(super) completion_disposition_notify: Arc<Notify>,
     pub(super) submission_results: Arc<Mutex<HashMap<String, BridgeQueueSubmissionReceipt>>>,
     pub(super) submission_order: Arc<Mutex<VecDeque<String>>>,
+    pub(super) submission_volatile_pending: Arc<Mutex<HashMap<String, String>>>,
     pub(super) submission_pending: Arc<Mutex<HashMap<String, String>>>,
     pub(super) submission_pending_order: Arc<Mutex<VecDeque<String>>>,
     pub(super) submission_store_path: Option<std::path::PathBuf>,
     pub(super) submission_persist: Arc<Mutex<()>>,
     pub(super) submission_dirty: AtomicBool,
+    pub(super) definitive_settlement_shutdown: tokio_util::sync::CancellationToken,
+    pub(super) definitive_settlements_active: std::sync::atomic::AtomicUsize,
+    pub(super) definitive_settlement_notify: Notify,
+    pub(super) interrupted_definitive_settlements: Arc<Mutex<HashMap<String, (String, String)>>>,
+    pub(super) retirement_fence: Arc<crate::queue_service::ThreadRetirementFence>,
+    pub(super) submission_completion_wake: std::sync::Mutex<std::sync::Weak<Notify>>,
     pub(super) next_queue_item_id: AtomicU64,
+    #[cfg(test)]
+    pub(super) fail_next_submission_persist: AtomicBool,
+    #[cfg(test)]
+    pub(super) fail_all_submission_persists: AtomicBool,
+    #[cfg(test)]
+    pub(super) submission_persist_barrier: std::sync::Mutex<Option<(Arc<Notify>, Arc<Notify>)>>,
+    #[cfg(test)]
+    pub(super) retirement_retry_barrier: std::sync::Mutex<Option<(Arc<Notify>, Arc<Notify>)>>,
 }
 
 #[derive(Debug, Deserialize)]

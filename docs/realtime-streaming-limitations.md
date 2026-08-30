@@ -33,7 +33,7 @@ ACP executable and writes the local manifest consumed by Rust.
 - A stream change, replay eviction, or detected gap triggers ACP session snapshot convergence.
 - Snapshot convergence is stream-wide: mobile freezes post-watermark delivery, expands its recovery
    set with `thread/loaded/list`, and refreshes every bridge-loaded or locally tracked thread plus
-   queues, pending approvals, pending user inputs, and negotiated agent descriptors before it
+   queues, pending schedules, pending approvals, pending user inputs, and negotiated agent descriptors before it
    acknowledges the watermark. A failed refresh keeps the barrier in place and retries without a
    partial acknowledgement.
 
@@ -87,6 +87,22 @@ Eligible managed sessions receive two bridge-owned MCP tools:
   another explicit `send_agent_message` call using the delivered envelope's `replyToThreadId`; the
   bridge does not synthesize conversations.
 
+The same authenticated MCP service also exposes three agent-only scheduling tools:
+
+- `schedule_prompt` durably schedules one prompt for the calling session at an absolute RFC 3339
+  timestamp strictly in the future. The bridge normalizes accepted timestamps to UTC.
+- `list_scheduled_prompts` lists only that session's pending schedules and their `scheduled`,
+  `queued`, or `retrying` status.
+- `cancel_scheduled_prompt` cancels only a pending schedule owned by that session. Unknown IDs and IDs
+  owned by another session both return `not_found`.
+
+Mobile shows pending schedules for the selected thread in a read-only composer dock. It can read
+that thread's complete pending list through `bridge/thread/schedules/read` and receives
+`bridge/thread/schedules/updated` complete-list notifications after durable changes. There is no
+mobile or WebSocket mutation for creating, editing, or cancelling schedules. Ownership and mutation
+authority come only from the active session-scoped MCP credential; MCP callers cannot supply a
+thread or owner ID.
+
 The bridge owns exactly one OS-assigned loopback listener and one MCP server task per bridge process.
 Every eligible ACP session shares it. DapperCode injects one Streamable HTTP descriptor when the ACP
 host advertises HTTP MCP support, otherwise one legacy SSE descriptor when it advertises SSE. It
@@ -132,6 +148,39 @@ for the sender and **Received from …** for the recipient. A bounded private jo
 workspace profile's central state restores sender-side activities after a bridge restart; exact
 versioned envelopes restore recipient origin without treating arbitrary user text as agent traffic.
 
+One-time schedules live in a separate bounded private state file under the workspace profile's
+central state directory. Admission is acknowledged only after an atomic restrictive-mode write.
+One wakeable worker catches up overdue prompts immediately after restart and retries temporary
+delivery failures indefinitely with capped exponential backoff. Due prompts use the ordinary text
+turn-start queue and a deterministic schedule-derived submission ID. A busy thread queues the prompt
+instead of steering it.
+
+The scheduler retains a queued prompt until the queue records a durable sent receipt. This is
+important because queue payloads are process-local: after a restart, a still-pending schedule is
+submitted again with the same ID, while a durable sent receipt suppresses a duplicate. Cancellation
+first persists its intent and then removes any due-but-queued item by that deterministic ID, so either
+side of a crash resumes safely.
+
+Queue admission also uses a deterministic source-turn ID so an interrupted response can be reconciled
+against a still-loaded transcript. The unavoidable boundary is a full bridge crash after the durable
+admission marker is written but before the ACP result is recorded: agent reconstruction does not
+guarantee preservation of the bridge's source-turn ID, so the bridge settles that marker as delivered
+rather than replaying a prompt that may already have performed side effects. This gives scheduled
+prompts at-most-once behavior at that boundary; a crash before the agent accepted the prompt can lose
+that one delivery. Outside that indistinguishable boundary, durable receipts provide exact deduplication
+and definitive failures are retried without changing the schedule-derived submission ID.
+
+Deleting a thread first takes the global queue-admission write barrier so every previously admitted
+dispatch or schedule drains. While that barrier remains held, the manager locks and rechecks the
+authoritative indexed family, and the bridge durably records that exact `prepared` family before
+installing its scheduler and queue guards. There is no initial-family fence that is later expanded.
+Existing schedules and queue state remain intact until ACP success advances the same family to
+`deleted`. Queue and scheduler cleanup then converge before the journal is cleared and empty
+snapshots are broadcast; the shared admission fence keeps permanent in-memory deleted-thread
+tombstones so delayed events or retained tasks cannot recreate queue runtime. Startup reconciliation
+installs the same tombstones while resuming a deleted plan before scheduled dispatch begins; mixed
+or indeterminate prepared-plan reconciliation fails closed with the journal and work intact.
+
 ## Known Limits
 
 1. Only events emitted by the ACP agent session owned by this bridge can be delivered live.
@@ -141,7 +190,8 @@ versioned envelopes restore recipient origin without treating arbitrary user tex
    if the bounded replay window is evicted before it reconnects; snapshot convergence restores
    durable session state, but evicted deltas may no longer exist.
 4. Queue and pending-steer state is intentionally in memory and does not survive a full bridge
-   process restart.
+   process restart. Pending scheduled prompts are the exception: scheduler state survives and
+   reconstructs its lost queue item with the same idempotency ID.
 5. Agent capabilities vary. Steering, session resume/load, permissions, and elicitations are exposed
    only when negotiated or supported by the selected agent.
 6. Sub-agent streaming needs an agent that reports its session tree. Agents that only reveal a

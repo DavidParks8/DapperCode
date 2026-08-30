@@ -1,6 +1,7 @@
 use crate::*;
+use sha2::{Digest, Sha256};
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(super) struct DurableQueueSubmissions {
     pub(super) results: HashMap<String, BridgeQueueSubmissionReceipt>,
     pub(super) order: VecDeque<String>,
@@ -37,15 +38,221 @@ const QUEUE_RECEIPT_STORE_MAX_BYTES: usize = 1024 * 1024;
 const QUEUE_IDENTIFIER_MAX_BYTES: usize = 4096;
 const QUEUE_DISPATCH_RETRY_MIN_MS: u64 = 250;
 const QUEUE_DISPATCH_RETRY_MAX_MS: u64 = 30_000;
+const DEFINITIVE_SETTLEMENT_INTERRUPTED_PREFIX: &str =
+    "queue definitive-failure persistence settlement was interrupted by shutdown";
 const AGENT_MESSAGE_JOURNAL_UPDATE_ATTEMPTS: usize = 3;
 const AGENT_MESSAGE_JOURNAL_UPDATE_RETRY_MS: u64 = 10;
+pub(crate) const SCHEDULED_PROMPT_SUBMISSION_PREFIX: &str = "scheduled-prompt:";
+const SCHEDULED_PROMPT_PUBLIC_ACTION_ERROR: &str = "scheduled prompts are managed by the scheduler";
+
+fn is_scheduled_prompt_entry(entry: &BridgeQueuedMessageEntry) -> bool {
+    entry
+        .submission_id
+        .starts_with(SCHEDULED_PROMPT_SUBMISSION_PREFIX)
+}
+
+fn is_scheduled_prompt_item(runtime: &BridgeThreadQueueRuntime, item_id: &str) -> bool {
+    runtime
+        .items
+        .iter()
+        .chain(runtime.pending_steers.iter())
+        .chain(
+            runtime
+                .steer_dispatch_in_flight
+                .iter()
+                .map(|dispatch| &dispatch.entry),
+        )
+        .any(|entry| entry.id == item_id && is_scheduled_prompt_entry(entry))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QueueSubmissionCancelOutcome {
+    Cancelled,
+    NotFound,
+    Sent,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ThreadRetirementFence {
+    gate: Arc<RwLock<()>>,
+    state: std::sync::Mutex<ThreadRetirementFenceState>,
+    #[cfg(test)]
+    pub(crate) begin_attempted: std::sync::Mutex<Option<Arc<Notify>>>,
+    #[cfg(test)]
+    pub(crate) admission_acquired: std::sync::Mutex<Option<Arc<Notify>>>,
+}
+
+#[derive(Debug, Default)]
+struct ThreadRetirementFenceState {
+    retiring: HashMap<String, usize>,
+    deleted: HashSet<String>,
+}
+
+pub(crate) struct ThreadRetirementLease {
+    fence: Arc<ThreadRetirementFence>,
+    thread_ids: Vec<String>,
+    finished: bool,
+}
+
+pub(crate) type ThreadRetirementAdmission = tokio::sync::OwnedRwLockReadGuard<()>;
+pub(crate) type ThreadRetirementAdmissionBarrier = tokio::sync::OwnedRwLockWriteGuard<()>;
+
+impl ThreadRetirementFence {
+    pub(crate) async fn admit(&self, thread_id: &str) -> Result<ThreadRetirementAdmission, String> {
+        self.admit_threads(&[thread_id]).await
+    }
+
+    pub(crate) async fn admit_threads(
+        &self,
+        thread_ids: &[&str],
+    ) -> Result<ThreadRetirementAdmission, String> {
+        let admission = self.gate.clone().read_owned().await;
+        #[cfg(test)]
+        if let Some(notify) = self
+            .admission_acquired
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+        {
+            notify.notify_one();
+        }
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if thread_ids.iter().any(|thread_id| {
+            state.retiring.contains_key(*thread_id) || state.deleted.contains(*thread_id)
+        }) {
+            return Err("thread is being deleted".to_string());
+        }
+        drop(state);
+        Ok(admission)
+    }
+
+    pub(crate) async fn block_admissions(self: &Arc<Self>) -> ThreadRetirementAdmissionBarrier {
+        #[cfg(test)]
+        if let Some(notify) = self
+            .begin_attempted
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+        {
+            notify.notify_one();
+        }
+        self.gate.clone().write_owned().await
+    }
+
+    pub(crate) fn begin_blocked(
+        self: &Arc<Self>,
+        thread_ids: &[String],
+        _barrier: &ThreadRetirementAdmissionBarrier,
+    ) -> ThreadRetirementLease {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        for thread_id in thread_ids {
+            *state.retiring.entry(thread_id.clone()).or_default() += 1;
+        }
+        ThreadRetirementLease {
+            fence: self.clone(),
+            thread_ids: thread_ids.to_vec(),
+            finished: false,
+        }
+    }
+
+    fn mark_deleted_blocked(
+        &self,
+        thread_ids: &[String],
+        _barrier: &ThreadRetirementAdmissionBarrier,
+    ) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.deleted.extend(thread_ids.iter().cloned());
+    }
+
+    pub(crate) async fn begin(self: &Arc<Self>, thread_ids: &[String]) -> ThreadRetirementLease {
+        let barrier = self.block_admissions().await;
+        self.begin_blocked(thread_ids, &barrier)
+    }
+}
+
+impl ThreadRetirementLease {
+    fn complete(&self, deleted: bool) {
+        let mut state = self
+            .fence
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        for thread_id in &self.thread_ids {
+            if deleted {
+                state.deleted.insert(thread_id.clone());
+            }
+            let remove = state.retiring.get_mut(thread_id).is_some_and(|count| {
+                *count -= 1;
+                *count == 0
+            });
+            if remove {
+                state.retiring.remove(thread_id);
+            }
+        }
+    }
+
+    pub(crate) async fn finish(mut self) {
+        self.complete(false);
+        self.finished = true;
+    }
+
+    pub(crate) async fn finish_deleted(mut self) {
+        self.complete(true);
+        self.finished = true;
+    }
+}
+
+impl Drop for ThreadRetirementLease {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        self.complete(false);
+    }
+}
+
+pub(crate) struct QueueThreadRetirement {
+    thread_ids: Vec<String>,
+    _actor_guards: Vec<tokio::sync::OwnedMutexGuard<()>>,
+}
 
 fn dispatch_failure_is_indeterminate(error: &str) -> bool {
     error.starts_with(INDETERMINATE_OPERATION_PREFIX)
 }
 
-fn trim_queue_pending(pending: &mut HashMap<String, String>, order: &mut VecDeque<String>) {
-    order.retain(|submission_id| pending.contains_key(submission_id));
+pub(crate) fn definitive_settlement_was_interrupted(error: &str) -> bool {
+    error.starts_with(DEFINITIVE_SETTLEMENT_INTERRUPTED_PREFIX)
+}
+
+struct DefinitiveSettlementGuard<'a> {
+    active: &'a std::sync::atomic::AtomicUsize,
+    notify: &'a Notify,
+}
+
+impl Drop for DefinitiveSettlementGuard<'_> {
+    fn drop(&mut self) {
+        self.active.fetch_sub(1, Ordering::AcqRel);
+        self.notify.notify_waiters();
+    }
+}
+
+fn submission_source_turn_id(submission_id: &str) -> String {
+    format!("queue-{:x}", Sha256::digest(submission_id.as_bytes()))
+}
+
+fn normalize_queue_pending(
+    pending: &HashMap<String, String>,
+    order: &mut VecDeque<String>,
+) -> Result<(), String> {
+    if pending.len() > SUBMISSION_DEDUPE_LIMIT {
+        return Err(format!(
+            "queue durable pending state exceeds the {SUBMISSION_DEDUPE_LIMIT}-entry limit"
+        ));
+    }
+    let mut seen = HashSet::new();
+    order.retain(|submission_id| {
+        pending.contains_key(submission_id) && seen.insert(submission_id.clone())
+    });
     let ordered = order.iter().cloned().collect::<HashSet<_>>();
     let mut missing = pending
         .keys()
@@ -54,11 +261,7 @@ fn trim_queue_pending(pending: &mut HashMap<String, String>, order: &mut VecDequ
         .collect::<Vec<_>>();
     missing.sort();
     order.extend(missing);
-    while order.len() > SUBMISSION_DEDUPE_LIMIT {
-        if let Some(oldest) = order.pop_front() {
-            pending.remove(&oldest);
-        }
-    }
+    Ok(())
 }
 
 fn validate_queue_identifier(name: &str, value: &str) -> Result<(), String> {
@@ -71,6 +274,19 @@ fn validate_queue_identifier(name: &str, value: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+fn normalize_retiring_thread_ids(thread_ids: &[String]) -> Result<Vec<String>, String> {
+    let mut normalized = thread_ids
+        .iter()
+        .map(|thread_id| thread_id.trim().to_string())
+        .collect::<Vec<_>>();
+    for thread_id in &normalized {
+        validate_queue_identifier("threadId", thread_id)?;
+    }
+    normalized.sort();
+    normalized.dedup();
+    Ok(normalized)
 }
 
 fn replace_turn_start_text(turn_start: &mut Value, content: &str) -> Result<(), String> {
@@ -129,15 +345,54 @@ impl BridgeQueueService {
             completion_disposition_notify: Arc::new(Notify::new()),
             submission_results: Arc::new(Mutex::new(submissions.results)),
             submission_order: Arc::new(Mutex::new(submissions.order)),
+            submission_volatile_pending: Arc::new(Mutex::new(HashMap::new())),
             submission_pending: Arc::new(Mutex::new(submissions.pending)),
             submission_pending_order: Arc::new(Mutex::new(submissions.pending_order)),
             submission_store_path,
             submission_persist: Arc::new(Mutex::new(())),
             submission_dirty: AtomicBool::new(false),
+            definitive_settlement_shutdown: tokio_util::sync::CancellationToken::new(),
+            definitive_settlements_active: std::sync::atomic::AtomicUsize::new(0),
+            definitive_settlement_notify: Notify::new(),
+            interrupted_definitive_settlements: Arc::new(Mutex::new(HashMap::new())),
+            retirement_fence: Arc::new(ThreadRetirementFence::default()),
+            submission_completion_wake: std::sync::Mutex::new(std::sync::Weak::new()),
             next_queue_item_id: AtomicU64::new(1),
+            #[cfg(test)]
+            fail_next_submission_persist: AtomicBool::new(false),
+            #[cfg(test)]
+            fail_all_submission_persists: AtomicBool::new(false),
+            #[cfg(test)]
+            submission_persist_barrier: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            retirement_retry_barrier: std::sync::Mutex::new(None),
         });
         service.spawn_notification_loop();
         service
+    }
+
+    pub(crate) fn attach_submission_completion_wake(&self, wake: &Arc<Notify>) {
+        *self
+            .submission_completion_wake
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Arc::downgrade(wake);
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn wait_for_retirement_retry_barrier(&self) {
+        let barrier = {
+            self.retirement_retry_barrier
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .take()
+        };
+        #[cfg(test)]
+        if let Some((reached, release)) = barrier {
+            let released = release.notified();
+            tokio::pin!(released);
+            reached.notify_one();
+            released.await;
+        }
     }
 
     pub(super) async fn load_submission_store(
@@ -159,7 +414,7 @@ impl BridgeQueueService {
                 }
                 let retained = state.order.iter().cloned().collect::<HashSet<_>>();
                 state.receipts.retain(|key, _| retained.contains(key));
-                trim_queue_pending(&mut state.pending, &mut state.pending_order);
+                normalize_queue_pending(&state.pending, &mut state.pending_order)?;
                 let results = state
                     .receipts
                     .into_iter()
@@ -239,7 +494,8 @@ impl BridgeQueueService {
         if self.submission_dirty.load(Ordering::Acquire) {
             let _ = self.persist_submission_store().await;
         }
-        let durable_blockers = usize::from(self.submission_dirty.load(Ordering::Acquire));
+        let durable_blockers = usize::from(self.submission_dirty.load(Ordering::Acquire))
+            .saturating_add(self.definitive_settlements_active.load(Ordering::Acquire));
         let threads = self.threads.read().await;
         QueueStatus {
             tracked_threads: threads.len(),
@@ -331,13 +587,58 @@ impl BridgeQueueService {
         if turn_start_contains_agent_message_envelope(&request.turn_start) {
             return Err("agent message envelopes are reserved for the bridge".to_string());
         }
-        self.send_message_with_origin(request, None).await
+        if request
+            .submission_id
+            .trim()
+            .starts_with(SCHEDULED_PROMPT_SUBMISSION_PREFIX)
+        {
+            return Err("scheduled prompt submission IDs are reserved for the bridge".to_string());
+        }
+        self.send_message_with_origin(request, None, None).await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn send_scheduled_prompt(
+        &self,
+        request: BridgeThreadQueueSendRequest,
+    ) -> Result<BridgeThreadQueueSendResponse, String> {
+        if turn_start_contains_agent_message_envelope(&request.turn_start) {
+            return Err("agent message envelopes are reserved for the bridge".to_string());
+        }
+        if !request
+            .submission_id
+            .trim()
+            .starts_with(SCHEDULED_PROMPT_SUBMISSION_PREFIX)
+        {
+            return Err("scheduled prompt submission ID must use the reserved prefix".to_string());
+        }
+        self.send_message_with_origin(request, None, None).await
+    }
+
+    pub(crate) async fn send_scheduled_prompt_admitted(
+        &self,
+        request: BridgeThreadQueueSendRequest,
+        retirement_admission: &ThreadRetirementAdmission,
+    ) -> Result<BridgeThreadQueueSendResponse, String> {
+        if turn_start_contains_agent_message_envelope(&request.turn_start) {
+            return Err("agent message envelopes are reserved for the bridge".to_string());
+        }
+        if !request
+            .submission_id
+            .trim()
+            .starts_with(SCHEDULED_PROMPT_SUBMISSION_PREFIX)
+        {
+            return Err("scheduled prompt submission ID must use the reserved prefix".to_string());
+        }
+        self.send_message_with_origin(request, None, Some(retirement_admission))
+            .await
     }
 
     async fn send_message_with_origin(
         &self,
         request: BridgeThreadQueueSendRequest,
         agent_message: Option<crate::agent_messaging::AgentMessageOrigin>,
+        retirement_admission: Option<&ThreadRetirementAdmission>,
     ) -> Result<BridgeThreadQueueSendResponse, String> {
         let normalized_thread_id = request.thread_id.trim().to_string();
         let submission_id = request.submission_id.trim().to_string();
@@ -370,6 +671,12 @@ impl BridgeQueueService {
             ));
         }
 
+        let acquired_admission = if retirement_admission.is_none() {
+            Some(self.retirement_fence.admit(&normalized_thread_id).await?)
+        } else {
+            None
+        };
+        let _retirement_admission = retirement_admission.or(acquired_admission.as_ref());
         self.ensure_thread_runtime(&normalized_thread_id).await?;
         let actor = self.thread_actor(&normalized_thread_id).await;
         let _actor_guard = actor.lock().await;
@@ -474,7 +781,11 @@ impl BridgeQueueService {
         }
 
         match self
-            .dispatch_turn_start(&normalized_thread_id, &queued_item.turn_start)
+            .dispatch_turn_start(
+                &normalized_thread_id,
+                &queued_item.turn_start,
+                &submission_source_turn_id(&submission_id),
+            )
             .await
         {
             Ok(turn_id) => {
@@ -509,14 +820,17 @@ impl BridgeQueueService {
                             at: now_iso(),
                             item_id: Some(queued_item.id),
                         });
+                        runtime.last_error_submission_id = Some(submission_id.clone());
                     }
                 }
                 if !dispatch_failure_is_indeterminate(&error) {
-                    if let Err(persist_error) = self.release_submission(&submission_id).await {
-                        eprintln!(
-                            "failed to release queue submission after definitive dispatch error: {persist_error}"
-                        );
-                    }
+                    let _settlement = self.track_definitive_settlement();
+                    self.settle_definitive_dispatch_failure(
+                        &submission_id,
+                        &normalized_thread_id,
+                        &error,
+                    )
+                    .await?;
                 }
                 Err(error)
             }
@@ -533,6 +847,10 @@ impl BridgeQueueService {
             .encode()
             .map_err(|error| format!("failed to encode agent message: {error}"))?;
         let submission_id = format!("agent-message:{}", envelope.message_id);
+        let retirement_admission = self
+            .retirement_fence
+            .admit_threads(&[&envelope.sender_thread_id, &envelope.recipient_thread_id])
+            .await?;
         self.backend
             .record_agent_messages(vec![
                 (
@@ -557,6 +875,7 @@ impl BridgeQueueService {
                     }),
                 },
                 Some(recipient_origin),
+                Some(&retirement_admission),
             )
             .await
         {
@@ -708,6 +1027,18 @@ impl BridgeQueueService {
             drop(persist_guard);
             return Ok(Some(self.submission_response(result).await));
         }
+        if let Some(pending_thread_id) = self
+            .submission_volatile_pending
+            .lock()
+            .await
+            .get(submission_id)
+            .cloned()
+        {
+            if pending_thread_id != thread_id {
+                return Err("submissionId is already bound to another thread".to_string());
+            }
+            return Err("submissionId is already being queued".to_string());
+        }
         Ok(None)
     }
 
@@ -745,54 +1076,181 @@ impl BridgeQueueService {
             drop(persist_guard);
             return Ok(Some(self.submission_response(result).await));
         }
-        let previous_pending = if persist_pending {
-            Some((
-                self.submission_pending.lock().await.clone(),
-                self.submission_pending_order.lock().await.clone(),
-            ))
-        } else {
-            None
-        };
+        {
+            let volatile_pending = self.submission_volatile_pending.lock().await;
+            if let Some(pending_thread_id) = volatile_pending.get(submission_id) {
+                if pending_thread_id != thread_id {
+                    return Err("submissionId is already bound to another thread".to_string());
+                }
+                return Err("submissionId is already being queued".to_string());
+            }
+        }
+        if !persist_pending {
+            self.submission_volatile_pending
+                .lock()
+                .await
+                .insert(submission_id.to_string(), thread_id.to_string());
+            return Ok(None);
+        }
+
+        let previous_pending = self.submission_pending.lock().await.clone();
+        let previous_order = self.submission_pending_order.lock().await.clone();
         {
             let mut pending = self.submission_pending.lock().await;
             let mut pending_order = self.submission_pending_order.lock().await;
-            let inserted = pending
-                .insert(submission_id.to_string(), thread_id.to_string())
-                .is_none();
-            if persist_pending && inserted {
-                pending_order.push_back(submission_id.to_string());
-                trim_queue_pending(&mut pending, &mut pending_order);
+            if pending.len() >= SUBMISSION_DEDUPE_LIMIT {
+                return Err(format!(
+                    "queue durable pending admission limit reached (max {SUBMISSION_DEDUPE_LIMIT})"
+                ));
             }
+            pending.insert(submission_id.to_string(), thread_id.to_string());
+            pending_order.push_back(submission_id.to_string());
         }
-        if persist_pending {
-            if let Err(error) = self.persist_submission_store_locked().await {
-                let (pending, order) = previous_pending.expect("persistent reservation snapshot");
-                *self.submission_pending.lock().await = pending;
-                *self.submission_pending_order.lock().await = order;
-                let _ = self.persist_submission_store_locked().await;
-                return Err(error);
-            }
+        if let Err(error) = self.persist_submission_store_locked().await {
+            *self.submission_pending.lock().await = previous_pending;
+            *self.submission_pending_order.lock().await = previous_order;
+            let _ = self.persist_submission_store_locked().await;
+            return Err(error);
         }
         Ok(None)
     }
 
     async fn release_submission(&self, submission_id: &str) -> Result<(), String> {
         let _persist = self.submission_persist.lock().await;
-        if self
+        let mut pending = self.submission_pending.lock().await.clone();
+        if pending.remove(submission_id).is_none() {
+            self.submission_volatile_pending
+                .lock()
+                .await
+                .remove(submission_id);
+            return Ok(());
+        }
+        let mut pending_order = self.submission_pending_order.lock().await.clone();
+        pending_order.retain(|candidate| candidate != submission_id);
+        let results = self.submission_results.lock().await.clone();
+        let order = self.submission_order.lock().await.clone();
+        self.persist_submission_snapshot_locked(&results, &order, &pending, &pending_order)
+            .await?;
+        *self.submission_pending.lock().await = pending;
+        *self.submission_pending_order.lock().await = pending_order;
+        self.submission_volatile_pending
+            .lock()
+            .await
+            .remove(submission_id);
+        Ok(())
+    }
+
+    async fn settle_definitive_dispatch_failure(
+        &self,
+        submission_id: &str,
+        thread_id: &str,
+        dispatch_error: &str,
+    ) -> Result<(), String> {
+        let mut attempt = 0_u32;
+        loop {
+            attempt = attempt.saturating_add(1);
+            match self.release_submission(submission_id).await {
+                Ok(()) => return Ok(()),
+                Err(persist_error) => {
+                    eprintln!(
+                        "failed to settle definitive queue dispatch failure for submission \
+                         {submission_id} on attempt {attempt}: {persist_error}; retrying"
+                    );
+                    if self.definitive_settlement_shutdown.is_cancelled() {
+                        let error = format!(
+                            "{DEFINITIVE_SETTLEMENT_INTERRUPTED_PREFIX}; dispatch failed: \
+                             {dispatch_error}; last persistence error: {persist_error}"
+                        );
+                        if submission_id.starts_with(SCHEDULED_PROMPT_SUBMISSION_PREFIX) {
+                            self.interrupted_definitive_settlements.lock().await.insert(
+                                submission_id.to_string(),
+                                (thread_id.to_string(), error.clone()),
+                            );
+                        }
+                        return Err(error);
+                    }
+                    let shift = attempt.saturating_sub(1).min(16);
+                    let delay_ms = QUEUE_DISPATCH_RETRY_MIN_MS
+                        .saturating_mul(1_u64 << shift)
+                        .min(QUEUE_DISPATCH_RETRY_MAX_MS);
+                    tokio::select! {
+                        _ = self.definitive_settlement_shutdown.cancelled() => {
+                            let error = format!(
+                                "{DEFINITIVE_SETTLEMENT_INTERRUPTED_PREFIX}; dispatch failed: \
+                                 {dispatch_error}; last persistence error: {persist_error}"
+                            );
+                            if submission_id.starts_with(SCHEDULED_PROMPT_SUBMISSION_PREFIX) {
+                                self.interrupted_definitive_settlements
+                                    .lock()
+                                    .await
+                                    .insert(
+                                        submission_id.to_string(),
+                                        (thread_id.to_string(), error.clone()),
+                                    );
+                            }
+                            return Err(error);
+                        }
+                        _ = tokio::time::sleep(Duration::from_millis(delay_ms)) => {}
+                    }
+                }
+            }
+        }
+    }
+
+    fn track_definitive_settlement(&self) -> DefinitiveSettlementGuard<'_> {
+        self.definitive_settlements_active
+            .fetch_add(1, Ordering::AcqRel);
+        DefinitiveSettlementGuard {
+            active: &self.definitive_settlements_active,
+            notify: &self.definitive_settlement_notify,
+        }
+    }
+
+    pub(crate) async fn settle_interrupted_definitive_failure(
+        &self,
+        thread_id: &str,
+        submission_id: &str,
+        dispatch_error: &str,
+    ) -> Result<(), String> {
+        let owner = self
             .submission_pending
             .lock()
             .await
-            .remove(submission_id)
-            .is_none()
-        {
-            return Ok(());
+            .get(submission_id)
+            .cloned();
+        if owner.as_deref().is_some_and(|owner| owner != thread_id) {
+            return Err("submissionId is already bound to another thread".to_string());
         }
-        self.submission_pending_order
-            .lock()
+        let _settlement = self.track_definitive_settlement();
+        self.settle_definitive_dispatch_failure(submission_id, thread_id, dispatch_error)
             .await
-            .retain(|candidate| candidate != submission_id);
-        self.persist_submission_store_locked().await?;
-        Ok(())
+    }
+
+    pub(crate) fn begin_definitive_settlement_shutdown(&self) {
+        self.definitive_settlement_shutdown.cancel();
+    }
+
+    pub(crate) async fn wait_for_definitive_settlements(&self) {
+        loop {
+            let notified = self.definitive_settlement_notify.notified();
+            if self.definitive_settlements_active.load(Ordering::Acquire) == 0 {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    pub(crate) async fn interrupted_definitive_settlements(
+        &self,
+    ) -> HashMap<String, (String, String)> {
+        self.interrupted_definitive_settlements.lock().await.clone()
+    }
+
+    pub(crate) async fn clear_interrupted_definitive_settlements(&self, submission_ids: &[String]) {
+        let mut interrupted = self.interrupted_definitive_settlements.lock().await;
+        for submission_id in submission_ids {
+            interrupted.remove(submission_id);
+        }
     }
 
     async fn mark_submission_dispatch_pending(
@@ -801,18 +1259,33 @@ impl BridgeQueueService {
         thread_id: &str,
     ) -> Result<(), String> {
         let _persist = self.submission_persist.lock().await;
+        if self
+            .submission_volatile_pending
+            .lock()
+            .await
+            .get(submission_id)
+            .is_some_and(|existing_thread_id| existing_thread_id != thread_id)
+        {
+            return Err("submissionId is already bound to another thread".to_string());
+        }
         let previous_pending = self.submission_pending.lock().await.clone();
         let previous_order = self.submission_pending_order.lock().await.clone();
         {
             let mut pending = self.submission_pending.lock().await;
             let mut pending_order = self.submission_pending_order.lock().await;
-            if pending
-                .insert(submission_id.to_string(), thread_id.to_string())
-                .is_none()
-            {
+            if let Some(existing_thread_id) = pending.get(submission_id) {
+                if existing_thread_id != thread_id {
+                    return Err("submissionId is already bound to another thread".to_string());
+                }
+            } else {
+                if pending.len() >= SUBMISSION_DEDUPE_LIMIT {
+                    return Err(format!(
+                        "queue durable pending admission limit reached (max {SUBMISSION_DEDUPE_LIMIT})"
+                    ));
+                }
+                pending.insert(submission_id.to_string(), thread_id.to_string());
                 pending_order.push_back(submission_id.to_string());
             }
-            trim_queue_pending(&mut pending, &mut pending_order);
         }
         if let Err(error) = self.persist_submission_store_locked().await {
             *self.submission_pending.lock().await = previous_pending;
@@ -820,11 +1293,19 @@ impl BridgeQueueService {
             let _ = self.persist_submission_store_locked().await;
             return Err(error);
         }
+        self.submission_volatile_pending
+            .lock()
+            .await
+            .remove(submission_id);
         Ok(())
     }
 
     async fn forget_submission_result(&self, submission_id: &str) -> Result<(), String> {
         let _persist = self.submission_persist.lock().await;
+        self.forget_submission_result_locked(submission_id).await
+    }
+
+    async fn forget_submission_result_locked(&self, submission_id: &str) -> Result<(), String> {
         self.submission_results.lock().await.remove(submission_id);
         self.submission_order
             .lock()
@@ -835,6 +1316,10 @@ impl BridgeQueueService {
             .lock()
             .await
             .retain(|candidate| candidate != submission_id);
+        self.submission_volatile_pending
+            .lock()
+            .await
+            .remove(submission_id);
         self.persist_submission_store_locked().await
     }
 
@@ -855,6 +1340,7 @@ impl BridgeQueueService {
         result: BridgeThreadQueueSendResponse,
     ) -> Result<(), String> {
         let _persist = self.submission_persist.lock().await;
+        let was_sent = matches!(&result.disposition, BridgeThreadQueueDisposition::Sent);
         let submission_id = result.submission_id.clone();
         let receipt = BridgeQueueSubmissionReceipt {
             submission_id: submission_id.clone(),
@@ -862,6 +1348,7 @@ impl BridgeQueueService {
             disposition: result.disposition,
             turn_id: result.turn_id,
         };
+        let receipt_thread_id = receipt.thread_id.clone();
         let mut results = self.submission_results.lock().await;
         let mut order = self.submission_order.lock().await;
         if results.insert(submission_id.clone(), receipt).is_none() {
@@ -874,12 +1361,64 @@ impl BridgeQueueService {
         }
         drop(order);
         drop(results);
-        self.submission_pending.lock().await.remove(&submission_id);
-        self.submission_pending_order
-            .lock()
-            .await
-            .retain(|candidate| candidate != &submission_id);
-        self.persist_submission_store_locked().await
+        if was_sent {
+            self.submission_volatile_pending
+                .lock()
+                .await
+                .remove(&submission_id);
+            self.submission_pending.lock().await.remove(&submission_id);
+            self.submission_pending_order
+                .lock()
+                .await
+                .retain(|candidate| candidate != &submission_id);
+        } else {
+            self.submission_pending.lock().await.remove(&submission_id);
+            self.submission_pending_order
+                .lock()
+                .await
+                .retain(|candidate| candidate != &submission_id);
+            self.submission_volatile_pending
+                .lock()
+                .await
+                .insert(submission_id.clone(), receipt_thread_id);
+        }
+        self.persist_submission_store_locked().await?;
+        if was_sent {
+            if let Some(wake) = self
+                .submission_completion_wake
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .upgrade()
+            {
+                wake.notify_one();
+            }
+        }
+        Ok(())
+    }
+
+    async fn remember_sent_submission_until_persisted(
+        &self,
+        result: BridgeThreadQueueSendResponse,
+        operation: &str,
+    ) {
+        let submission_id = result.submission_id.clone();
+        let mut attempt = 0_u32;
+        loop {
+            attempt = attempt.saturating_add(1);
+            match self.remember_submission_result(result.clone()).await {
+                Ok(()) => return,
+                Err(error) => {
+                    eprintln!(
+                        "failed to persist {operation} queue submission {submission_id} on attempt {attempt}: {error}; retrying"
+                    );
+                    let shift = attempt.saturating_sub(1).min(16);
+                    let delay_ms = QUEUE_DISPATCH_RETRY_MIN_MS
+                        .saturating_mul(1_u64 << shift)
+                        .min(QUEUE_DISPATCH_RETRY_MAX_MS);
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                }
+            }
+        }
     }
 
     async fn persist_submission_store(&self) -> Result<(), String> {
@@ -888,15 +1427,52 @@ impl BridgeQueueService {
     }
 
     async fn persist_submission_store_locked(&self) -> Result<(), String> {
+        let results = self.submission_results.lock().await.clone();
+        let order = self.submission_order.lock().await.clone();
+        let pending = self.submission_pending.lock().await.clone();
+        let pending_order = self.submission_pending_order.lock().await.clone();
+        self.persist_submission_snapshot_locked(&results, &order, &pending, &pending_order)
+            .await
+    }
+
+    async fn persist_submission_snapshot_locked(
+        &self,
+        results: &HashMap<String, BridgeQueueSubmissionReceipt>,
+        order: &VecDeque<String>,
+        pending: &HashMap<String, String>,
+        pending_order: &VecDeque<String>,
+    ) -> Result<(), String> {
+        #[cfg(test)]
+        {
+            let barrier = {
+                self.submission_persist_barrier
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .take()
+            };
+            if let Some((reached, release)) = barrier {
+                let released = release.notified();
+                tokio::pin!(released);
+                reached.notify_one();
+                released.await;
+            }
+        }
+        #[cfg(test)]
+        if self.fail_all_submission_persists.load(Ordering::Acquire)
+            || self
+                .fail_next_submission_persist
+                .swap(false, Ordering::AcqRel)
+        {
+            self.submission_dirty.store(true, Ordering::Release);
+            return Err("injected queue idempotency persistence failure".to_string());
+        }
         let Some(path) = &self.submission_store_path else {
             self.submission_dirty.store(false, Ordering::Release);
             return Ok(());
         };
-        let results = self.submission_results.lock().await;
-        let order = self.submission_order.lock().await;
-        let mut pending = self.submission_pending.lock().await.clone();
-        let mut pending_order = self.submission_pending_order.lock().await.clone();
-        trim_queue_pending(&mut pending, &mut pending_order);
+        let pending = pending.clone();
+        let mut pending_order = pending_order.clone();
+        normalize_queue_pending(&pending, &mut pending_order)?;
         let mut snapshot = DurableQueueReceiptFile {
             pending,
             pending_order,
@@ -921,39 +1497,30 @@ impl BridgeQueueService {
                 },
             );
         }
-        drop(order);
-        drop(results);
         let bytes = loop {
             let bytes = serde_json::to_vec(&snapshot)
                 .map_err(|error| format!("failed to serialize queue idempotency state: {error}"))?;
             if bytes.len() <= QUEUE_RECEIPT_STORE_MAX_BYTES {
                 break bytes;
             }
-            let entry_count = snapshot.order.len() + snapshot.pending_order.len();
-            if entry_count == 0 {
+            if snapshot.order.is_empty() {
                 self.submission_dirty.store(true, Ordering::Release);
-                return Err("queue idempotency state exceeds its byte budget".to_string());
+                return Err(
+                    "queue durable pending state exceeds the idempotency byte budget".to_string(),
+                );
             }
-            let batch_size = entry_count
+            let batch_size = snapshot
+                .order
+                .len()
                 .saturating_mul(bytes.len() - QUEUE_RECEIPT_STORE_MAX_BYTES)
                 .div_ceil(bytes.len())
                 .max(1);
-            if !snapshot.order.is_empty() {
-                for _ in 0..batch_size.min(snapshot.order.len()) {
-                    let oldest = snapshot
-                        .order
-                        .pop_front()
-                        .expect("receipt order is non-empty");
-                    snapshot.receipts.remove(&oldest);
-                }
-                continue;
-            }
-            for _ in 0..batch_size.min(snapshot.pending_order.len()) {
+            for _ in 0..batch_size.min(snapshot.order.len()) {
                 let oldest = snapshot
-                    .pending_order
+                    .order
                     .pop_front()
-                    .expect("pending order is non-empty");
-                snapshot.pending.remove(&oldest);
+                    .expect("receipt order is non-empty");
+                snapshot.receipts.remove(&oldest);
             }
         };
         match crate::storage::atomic_write_private(path, &bytes).await {
@@ -987,39 +1554,39 @@ impl BridgeQueueService {
         validate_queue_identifier("threadId", &normalized_thread_id)?;
         validate_queue_identifier("itemId", &normalized_item_id)?;
 
+        let _retirement_admission = self.retirement_fence.admit(&normalized_thread_id).await?;
         self.ensure_thread_runtime(&normalized_thread_id).await?;
+        {
+            let threads = self.threads.read().await;
+            let runtime = threads
+                .get(&normalized_thread_id)
+                .ok_or_else(|| "queue state unavailable".to_string())?;
+            if !automatic_agent_steer
+                && runtime
+                    .items
+                    .iter()
+                    .find(|item| item.id == normalized_item_id)
+                    .is_some_and(is_scheduled_prompt_entry)
+            {
+                return Err(SCHEDULED_PROMPT_PUBLIC_ACTION_ERROR.to_string());
+            }
+        }
         if !self.backend.supports_steer(&normalized_thread_id)? {
             return Err("ACP steering extension is not negotiated for this agent".to_string());
         }
-        if !self
-            .threads
-            .read()
-            .await
-            .get(&normalized_thread_id)
-            .is_some_and(|runtime| {
-                runtime
-                    .items
-                    .iter()
-                    .any(|item| item.id == normalized_item_id)
-            })
         {
-            return Err("queued message not found".to_string());
-        }
-        if !automatic_agent_steer
-            && self
-                .threads
-                .read()
-                .await
+            let threads = self.threads.read().await;
+            let runtime = threads
                 .get(&normalized_thread_id)
-                .and_then(|runtime| {
-                    runtime
-                        .items
-                        .iter()
-                        .find(|item| item.id == normalized_item_id)
-                })
-                .is_some_and(|item| item.agent_message.is_some())
-        {
-            return Err("agent messages are steered automatically".to_string());
+                .ok_or_else(|| "queue state unavailable".to_string())?;
+            let item = runtime
+                .items
+                .iter()
+                .find(|item| item.id == normalized_item_id)
+                .ok_or_else(|| "queued message not found".to_string())?;
+            if !automatic_agent_steer && item.agent_message.is_some() {
+                return Err("agent messages are steered automatically".to_string());
+            }
         }
         let actor = self.thread_actor(&normalized_thread_id).await;
         let _actor_guard = actor.lock().await;
@@ -1030,6 +1597,9 @@ impl BridgeQueueService {
                 .get_mut(&normalized_thread_id)
                 .ok_or_else(|| "queue state unavailable".to_string())?;
 
+            if !automatic_agent_steer && is_scheduled_prompt_item(runtime, &normalized_item_id) {
+                return Err(SCHEDULED_PROMPT_PUBLIC_ACTION_ERROR.to_string());
+            }
             if runtime.turn_start_in_flight || runtime.action_in_flight_item_id.is_some() {
                 return Err("queue is busy processing another action".to_string());
             }
@@ -1098,6 +1668,9 @@ impl BridgeQueueService {
             let runtime = threads
                 .get_mut(&normalized_thread_id)
                 .ok_or_else(|| "queued message not found".to_string())?;
+            if is_scheduled_prompt_item(runtime, &normalized_item_id) {
+                return Err(SCHEDULED_PROMPT_PUBLIC_ACTION_ERROR.to_string());
+            }
             if runtime.action_in_flight_item_id.as_deref() == Some(normalized_item_id.as_str()) {
                 return Err(
                     "cannot cancel a queued message while it is being processed".to_string()
@@ -1167,6 +1740,7 @@ impl BridgeQueueService {
                         at: now_iso(),
                         item_id: Some(normalized_item_id.clone()),
                     });
+                    runtime.last_error_submission_id = None;
                     snapshot = Self::snapshot_for_thread(&normalized_thread_id, Some(runtime));
                 }
             }
@@ -1180,6 +1754,7 @@ impl BridgeQueueService {
                     at: now_iso(),
                     item_id: Some(normalized_item_id.clone()),
                 });
+                runtime.last_error_submission_id = None;
                 snapshot = Self::snapshot_for_thread(&normalized_thread_id, Some(runtime));
             }
         }
@@ -1192,6 +1767,314 @@ impl BridgeQueueService {
             ok: true,
             queue: snapshot,
         })
+    }
+
+    pub(crate) async fn cancel_submission(
+        self: &Arc<Self>,
+        thread_id: &str,
+        submission_id: &str,
+    ) -> Result<QueueSubmissionCancelOutcome, String> {
+        let thread_id = thread_id.trim().to_string();
+        let submission_id = submission_id.trim().to_string();
+        validate_queue_identifier("threadId", &thread_id)?;
+        validate_queue_identifier("submissionId", &submission_id)?;
+
+        let actor = self.thread_actor(&thread_id).await;
+        let actor_guard = actor.lock().await;
+        let persist_guard = self.submission_persist.lock().await;
+        if let Some(receipt) = self
+            .submission_results
+            .lock()
+            .await
+            .get(&submission_id)
+            .cloned()
+        {
+            if receipt.thread_id != thread_id {
+                return Err("submissionId is already bound to another thread".to_string());
+            }
+            if matches!(receipt.disposition, BridgeThreadQueueDisposition::Sent) {
+                return Ok(QueueSubmissionCancelOutcome::Sent);
+            }
+        }
+
+        let removed = {
+            let mut threads = self.threads.write().await;
+            threads.get_mut(&thread_id).and_then(|runtime| {
+                let entry = if let Some(index) = runtime
+                    .items
+                    .iter()
+                    .position(|entry| entry.submission_id == submission_id)
+                {
+                    runtime.items.remove(index)
+                } else if let Some(index) = runtime
+                    .pending_steers
+                    .iter()
+                    .position(|entry| entry.submission_id == submission_id)
+                {
+                    runtime.pending_steers.remove(index)
+                } else {
+                    None
+                };
+                entry.map(|entry| {
+                    if runtime.editing_item_id.as_deref() == Some(entry.id.as_str()) {
+                        runtime.editing_item_id = None;
+                    }
+                    runtime.last_error = None;
+                    (
+                        entry,
+                        Self::snapshot_for_thread(&thread_id, Some(runtime)),
+                        !Self::runtime_has_blockers(runtime),
+                    )
+                })
+            })
+        };
+        let Some((entry, snapshot, should_dispatch)) = removed else {
+            drop(actor_guard);
+            let durable_owner = self
+                .submission_pending
+                .lock()
+                .await
+                .get(&submission_id)
+                .cloned();
+            let volatile_owner = self
+                .submission_volatile_pending
+                .lock()
+                .await
+                .get(&submission_id)
+                .cloned();
+            if durable_owner
+                .iter()
+                .chain(volatile_owner.iter())
+                .any(|owner| owner != &thread_id)
+            {
+                return Err("submissionId is already bound to another thread".to_string());
+            }
+            let dispatch_was_indeterminate = durable_owner.is_some();
+            self.forget_submission_result_locked(&submission_id).await?;
+            return Ok(if dispatch_was_indeterminate {
+                QueueSubmissionCancelOutcome::Sent
+            } else {
+                QueueSubmissionCancelOutcome::NotFound
+            });
+        };
+        drop(actor_guard);
+
+        self.forget_submission_result_locked(&entry.submission_id)
+            .await?;
+        drop(persist_guard);
+        self.broadcast_snapshot(&snapshot).await;
+        if should_dispatch {
+            self.spawn_auto_dispatch(thread_id);
+        }
+        Ok(QueueSubmissionCancelOutcome::Cancelled)
+    }
+
+    pub(crate) async fn reconcile_indeterminate_submission(
+        self: &Arc<Self>,
+        thread_id: &str,
+        submission_id: &str,
+    ) -> Result<Option<BridgeThreadQueueSendResponse>, String> {
+        let thread_id = thread_id.trim().to_string();
+        let submission_id = submission_id.trim().to_string();
+        validate_queue_identifier("threadId", &thread_id)?;
+        validate_queue_identifier("submissionId", &submission_id)?;
+
+        let actor = self.thread_actor(&thread_id).await;
+        let _actor_guard = actor.lock().await;
+        let persist_guard = self.submission_persist.lock().await;
+        if let Some(receipt) = self
+            .submission_results
+            .lock()
+            .await
+            .get(&submission_id)
+            .cloned()
+        {
+            if receipt.thread_id != thread_id {
+                return Err("submissionId is already bound to another thread".to_string());
+            }
+            self.persist_submission_store_locked().await?;
+            drop(persist_guard);
+            return Ok(Some(self.submission_response(receipt).await));
+        }
+        let Some(pending_thread_id) = self
+            .submission_pending
+            .lock()
+            .await
+            .get(&submission_id)
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        if pending_thread_id != thread_id {
+            return Err("submissionId is already bound to another thread".to_string());
+        }
+
+        let source_turn_id = submission_source_turn_id(&submission_id);
+        let reconciled_turn_id = self
+            .backend
+            .reconcile_turn_start(&thread_id, &source_turn_id)
+            .await?
+            .unwrap_or(source_turn_id);
+        drop(persist_guard);
+
+        // A durable pending marker proves that admission may have crossed the ACP boundary. If the
+        // bridge-local deterministic transcript marker survived, use it as positive confirmation.
+        // After a full process crash that marker may be unrecoverable, so settle conservatively
+        // rather than resubmitting a prompt that may already have performed side effects.
+        let result = BridgeThreadQueueSendResponse {
+            submission_id,
+            disposition: BridgeThreadQueueDisposition::Sent,
+            queue: self.read_queue(&thread_id).await,
+            turn_id: Some(reconciled_turn_id),
+        };
+        self.remember_submission_result(result.clone()).await?;
+        Ok(Some(result))
+    }
+
+    pub(crate) async fn submission_was_sent(
+        &self,
+        thread_id: &str,
+        submission_id: &str,
+    ) -> Result<bool, String> {
+        let _persist = self.submission_persist.lock().await;
+        let sent = self
+            .submission_results
+            .lock()
+            .await
+            .get(submission_id)
+            .is_some_and(|receipt| {
+                receipt.thread_id == thread_id
+                    && matches!(receipt.disposition, BridgeThreadQueueDisposition::Sent)
+            });
+        if sent {
+            self.persist_submission_store_locked().await?;
+        }
+        Ok(sent)
+    }
+
+    pub(crate) async fn begin_retirement_fence(
+        &self,
+        thread_ids: &[String],
+    ) -> Result<ThreadRetirementLease, String> {
+        let thread_ids = normalize_retiring_thread_ids(thread_ids)?;
+        Ok(self.retirement_fence.begin(&thread_ids).await)
+    }
+
+    pub(crate) async fn block_retirement_admissions(&self) -> ThreadRetirementAdmissionBarrier {
+        self.retirement_fence.block_admissions().await
+    }
+
+    pub(crate) async fn install_deleted_thread_tombstones(
+        &self,
+        thread_ids: &[String],
+    ) -> Result<(), String> {
+        let thread_ids = normalize_retiring_thread_ids(thread_ids)?;
+        let barrier = self.block_retirement_admissions().await;
+        self.retirement_fence
+            .mark_deleted_blocked(&thread_ids, &barrier);
+        Ok(())
+    }
+
+    pub(crate) fn begin_retirement_fence_blocked(
+        &self,
+        thread_ids: &[String],
+        barrier: &ThreadRetirementAdmissionBarrier,
+    ) -> Result<ThreadRetirementLease, String> {
+        let thread_ids = normalize_retiring_thread_ids(thread_ids)?;
+        Ok(self.retirement_fence.begin_blocked(&thread_ids, barrier))
+    }
+
+    pub(crate) async fn begin_thread_retirement(
+        self: &Arc<Self>,
+        thread_ids: &[String],
+    ) -> Result<QueueThreadRetirement, String> {
+        let thread_ids = normalize_retiring_thread_ids(thread_ids)?;
+
+        let mut actors = Vec::with_capacity(thread_ids.len());
+        for thread_id in &thread_ids {
+            actors.push((thread_id.clone(), self.thread_actor(thread_id).await));
+        }
+        let mut actor_guards = Vec::with_capacity(actors.len());
+        for (_, actor) in &actors {
+            actor_guards.push(actor.clone().lock_owned().await);
+        }
+
+        Ok(QueueThreadRetirement {
+            thread_ids,
+            _actor_guards: actor_guards,
+        })
+    }
+
+    pub(crate) async fn commit_thread_retirement(
+        &self,
+        retirement: &QueueThreadRetirement,
+    ) -> Result<(), String> {
+        let thread_ids = &retirement.thread_ids;
+        let retired = thread_ids.iter().cloned().collect::<HashSet<_>>();
+        let _persist_guard = self.submission_persist.lock().await;
+        let mut results = self.submission_results.lock().await.clone();
+        let mut order = self.submission_order.lock().await.clone();
+        let mut volatile_pending = self.submission_volatile_pending.lock().await.clone();
+        let mut pending = self.submission_pending.lock().await.clone();
+        let mut pending_order = self.submission_pending_order.lock().await.clone();
+        results.retain(|_, receipt| !retired.contains(&receipt.thread_id));
+        order.retain(|submission_id| results.contains_key(submission_id));
+        volatile_pending.retain(|_, thread_id| !retired.contains(thread_id));
+        pending.retain(|_, thread_id| !retired.contains(thread_id));
+        pending_order.retain(|submission_id| pending.contains_key(submission_id));
+        self.persist_submission_snapshot_locked(&results, &order, &pending, &pending_order)
+            .await?;
+
+        *self.submission_results.lock().await = results;
+        *self.submission_order.lock().await = order;
+        *self.submission_volatile_pending.lock().await = volatile_pending;
+        *self.submission_pending.lock().await = pending;
+        *self.submission_pending_order.lock().await = pending_order;
+        {
+            let mut threads = self.threads.write().await;
+            for thread_id in thread_ids {
+                threads.remove(thread_id);
+            }
+        }
+        {
+            let mut thread_actors = self.thread_actors.write().await;
+            for thread_id in thread_ids {
+                thread_actors.remove(thread_id);
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn rollback_thread_retirement(&self, _retirement: QueueThreadRetirement) {}
+
+    pub(crate) async fn publish_thread_retirement(&self, thread_ids: &[String]) {
+        for thread_id in thread_ids {
+            self.broadcast_snapshot(&Self::snapshot_for_thread(thread_id, None))
+                .await;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn retire_threads(
+        self: &Arc<Self>,
+        thread_ids: &[String],
+    ) -> Result<(), String> {
+        let fence = self.begin_retirement_fence(thread_ids).await?;
+        let retirement = match self.begin_thread_retirement(thread_ids).await {
+            Ok(retirement) => retirement,
+            Err(error) => {
+                fence.finish().await;
+                return Err(error);
+            }
+        };
+        if let Err(error) = self.commit_thread_retirement(&retirement).await {
+            fence.finish().await;
+            return Err(error);
+        }
+        drop(retirement);
+        self.publish_thread_retirement(thread_ids).await;
+        fence.finish().await;
+        Ok(())
     }
 
     pub(super) async fn start_message_edit(
@@ -1218,6 +2101,9 @@ impl BridgeQueueService {
             let runtime = threads
                 .get_mut(&normalized_thread_id)
                 .ok_or_else(|| "queue state unavailable".to_string())?;
+            if is_scheduled_prompt_item(runtime, &normalized_item_id) {
+                return Err(SCHEDULED_PROMPT_PUBLIC_ACTION_ERROR.to_string());
+            }
             if runtime.turn_start_in_flight || runtime.action_in_flight_item_id.is_some() {
                 return Err("queue is busy processing another action".to_string());
             }
@@ -1292,6 +2178,9 @@ impl BridgeQueueService {
             let runtime = threads
                 .get_mut(&normalized_thread_id)
                 .ok_or_else(|| "queue state unavailable".to_string())?;
+            if is_scheduled_prompt_item(runtime, &normalized_item_id) {
+                return Err(SCHEDULED_PROMPT_PUBLIC_ACTION_ERROR.to_string());
+            }
             if runtime.editing_item_id.as_deref() != Some(normalized_item_id.as_str()) {
                 return Err("queued message is not being edited".to_string());
             }
@@ -1378,6 +2267,9 @@ impl BridgeQueueService {
             let runtime = threads
                 .get_mut(&normalized_thread_id)
                 .ok_or_else(|| "queue state unavailable".to_string())?;
+            if is_scheduled_prompt_item(runtime, &normalized_item_id) {
+                return Err(SCHEDULED_PROMPT_PUBLIC_ACTION_ERROR.to_string());
+            }
             if runtime.editing_item_id.as_deref() != Some(normalized_item_id.as_str()) {
                 return Err("queued message is not being edited".to_string());
             }
@@ -1481,6 +2373,7 @@ impl BridgeQueueService {
                             at: now_iso(),
                             item_id: None,
                         });
+                        runtime.last_error_submission_id = None;
                     }
                 }
             }
@@ -1495,8 +2388,11 @@ impl BridgeQueueService {
         &self,
         thread_id: &str,
         turn_start: &Value,
+        source_turn_id: &str,
     ) -> Result<String, String> {
-        self.backend.turn_start(thread_id, turn_start).await
+        self.backend
+            .turn_start(thread_id, turn_start, source_turn_id)
+            .await
     }
 
     pub(super) fn spawn_steer_dispatch(self: &Arc<Self>, thread_id: String) {
@@ -1518,6 +2414,10 @@ impl BridgeQueueService {
     }
 
     pub(super) async fn drain_pending_steers(self: &Arc<Self>, thread_id: String) {
+        let _retirement_admission = match self.retirement_fence.admit(&thread_id).await {
+            Ok(admission) => admission,
+            Err(_) => return,
+        };
         loop {
             let supports_live_agent_message = self
                 .backend
@@ -1565,6 +2465,10 @@ impl BridgeQueueService {
                     };
                     runtime.steer_prepare_in_flight = false;
                     if let Err(error) = &result {
+                        runtime.last_error_submission_id = runtime
+                            .pending_steers
+                            .front()
+                            .map(|entry| entry.submission_id.clone());
                         runtime.last_error = Some(BridgeThreadQueueError {
                             message: error.clone(),
                             operation: "steer".to_string(),
@@ -1750,6 +2654,7 @@ impl BridgeQueueService {
                             at: now_iso(),
                             item_id: Some(item_id),
                         });
+                        runtime.last_error_submission_id = Some(submission_id.clone());
                     }
                 }
                 (
@@ -1767,17 +2672,16 @@ impl BridgeQueueService {
             drop(actor_guard);
             self.broadcast_snapshot(&snapshot.0).await;
             if let Some((submission_id, agent_message_id, turn_id)) = snapshot.1 {
-                if let Err(error) = self
-                    .remember_submission_result(BridgeThreadQueueSendResponse {
+                self.remember_sent_submission_until_persisted(
+                    BridgeThreadQueueSendResponse {
                         submission_id,
                         disposition: BridgeThreadQueueDisposition::Sent,
                         queue: snapshot.0.clone(),
                         turn_id: Some(turn_id),
-                    })
-                    .await
-                {
-                    eprintln!("failed to persist successful steer receipt: {error}");
-                }
+                    },
+                    "successful steer",
+                )
+                .await;
                 if let Some(message_id) = agent_message_id {
                     if let Err(error) = self
                         .persist_agent_message_disposition(
@@ -1831,7 +2735,9 @@ impl BridgeQueueService {
             let Some(runtime) = threads.get_mut(thread_id) else {
                 return;
             };
+            let mut error_submission_id = None;
             if let Some(owned) = runtime.steer_dispatch_in_flight.take() {
+                error_submission_id = Some(owned.entry.submission_id.clone());
                 runtime.pending_steers.push_front(owned.entry);
             }
             runtime.last_error = Some(BridgeThreadQueueError {
@@ -1840,6 +2746,7 @@ impl BridgeQueueService {
                 at: now_iso(),
                 item_id: Some(item_id.to_string()),
             });
+            runtime.last_error_submission_id = error_submission_id;
             Self::snapshot_for_thread(thread_id, Some(runtime))
         };
         self.broadcast_snapshot(&snapshot).await;
@@ -1870,6 +2777,7 @@ impl BridgeQueueService {
                     runtime
                         .items
                         .iter()
+                        .filter(|entry| !is_scheduled_prompt_entry(entry))
                         .map(BridgeQueuedMessageEntry::to_public)
                         .collect::<Vec<_>>(),
                     runtime
@@ -1877,12 +2785,24 @@ impl BridgeQueueService {
                         .iter()
                         .map(|dispatch| &dispatch.entry)
                         .chain(runtime.pending_steers.iter())
+                        .filter(|entry| !is_scheduled_prompt_entry(entry))
                         .map(BridgeQueuedMessageEntry::to_public)
                         .collect::<Vec<_>>(),
-                    runtime.editing_item_id.clone(),
+                    runtime
+                        .editing_item_id
+                        .as_ref()
+                        .filter(|item_id| !is_scheduled_prompt_item(runtime, item_id))
+                        .cloned(),
                     !runtime.pending_steers.is_empty() && !runtime.active_tool_call_ids.is_empty(),
                     runtime.steer_dispatch_in_flight.is_some(),
-                    runtime.last_error.clone(),
+                    runtime.last_error.clone().filter(|_| {
+                        !runtime
+                            .last_error_submission_id
+                            .as_deref()
+                            .is_some_and(|submission_id| {
+                                submission_id.starts_with(SCHEDULED_PROMPT_SUBMISSION_PREFIX)
+                            })
+                    }),
                 )
             },
         );
@@ -1919,6 +2839,10 @@ impl BridgeQueueService {
     pub(super) async fn handle_canonical_event(self: &Arc<Self>, received: CanonicalHubEvent) {
         let Some(thread_id) = received.event.thread_id().map(str::to_string) else {
             return;
+        };
+        let _retirement_admission = match self.retirement_fence.admit(&thread_id).await {
+            Ok(admission) => admission,
+            Err(_) => return,
         };
         let actor = self.thread_actor(&thread_id).await;
         let _actor_guard = actor.lock().await;
@@ -2197,6 +3121,10 @@ impl BridgeQueueService {
     }
 
     pub(super) async fn drain_thread_queue(self: &Arc<Self>, thread_id: String) {
+        let _retirement_admission = match self.retirement_fence.admit(&thread_id).await {
+            Ok(admission) => admission,
+            Err(_) => return,
+        };
         let actor = self.thread_actor(&thread_id).await;
         let actor_guard = actor.lock().await;
         let (queued_item, snapshot) = {
@@ -2239,6 +3167,7 @@ impl BridgeQueueService {
             .mark_submission_dispatch_pending(&queued_item.submission_id, &thread_id)
             .await
         {
+            let failed_submission_id = queued_item.submission_id.clone();
             let (snapshot, retry_attempt, schedule_retry) = {
                 let mut threads = self.threads.write().await;
                 let Some(runtime) = threads.get_mut(&thread_id) else {
@@ -2255,6 +3184,7 @@ impl BridgeQueueService {
                     at: now_iso(),
                     item_id: runtime.items.front().map(|item| item.id.clone()),
                 });
+                runtime.last_error_submission_id = Some(failed_submission_id);
                 (
                     Self::snapshot_for_thread(&thread_id, Some(runtime)),
                     runtime.dispatch_retry_attempt,
@@ -2274,7 +3204,11 @@ impl BridgeQueueService {
         }
         match self
             .backend
-            .turn_start(&thread_id, &queued_item.turn_start)
+            .turn_start(
+                &thread_id,
+                &queued_item.turn_start,
+                &submission_source_turn_id(&queued_item.submission_id),
+            )
             .await
         {
             Ok(turn_id) => {
@@ -2296,18 +3230,17 @@ impl BridgeQueueService {
                         BridgeQueueService::snapshot_for_thread(&thread_id, Some(runtime)),
                     )
                 };
-                drop(actor_guard);
-                if let Err(error) = self
-                    .remember_submission_result(BridgeThreadQueueSendResponse {
+                self.remember_sent_submission_until_persisted(
+                    BridgeThreadQueueSendResponse {
                         submission_id: queued_item.submission_id,
                         disposition: BridgeThreadQueueDisposition::Sent,
                         queue,
                         turn_id: Some(turn_id),
-                    })
-                    .await
-                {
-                    eprintln!("failed to persist dispatched queue submission: {error}");
-                }
+                    },
+                    "dispatched",
+                )
+                .await;
+                drop(actor_guard);
                 if let Some(message_id) = agent_message_id {
                     if let Err(error) = self
                         .persist_agent_message_disposition(
@@ -2337,7 +3270,23 @@ impl BridgeQueueService {
                     .agent_message
                     .as_ref()
                     .map(|message| message.message_id.clone());
-                let (snapshot, completion_event_ids) = {
+                let _settlement = (!indeterminate).then(|| self.track_definitive_settlement());
+                let settlement_error = if indeterminate {
+                    None
+                } else {
+                    self.settle_definitive_dispatch_failure(
+                        &failed_submission_id,
+                        &thread_id,
+                        &error,
+                    )
+                    .await
+                    .err()
+                };
+                let settlement_converged = !indeterminate && settlement_error.is_none();
+                let retry_after_settlement =
+                    settlement_converged && !self.definitive_settlement_shutdown.is_cancelled();
+                let visible_error = settlement_error.unwrap_or_else(|| error.clone());
+                let (snapshot, completion_event_ids, retry) = {
                     let mut threads = self.threads.write().await;
                     let Some(runtime) = threads.get_mut(&thread_id) else {
                         return;
@@ -2346,34 +3295,33 @@ impl BridgeQueueService {
                     if !indeterminate {
                         runtime.items.push_front(queued_item);
                     }
+                    let retry = if retry_after_settlement {
+                        runtime.dispatch_retry_attempt =
+                            runtime.dispatch_retry_attempt.saturating_add(1);
+                        let schedule_retry = !runtime.dispatch_retry_scheduled;
+                        runtime.dispatch_retry_scheduled = true;
+                        schedule_retry.then_some(runtime.dispatch_retry_attempt)
+                    } else {
+                        None
+                    };
                     runtime.last_error = Some(BridgeThreadQueueError {
-                        message: error.clone(),
+                        message: visible_error,
                         operation: "dispatch".to_string(),
                         at: now_iso(),
                         item_id: Some(failed_item_id),
                     });
+                    runtime.last_error_submission_id = Some(failed_submission_id.clone());
                     (
                         BridgeQueueService::snapshot_for_thread(&thread_id, Some(runtime)),
                         std::mem::take(&mut runtime.pending_completion_event_ids),
+                        retry,
                     )
                 };
                 drop(actor_guard);
-                if !indeterminate {
-                    if let Err(persist_error) = self
-                        .remember_submission_result(BridgeThreadQueueSendResponse {
-                            submission_id: failed_submission_id,
-                            disposition: BridgeThreadQueueDisposition::Queued,
-                            queue: snapshot.clone(),
-                            turn_id: None,
-                        })
-                        .await
-                    {
-                        eprintln!(
-                            "failed to clear queue dispatch reservation after error: {persist_error}"
-                        );
-                    }
-                }
                 self.broadcast_snapshot(&snapshot).await;
+                if let Some(attempt) = retry {
+                    self.schedule_auto_dispatch_retry(thread_id.clone(), attempt);
+                }
                 if indeterminate {
                     if let Some(message_id) = failed_agent_message_id {
                         if let Err(update_error) = self
@@ -2632,6 +3580,7 @@ mod tests {
             &'a self,
             thread_id: &'a str,
             turn_start: &'a Value,
+            _source_turn_id: &'a str,
         ) -> BoxFuture<'a, Result<String, String>> {
             let turn_start = turn_start.clone();
             Box::pin(async move {
@@ -2804,6 +3753,12 @@ mod tests {
             }),
             agent_message: None,
         }
+    }
+
+    fn scheduled(id: &str) -> BridgeQueuedMessageEntry {
+        let mut entry = queued(id);
+        entry.submission_id = format!("{SCHEDULED_PROMPT_SUBMISSION_PREFIX}{id}");
+        entry
     }
 
     fn active_runtime(item_ids: &[&str], tool_ids: &[&str]) -> BridgeThreadQueueRuntime {
@@ -3664,6 +4619,411 @@ mod tests {
                 "agent message envelopes are reserved for the bridge"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn public_queue_cannot_preempt_reserved_scheduled_submissions() {
+        let (backend, _) = fake_dispatcher();
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let submission_id = "scheduled-prompt:00000000-0000-4000-8000-000000000001";
+
+        for thread_id in ["thread", "other-thread"] {
+            assert_eq!(
+                service
+                    .send_message(send_request(thread_id, submission_id, "forged"))
+                    .await
+                    .expect_err("public scheduled-prompt submission IDs are reserved"),
+                "scheduled prompt submission IDs are reserved for the bridge"
+            );
+        }
+
+        let accepted = service
+            .send_scheduled_prompt(send_request("thread", submission_id, "scheduled work"))
+            .await
+            .expect("internal scheduler submission is admitted");
+        assert!(matches!(
+            accepted.disposition,
+            BridgeThreadQueueDisposition::Queued
+        ));
+        assert_eq!(accepted.submission_id, submission_id);
+        assert!(accepted.queue.items.is_empty());
+        assert_eq!(service.status().await.depth, 1);
+        assert!(service.read_queue("thread").await.items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn scheduled_queue_entries_are_hidden_and_reject_every_public_action() {
+        let (service, _) = service_with_runtime(&["ordinary", "scheduled"], &[]).await;
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").expect("runtime");
+            runtime.items[1] = scheduled("scheduled");
+            runtime.pending_steers.push_back(queued("ordinary-steer"));
+            runtime
+                .pending_steers
+                .push_back(scheduled("scheduled-steer"));
+            runtime.editing_item_id = Some("scheduled".to_string());
+        }
+
+        let snapshot = service.read_queue("thread").await;
+        assert_eq!(
+            snapshot
+                .items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            ["ordinary"]
+        );
+        assert_eq!(
+            snapshot
+                .pending_steers
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            ["ordinary-steer"]
+        );
+        assert_eq!(snapshot.pending_steer_count, 1);
+        assert!(snapshot.editing_item_id.is_none());
+        let status = service.status().await;
+        assert_eq!(status.depth, 2);
+        assert_eq!(status.pending_steers, 2);
+
+        let edit = BridgeThreadQueueEditRequest {
+            thread_id: "thread".to_string(),
+            item_id: "scheduled".to_string(),
+        };
+        assert_eq!(
+            service
+                .start_message_edit(edit.clone())
+                .await
+                .expect_err("scheduled edit start is private"),
+            SCHEDULED_PROMPT_PUBLIC_ACTION_ERROR
+        );
+        assert_eq!(
+            service
+                .commit_message_edit(BridgeThreadQueueEditCommitRequest {
+                    thread_id: "thread".to_string(),
+                    item_id: "scheduled".to_string(),
+                    content: "replacement".to_string(),
+                })
+                .await
+                .expect_err("scheduled edit commit is private"),
+            SCHEDULED_PROMPT_PUBLIC_ACTION_ERROR
+        );
+        assert_eq!(
+            service
+                .cancel_message_edit(edit)
+                .await
+                .expect_err("scheduled edit cancellation is private"),
+            SCHEDULED_PROMPT_PUBLIC_ACTION_ERROR
+        );
+        assert_eq!(
+            service
+                .steer_message(BridgeThreadQueueSteerRequest {
+                    thread_id: "thread".to_string(),
+                    item_id: "scheduled".to_string(),
+                })
+                .await
+                .expect_err("scheduled steering is private"),
+            SCHEDULED_PROMPT_PUBLIC_ACTION_ERROR
+        );
+        assert_eq!(
+            service
+                .cancel_message(BridgeThreadQueueCancelRequest {
+                    thread_id: "thread".to_string(),
+                    item_id: "scheduled".to_string(),
+                })
+                .await
+                .expect_err("scheduled queue cancellation is private"),
+            SCHEDULED_PROMPT_PUBLIC_ACTION_ERROR
+        );
+
+        assert_eq!(
+            service
+                .cancel_submission(
+                    "thread",
+                    &format!("{SCHEDULED_PROMPT_SUBMISSION_PREFIX}scheduled"),
+                )
+                .await
+                .expect("scheduler cancellation remains available"),
+            QueueSubmissionCancelOutcome::Cancelled
+        );
+        assert_eq!(
+            service
+                .cancel_submission(
+                    "thread",
+                    &format!("{SCHEDULED_PROMPT_SUBMISSION_PREFIX}scheduled-steer"),
+                )
+                .await
+                .expect("scheduler can cancel a pending scheduled steer"),
+            QueueSubmissionCancelOutcome::Cancelled
+        );
+        let snapshot = service.read_queue("thread").await;
+        assert_eq!(snapshot.items[0].id, "ordinary");
+        assert_eq!(snapshot.pending_steers[0].id, "ordinary-steer");
+    }
+
+    #[tokio::test]
+    async fn hidden_scheduled_queue_entries_still_dispatch_in_fifo_order() {
+        let (service, mut calls) = service_with_runtime(&["scheduled", "ordinary"], &[]).await;
+        service
+            .threads
+            .write()
+            .await
+            .get_mut("thread")
+            .expect("runtime")
+            .items[0] = scheduled("scheduled");
+
+        let snapshot = service.read_queue("thread").await;
+        assert_eq!(
+            snapshot
+                .items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            ["ordinary"]
+        );
+        assert_eq!(service.status().await.depth, 2);
+
+        service
+            .handle_canonical_event(finish_event("turn", 7, 73))
+            .await;
+        let turn_start = calls
+            .turn_start
+            .recv()
+            .await
+            .expect("hidden scheduled entry dispatches");
+        assert_eq!(turn_start.turn_start["input"][0]["text"], "text-scheduled");
+        turn_start
+            .response
+            .send(Ok("scheduled-turn".to_string()))
+            .expect("scheduled turn starts");
+    }
+
+    #[tokio::test]
+    async fn direct_scheduled_dispatch_error_is_private_but_ordinary_error_remains_public() {
+        let (backend, mut calls) = fake_dispatcher();
+        {
+            let mut snapshot = backend.snapshot.lock().expect("snapshot lock");
+            snapshot.session.active_run_id = None;
+            snapshot.session.active_source_turn_id = None;
+            snapshot.session.active_generation = None;
+        }
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let scheduled_submission =
+            format!("{SCHEDULED_PROMPT_SUBMISSION_PREFIX}direct-dispatch-failure");
+        let scheduled_send = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .send_scheduled_prompt(send_request(
+                        "thread",
+                        &scheduled_submission,
+                        "scheduled work",
+                    ))
+                    .await
+            }
+        });
+        calls
+            .turn_start
+            .recv()
+            .await
+            .expect("scheduled prompt reaches dispatcher")
+            .response
+            .send(Err("scheduled dispatch failed".to_string()))
+            .expect("scheduled failure response");
+        assert_eq!(
+            scheduled_send
+                .await
+                .expect("scheduled send task")
+                .expect_err("scheduled dispatch fails"),
+            "scheduled dispatch failed"
+        );
+        assert!(
+            service.read_queue("thread").await.last_error.is_none(),
+            "scheduler-owned item IDs must not leak through the public queue error"
+        );
+        {
+            let threads = service.threads.read().await;
+            let runtime = threads.get("thread").expect("scheduled runtime");
+            assert!(runtime.last_error.is_some());
+            assert!(runtime
+                .last_error_submission_id
+                .as_deref()
+                .is_some_and(|submission_id| {
+                    submission_id.starts_with(SCHEDULED_PROMPT_SUBMISSION_PREFIX)
+                }));
+        }
+
+        let ordinary_send = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .send_message(send_request(
+                        "thread",
+                        "ordinary-dispatch-failure",
+                        "ordinary work",
+                    ))
+                    .await
+            }
+        });
+        calls
+            .turn_start
+            .recv()
+            .await
+            .expect("ordinary prompt reaches dispatcher")
+            .response
+            .send(Err("ordinary dispatch failed".to_string()))
+            .expect("ordinary failure response");
+        assert_eq!(
+            ordinary_send
+                .await
+                .expect("ordinary send task")
+                .expect_err("ordinary dispatch fails"),
+            "ordinary dispatch failed"
+        );
+        let error = service
+            .read_queue("thread")
+            .await
+            .last_error
+            .expect("ordinary queue error remains visible");
+        assert_eq!(error.message, "ordinary dispatch failed");
+        assert_eq!(error.operation, "dispatch");
+        assert!(error
+            .item_id
+            .as_deref()
+            .is_some_and(|item_id| item_id.starts_with("queue-")));
+    }
+
+    #[tokio::test]
+    async fn ordinary_dispatch_reports_interrupted_definitive_persistence_settlement() {
+        let directory = std::env::current_dir()
+            .expect("current directory")
+            .join("target")
+            .join(format!(
+                "queue-definitive-client-settlement-{}",
+                uuid::Uuid::new_v4()
+            ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("queue.json");
+        let (backend, mut calls) = fake_dispatcher();
+        {
+            let mut snapshot = backend.snapshot.lock().expect("snapshot lock");
+            snapshot.session.active_run_id = None;
+            snapshot.session.active_source_turn_id = None;
+            snapshot.session.active_generation = None;
+        }
+        let service = BridgeQueueService::with_submission_store(
+            backend,
+            Arc::new(ClientHub::new()),
+            Some(path.clone()),
+            DurableQueueSubmissions::default(),
+        );
+        let send = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .send_message(send_request(
+                        "thread",
+                        "ordinary-settlement-failure",
+                        "ordinary work",
+                    ))
+                    .await
+            }
+        });
+        let dispatch = calls
+            .turn_start
+            .recv()
+            .await
+            .expect("ordinary prompt reaches dispatcher");
+        service
+            .fail_all_submission_persists
+            .store(true, Ordering::Release);
+        dispatch
+            .response
+            .send(Err("ordinary backend failure".to_string()))
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if service.submission_dirty.load(Ordering::Acquire)
+                    && service
+                        .definitive_settlements_active
+                        .load(Ordering::Acquire)
+                        == 1
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("ordinary failure owns persistence settlement");
+        service.begin_definitive_settlement_shutdown();
+        let error = tokio::time::timeout(Duration::from_secs(1), send)
+            .await
+            .expect("ordinary settlement interruption is bounded")
+            .expect("ordinary send task")
+            .expect_err("ordinary send surfaces settlement failure");
+        assert!(definitive_settlement_was_interrupted(&error));
+        assert!(error.contains("ordinary backend failure"));
+        assert!(error.contains("injected queue idempotency persistence failure"));
+        assert!(service
+            .submission_pending
+            .lock()
+            .await
+            .contains_key("ordinary-settlement-failure"));
+        assert!(BridgeQueueService::load_submission_store(&path)
+            .await
+            .unwrap()
+            .pending
+            .contains_key("ordinary-settlement-failure"));
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
+    async fn queued_scheduled_auto_dispatch_error_is_private() {
+        let (service, mut calls) = service_with_runtime(&["scheduled"], &[]).await;
+        service
+            .threads
+            .write()
+            .await
+            .get_mut("thread")
+            .expect("runtime")
+            .items[0] = scheduled("scheduled");
+
+        service
+            .handle_canonical_event(finish_event("turn", 7, 74))
+            .await;
+        calls
+            .turn_start
+            .recv()
+            .await
+            .expect("queued scheduled prompt auto-dispatches")
+            .response
+            .send(Err("scheduled auto-dispatch failed".to_string()))
+            .expect("scheduled auto-dispatch failure response");
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let threads = service.threads.read().await;
+                let runtime = threads.get("thread").expect("runtime");
+                if runtime.last_error.is_some() {
+                    assert!(runtime.last_error_submission_id.as_deref().is_some_and(
+                        |submission_id| {
+                            submission_id.starts_with(SCHEDULED_PROMPT_SUBMISSION_PREFIX)
+                        }
+                    ));
+                    break;
+                }
+                drop(threads);
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("scheduled auto-dispatch error settles");
+
+        let snapshot = service.read_queue("thread").await;
+        assert!(snapshot.items.is_empty());
+        assert!(snapshot.last_error.is_none());
     }
 
     #[tokio::test]
@@ -4583,6 +5943,391 @@ mod tests {
             .send(Ok(()))
             .expect("journal update settles");
         drain.await.expect("auto dispatch completes");
+    }
+
+    #[tokio::test]
+    async fn retirement_started_before_background_dispatch_blocks_queue_and_steer_paths() {
+        let (backend, mut calls) = fake_dispatcher();
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        service.threads.write().await.insert(
+            "queued".to_string(),
+            BridgeThreadQueueRuntime {
+                items: VecDeque::from([queued("fenced-queue")]),
+                ..BridgeThreadQueueRuntime::default()
+            },
+        );
+        service.threads.write().await.insert(
+            "steered".to_string(),
+            BridgeThreadQueueRuntime {
+                pending_steers: VecDeque::from([queued("fenced-steer")]),
+                active_turn_id: Some("turn".to_string()),
+                active_run_id: Some("run".to_string()),
+                active_prompt_generation: Some(1),
+                live_generation_known: true,
+                thread_running: true,
+                ..BridgeThreadQueueRuntime::default()
+            },
+        );
+
+        let queue_fence = service
+            .begin_retirement_fence(&["queued".to_string()])
+            .await
+            .unwrap();
+        let queue_dispatch = tokio::spawn({
+            let service = service.clone();
+            async move { service.drain_thread_queue("queued".to_string()).await }
+        });
+        queue_dispatch.await.expect("fenced queue dispatch exits");
+        assert!(calls.turn_start.try_recv().is_err());
+        queue_fence.finish().await;
+
+        let steer_fence = service
+            .begin_retirement_fence(&["steered".to_string()])
+            .await
+            .unwrap();
+        let steer_dispatch = tokio::spawn({
+            let service = service.clone();
+            async move { service.drain_pending_steers("steered".to_string()).await }
+        });
+        steer_dispatch.await.expect("fenced steer dispatch exits");
+        assert!(calls.steer.try_recv().is_err());
+        steer_fence.finish().await;
+    }
+
+    #[tokio::test]
+    async fn delayed_run_started_after_successful_deletion_cannot_recreate_queue_runtime_or_actor()
+    {
+        let (backend, _) = fake_dispatcher();
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let thread_id = crate::acp::identity::AgentSessionId::new("agent", "deleted-event")
+            .unwrap()
+            .encode();
+        let release_event = Arc::new(Notify::new());
+        let event_waiting = Arc::new(Notify::new());
+        let delayed_event = tokio::spawn({
+            let service = service.clone();
+            let thread_id = thread_id.clone();
+            let release_event = release_event.clone();
+            let event_waiting = event_waiting.clone();
+            async move {
+                event_waiting.notify_one();
+                release_event.notified().await;
+                service
+                    .handle_canonical_event(CanonicalHubEvent {
+                        event_id: 500,
+                        foreground_mobile_present: false,
+                        event: CanonicalEvent::RunStarted {
+                            agent_id: "agent".to_string(),
+                            thread_id,
+                            run_id: "delayed-run".to_string(),
+                            source_turn_id: "delayed-turn".to_string(),
+                            generation: 1,
+                        },
+                    })
+                    .await;
+            }
+        });
+        event_waiting.notified().await;
+
+        let retirement = crate::runtime_backend::ThreadStateRetirement::begin(
+            service.clone(),
+            crate::scheduled_prompts::ScheduledPromptService::inert_for_test(),
+            std::slice::from_ref(&thread_id),
+        )
+        .await
+        .expect("begin authoritative retirement");
+        retirement
+            .finish_delete(Ok(vec![thread_id.clone()]))
+            .await
+            .expect("complete deletion");
+        release_event.notify_one();
+        delayed_event.await.expect("delayed event task");
+
+        assert!(!service.threads.read().await.contains_key(&thread_id));
+        assert!(!service.thread_actors.read().await.contains_key(&thread_id));
+        assert_eq!(
+            service
+                .retirement_fence
+                .admit(&thread_id)
+                .await
+                .unwrap_err(),
+            "thread is being deleted"
+        );
+    }
+
+    #[tokio::test]
+    async fn retained_queue_task_after_successful_deletion_cannot_recreate_queue_runtime_or_actor()
+    {
+        let (backend, mut calls) = fake_dispatcher();
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let thread_id = crate::acp::identity::AgentSessionId::new("agent", "deleted-queue-task")
+            .unwrap()
+            .encode();
+        service.threads.write().await.insert(
+            thread_id.clone(),
+            BridgeThreadQueueRuntime {
+                items: VecDeque::from([queued("deleted-queue-task")]),
+                ..BridgeThreadQueueRuntime::default()
+            },
+        );
+        let release_task = Arc::new(Notify::new());
+        let task_waiting = Arc::new(Notify::new());
+        let retained_task = tokio::spawn({
+            let service = service.clone();
+            let thread_id = thread_id.clone();
+            let release_task = release_task.clone();
+            let task_waiting = task_waiting.clone();
+            async move {
+                task_waiting.notify_one();
+                release_task.notified().await;
+                service.drain_thread_queue(thread_id).await;
+            }
+        });
+        task_waiting.notified().await;
+
+        let retirement = crate::runtime_backend::ThreadStateRetirement::begin(
+            service.clone(),
+            crate::scheduled_prompts::ScheduledPromptService::inert_for_test(),
+            std::slice::from_ref(&thread_id),
+        )
+        .await
+        .expect("begin authoritative retirement");
+        retirement
+            .finish_delete(Ok(vec![thread_id.clone()]))
+            .await
+            .expect("complete deletion");
+        release_task.notify_one();
+        retained_task.await.expect("retained queue task");
+
+        assert!(calls.turn_start.try_recv().is_err());
+        assert!(!service.threads.read().await.contains_key(&thread_id));
+        assert!(!service.thread_actors.read().await.contains_key(&thread_id));
+    }
+
+    #[tokio::test]
+    async fn failed_deletion_removes_retiring_state_and_allows_canonical_activity_again() {
+        let (backend, _) = fake_dispatcher();
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let thread_id = crate::acp::identity::AgentSessionId::new("agent", "failed-delete")
+            .unwrap()
+            .encode();
+        let retirement = crate::runtime_backend::ThreadStateRetirement::begin(
+            service.clone(),
+            crate::scheduled_prompts::ScheduledPromptService::inert_for_test(),
+            std::slice::from_ref(&thread_id),
+        )
+        .await
+        .expect("begin authoritative retirement");
+        assert_eq!(
+            retirement
+                .finish_delete(Err("delete failed".to_string()))
+                .await
+                .unwrap_err(),
+            "delete failed"
+        );
+
+        service
+            .handle_canonical_event(CanonicalHubEvent {
+                event_id: 501,
+                foreground_mobile_present: false,
+                event: CanonicalEvent::RunStarted {
+                    agent_id: "agent".to_string(),
+                    thread_id: thread_id.clone(),
+                    run_id: "restored-run".to_string(),
+                    source_turn_id: "restored-turn".to_string(),
+                    generation: 1,
+                },
+            })
+            .await;
+        let threads = service.threads.read().await;
+        let runtime = threads
+            .get(&thread_id)
+            .expect("failed deletion permits runtime activity again");
+        assert_eq!(runtime.active_run_id.as_deref(), Some("restored-run"));
+    }
+
+    #[tokio::test]
+    async fn queued_dispatch_holds_actor_and_retirement_admission_until_sent_receipt_is_durable() {
+        let directory = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join(format!("queue-receipt-race-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let receipt_path = directory.join("queue.json");
+        let (backend, mut calls) = fake_dispatcher();
+        let service = BridgeQueueService::with_submission_store(
+            backend,
+            Arc::new(ClientHub::new()),
+            Some(receipt_path.clone()),
+            DurableQueueSubmissions::default(),
+        );
+        service.threads.write().await.insert(
+            "thread".to_string(),
+            BridgeThreadQueueRuntime {
+                items: VecDeque::from([queued("receipt-race")]),
+                ..BridgeThreadQueueRuntime::default()
+            },
+        );
+        let dispatch = tokio::spawn({
+            let service = service.clone();
+            async move { service.drain_thread_queue("thread".to_string()).await }
+        });
+        let turn_start = calls.turn_start.recv().await.expect("queued dispatch");
+
+        let persist_reached = Arc::new(Notify::new());
+        let release_persist = Arc::new(Notify::new());
+        *service
+            .submission_persist_barrier
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) =
+            Some((persist_reached.clone(), release_persist.clone()));
+        let retirement_started = Arc::new(Notify::new());
+        *service
+            .retirement_fence
+            .begin_attempted
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(retirement_started.clone());
+        let retirement = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .begin_retirement_fence(&["thread".to_string()])
+                    .await
+                    .unwrap()
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(1), retirement_started.notified())
+            .await
+            .expect("retirement waits behind dispatch admission");
+
+        turn_start
+            .response
+            .send(Ok("delivered-turn".to_string()))
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(1), persist_reached.notified())
+            .await
+            .expect("sent receipt reaches durable persistence");
+        let cancellation = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .cancel_submission("thread", "submission-receipt-race")
+                    .await
+            }
+        });
+        tokio::task::yield_now().await;
+        assert!(!cancellation.is_finished());
+        assert!(!retirement.is_finished());
+
+        release_persist.notify_one();
+        dispatch.await.expect("dispatch settles");
+        assert_eq!(
+            cancellation.await.unwrap().unwrap(),
+            QueueSubmissionCancelOutcome::Sent
+        );
+        let fence = retirement.await.expect("retirement acquires after receipt");
+        let durable = BridgeQueueService::load_submission_store(&receipt_path)
+            .await
+            .unwrap();
+        assert!(matches!(
+            durable
+                .results
+                .get("submission-receipt-race")
+                .map(|receipt| &receipt.disposition),
+            Some(BridgeThreadQueueDisposition::Sent)
+        ));
+        fence.finish().await;
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
+    async fn steer_dispatch_holds_retirement_admission_through_sent_receipt_persistence() {
+        let (service, mut calls) = service_with_runtime(&["retirement-steer"], &[]).await;
+        calls
+            .manual_disposition_update
+            .store(true, Ordering::SeqCst);
+        {
+            let mut threads = service.threads.write().await;
+            let runtime = threads.get_mut("thread").unwrap();
+            let mut entry = runtime.items.pop_front().unwrap();
+            entry.agent_message = Some(crate::agent_messaging::AgentMessageOrigin {
+                message_id: "retirement-steer-message".to_string(),
+                direction: crate::agent_messaging::AgentMessageDirection::Received,
+                related_thread_id: "parent".to_string(),
+                related_title: Some("Parent".to_string()),
+                relation: crate::agent_messaging::AgentRelationKind::Parent,
+                disposition: crate::agent_messaging::AgentMessageDisposition::Steering,
+                body: "Retirement waits for durable disposition.".to_string(),
+            });
+            runtime.pending_steers.push_back(entry);
+        }
+        let dispatch = tokio::spawn({
+            let service = service.clone();
+            async move { service.drain_pending_steers("thread".to_string()).await }
+        });
+        let steer = calls.steer.recv().await.expect("steer dispatch");
+
+        let persist_reached = Arc::new(Notify::new());
+        let release_persist = Arc::new(Notify::new());
+        *service
+            .submission_persist_barrier
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) =
+            Some((persist_reached.clone(), release_persist.clone()));
+        let retirement_started = Arc::new(Notify::new());
+        *service
+            .retirement_fence
+            .begin_attempted
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(retirement_started.clone());
+        let retirement = tokio::spawn({
+            let service = service.clone();
+            async move {
+                service
+                    .begin_retirement_fence(&["thread".to_string()])
+                    .await
+                    .unwrap()
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(1), retirement_started.notified())
+            .await
+            .expect("retirement waits behind steer admission");
+
+        steer.response.send(Ok(())).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), persist_reached.notified())
+            .await
+            .expect("steer receipt reaches persistence");
+        assert!(!retirement.is_finished());
+        release_persist.notify_one();
+        let disposition = calls
+            .disposition_update
+            .recv()
+            .await
+            .expect("agent-message disposition reaches durable settlement");
+        assert_eq!(disposition.message_id, "retirement-steer-message");
+        assert_eq!(
+            disposition.disposition,
+            crate::agent_messaging::AgentMessageDisposition::Sent
+        );
+        assert!(
+            !retirement.is_finished(),
+            "retirement admission remains held through disposition settlement"
+        );
+        disposition.response.send(Ok(())).unwrap();
+        dispatch.await.expect("steer dispatch settles");
+        let fence = retirement
+            .await
+            .expect("retirement acquires after steer receipt");
+        assert!(matches!(
+            service
+                .submission_results
+                .lock()
+                .await
+                .get("submission-retirement-steer")
+                .map(|receipt| &receipt.disposition),
+            Some(BridgeThreadQueueDisposition::Sent)
+        ));
+        fence.finish().await;
     }
 
     #[tokio::test]
@@ -6428,10 +8173,10 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        let bounded = BridgeQueueService::load_submission_store(&path)
+        assert!(BridgeQueueService::load_submission_store(&path)
             .await
-            .unwrap();
-        assert_eq!(bounded.pending.len(), SUBMISSION_DEDUPE_LIMIT);
+            .unwrap_err()
+            .contains("durable pending state exceeds"));
 
         let receipts = (0..=SUBMISSION_DEDUPE_LIMIT)
             .map(|index| {
@@ -6504,12 +8249,16 @@ mod tests {
             "oversized".to_string(),
             "x".repeat(QUEUE_RECEIPT_STORE_MAX_BYTES),
         );
-        service.persist_submission_store().await.unwrap();
-        assert!(BridgeQueueService::load_submission_store(&path)
+        assert!(service
+            .persist_submission_store()
             .await
-            .unwrap()
-            .pending
-            .is_empty());
+            .unwrap_err()
+            .contains("durable pending state exceeds"));
+        assert!(service
+            .submission_pending
+            .lock()
+            .await
+            .contains_key("oversized"));
         let _ = std::fs::remove_dir_all(directory);
     }
 
@@ -6687,21 +8436,144 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pending_dispatch_reservations_evict_oldest_without_blocking_new_work() {
+    async fn retirement_persistence_failure_keeps_recoverable_runtime_and_idempotency_order() {
+        let target = "retirement-target".to_string();
+        let other = "other-thread".to_string();
+        let target_result = "target-result".to_string();
+        let other_result = "other-result".to_string();
+        let target_pending = "target-pending".to_string();
+        let other_pending = "other-pending".to_string();
         let (backend, _) = fake_dispatcher();
+        let service = BridgeQueueService::with_submission_store(
+            backend,
+            Arc::new(ClientHub::new()),
+            None,
+            DurableQueueSubmissions {
+                results: HashMap::from([
+                    (
+                        target_result.clone(),
+                        BridgeQueueSubmissionReceipt {
+                            submission_id: target_result.clone(),
+                            thread_id: target.clone(),
+                            disposition: BridgeThreadQueueDisposition::Sent,
+                            turn_id: Some("target-turn".to_string()),
+                        },
+                    ),
+                    (
+                        other_result.clone(),
+                        BridgeQueueSubmissionReceipt {
+                            submission_id: other_result.clone(),
+                            thread_id: other.clone(),
+                            disposition: BridgeThreadQueueDisposition::Sent,
+                            turn_id: Some("other-turn".to_string()),
+                        },
+                    ),
+                ]),
+                order: VecDeque::from([other_result.clone(), target_result.clone()]),
+                pending: HashMap::from([
+                    (target_pending.clone(), target.clone()),
+                    (other_pending.clone(), other.clone()),
+                ]),
+                pending_order: VecDeque::from([target_pending.clone(), other_pending.clone()]),
+            },
+        );
+        service.threads.write().await.insert(
+            target.clone(),
+            BridgeThreadQueueRuntime {
+                items: VecDeque::from([queued("before-retirement")]),
+                editing_item_id: Some("before-retirement".to_string()),
+                ..BridgeThreadQueueRuntime::default()
+            },
+        );
+        service
+            .fail_next_submission_persist
+            .store(true, Ordering::Release);
+
+        let error = service
+            .retire_threads(std::slice::from_ref(&target))
+            .await
+            .expect_err("injected persistence failure must reject retirement");
+        assert!(error.contains("injected queue idempotency persistence failure"));
+
+        let runtime = service.read_queue(&target).await;
+        assert_eq!(runtime.items.len(), 1);
+        assert_eq!(runtime.items[0].id, "before-retirement");
+        assert_eq!(
+            runtime.editing_item_id.as_deref(),
+            Some("before-retirement")
+        );
+        assert_eq!(
+            *service.submission_order.lock().await,
+            VecDeque::from([other_result.clone(), target_result.clone()])
+        );
+        assert_eq!(
+            *service.submission_pending_order.lock().await,
+            VecDeque::from([target_pending.clone(), other_pending.clone()])
+        );
+        assert_eq!(
+            *service.submission_pending.lock().await,
+            HashMap::from([
+                (target_pending, target.clone()),
+                (other_pending, other.clone())
+            ])
+        );
+        let results = service.submission_results.lock().await;
+        assert_eq!(results.len(), 2);
+        assert_eq!(
+            results
+                .get(&target_result)
+                .and_then(|receipt| receipt.turn_id.as_deref()),
+            Some("target-turn")
+        );
+        assert_eq!(
+            results
+                .get(&other_result)
+                .and_then(|receipt| receipt.turn_id.as_deref()),
+            Some("other-turn")
+        );
+        drop(results);
+        assert!(
+            service.submission_dirty.load(Ordering::Acquire),
+            "failed cleanup remains marked for recovery"
+        );
+        drop(
+            service
+                .retirement_fence
+                .admit(&target)
+                .await
+                .expect("failed retirement releases admission fence"),
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_dispatch_reservations_reject_new_work_without_evicting_oldest() {
+        let (backend, mut calls) = fake_dispatcher();
+        {
+            let mut snapshot = backend.snapshot.lock().unwrap();
+            snapshot.session.active_run_id = None;
+            snapshot.session.active_source_turn_id = None;
+            snapshot.session.active_generation = None;
+        }
         let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
 
-        for index in 0..=SUBMISSION_DEDUPE_LIMIT {
+        for index in 0..SUBMISSION_DEDUPE_LIMIT {
             service
                 .reserve_submission(&format!("pending-{index:05}"), "thread", true)
                 .await
                 .unwrap();
         }
+        let rejected = format!("pending-{SUBMISSION_DEDUPE_LIMIT:05}");
+        assert!(service
+            .send_message(send_request("thread", &rejected, "must not dispatch"))
+            .await
+            .expect_err("count pressure rejects before dispatch")
+            .contains("admission limit reached"));
+        assert!(calls.turn_start.try_recv().is_err());
 
         let pending = service.submission_pending.lock().await;
         assert_eq!(pending.len(), SUBMISSION_DEDUPE_LIMIT);
-        assert!(!pending.contains_key("pending-00000"));
-        assert!(pending.contains_key(&format!("pending-{SUBMISSION_DEDUPE_LIMIT:05}")));
+        assert!(pending.contains_key("pending-00000"));
+        assert!(!pending.contains_key(&rejected));
         drop(pending);
         assert_eq!(
             service
@@ -6710,8 +8582,100 @@ mod tests {
                 .await
                 .front()
                 .map(String::as_str),
-            Some("pending-00001")
+            Some("pending-00000")
         );
+        assert!(service
+            .lookup_submission("pending-00000", "thread")
+            .await
+            .expect_err("oldest pending marker still prevents replay")
+            .contains("indeterminate"));
+    }
+
+    #[tokio::test]
+    async fn pending_dispatch_byte_pressure_rejects_new_work_without_evicting_oldest() {
+        let directory = std::env::current_dir()
+            .expect("current directory")
+            .join("target")
+            .join(format!(
+                "queue-pending-byte-pressure-{}",
+                uuid::Uuid::new_v4()
+            ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("queue.json");
+        let thread_id = "x".repeat(QUEUE_IDENTIFIER_MAX_BYTES);
+        let pending_fixture = |count: usize| {
+            let pending = (0..count)
+                .map(|index| (format!("pending-{index:05}"), thread_id.clone()))
+                .collect::<HashMap<_, _>>();
+            let pending_order = (0..count)
+                .map(|index| format!("pending-{index:05}"))
+                .collect::<VecDeque<_>>();
+            (pending, pending_order)
+        };
+        let mut low = 0;
+        let mut high = SUBMISSION_DEDUPE_LIMIT;
+        while low < high {
+            let midpoint = (low + high).div_ceil(2);
+            let (pending, pending_order) = pending_fixture(midpoint);
+            let bytes = serde_json::to_vec(&DurableQueueReceiptFile {
+                pending,
+                pending_order,
+                ..DurableQueueReceiptFile::default()
+            })
+            .unwrap();
+            if bytes.len() <= QUEUE_RECEIPT_STORE_MAX_BYTES {
+                low = midpoint;
+            } else {
+                high = midpoint - 1;
+            }
+        }
+        assert!(low > 0 && low < SUBMISSION_DEDUPE_LIMIT);
+        let (pending, pending_order) = pending_fixture(low);
+        let (backend, mut calls) = fake_dispatcher();
+        {
+            let mut snapshot = backend.snapshot.lock().unwrap();
+            snapshot.session.active_run_id = None;
+            snapshot.session.active_source_turn_id = None;
+            snapshot.session.active_generation = None;
+        }
+        let service = BridgeQueueService::with_submission_store(
+            backend,
+            Arc::new(ClientHub::new()),
+            Some(path.clone()),
+            DurableQueueSubmissions {
+                pending,
+                pending_order,
+                ..DurableQueueSubmissions::default()
+            },
+        );
+        service.persist_submission_store().await.unwrap();
+
+        let rejected = format!("pending-{low:05}");
+        assert!(service
+            .send_message(send_request(
+                &thread_id,
+                &rejected,
+                "must not dispatch under byte pressure",
+            ))
+            .await
+            .expect_err("byte pressure rejects before dispatch")
+            .contains("byte budget"));
+        assert!(calls.turn_start.try_recv().is_err());
+        let pending = service.submission_pending.lock().await;
+        assert!(pending.contains_key("pending-00000"));
+        assert!(!pending.contains_key(&rejected));
+        drop(pending);
+        let restored = BridgeQueueService::load_submission_store(&path)
+            .await
+            .unwrap();
+        assert!(restored.pending.contains_key("pending-00000"));
+        assert!(!restored.pending.contains_key(&rejected));
+        assert!(service
+            .lookup_submission("pending-00000", &thread_id)
+            .await
+            .expect_err("oldest pending marker still prevents replay")
+            .contains("indeterminate"));
+        let _ = std::fs::remove_dir_all(directory);
     }
 
     #[tokio::test]
@@ -7080,5 +9044,309 @@ mod tests {
                 .insert("elicitation".to_string());
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn scheduled_submission_guards_reject_reserved_content_and_unreserved_ids() {
+        let (backend, _) = fake_dispatcher();
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let (envelope, _, _) = agent_message_fixture("scheduled-forgery");
+        let encoded = envelope.encode().expect("agent message envelope");
+        let scheduled_id = format!(
+            "{SCHEDULED_PROMPT_SUBMISSION_PREFIX}{}",
+            uuid::Uuid::new_v4()
+        );
+
+        assert_eq!(
+            service
+                .send_scheduled_prompt(send_request("thread", &scheduled_id, &encoded))
+                .await
+                .unwrap_err(),
+            "agent message envelopes are reserved for the bridge"
+        );
+        assert_eq!(
+            service
+                .send_scheduled_prompt(send_request("thread", "ordinary-id", "prompt"))
+                .await
+                .unwrap_err(),
+            "scheduled prompt submission ID must use the reserved prefix"
+        );
+
+        let admission = service.retirement_fence.admit("thread").await.unwrap();
+        assert_eq!(
+            service
+                .send_scheduled_prompt_admitted(
+                    send_request("thread", &scheduled_id, &encoded),
+                    &admission,
+                )
+                .await
+                .unwrap_err(),
+            "agent message envelopes are reserved for the bridge"
+        );
+        assert_eq!(
+            service
+                .send_scheduled_prompt_admitted(
+                    send_request("thread", "ordinary-id", "prompt"),
+                    &admission,
+                )
+                .await
+                .unwrap_err(),
+            "scheduled prompt submission ID must use the reserved prefix"
+        );
+    }
+
+    #[tokio::test]
+    async fn volatile_and_durable_submission_ownership_is_bounded_and_thread_scoped() {
+        let mut order = VecDeque::from([
+            "duplicate".to_string(),
+            "stale".to_string(),
+            "duplicate".to_string(),
+        ]);
+        normalize_queue_pending(
+            &HashMap::from([
+                ("duplicate".to_string(), "thread".to_string()),
+                ("missing".to_string(), "thread".to_string()),
+            ]),
+            &mut order,
+        )
+        .unwrap();
+        assert_eq!(
+            order,
+            VecDeque::from(["duplicate".to_string(), "missing".to_string()])
+        );
+
+        let (backend, _) = fake_dispatcher();
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let first_lease = service
+            .retirement_fence
+            .begin(&["thread".to_string()])
+            .await;
+        let second_lease = service
+            .retirement_fence
+            .begin(&["thread".to_string()])
+            .await;
+        first_lease.finish().await;
+        assert_eq!(
+            service.retirement_fence.admit("thread").await.unwrap_err(),
+            "thread is being deleted"
+        );
+        second_lease.finish().await;
+        drop(service.retirement_fence.admit("thread").await.unwrap());
+
+        service
+            .submission_volatile_pending
+            .lock()
+            .await
+            .insert("volatile".to_string(), "thread".to_string());
+        assert!(service
+            .lookup_submission("volatile", "thread")
+            .await
+            .unwrap_err()
+            .contains("already being queued"));
+        assert!(service
+            .lookup_submission("volatile", "other")
+            .await
+            .unwrap_err()
+            .contains("another thread"));
+        assert!(service
+            .reserve_submission("volatile", "thread", false)
+            .await
+            .unwrap_err()
+            .contains("already being queued"));
+        assert!(service
+            .reserve_submission("volatile", "other", false)
+            .await
+            .unwrap_err()
+            .contains("another thread"));
+        assert!(service
+            .mark_submission_dispatch_pending("volatile", "other")
+            .await
+            .unwrap_err()
+            .contains("another thread"));
+        service.submission_volatile_pending.lock().await.clear();
+
+        service
+            .submission_pending
+            .lock()
+            .await
+            .insert("dispatch".to_string(), "thread".to_string());
+        assert!(service
+            .mark_submission_dispatch_pending("dispatch", "other")
+            .await
+            .unwrap_err()
+            .contains("another thread"));
+        service.submission_pending.lock().await.clear();
+
+        {
+            let mut pending = service.submission_pending.lock().await;
+            for index in 0..SUBMISSION_DEDUPE_LIMIT {
+                pending.insert(format!("pending-{index}"), "thread".to_string());
+            }
+        }
+        assert!(service
+            .mark_submission_dispatch_pending("over-limit", "thread")
+            .await
+            .unwrap_err()
+            .contains("admission limit"));
+    }
+
+    #[tokio::test]
+    async fn cancellation_and_reconciliation_reject_cross_thread_receipts_and_reservations() {
+        let (backend, _) = fake_dispatcher();
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        let receipt = |submission_id: &str| BridgeQueueSubmissionReceipt {
+            submission_id: submission_id.to_string(),
+            thread_id: "owner".to_string(),
+            disposition: BridgeThreadQueueDisposition::Sent,
+            turn_id: Some("turn".to_string()),
+        };
+
+        service
+            .submission_results
+            .lock()
+            .await
+            .insert("cancel-receipt".to_string(), receipt("cancel-receipt"));
+        assert!(service
+            .cancel_submission("other", "cancel-receipt")
+            .await
+            .unwrap_err()
+            .contains("another thread"));
+        service.submission_results.lock().await.clear();
+
+        service
+            .submission_pending
+            .lock()
+            .await
+            .insert("cancel-pending".to_string(), "owner".to_string());
+        assert!(service
+            .cancel_submission("other", "cancel-pending")
+            .await
+            .unwrap_err()
+            .contains("another thread"));
+        assert_eq!(
+            service
+                .cancel_submission("owner", "cancel-pending")
+                .await
+                .unwrap(),
+            QueueSubmissionCancelOutcome::Sent
+        );
+
+        service.submission_results.lock().await.insert(
+            "reconcile-receipt".to_string(),
+            receipt("reconcile-receipt"),
+        );
+        assert!(service
+            .reconcile_indeterminate_submission("other", "reconcile-receipt")
+            .await
+            .unwrap_err()
+            .contains("another thread"));
+        service.submission_results.lock().await.clear();
+
+        service
+            .submission_pending
+            .lock()
+            .await
+            .insert("reconcile-pending".to_string(), "owner".to_string());
+        assert!(service
+            .reconcile_indeterminate_submission("other", "reconcile-pending")
+            .await
+            .unwrap_err()
+            .contains("another thread"));
+
+        service
+            .submission_results
+            .lock()
+            .await
+            .insert("not-sent".to_string(), receipt("not-sent"));
+        assert!(!service
+            .submission_was_sent("other", "not-sent")
+            .await
+            .unwrap());
+
+        service
+            .retire_threads(&["retired".to_string()])
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn definitive_settlement_shutdown_preserves_scheduled_failures_and_wakes_waiters() {
+        let (backend, _) = fake_dispatcher();
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        service
+            .submission_pending
+            .lock()
+            .await
+            .insert("owned".to_string(), "owner".to_string());
+        assert!(service
+            .settle_interrupted_definitive_failure("other", "owned", "failed")
+            .await
+            .unwrap_err()
+            .contains("another thread"));
+
+        let guard = service.track_definitive_settlement();
+        let wait = tokio::spawn({
+            let service = service.clone();
+            async move { service.wait_for_definitive_settlements().await }
+        });
+        tokio::task::yield_now().await;
+        assert!(!wait.is_finished());
+        drop(guard);
+        wait.await.unwrap();
+
+        let directory = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join(format!(
+                "queue-definitive-shutdown-{}",
+                uuid::Uuid::new_v4()
+            ));
+        let path = directory.join("queue.json");
+        std::fs::create_dir_all(&path).unwrap();
+        let (backend, _) = fake_dispatcher();
+        let service = BridgeQueueService::with_submission_store(
+            backend,
+            Arc::new(ClientHub::new()),
+            Some(path),
+            DurableQueueSubmissions::default(),
+        );
+        let submission_id = format!(
+            "{SCHEDULED_PROMPT_SUBMISSION_PREFIX}{}",
+            uuid::Uuid::new_v4()
+        );
+        service
+            .submission_pending
+            .lock()
+            .await
+            .insert(submission_id.clone(), "thread".to_string());
+        service.begin_definitive_settlement_shutdown();
+        assert!(service
+            .settle_interrupted_definitive_failure("thread", &submission_id, "dispatch failed",)
+            .await
+            .unwrap_err()
+            .contains(DEFINITIVE_SETTLEMENT_INTERRUPTED_PREFIX));
+        assert!(service
+            .interrupted_definitive_settlements()
+            .await
+            .contains_key(&submission_id));
+        service
+            .submission_pending
+            .lock()
+            .await
+            .insert("ordinary-submission".to_string(), "thread".to_string());
+        assert!(service
+            .settle_interrupted_definitive_failure(
+                "thread",
+                "ordinary-submission",
+                "dispatch failed",
+            )
+            .await
+            .unwrap_err()
+            .contains("failed to persist queue idempotency state"));
+        assert!(!service
+            .interrupted_definitive_settlements()
+            .await
+            .contains_key("ordinary-submission"));
+        let _ = std::fs::remove_dir_all(directory);
     }
 }

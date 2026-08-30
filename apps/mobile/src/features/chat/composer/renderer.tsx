@@ -17,6 +17,7 @@ import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { motionDuration } from '@shared/ui/motion';
 import { QueuedMessageDockView } from './QueuedMessageDockView';
+import { ScheduledPromptDock } from '../workflow/ScheduledPromptDock';
 import type {
   MainScreenWorkflowQueueStateContext,
   MainScreenWorkflowQueueStateResult,
@@ -62,6 +63,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     remainingQueuedMessagesCount,
     removeComposerAttachment,
     selectedChat,
+    selectedScheduledPrompts,
     selectedThreadRuntimeSnapshot,
     setDraft,
     showBridgeRecoveryBanner,
@@ -114,6 +116,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         dismissBridgeUiSurface={dismissBridgeUiSurface}
       />
       <PendingApprovalView pendingApproval={pendingApproval} onResolve={handleResolveApproval} />
+      <ScheduledPromptDock scheduledPrompts={selectedScheduledPrompts} />
       <QueuedMessageDockView
         showQueuedMessageDock={showQueuedMessageDock}
         oldestQueuedMessage={oldestQueuedMessage}

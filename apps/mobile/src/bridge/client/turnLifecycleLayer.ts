@@ -27,6 +27,7 @@ import {
 } from '@bridge/client/clientContractsAndSnapshotInternals';
 import type {
   ApprovalPolicy,
+  BridgeThreadSchedulesState,
   BridgeThreadQueueSendResponse,
   BridgeThreadQueueState,
   Chat,
@@ -287,6 +288,15 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
       });
     }
     return this.ws.request<BridgeThreadQueueState>('bridge/thread/queue/read', {
+      threadId: normalizedThreadId,
+    });
+  }
+  readThreadSchedules(threadId: string): Promise<BridgeThreadSchedulesState> {
+    const normalizedThreadId = threadId.trim();
+    if (!normalizedThreadId) {
+      return Promise.resolve({ threadId: '', schedules: [] });
+    }
+    return this.ws.request<BridgeThreadSchedulesState>('bridge/thread/schedules/read', {
       threadId: normalizedThreadId,
     });
   }

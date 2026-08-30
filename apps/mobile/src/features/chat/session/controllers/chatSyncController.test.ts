@@ -78,17 +78,20 @@ describe('chatSyncController', () => {
     });
   });
 
-  it('delegates forced loads, polls, and queue reads', async () => {
+  it('delegates forced loads, polls, queue reads, and schedule reads', async () => {
     const api = {
       getChat: jest.fn().mockResolvedValue(chat('idle')),
       readThreadQueue: jest.fn().mockResolvedValue([]),
+      readThreadSchedules: jest.fn().mockResolvedValue({ threadId: 'thread', schedules: [] }),
     };
     const controller = new ChatSyncController(api);
     await controller.load('thread');
     await controller.poll('thread');
     await controller.readQueue('thread');
+    await controller.readSchedules('thread');
     expect(api.getChat).toHaveBeenNthCalledWith(1, 'thread', { forceRefresh: true });
     expect(api.getChat).toHaveBeenNthCalledWith(2, 'thread');
+    expect(api.readThreadSchedules).toHaveBeenCalledWith('thread');
   });
 
   it('polls immediately, schedules follow-up work, tolerates failures, and cleans up', async () => {

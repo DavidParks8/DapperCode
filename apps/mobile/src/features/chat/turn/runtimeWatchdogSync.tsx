@@ -25,6 +25,7 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
     bumpAgentRuntimeRevision,
     bumpRunWatchdog,
     chatIdRef,
+    deletedThreadIdsRef,
     externalStatusFullSyncInFlightRef,
     externalStatusFullSyncNextAllowedAtRef,
     externalStatusFullSyncQueuedThreadRef,
@@ -138,11 +139,14 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
       threadId: string,
       updater: (previous: ThreadRuntimeSnapshot) => Partial<ThreadRuntimeSnapshot>,
     ) => {
-      if (!threadId) {
+      if (!threadId || deletedThreadIdsRef.current.has(threadId)) {
         return;
       }
 
       setThreadRuntimeSnapshots((current) => {
+        if (deletedThreadIdsRef.current.has(threadId)) {
+          return current;
+        }
         const previous = current[threadId] ?? {
           updatedAtMs: Date.now(),
         };
@@ -156,7 +160,7 @@ export function useMainScreenRuntimeWatchdogSync(context: MainScreenRuntimeWatch
         };
       });
     },
-    [setThreadRuntimeSnapshots],
+    [deletedThreadIdsRef, setThreadRuntimeSnapshots],
   );
 
   const cacheThreadActivity = useCallback(

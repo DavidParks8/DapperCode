@@ -2,6 +2,7 @@ import type { HostBridgeApiClient } from '@bridge/client/client';
 import type {
   BridgeCapabilities,
   BridgeThreadQueueState,
+  BridgeThreadSchedulesState,
   Chat,
   PendingApproval,
   PendingUserInputRequest,
@@ -27,11 +28,13 @@ type ReplayRecoveryApi = Pick<
   | 'listPendingUserInputs'
   | 'readBridgeCapabilities'
   | 'readThreadQueue'
+  | 'readThreadSchedules'
 >;
 
 export interface ReplayRecoveryThreadSnapshot {
   chat: Chat;
   queue: BridgeThreadQueueState;
+  schedules: BridgeThreadSchedulesState;
 }
 
 export interface ReplayRecoverySnapshot {
@@ -109,6 +112,7 @@ export async function fetchReplayRecoverySnapshot(
   api: ReplayRecoveryApi,
   trackedThreadIds: Iterable<string | null | undefined>,
   signal?: AbortSignal,
+  excludedThreadIds?: ReadonlySet<string>,
 ): Promise<ReplayRecoverySnapshot> {
   throwIfReplayRecoveryAborted(signal);
   const [loadedThreadIds, approvals, userInputs, capabilities] =
@@ -130,17 +134,18 @@ export async function fetchReplayRecoverySnapshot(
     loadedThreadIds,
     approvals.map((approval) => approval.threadId),
     userInputs.map((request) => request.threadId),
-  ]);
+  ]).filter((threadId) => !excludedThreadIds?.has(threadId));
 
   const threads = await mapWithConcurrency(
     threadIds,
     REPLAY_RECOVERY_CONCURRENCY,
     async (threadId) => {
-      const [chat, queue] = await Promise.all([
+      const [chat, queue, schedules] = await Promise.all([
         api.getChat(threadId, { forceRefresh: true }),
         api.readThreadQueue(threadId),
+        api.readThreadSchedules(threadId),
       ]);
-      return { chat, queue };
+      return { chat, queue, schedules };
     },
     signal,
   );

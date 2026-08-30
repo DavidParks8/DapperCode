@@ -162,6 +162,11 @@ pub trait HarnessAdapter: Send + Sync {
         request: HarnessDeleteRequest,
     ) -> BoxFuture<'a, Result<(), HarnessError>>;
 
+    fn session_exists<'a>(
+        &'a self,
+        context: &'a SessionContext,
+    ) -> BoxFuture<'a, Result<bool, HarnessError>>;
+
     fn steer<'a>(
         &'a self,
         context: &'a SessionContext,

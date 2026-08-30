@@ -1419,6 +1419,33 @@ describe('HostBridgeApiClient', () => {
     expect(result.items[0]?.content).toBe('hello');
   });
 
+  it('readThreadSchedules() requests the read-only schedule inventory', async () => {
+    const ws = createWsMock();
+    ws.request.mockResolvedValueOnce({
+      threadId: 'thr_schedule',
+      schedules: [
+        {
+          scheduleId: 'schedule_1',
+          threadId: 'thr_schedule',
+          promptPreview: 'Run the release check.',
+          promptBytes: 22,
+          scheduledFor: '2026-08-30T16:00:00.000Z',
+          createdAt: '2026-08-29T21:00:00.000Z',
+          status: 'scheduled',
+          retryAttempt: 0,
+        },
+      ],
+    });
+
+    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
+    const result = await client.readThreadSchedules('thr_schedule');
+
+    expect(ws.request).toHaveBeenCalledWith('bridge/thread/schedules/read', {
+      threadId: 'thr_schedule',
+    });
+    expect(result.schedules[0]?.promptPreview).toBe('Run the release check.');
+  });
+
   it('sendOrQueueChatMessage() queues through bridge when runtime is busy', async () => {
     const ws = createWsMock();
     ws.request

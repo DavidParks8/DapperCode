@@ -1,5 +1,6 @@
 import type {
   BridgeQueuedMessage,
+  BridgeScheduledPrompt,
   BridgeThreadQueueError,
   BridgeUiSurface,
   PendingApproval,
@@ -50,6 +51,7 @@ export interface ThreadRuntimeSnapshot {
   waitingForToolCalls?: boolean;
   steeringInFlight?: boolean;
   queuedMessageError?: BridgeThreadQueueError | null;
+  scheduledPrompts?: BridgeScheduledPrompt[];
   contextUsage?: ThreadContextUsage | null;
   tokenTotals?: SessionTokenTotals | null;
   plan?: ActivePlanState | null;

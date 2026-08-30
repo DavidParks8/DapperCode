@@ -269,6 +269,24 @@ export interface BridgeThreadQueueState {
   lastError?: BridgeThreadQueueError | null;
 }
 
+export type BridgeScheduledPromptStatus = 'scheduled' | 'queued' | 'retrying';
+
+export interface BridgeScheduledPrompt {
+  scheduleId: string;
+  threadId: string;
+  promptPreview: string;
+  promptBytes: number;
+  scheduledFor: string;
+  createdAt: string;
+  status: BridgeScheduledPromptStatus;
+  retryAttempt: number;
+}
+
+export interface BridgeThreadSchedulesState {
+  threadId: string;
+  schedules: BridgeScheduledPrompt[];
+}
+
 export type BridgeThreadQueueDisposition = 'queued' | 'sent';
 
 export interface BridgeThreadQueueSendResponse {

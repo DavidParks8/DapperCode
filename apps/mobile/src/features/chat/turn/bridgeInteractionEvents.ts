@@ -14,6 +14,7 @@ import { lookupDispatchEntry, readString, toRecord } from '@shared/runtimeValida
 import {
   toPendingUserInputRequest,
   buildUserInputDrafts,
+  parseBridgeThreadSchedulesState,
   parseBridgeThreadQueueState,
   toPendingApproval,
   toBridgeUiSurface,
@@ -35,6 +36,7 @@ export function processBridgeInteractionEvents(
 ): void {
   const {
     cacheThreadQueueState,
+    cacheThreadSchedulesState,
     cacheThreadPendingApproval,
     cacheThreadActivity,
     clearRunWatchdog,
@@ -61,6 +63,13 @@ export function processBridgeInteractionEvents(
         return;
       }
       cacheThreadQueueState(parsed.threadId, parsed);
+    },
+    'bridge/thread/schedules/updated': () => {
+      const parsed = parseBridgeThreadSchedulesState(event.params);
+      if (!parsed || parsed.threadId !== currentId) {
+        return;
+      }
+      cacheThreadSchedulesState(parsed.threadId, parsed);
     },
     'bridge/approval.requested': () => {
       const parsed = toPendingApproval(event.params);

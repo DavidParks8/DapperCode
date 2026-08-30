@@ -68,7 +68,9 @@ mod protocol_constants;
 mod push;
 mod replay;
 mod resource_limits;
+mod retirement_journal;
 mod rpc;
+mod scheduled_prompts;
 mod services;
 mod storage;
 
@@ -211,21 +213,53 @@ async fn main() {
         Some(queue_submission_path),
         queue_submissions,
     );
-    let agent_messaging = match agent_messaging::AgentMessagingService::start(
-        Arc::downgrade(&backend),
+    let scheduler = match scheduled_prompts::ScheduledPromptService::start_paused(
+        config.state_dir.join("scheduled-prompts.json"),
         Arc::downgrade(&queue),
+        hub.clone(),
     )
     .await
     {
-        Ok(service) => service,
+        Ok(scheduler) => scheduler,
         Err(error) => {
             eprintln!("{error}");
             backend.shutdown().await;
             std::process::exit(1);
         }
     };
+    if let Err(error) = backend
+        .attach_thread_lifecycle(Arc::downgrade(&queue), Arc::downgrade(&scheduler))
+        .await
+    {
+        eprintln!("{error}");
+        scheduler.shutdown().await;
+        backend.shutdown().await;
+        std::process::exit(1);
+    }
+    if let Err(error) = scheduler.start_worker() {
+        eprintln!("{error}");
+        scheduler.shutdown().await;
+        backend.shutdown().await;
+        std::process::exit(1);
+    }
+    let agent_messaging = match agent_messaging::AgentMessagingService::start(
+        Arc::downgrade(&backend),
+        Arc::downgrade(&queue),
+        scheduler.clone(),
+    )
+    .await
+    {
+        Ok(service) => service,
+        Err(error) => {
+            eprintln!("{error}");
+            scheduler.shutdown().await;
+            backend.shutdown().await;
+            std::process::exit(1);
+        }
+    };
     if let Err(error) = backend.attach_agent_messaging(agent_messaging).await {
         eprintln!("{error}");
+        scheduler.shutdown().await;
         backend.shutdown().await;
         std::process::exit(1);
     }
@@ -255,6 +289,7 @@ async fn main() {
         hub,
         backend,
         queue,
+        scheduler: scheduler.clone(),
         operation_dedupe: Arc::new(Mutex::new(operation_dedupe)),
         thread_create_actor: Arc::new(Mutex::new(())),
         thread_fork_actor: Arc::new(Mutex::new(())),

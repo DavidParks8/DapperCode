@@ -50,6 +50,34 @@ export const createMainScreenWorkflowStyles = (theme: AppTheme) =>
       color: theme.colors.textMuted,
       marginTop: theme.spacing.xs,
     },
+    scheduledPromptRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+    },
+    scheduledPromptContent: { flex: 1, minWidth: 0, gap: 2 },
+    scheduledPromptHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+      minWidth: 0,
+    },
+    scheduledPromptTitle: {
+      ...theme.typography.caption,
+      color: theme.colors.textPrimary,
+      fontWeight: '700',
+      flex: 1,
+      minWidth: 0,
+    },
+    scheduledPromptSummary: {
+      ...theme.typography.caption,
+      color: theme.colors.textSecondary,
+      flexShrink: 0,
+    },
+    scheduledPromptPreview: {
+      ...theme.typography.caption,
+      color: theme.colors.textSecondary,
+    },
     workflowSection: { marginTop: theme.spacing.md, gap: theme.spacing.xs },
     workflowSectionEyebrow: {
       ...theme.typography.caption,
