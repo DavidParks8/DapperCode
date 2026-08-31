@@ -10,9 +10,9 @@ use agent_client_protocol::{
         SessionListCapabilities, SessionNotification, SessionResumeCapabilities, SessionUpdate,
         StopReason,
     },
-    Agent, Lines,
+    Agent, JsonRpcRequest, JsonRpcResponse, Lines,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -22,6 +22,41 @@ use tokio::{
 const SCENARIO_ENV: &str = "DAPPERCODE_E2E_SCENARIO_PATH";
 const CONTROL_ENV: &str = "DAPPERCODE_E2E_CONTROL_PATH";
 const HOLD_TIMEOUT: Duration = Duration::from_secs(30);
+const STEER_METHOD: &str = "_dappercode.dev/session/steer";
+const FORK_METHOD: &str = "_dappercode.dev/session/fork";
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonRpcRequest)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[request(method = "_dappercode.dev/session/steer", response = SteerResponse)]
+struct SteerRequest {
+    session_id: agent_client_protocol::schema::v1::SessionId,
+    expected_run_id: String,
+    expected_source_turn_id: String,
+    prompt_generation: u64,
+    prompt: Vec<agent_client_protocol::schema::v1::ContentBlock>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonRpcResponse)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SteerResponse {
+    accepted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonRpcRequest)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[request(method = "_dappercode.dev/session/fork", response = ForkResponse)]
+struct ForkRequest {
+    session_id: agent_client_protocol::schema::v1::SessionId,
+    message_id: Option<String>,
+    user_message_ordinal: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonRpcResponse)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ForkResponse {
+    session_id: agent_client_protocol::schema::v1::SessionId,
+    title: Option<String>,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -108,10 +143,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .list(SessionListCapabilities::new())
                             .resume(SessionResumeCapabilities::new()),
                     );
-                responder.respond(
-                    InitializeResponse::new(request.protocol_version)
-                        .agent_capabilities(capabilities),
-                )
+                let mut response = InitializeResponse::new(request.protocol_version)
+                    .agent_capabilities(capabilities);
+                response.meta = Some(
+                    serde_json::from_value(serde_json::json!({
+                        "dappercode.dev": {
+                            "version": 1,
+                            "capabilities": {
+                                "sessionSteer": {"method": STEER_METHOD, "version": 1},
+                                "sessionFork": {"method": FORK_METHOD, "version": 1}
+                            }
+                        }
+                    }))
+                    .expect("valid DapperCode extension metadata"),
+                );
+                responder.respond(response)
             },
             on_receive_request!(),
         )
@@ -218,6 +264,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         responder.respond_with_error(agent_client_protocol::Error::internal_error())
                     }
                 }
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            async |request: ForkRequest, responder, _| {
+                responder.respond(ForkResponse {
+                    session_id: agent_client_protocol::schema::v1::SessionId::new(format!(
+                        "{}-fork",
+                        request.session_id
+                    )),
+                    title: Some("Forked layout session".to_string()),
+                })
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            async |_request: SteerRequest, responder, _| {
+                responder.respond(SteerResponse { accepted: true })
             },
             on_receive_request!(),
         )

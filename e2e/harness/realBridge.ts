@@ -35,6 +35,7 @@ export interface RealBridge {
   readonly token: string;
   readonly scenario: Scenario;
   waitForConnection(timeoutMs?: number): Promise<void>;
+  request(method: string, params: Record<string, unknown>): Promise<unknown>;
   streamAssistantTurn(options: StreamAssistantTurnOptions): Promise<void>;
   close(): Promise<void>;
 }
@@ -172,6 +173,14 @@ export async function startRealBridge(options: RealBridgeOptions = {}): Promise<
         throw new Error(
           'Timed out waiting for the mobile app to connect to the production bridge.',
         );
+      },
+      async request(method, params) {
+        const socket = await openSocket(url, token, RPC_TIMEOUT_MS);
+        try {
+          return await sendRpc(socket, method, params);
+        } finally {
+          await closeSocket(socket);
+        }
       },
       async streamAssistantTurn(streamOptions) {
         const messageId = streamOptions.messageId ?? `e2e-message-${randomUUID()}`;

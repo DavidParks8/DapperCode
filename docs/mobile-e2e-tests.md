@@ -59,6 +59,11 @@ The typed ACP fixture is deliberately on the other side of the boundary under te
 `agent-client-protocol` request and response types instead of hand-written ACP JSON, and Cargo
 compiles it only with the `e2e-agent` feature. It is not included in production builds.
 
+`e2e/specs/bridge-workflows.spec.ts` also exercises the non-layout bridge workflows that are easiest
+for a shallow fake to omit: forking a loaded conversation, starting/committing/cancelling a queued
+message edit, and steering that queued message into an active turn. Fork and steer cross the typed
+DapperCode ACP extensions; queue edits execute the production queue service.
+
 ### Seeding
 
 `e2e/fixtures/seed.ts` writes the app's persisted state to `localStorage` before the first script
