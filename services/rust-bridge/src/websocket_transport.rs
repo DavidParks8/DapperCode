@@ -1815,6 +1815,7 @@ mod tests {
             port: 8787,
             preview_host: "127.0.0.1".to_string(),
             preview_port: 8788,
+            preview_enabled: true,
             connect_url: None,
             preview_connect_url: None,
             workdir: PathBuf::from("/tmp"),

@@ -15,12 +15,13 @@ import {
 } from '../layout/assertions.ts';
 import { readRect, readViewportRect } from '../layout/geometry.ts';
 import { expect } from '@playwright/test';
+import { E2E_THREADS } from '../harness/scenario.ts';
 
 test.describe('chat screen layout', () => {
   test('the composer is anchored to the bottom without covering the transcript', async ({
     createApp,
   }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     const transcript = selectors.transcript(app.page);
     const composer = selectors.composer(app.page);
 
@@ -47,7 +48,7 @@ test.describe('chat screen layout', () => {
   });
 
   test('the composer controls keep symmetric insets and a single row', async ({ createApp }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     const controls = selectors.composerControls(app.page);
     const inputSurface = selectors.composerInputSurface(app.page);
     const submit = selectors.composerSubmitSlot(app.page);
@@ -65,16 +66,20 @@ test.describe('chat screen layout', () => {
   });
 
   test('the send control is a comfortable touch target', async ({ createApp }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     await expectTouchTarget(selectors.composerSubmitSlot(app.page));
   });
 
   test('transcript messages share a rail and stack in chronological order', async ({
     createApp,
   }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
-    const userMessage = selectors.message(app.page, 'user', 'msg-user-1');
-    const assistantMessage = selectors.message(app.page, 'assistant', 'msg-assistant-1');
+    const app = await createApp({ chatId: E2E_THREADS.layout });
+    const userMessage = selectors
+      .userMessages(app.page)
+      .filter({ hasText: 'Why does the composer overlap the transcript?' });
+    const assistantMessage = selectors
+      .assistantMessages(app.page)
+      .filter({ hasText: 'The transcript uses a fixed bottom inset' });
 
     await expectVisible(userMessage);
     await expectVisible(assistantMessage);
@@ -88,7 +93,7 @@ test.describe('chat screen layout', () => {
   test('messages clear the top chrome and never slide under the composer', async ({
     createApp,
   }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     const topChrome = selectors.topChrome(app.page);
     const composer = selectors.composer(app.page);
     const messages = selectors.messages(app.page);
@@ -105,7 +110,7 @@ test.describe('chat screen layout', () => {
   });
 
   test('the header rows stay inside the top chrome', async ({ createApp }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     const topChrome = selectors.topChrome(app.page);
 
     await expectContainedWithin(selectors.chatHeaderRow(app.page), topChrome);
@@ -114,8 +119,10 @@ test.describe('chat screen layout', () => {
   });
 
   test('a long assistant answer wraps instead of widening the rail', async ({ createApp }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
-    const assistantMessage = selectors.message(app.page, 'assistant', 'msg-assistant-1');
+    const app = await createApp({ chatId: E2E_THREADS.layout });
+    const assistantMessage = selectors
+      .assistantMessages(app.page)
+      .filter({ hasText: 'The transcript uses a fixed bottom inset' });
     const transcript = selectors.transcript(app.page);
 
     // The seeded answer is deliberately long: it must gain height, not width.

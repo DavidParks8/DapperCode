@@ -16,6 +16,7 @@ pub(crate) struct BridgeConfig {
     pub(crate) port: u16,
     pub(crate) preview_host: String,
     pub(crate) preview_port: u16,
+    pub(crate) preview_enabled: bool,
     pub(crate) connect_url: Option<String>,
     pub(crate) preview_connect_url: Option<String>,
     pub(crate) workdir: PathBuf,
@@ -57,7 +58,8 @@ impl BridgeConfig {
             .ok()
             .and_then(|v| v.parse::<u16>().ok())
             .unwrap_or_else(|| port.checked_add(1).unwrap_or(8788));
-        if preview_port == port {
+        let preview_enabled = !parse_bool_env("BRIDGE_DISABLE_BROWSER_PREVIEW");
+        if preview_enabled && preview_port == port {
             return Err("BRIDGE_PREVIEW_PORT must differ from BRIDGE_PORT".to_string());
         }
         let connect_url = parse_connect_url_env("BRIDGE_CONNECT_URL")?;
@@ -111,6 +113,7 @@ impl BridgeConfig {
             port,
             preview_host,
             preview_port,
+            preview_enabled,
             connect_url,
             preview_connect_url,
             workdir,
@@ -634,6 +637,7 @@ mod tests {
             port: 8787,
             preview_host: "127.0.0.1".to_string(),
             preview_port: 8788,
+            preview_enabled: true,
             connect_url: None,
             preview_connect_url: None,
             workdir: PathBuf::from("/tmp/workdir"),
@@ -891,6 +895,7 @@ mod tests {
             "BRIDGE_PORT",
             "BRIDGE_PREVIEW_HOST",
             "BRIDGE_PREVIEW_PORT",
+            "BRIDGE_DISABLE_BROWSER_PREVIEW",
             "BRIDGE_CONNECT_URL",
             "BRIDGE_PREVIEW_CONNECT_URL",
             "BRIDGE_WORKDIR",
@@ -974,6 +979,16 @@ mod tests {
         unsafe { env::set_var("BRIDGE_PREVIEW_PORT", "9000") };
         assert!(BridgeConfig::from_env().is_err());
         unsafe {
+            env::set_var("BRIDGE_DISABLE_BROWSER_PREVIEW", "true");
+            env::set_var("BRIDGE_PORT", "0");
+            env::set_var("BRIDGE_PREVIEW_PORT", "0");
+        }
+        let ephemeral = BridgeConfig::from_env().unwrap();
+        assert_eq!((ephemeral.port, ephemeral.preview_port), (0, 0));
+        assert!(!ephemeral.preview_enabled);
+        unsafe {
+            env::set_var("BRIDGE_DISABLE_BROWSER_PREVIEW", "false");
+            env::set_var("BRIDGE_PORT", "9000");
             env::set_var("BRIDGE_PREVIEW_PORT", "9001");
         }
         assert!(BridgeConfig::from_env().is_ok());

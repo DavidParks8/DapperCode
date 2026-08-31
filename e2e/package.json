@@ -2,6 +2,6 @@
   "name": "@dappercode/e2e",
   "version": "0.1.0",
   "private": true,
-  "description": "Playwright layout and visual end-to-end tests driven by an in-process harness bridge",
+  "description": "Playwright layout and visual end-to-end tests driven through the production Rust bridge",
   "type": "module"
 }

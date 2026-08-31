@@ -11,6 +11,7 @@ import {
   expectWithinViewport,
 } from '../layout/assertions.ts';
 import { readRect } from '../layout/geometry.ts';
+import { E2E_THREADS } from '../harness/scenario.ts';
 
 /**
  * A streaming turn is when the chat layout is most likely to break: text arrives in deltas, the
@@ -19,20 +20,19 @@ import { readRect } from '../layout/geometry.ts';
  */
 test.describe('streaming layout', () => {
   test('the composer stays anchored for the whole of a streaming turn', async ({ createApp }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     const composer = selectors.composer(app.page);
 
     // Sampled continuously, so a composer that jumps mid-stream and settles back still fails.
     await expectStableDuring(composer, async () => {
       await app.bridge.streamAssistantTurn({
-        threadId: 'thread-layout',
+        threadId: E2E_THREADS.layout,
         chunks: [
           'Streaming the first sentence of a long reply. ',
           'Adding a second sentence so the transcript has to grow. ',
           'And a third that is long enough to wrap across several lines of the message body.',
         ],
         delayMs: 120,
-        persist: true,
       });
     });
 
@@ -41,7 +41,7 @@ test.describe('streaming layout', () => {
   });
 
   test('the stop control replaces send without moving its slot', async ({ createApp }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     const controls = selectors.composerControls(app.page);
     const submit = selectors.composerSubmitSlot(app.page);
     const input = selectors.composerInputSurface(app.page);
@@ -53,10 +53,9 @@ test.describe('streaming layout', () => {
     ]);
 
     await app.bridge.streamAssistantTurn({
-      threadId: 'thread-layout',
+      threadId: E2E_THREADS.layout,
       chunks: ['Working on it. ', 'Still working. ', 'Done.'],
       delayMs: 20,
-      persist: true,
       // The turn is held open for the duration of these measurements, so a loaded machine cannot
       // finish the run out from under them.
       whileRunning: async () => {
@@ -93,16 +92,15 @@ test.describe('streaming layout', () => {
   test('the composer returns to its resting shape once the turn finishes', async ({
     createApp,
   }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     const controls = selectors.composerControls(app.page);
     const input = selectors.composerInputSurface(app.page);
     const [controlsIdle, inputIdle] = await Promise.all([readRect(controls), readRect(input)]);
 
     await app.bridge.streamAssistantTurn({
-      threadId: 'thread-layout',
+      threadId: E2E_THREADS.layout,
       chunks: ['A short reply.'],
       delayMs: 30,
-      persist: true,
     });
 
     await expect(selectors.composerStopSlot(app.page)).toHaveCount(0);
@@ -115,21 +113,23 @@ test.describe('streaming layout', () => {
   test('the streamed answer lands on the transcript rail and stays clear of the composer', async ({
     createApp,
   }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     const existingAssistant = await readRect(
-      selectors.message(app.page, 'assistant', 'msg-assistant-1'),
+      selectors
+        .assistantMessages(app.page)
+        .filter({ hasText: 'The transcript uses a fixed bottom inset' }),
     );
 
     await app.bridge.streamAssistantTurn({
-      threadId: 'thread-layout',
-      turnId: 'turn-stream',
+      threadId: E2E_THREADS.layout,
       messageId: 'msg-streamed',
       chunks: ['A streamed reply that should sit on the same rail as every other message.'],
       delayMs: 30,
-      persist: true,
     });
 
-    const streamed = selectors.message(app.page, 'assistant', 'msg-streamed');
+    const streamed = selectors
+      .assistantMessages(app.page)
+      .filter({ hasText: 'A streamed reply that should sit on the same rail' });
     await expectVisible(streamed);
     const streamedRect = await readRect(streamed);
 
@@ -140,16 +140,15 @@ test.describe('streaming layout', () => {
   });
 
   test('a failed run leaves the composer usable and correctly sized', async ({ createApp }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     const controls = selectors.composerControls(app.page);
     const before = await readRect(controls);
 
     await app.bridge.streamAssistantTurn({
-      threadId: 'thread-layout',
+      threadId: E2E_THREADS.layout,
       chunks: ['Partial answer before the failure.'],
       delayMs: 30,
       succeed: false,
-      errorMessage: 'The agent process exited unexpectedly.',
     });
 
     // Error handling frequently forgets to restore the composer, stranding the user with a stop

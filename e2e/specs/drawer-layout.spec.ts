@@ -12,6 +12,7 @@ import {
   expectWithinViewport,
 } from '../layout/assertions.ts';
 import { readRect, readRects } from '../layout/geometry.ts';
+import { E2E_THREADS } from '../harness/scenario.ts';
 
 test.describe('navigation drawer layout', () => {
   test('every seeded session gets a row on a shared rail', async ({ app }) => {
@@ -30,15 +31,15 @@ test.describe('navigation drawer layout', () => {
     await expectVisible(drawer);
     await expectWithinViewport(drawer);
 
-    for (const chatId of ['thread-layout', 'thread-short', 'thread-long-title']) {
+    for (const chatId of [E2E_THREADS.layout, E2E_THREADS.short, E2E_THREADS.longTitle]) {
       await expectContainedWithin(selectors.drawerChatRow(app.page, chatId), drawer);
     }
   });
 
   test('a session title that overflows does not widen or grow its row', async ({ app }) => {
     await app.openDrawer();
-    const longTitleRow = selectors.drawerChatRow(app.page, 'thread-long-title');
-    const shortTitleRow = selectors.drawerChatRow(app.page, 'thread-short');
+    const longTitleRow = selectors.drawerChatRow(app.page, E2E_THREADS.longTitle);
+    const shortTitleRow = selectors.drawerChatRow(app.page, E2E_THREADS.short);
 
     // `thread-long-title` is seeded with a title far wider than the drawer. Truncation is the
     // contract: the row must match its siblings in both width and height.

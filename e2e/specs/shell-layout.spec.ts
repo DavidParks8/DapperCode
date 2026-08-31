@@ -9,6 +9,7 @@ import {
   TABLET_LAYOUT_MIN_WIDTH,
   TABLET_SIDEBAR_WIDTH,
 } from '../layout/shell.ts';
+import { E2E_THREADS } from '../harness/scenario.ts';
 
 /**
  * The app switches between two shells at `TABLET_LAYOUT_MIN_WIDTH`. Both branches are exercised
@@ -17,7 +18,7 @@ import {
  */
 test.describe('shell layout', () => {
   test('the shell matches the viewport width', async ({ createApp }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     // Asserted against the project's declared shell, so a moved breakpoint fails here rather than
     // quietly rerouting the test to the other branch.
     const shell = await expectShellMode(app.page, expectedShellModeFor(test.info().project.name));
@@ -35,7 +36,7 @@ test.describe('shell layout', () => {
   });
 
   test('a docked drawer and the chat pane tile the viewport', async ({ createApp }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     test.skip(
       expectedShellModeFor(test.info().project.name) !== 'pinned',
       'Only the wide shell docks the drawer.',
@@ -61,7 +62,7 @@ test.describe('shell layout', () => {
   });
 
   test('an overlay drawer covers the chat instead of tiling with it', async ({ createApp }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     test.skip(
       expectedShellModeFor(test.info().project.name) !== 'overlay',
       'Only the narrow shell overlays the drawer.',
@@ -97,7 +98,7 @@ test.describe('shell layout', () => {
       expectedShellModeFor(test.info().project.name) !== 'overlay',
       'The breakpoint itself only needs checking once.',
     );
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
 
     await app.page.setViewportSize({ width: TABLET_LAYOUT_MIN_WIDTH - 1, height: 900 });
     await app.settle();

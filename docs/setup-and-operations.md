@@ -375,6 +375,8 @@ working:
 
 - `BRIDGE_HOST`, `BRIDGE_PORT`
 - `BRIDGE_PREVIEW_HOST`, `BRIDGE_PREVIEW_PORT`
+- `BRIDGE_DISABLE_BROWSER_PREVIEW`: disables the preview listener when `true`; intended for isolated
+  test workers that do not exercise browser preview
 - `BRIDGE_CONNECT_URL`, `BRIDGE_PREVIEW_CONNECT_URL`
 - `BRIDGE_AUTH_TOKEN`
 - `BRIDGE_ALLOW_QUERY_TOKEN_AUTH`

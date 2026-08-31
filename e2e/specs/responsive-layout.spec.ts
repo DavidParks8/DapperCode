@@ -10,6 +10,7 @@ import {
 } from '../layout/assertions.ts';
 import { readRect, readViewportRect } from '../layout/geometry.ts';
 import { readShell } from '../layout/shell.ts';
+import { E2E_THREADS } from '../harness/scenario.ts';
 
 /**
  * These assertions are written against the viewport rather than against fixed pixel values, so the
@@ -20,7 +21,7 @@ test.describe('responsive layout', () => {
   test('the chat surface partitions the viewport with no gap and no overlap', async ({
     createApp,
   }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     const shell = await readShell(app.page);
     const transcript = selectors.transcript(app.page);
     const composer = selectors.composer(app.page);
@@ -47,7 +48,7 @@ test.describe('responsive layout', () => {
   });
 
   test('the top chrome spans the chat pane and stays at the top', async ({ createApp }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     const viewport = await readViewportRect(app.page);
     const [chromeRect, transcriptRect] = await Promise.all([
       readRect(selectors.topChrome(app.page)),
@@ -61,21 +62,25 @@ test.describe('responsive layout', () => {
   });
 
   test('the message rail keeps symmetric insets at every size', async ({ createApp }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     const transcript = selectors.transcript(app.page);
 
     await expectSymmetricHorizontalInsets(
-      selectors.message(app.page, 'user', 'msg-user-1'),
+      selectors
+        .userMessages(app.page)
+        .filter({ hasText: 'Why does the composer overlap the transcript?' }),
       transcript,
     );
     await expectSymmetricHorizontalInsets(
-      selectors.message(app.page, 'assistant', 'msg-assistant-1'),
+      selectors
+        .assistantMessages(app.page)
+        .filter({ hasText: 'The transcript uses a fixed bottom inset' }),
       transcript,
     );
   });
 
   test('the composer controls keep symmetric insets at every size', async ({ createApp }) => {
-    const app = await createApp({ chatId: 'thread-layout' });
+    const app = await createApp({ chatId: E2E_THREADS.layout });
     await expectSymmetricHorizontalInsets(
       selectors.composerControls(app.page),
       selectors.composer(app.page),
@@ -91,7 +96,7 @@ test.describe('responsive layout', () => {
     expect(drawerRect.height).toBeLessThanOrEqual(viewport.height + 1);
     await expectWithinViewport(selectors.drawer(app.page));
 
-    for (const chatId of ['thread-layout', 'thread-short', 'thread-long-title']) {
+    for (const chatId of [E2E_THREADS.layout, E2E_THREADS.short, E2E_THREADS.longTitle]) {
       await expectContainedWithin(
         selectors.drawerChatRow(app.page, chatId),
         selectors.drawer(app.page),

@@ -137,11 +137,11 @@ pnpm --filter @dappercode/mobile run test
 ```
 
 Mobile layout or navigation changes also need the end-to-end layout suite, which measures real
-on-screen geometry against a harness bridge:
+on-screen geometry through the production Rust bridge and a deterministic ACP fixture:
 
 ```bash
-npm run e2e
-npm run typecheck:e2e
+pnpm run e2e
+pnpm run typecheck:e2e
 ```
 
 Use `docs/setup-and-operations.md` for smoke tests and `docs/troubleshooting.md` for recovery.

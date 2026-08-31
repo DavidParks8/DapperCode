@@ -1,25 +1,21 @@
 import { test as base, expect, type Locator, type Page } from '@playwright/test';
 
 import { ensureWebBuild } from '../harness/webBuild.ts';
-import {
-  startHarnessBridge,
-  type HarnessBridge,
-  type HarnessBridgeOptions,
-} from '../harness/bridgeServer.ts';
+import { startRealBridge, type RealBridge, type RealBridgeOptions } from '../harness/realBridge.ts';
 import { startStaticSiteServer, type StaticSiteServer } from '../harness/staticServer.ts';
-import { FIXED_NOW_MS } from '../harness/protocol.ts';
+import { FIXED_NOW_MS } from '../harness/scenario.ts';
 import { settleLayout, type Rect, readRect } from '../layout/geometry.ts';
 import { selectors } from './selectors.ts';
 import { seedBridgeProfileScript } from './seed.ts';
 
-export interface AppOptions extends HarnessBridgeOptions {
+export interface AppOptions extends RealBridgeOptions {
   /** Chat to open directly. Defaults to the app's own landing redirect. */
   readonly chatId?: string;
 }
 
 export interface AppHandle {
   readonly page: Page;
-  readonly bridge: HarnessBridge;
+  readonly bridge: RealBridge;
   /** Console errors and uncaught exceptions observed since load. */
   readonly errors: readonly string[];
   /** Navigates to a chat route and waits for the transcript to settle. */
@@ -35,7 +31,7 @@ interface WorkerFixtures {
 }
 
 interface TestFixtures {
-  bridge: HarnessBridge;
+  bridge: RealBridge;
   app: AppHandle;
   createApp: (options?: AppOptions) => Promise<AppHandle>;
 }
@@ -57,23 +53,17 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 
   /** A fresh bridge per test keeps scenario mutations from leaking between specs. */
   bridge: async ({}, use) => {
-    const bridge = await startHarnessBridge();
+    const bridge = await startRealBridge();
     await use(bridge);
-    // Close first: close() drains requests still in flight, so drift read afterwards includes the
-    // last call the page made instead of racing it.
     await bridge.close();
-    const drift = describeContractDrift(bridge);
-    if (drift) {
-      throw new Error(drift);
-    }
   },
 
   createApp: async ({ page, site }, use) => {
-    const started: HarnessBridge[] = [];
+    const started: RealBridge[] = [];
     const handles: AppHandle[] = [];
 
     const createApp = async (options: AppOptions = {}): Promise<AppHandle> => {
-      const bridge = await startHarnessBridge(options);
+      const bridge = await startRealBridge(options);
       started.push(bridge);
       const handle = await launchApp(page, site, bridge, options);
       handles.push(handle);
@@ -83,13 +73,10 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     await use(createApp);
 
     const appFailure = describeAppErrors(handles);
+    await page.close();
 
     for (const bridge of started) {
       await bridge.close();
-    }
-    const drift = started.map((bridge) => describeContractDrift(bridge)).find(Boolean);
-    if (drift) {
-      throw new Error(drift);
     }
     if (appFailure) {
       throw new Error(appFailure);
@@ -101,6 +88,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     const handle = await launchApp(page, site, bridge, {});
     await use(handle);
     const failure = describeAppErrors([handle]);
+    await page.close();
     if (failure) {
       throw new Error(failure);
     }
@@ -138,7 +126,7 @@ const launchedPages = new WeakSet<Page>();
 async function launchApp(
   page: Page,
   site: StaticSiteServer,
-  bridge: HarnessBridge,
+  bridge: RealBridge,
   options: AppOptions,
 ): Promise<AppHandle> {
   if (launchedPages.has(page)) {
@@ -231,27 +219,6 @@ async function waitForRestingPosition(target: Locator, timeout = 5_000): Promise
     await target.page().waitForTimeout(50);
   }
   throw new Error('Timed out waiting for the drawer to reach a resting position.');
-}
-
-/**
- * Turns recorded drift into a failure message.
- *
- * The whole value of a harness bridge rests on it behaving like the real one. When the app asks for
- * something the harness cannot serve, the specs would otherwise keep passing against a bridge that
- * has quietly stopped resembling production, so it is treated as a test failure.
- */
-function describeContractDrift(bridge: HarnessBridge): string | null {
-  if (bridge.contractDrift.length === 0) {
-    return null;
-  }
-  const lines = bridge.contractDrift.map(({ method, reason }) =>
-    reason === 'undeclared'
-      ? `  ${method} — not declared in contracts/bridge-rpc/v2/manifest.json at all, so the app ` +
-        `and the shared contract disagree.`
-      : `  ${method} — declared in the bridge contract but the harness has no handler, so the ` +
-        `real bridge would have answered this and the harness did not.`,
-  );
-  return `The harness bridge could not answer every call the app made:\n${lines.join('\n')}`;
 }
 
 export const PROFILE_ID = 'harness-profile';

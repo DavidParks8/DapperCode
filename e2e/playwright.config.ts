@@ -17,6 +17,7 @@ process.env['DAPPERCODE_E2E_RUN_ID'] = runId;
 const artifactsRoot = path.join(repoRoot, '.e2e', 'runs', runId);
 
 export default defineConfig({
+  globalSetup: './globalSetup.ts',
   testDir: './specs',
   testMatch: '**/*.spec.ts',
   outputDir: path.join(artifactsRoot, 'test-results'),
