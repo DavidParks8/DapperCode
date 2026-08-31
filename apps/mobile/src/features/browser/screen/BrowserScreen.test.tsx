@@ -19,6 +19,11 @@ import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { BrowserScreen } from './BrowserScreen';
 import { createBrowserScreenStyles } from './styles';
 import { feedback } from '@shared/feedback';
+import {
+  getRenderedGlassViewProps,
+  setMockGlassEffectAPIAvailable,
+  setMockLiquidGlassAvailable,
+} from '@shared/testing/glassEffectMock';
 
 jest.mock('react-native-reanimated', () => {
   const { View, Text, Image, ScrollView } = jest.requireActual('react-native');
@@ -917,6 +922,37 @@ describe('BrowserScreen behavior', () => {
     const styles = createBrowserScreenStyles(theme);
     // startHeroTitle should derive fontSize from largeTitle (24), not a raw 22 override
     expect(styles.startHeroTitle.fontSize).toBe(theme.typography.largeTitle.fontSize);
+  });
+
+  it('uses native glass surfaces for browser chrome and start-page targets', async () => {
+    setMockLiquidGlassAvailable(true);
+    setMockGlassEffectAPIAvailable(true);
+    const result = await renderBrowser();
+    const glassSurfaces = getRenderedGlassViewProps();
+
+    expect(glassSurfaces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          testID: 'browser-top-chrome-glass-surface',
+          glassEffectStyle: theme.glass.chrome.glassEffectStyle,
+        }),
+        expect.objectContaining({
+          testID: 'browser-bottom-bar-glass-surface',
+          glassEffectStyle: theme.glass.capsule.glassEffectStyle,
+          isInteractive: true,
+        }),
+        expect.objectContaining({
+          testID: 'browser-hero-glass-surface',
+          glassEffectStyle: theme.glass.capsule.glassEffectStyle,
+        }),
+        expect.objectContaining({
+          testID: 'browser-target-glass-surface-127.0.0.1:5173',
+          glassEffectStyle: theme.glass.capsule.glassEffectStyle,
+        }),
+      ]),
+    );
+
+    act(() => result.tree.unmount());
   });
 
   it('has adequate hitSlop on toolbar and nav buttons', async () => {

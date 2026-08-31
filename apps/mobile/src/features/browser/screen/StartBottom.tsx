@@ -5,6 +5,7 @@ import { ActivityIndicator, Platform, Pressable, ScrollView, Text, View } from '
 import type { BrowserPreviewTargetSuggestion } from '@bridge/types/types';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import { useAppTheme } from '@shared/theme';
+import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { createBrowserScreenStyles } from './styles';
 import { getCompactBrowserLabel } from './shared';
 
@@ -27,22 +28,33 @@ function QuickTargetTile({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`${title}, ${subtitle}`}
-      style={({ pressed }) => [styles.quickTile, pressed && styles.quickTilePressed]}
+      style={styles.quickTile}
     >
-      <View style={styles.quickTileIcon}>
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name={icon}
-          size={16}
-          color={theme.colors.textPrimary}
-        />
-      </View>
-      <Text style={styles.quickTileTitle} numberOfLines={1}>
-        {title}
-      </Text>
-      <Text style={styles.quickTileSubtitle} numberOfLines={2}>
-        {subtitle}
-      </Text>
+      {({ pressed }) => (
+        <>
+          <GlassSurface
+            pointerEvents="none"
+            role="capsule"
+            style={styles.quickTileGlass}
+            testID={`browser-target-glass-surface-${title}`}
+          />
+          {pressed ? <View pointerEvents="none" style={styles.quickTilePressedOverlay} /> : null}
+          <View style={styles.quickTileIcon}>
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name={icon}
+              size={16}
+              color={theme.colors.textPrimary}
+            />
+          </View>
+          <Text style={styles.quickTileTitle} numberOfLines={1}>
+            {title}
+          </Text>
+          <Text style={styles.quickTileSubtitle} numberOfLines={2}>
+            {subtitle}
+          </Text>
+        </>
+      )}
     </Pressable>
   );
 }
@@ -75,9 +87,13 @@ export function BrowserStartPage({
       showsVerticalScrollIndicator={false}
     >
       <View style={styles.startHero}>
-        <View style={styles.startHeroIcon}>
+        <GlassSurface
+          role="capsule"
+          style={styles.startHeroIcon}
+          testID="browser-hero-glass-surface"
+        >
           <Ionicons name="globe-outline" size={20} color={colors.textPrimary} />
-        </View>
+        </GlassSurface>
         <Text style={styles.startHeroTitle}>Open a local preview</Text>
         <Text style={styles.startHeroSubtitle}>
           Use the search bar above or tap a running localhost target.
@@ -171,7 +187,12 @@ export function BrowserBottomBar({
   const { colors } = theme;
 
   return (
-    <View style={styles.bottomBar}>
+    <GlassSurface
+      isInteractive
+      role="capsule"
+      style={styles.bottomBar}
+      testID="browser-bottom-bar-glass-surface"
+    >
       <Pressable
         onPress={handleGoBackPress}
         disabled={Platform.OS === 'web' || !canGoBack}
@@ -255,6 +276,6 @@ export function BrowserBottomBar({
           color={colors.textPrimary}
         />
       </Pressable>
-    </View>
+    </GlassSurface>
   );
 }
