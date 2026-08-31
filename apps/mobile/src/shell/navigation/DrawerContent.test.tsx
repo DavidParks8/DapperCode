@@ -23,8 +23,10 @@ import type {
   RpcNotification,
 } from '@bridge/types/types';
 import type { HostBridgeWsClient } from '@bridge/ws/ws';
-import { workspaceChatLimitAtom } from '@shell/state/appState/settings';
+import { confirmSessionDeletionAtom, workspaceChatLimitAtom } from '@shell/state/appState/settings';
+import { apiClientAtom, wsClientAtom } from '@shell/state/bridge/atoms';
 import { selectedChatIdAtom } from '@shell/state/chat/atoms';
+import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
 import type { AppStore } from '@shell/state/types';
 import type { WorkspaceChatLimit } from '@shell/state/appSettings';
@@ -442,6 +444,158 @@ describe('DrawerContent render behavior matrix', () => {
     act(() => tree?.unmount());
   });
 
+  it('preserves drawer state and reloads when bridge clients change for the same profile', async () => {
+    const alpha = createChat({ id: 'alpha', title: 'Alpha chat', cwd: '/repo/alpha' });
+    const firstHarness = createHarness({
+      chats: [alpha, createChat({ id: 'beta', title: 'Beta chat', cwd: '/repo/beta' })],
+    });
+    const replacementHarness = createHarness({
+      chats: [alpha, createChat({ id: 'gamma', title: 'Gamma chat', cwd: '/repo/gamma' })],
+    });
+    const store = createDrawerStore(firstHarness.api, firstHarness.ws);
+    const tree = await renderDrawer(firstHarness, { store });
+    const root = tree.root as Queryable;
+
+    await act(async () => {
+      (findByLabel(root, 'Search sessions').props['onChangeText'] as (value: string) => void)(
+        'alpha',
+      );
+      await Promise.resolve();
+    });
+    await press(findByLabel(root, 'Select sessions'));
+    const alphaRow = root.findAll(
+      (candidate) =>
+        typeof candidate.props['accessibilityLabel'] === 'string' &&
+        candidate.props['accessibilityLabel'].startsWith('Alpha chat,') &&
+        typeof candidate.props['onPress'] === 'function',
+    )[0];
+    if (!alphaRow) {
+      throw new Error('Expected Alpha chat row');
+    }
+    await press(alphaRow);
+    expect(hasText(root, '1 Selected')).toBe(true);
+
+    await act(async () => {
+      store.set(wsClientAtom, replacementHarness.ws);
+      store.set(apiClientAtom, replacementHarness.api);
+      for (let index = 0; index < 8; index += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(replacementHarness.api.startChatListStream).toHaveBeenCalledTimes(1);
+    expect(findByLabel(root, 'Search sessions').props['value']).toBe('alpha');
+    expect(hasText(root, '1 Selected')).toBe(true);
+    expect(hasText(root, 'Loading sessions')).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('ignores a pending stream batch from the replaced client', async () => {
+    const originalHarness = createHarness();
+    let originalBatch:
+      | ((batch: { streamId: string; limit: number; done: boolean; chats: ChatSummary[] }) => void)
+      | undefined;
+    let resolveOriginalStream:
+      ((controller: { streamId: string; cancel: () => void }) => void) | undefined;
+    (originalHarness.api.startChatListStream as jest.Mock).mockImplementation(
+      (_options, onBatch) => {
+        originalBatch = onBatch;
+        return new Promise((resolve) => {
+          resolveOriginalStream = resolve;
+        });
+      },
+    );
+    const replacementHarness = createHarness({
+      chats: [createChat({ id: 'replacement', title: 'Replacement stream chat' })],
+    });
+    const store = createDrawerStore(originalHarness.api, originalHarness.ws);
+    const tree = await renderDrawer(originalHarness, { store });
+
+    await act(async () => {
+      store.set(wsClientAtom, replacementHarness.ws);
+      store.set(apiClientAtom, replacementHarness.api);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      originalBatch?.({
+        streamId: 'stale',
+        limit: 20,
+        done: true,
+        chats: [createChat({ id: 'stale', title: 'Stale stream chat' })],
+      });
+      resolveOriginalStream?.({
+        streamId: 'stale',
+        cancel: originalHarness.cancelStream,
+      });
+      for (let index = 0; index < 8; index += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(originalHarness.cancelStream).toHaveBeenCalledTimes(1);
+    expect(replacementHarness.api.startChatListStream).toHaveBeenCalledTimes(1);
+    expect(hasText(tree.root as Queryable, 'Replacement stream chat')).toBe(true);
+    expect(hasText(tree.root as Queryable, 'Stale stream chat')).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('loads replacement deep history after an old client deep request settles', async () => {
+    const originalHarness = createHarness({
+      chats: [createChat({ id: 'original', title: 'Original recent chat' })],
+    });
+    let resolveOriginalDeep!: (value: {
+      chats: ChatSummary[];
+      partial: boolean;
+      diagnostics: string[];
+    }) => void;
+    (originalHarness.api.listAllChats as jest.Mock).mockReturnValue(
+      new Promise((resolve) => {
+        resolveOriginalDeep = resolve;
+      }),
+    );
+    const replacementChat = createChat({
+      id: 'replacement',
+      title: 'Replacement recent chat',
+    });
+    const replacementHarness = createHarness({ chats: [replacementChat] });
+    const store = createDrawerStore(originalHarness.api, originalHarness.ws);
+    const tree = await renderDrawer(originalHarness, { store });
+
+    await act(async () => {
+      jest.advanceTimersByTime(2500);
+      await Promise.resolve();
+    });
+    expect(originalHarness.api.listAllChats).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      store.set(wsClientAtom, replacementHarness.ws);
+      store.set(apiClientAtom, replacementHarness.api);
+      for (let index = 0; index < 6; index += 1) {
+        await Promise.resolve();
+      }
+    });
+    expect(replacementHarness.api.startChatListStream).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveOriginalDeep({
+        chats: [createChat({ id: 'stale-deep', title: 'Stale deep chat' })],
+        partial: false,
+        diagnostics: [],
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      jest.advanceTimersByTime(2500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(replacementHarness.api.listAllChats).toHaveBeenCalledTimes(1);
+    expect(hasText(tree.root as Queryable, 'Replacement recent chat')).toBe(true);
+    expect(hasText(tree.root as Queryable, 'Stale deep chat')).toBe(false);
+    act(() => tree.unmount());
+  });
+
   it('keeps pending-session hydration failures retryable in an empty drawer', async () => {
     const harness = createHarness({
       connected: false,
@@ -544,6 +698,40 @@ describe('DrawerContent render behavior matrix', () => {
     ).toHaveLength(1);
     await press(findByLabel(tree.root as Queryable, 'Close session list'));
     expect(onClose).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+  });
+
+  it('closes the session list after lock/unlock when a session row is pressed', async () => {
+    const listeners = new Set<(state: string) => void>();
+    jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, handler) => {
+      listeners.add(handler as (state: string) => void);
+      return {
+        remove: () => {
+          listeners.delete(handler as (state: string) => void);
+        },
+      };
+    });
+    const onClose = jest.fn();
+    const closeDrawer = jest.fn();
+    const harness = createHarness({
+      chats: [createChat({ id: 'thread', title: 'Listed thread', cwd: '/workspace' })],
+    });
+    const store = createDrawerStore(harness.api, harness.ws, { selectedChatId: 'thread' });
+    store.set(drawerCommandsAtom, { closeDrawer, toggleNavigation: jest.fn() });
+    const tree = await renderDrawer(harness, { onClose, selectedChatId: 'thread', store });
+
+    await act(async () => {
+      for (const listener of listeners) {
+        listener('inactive');
+        listener('background');
+        listener('active');
+      }
+      await Promise.resolve();
+    });
+
+    await press(findByLabel(tree.root as Queryable, 'Listed thread, workspace, Agent, Complete'));
+    expect(onClose).toHaveBeenCalled();
+    expect(closeDrawer).toHaveBeenCalled();
     act(() => tree.unmount());
   });
 
@@ -676,6 +864,7 @@ describe('DrawerContent render behavior matrix', () => {
   });
 
   it('reacts to websocket connectivity, lifecycle events, and snapshot refresh', async () => {
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
     const harness = createHarness({
       connected: false,
       chats: [
@@ -1881,6 +2070,24 @@ describe('DrawerContent session deletion', () => {
     act(() => tree.unmount());
   });
 
+  it('deletes immediately without a modal when confirmation is disabled', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'a', title: 'Chat a' }), createChat({ id: 'b', title: 'Chat b' })],
+    });
+    const store = createDrawerStore(harness.api, harness.ws);
+    store.set(confirmSessionDeletionAtom, false);
+    const alert = jest.spyOn(Alert, 'alert');
+    const tree = await renderDrawer(harness, { store });
+
+    await press(findDeleteAction(tree.root as Queryable, 'Chat a'));
+
+    expect(alert).not.toHaveBeenCalled();
+    expect(harness.api.deleteChat).toHaveBeenCalledWith('a');
+    expect(hasText(tree.root as Queryable, 'Chat a')).toBe(false);
+    expect(hasText(tree.root as Queryable, 'Chat b')).toBe(true);
+    act(() => tree.unmount());
+  });
+
   it('puts the session back and warns when the agent refuses the delete', async () => {
     const harness = createHarness({
       chats: [
@@ -1937,15 +2144,21 @@ describe('DrawerContent session deletion', () => {
     act(() => tree.unmount());
   });
 
-  it('starts a new chat when the session being viewed is deleted', async () => {
+  it('starts a new chat without closing the session list when the current session is deleted', async () => {
     const harness = createHarness({ chats: [createChat({ id: 'a', title: 'Chat a' })] });
     answerConfirm('confirm');
     const store = createDrawerStore(harness.api, harness.ws, { selectedChatId: 'a' });
+    const closeDrawer = jest.fn();
+    store.set(drawerCommandsAtom, { closeDrawer });
     const tree = await renderDrawer(harness, { store, selectedChatId: 'a' });
 
     await press(findDeleteAction(tree.root as Queryable, 'Chat a'));
 
+    expect(harness.api.deleteChat).toHaveBeenCalledWith('a');
+    expect(hasText(tree.root as Queryable, 'Chat a')).toBe(false);
     expect(store.get(selectedChatIdAtom)).toBeNull();
+    expect(router.navigate).toHaveBeenCalledWith(routes.newChat('profile-1'));
+    expect(closeDrawer).not.toHaveBeenCalled();
     act(() => tree.unmount());
   });
 
@@ -2360,6 +2573,495 @@ describe('DrawerContent session search', () => {
     });
     expect(router.dismissTo).not.toHaveBeenCalled();
     expect(router.navigate).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+});
+
+describe('DrawerContent bulk selection', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-07-20T00:30:00.000Z'));
+    (ChatSummaryCache.loadChatSummaryCache as jest.Mock).mockImplementation((profileId: string) =>
+      Promise.resolve(createEmptyChatSummaryCache(profileId)),
+    );
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+
+  function answerConfirm(answer: 'confirm' | 'cancel'): jest.SpyInstance {
+    return jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
+      const button = (buttons ?? []).find((candidate) =>
+        answer === 'confirm' ? candidate.style === 'destructive' : candidate.style === 'cancel',
+      );
+      button?.onPress?.();
+    });
+  }
+
+  function findChatRow(root: Queryable, title: string): Queryable {
+    const node = root.findAll(
+      (candidate) =>
+        typeof candidate.props['accessibilityLabel'] === 'string' &&
+        candidate.props['accessibilityLabel'].startsWith(`${title},`) &&
+        typeof candidate.props['onPress'] === 'function',
+    )[0];
+    if (!node) {
+      throw new Error(`Expected chat row for ${title}`);
+    }
+    return node;
+  }
+
+  function findOptionalByLabel(root: Queryable, label: string): Queryable | undefined {
+    return root.findAll((candidate) => candidate.props['accessibilityLabel'] === label)[0];
+  }
+
+  async function enterSelectionMode(root: Queryable): Promise<void> {
+    await press(findByLabel(root, 'Select sessions'));
+  }
+
+  async function selectChats(root: Queryable, titles: string[]): Promise<void> {
+    for (const title of titles) {
+      await press(findChatRow(root, title));
+    }
+  }
+
+  function deleteButton(root: Queryable): Queryable {
+    const node = root.findAll(
+      (candidate) =>
+        typeof candidate.props['accessibilityLabel'] === 'string' &&
+        candidate.props['accessibilityLabel'].startsWith('Delete') &&
+        candidate.props['accessibilityLabel'].includes('selected') &&
+        typeof candidate.props['onPress'] === 'function',
+    )[0];
+    if (!node) {
+      throw new Error('Expected bulk delete button');
+    }
+    return node;
+  }
+
+  it('swaps the drawer chrome for the selection toolbar and back again', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'a', title: 'Chat a' }), createChat({ id: 'b', title: 'Chat b' })],
+    });
+    const tree = await renderDrawer(harness, { onClose: jest.fn() });
+    const root = tree.root as Queryable;
+
+    expect(findOptionalByLabel(root, 'New chat')).toBeDefined();
+    expect(hasText(root, 'Agent activity')).toBe(true);
+
+    await enterSelectionMode(root);
+
+    expect(hasText(root, 'Select Sessions')).toBe(true);
+    expect(hasText(root, 'Tap sessions to select them')).toBe(true);
+    expect(findOptionalByLabel(root, 'Select all sessions')).toBeDefined();
+    expect(findOptionalByLabel(root, 'Delete selected sessions')).toBeDefined();
+    // Mail hides the nav actions while editing so the only exits are Cancel and the action itself.
+    expect(findOptionalByLabel(root, 'New chat')).toBeUndefined();
+    expect(findOptionalByLabel(root, 'Close session list')).toBeUndefined();
+    expect(findOptionalByLabel(root, 'Bridge connected. Edit connection')).toBeUndefined();
+    expect(findOptionalByLabel(root, 'Open preview browser')).toBeUndefined();
+
+    await press(findByLabel(root, 'Cancel selecting sessions'));
+
+    expect(hasText(root, 'Agent activity')).toBe(true);
+    expect(findOptionalByLabel(root, 'New chat')).toBeDefined();
+    expect(findOptionalByLabel(root, 'Close session list')).toBeDefined();
+    expect(findOptionalByLabel(root, 'Bridge connected. Edit connection')).toBeDefined();
+    expect(findOptionalByLabel(root, 'Select all sessions')).toBeUndefined();
+    act(() => tree.unmount());
+  });
+
+  it('hides the edit affordance until the drawer has sessions', async () => {
+    const tree = await renderDrawer(createHarness({ chats: [] }));
+    const root = tree.root as Queryable;
+
+    expect(findOptionalByLabel(root, 'Select sessions')).toBeUndefined();
+    act(() => tree.unmount());
+  });
+
+  it('turns rows into checkboxes and counts the selection', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'a', title: 'Chat a' }), createChat({ id: 'b', title: 'Chat b' })],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await enterSelectionMode(root);
+    const row = findChatRow(root, 'Chat a');
+    expect(row.props['accessibilityRole']).toBe('checkbox');
+    expect((row.props['accessibilityState'] as { checked?: boolean }).checked).toBe(false);
+
+    await selectChats(root, ['Chat a']);
+
+    expect(hasText(root, '1 Selected')).toBe(true);
+    expect(hasText(root, '1 session selected')).toBe(true);
+    expect(
+      (findChatRow(root, 'Chat a').props['accessibilityState'] as { checked?: boolean }).checked,
+    ).toBe(true);
+    expect(deleteButton(root).props['accessibilityLabel']).toBe('Delete 1 selected session');
+
+    await selectChats(root, ['Chat b']);
+    expect(hasText(root, '2 Selected')).toBe(true);
+    expect(deleteButton(root).props['accessibilityLabel']).toBe('Delete 2 selected sessions');
+
+    await selectChats(root, ['Chat a']);
+    expect(hasText(root, '1 Selected')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('does not open a session while selecting', async () => {
+    const harness = createHarness({ chats: [createChat({ id: 'a', title: 'Chat a' })] });
+    const store = createDrawerStore(harness.api, harness.ws);
+    const tree = await renderDrawer(harness, { store });
+    const root = tree.root as Queryable;
+
+    await enterSelectionMode(root);
+    await selectChats(root, ['Chat a']);
+
+    expect(store.get(selectedChatIdAtom)).toBeNull();
+    expect(router.navigate).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+
+  it('pauses swipe-to-delete while selecting so the row action cannot fire', async () => {
+    const harness = createHarness({ chats: [createChat({ id: 'a', title: 'Chat a' })] });
+    answerConfirm('confirm');
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    expect(findOptionalByLabel(root, 'Delete Chat a')).toBeDefined();
+
+    await enterSelectionMode(root);
+
+    // The per-row destructive action must be unreachable while selecting, not merely hidden:
+    // leaving it mounted would let a screen reader delete an unselected row mid-selection.
+    expect(findOptionalByLabel(root, 'Delete Chat a')).toBeUndefined();
+    expect(
+      root.findAll((node) => node.props['testID'] === 'swipe-delete-action-layer'),
+    ).toHaveLength(0);
+    expect(harness.api.deleteChat).not.toHaveBeenCalled();
+
+    await press(findByLabel(root, 'Cancel selecting sessions'));
+
+    expect(findOptionalByLabel(root, 'Delete Chat a')).toBeDefined();
+    act(() => tree.unmount());
+  });
+
+  it('keeps the delete action inert until something is selected', async () => {
+    const harness = createHarness({ chats: [createChat({ id: 'a', title: 'Chat a' })] });
+    const alert = answerConfirm('confirm');
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await enterSelectionMode(root);
+    const button = deleteButton(root);
+    expect(button.props['disabled']).toBe(true);
+    expect((button.props['accessibilityState'] as { disabled?: boolean }).disabled).toBe(true);
+    await press(button);
+
+    expect(alert).not.toHaveBeenCalled();
+    expect(harness.api.deleteChat).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+
+  it('selects and deselects every listed session from the toolbar', async () => {
+    const harness = createHarness({
+      chats: [
+        createChat({ id: 'a', title: 'Chat a' }),
+        createChat({ id: 'b', title: 'Chat b' }),
+        createChat({ id: 'c', title: 'Chat c' }),
+      ],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await enterSelectionMode(root);
+    await press(findByLabel(root, 'Select all sessions'));
+
+    expect(hasText(root, '3 Selected')).toBe(true);
+    expect(findOptionalByLabel(root, 'Deselect all sessions')).toBeDefined();
+
+    await press(findByLabel(root, 'Deselect all sessions'));
+
+    expect(hasText(root, 'Select Sessions')).toBe(true);
+    expect(findOptionalByLabel(root, 'Select all sessions')).toBeDefined();
+    act(() => tree.unmount());
+  });
+
+  it('confirms once, deletes every selected session, and leaves selection mode', async () => {
+    const removePersisted = ChatSummaryCache.deletePersistedChatSummary as jest.Mock;
+    const harness = createHarness({
+      chats: [
+        createChat({ id: 'a', title: 'Chat a' }),
+        createChat({ id: 'b', title: 'Chat b' }),
+        createChat({ id: 'c', title: 'Chat c' }),
+      ],
+    });
+    const alert = answerConfirm('confirm');
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await enterSelectionMode(root);
+    await selectChats(root, ['Chat a', 'Chat c']);
+    await press(deleteButton(root));
+
+    expect(alert).toHaveBeenCalledTimes(1);
+    expect(alert).toHaveBeenCalledWith(
+      'Delete 2 sessions?',
+      '2 selected sessions will be removed from this agent’s history.',
+      expect.any(Array),
+      expect.any(Object),
+    );
+    expect(harness.api.deleteChat).toHaveBeenCalledWith('a');
+    expect(harness.api.deleteChat).toHaveBeenCalledWith('c');
+    expect(harness.api.deleteChat).toHaveBeenCalledTimes(2);
+    expect(removePersisted).toHaveBeenCalledWith('profile-1', 'a');
+    expect(removePersisted).toHaveBeenCalledWith('profile-1', 'c');
+    expect(hasText(root, 'Chat a')).toBe(false);
+    expect(hasText(root, 'Chat c')).toBe(false);
+    expect(hasText(root, 'Chat b')).toBe(true);
+    // Selection mode must settle back to the resting drawer once the bulk delete succeeds.
+    expect(hasText(root, 'Agent activity')).toBe(true);
+    expect(findOptionalByLabel(root, 'Select all sessions')).toBeUndefined();
+    expect(findOptionalByLabel(root, 'New chat')).toBeDefined();
+    expect(findOptionalByLabel(root, 'Bridge connected. Edit connection')).toBeDefined();
+    act(() => tree.unmount());
+  });
+
+  it('keeps every selected session when the bulk confirmation is dismissed', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'a', title: 'Chat a' }), createChat({ id: 'b', title: 'Chat b' })],
+    });
+    answerConfirm('cancel');
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await enterSelectionMode(root);
+    await selectChats(root, ['Chat a', 'Chat b']);
+    await press(deleteButton(root));
+
+    expect(harness.api.deleteChat).not.toHaveBeenCalled();
+    expect(hasText(root, 'Chat a')).toBe(true);
+    expect(hasText(root, 'Chat b')).toBe(true);
+    expect(hasText(root, '2 Selected')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('deletes the selection immediately when confirmation is disabled', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'a', title: 'Chat a' }), createChat({ id: 'b', title: 'Chat b' })],
+    });
+    const store = createDrawerStore(harness.api, harness.ws);
+    store.set(confirmSessionDeletionAtom, false);
+    const alert = jest.spyOn(Alert, 'alert');
+    const tree = await renderDrawer(harness, { store });
+    const root = tree.root as Queryable;
+
+    await enterSelectionMode(root);
+    await selectChats(root, ['Chat a']);
+    await press(deleteButton(root));
+
+    expect(alert).not.toHaveBeenCalled();
+    expect(harness.api.deleteChat).toHaveBeenCalledWith('a');
+    expect(hasText(root, 'Chat a')).toBe(false);
+    expect(hasText(root, 'Chat b')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('deletes a selected parent once and forgets its selected descendants', async () => {
+    const harness = createHarness({
+      chats: [
+        createChat({ id: 'a', title: 'Parent' }),
+        createChat({ id: 'b', title: 'Child', parentThreadId: 'a' }),
+        createChat({ id: 'c', title: 'Unrelated' }),
+      ],
+    });
+    const alert = answerConfirm('confirm');
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await enterSelectionMode(root);
+    await selectChats(root, ['Parent', 'Child']);
+    await press(deleteButton(root));
+
+    expect(alert).toHaveBeenCalledWith(
+      'Delete 2 sessions?',
+      '2 selected sessions will be removed from this agent’s history.',
+      expect.any(Array),
+      expect.any(Object),
+    );
+    expect(harness.api.deleteChat).toHaveBeenCalledTimes(1);
+    expect(harness.api.deleteChat).toHaveBeenCalledWith('a');
+    expect(harness.api.forgetChat).toHaveBeenCalledWith('b');
+    expect(hasText(root, 'Parent')).toBe(false);
+    expect(hasText(root, 'Child')).toBe(false);
+    expect(hasText(root, 'Unrelated')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('counts unselected linked sub-sessions in the confirmation', async () => {
+    const harness = createHarness({
+      chats: [
+        createChat({ id: 'a', title: 'Parent' }),
+        createChat({ id: 'b', title: 'Child', parentThreadId: 'a' }),
+        createChat({ id: 'c', title: 'Grandchild', parentThreadId: 'b' }),
+      ],
+    });
+    const alert = answerConfirm('confirm');
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await enterSelectionMode(root);
+    await selectChats(root, ['Parent']);
+    await press(deleteButton(root));
+
+    expect(alert).toHaveBeenCalledWith(
+      'Delete 1 session?',
+      '1 selected session and 2 linked sub-sessions will be removed from this agent’s history.',
+      expect.any(Array),
+      expect.any(Object),
+    );
+    expect(hasText(root, 'Grandchild')).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('restores refused sessions, keeps them selected, and stays in selection mode', async () => {
+    const harness = createHarness({
+      chats: [
+        createChat({ id: 'a', title: 'Chat a' }),
+        createChat({ id: 'b', title: 'Chat b' }),
+        createChat({ id: 'c', title: 'Chat c' }),
+      ],
+    });
+    (harness.api.deleteChat as jest.Mock).mockImplementation((chatId: string) =>
+      chatId === 'b' ? Promise.reject(new Error('delete unsupported')) : Promise.resolve(undefined),
+    );
+    const alert = answerConfirm('confirm');
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await enterSelectionMode(root);
+    await selectChats(root, ['Chat a', 'Chat b']);
+    await press(deleteButton(root));
+
+    expect(alert).toHaveBeenLastCalledWith(
+      'Could not delete 1 session',
+      'The session was restored. Check the bridge connection and try again.',
+    );
+    expect(hasText(root, 'Chat a')).toBe(false);
+    expect(hasText(root, 'Chat b')).toBe(true);
+    expect(hasText(root, 'Chat c')).toBe(true);
+    // The refused session stays selected so a retry does not require rebuilding the selection.
+    expect(hasText(root, '1 Selected')).toBe(true);
+    expect(findOptionalByLabel(root, 'Select all sessions')).toBeDefined();
+    expect(
+      (findChatRow(root, 'Chat b').props['accessibilityState'] as { checked?: boolean }).checked,
+    ).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('starts a new chat when the open session is deleted in bulk', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'a', title: 'Chat a' }), createChat({ id: 'b', title: 'Chat b' })],
+    });
+    answerConfirm('confirm');
+    const store = createDrawerStore(harness.api, harness.ws, { selectedChatId: 'a' });
+    const closeDrawer = jest.fn();
+    store.set(drawerCommandsAtom, { closeDrawer });
+    const tree = await renderDrawer(harness, { store, selectedChatId: 'a' });
+    const root = tree.root as Queryable;
+
+    await enterSelectionMode(root);
+    await selectChats(root, ['Chat a']);
+    await press(deleteButton(root));
+
+    expect(store.get(selectedChatIdAtom)).toBeNull();
+    expect(router.navigate).toHaveBeenCalledWith(routes.newChat('profile-1'));
+    expect(closeDrawer).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+
+  it('drops a session another client deleted from the running selection', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'a', title: 'Chat a' }), createChat({ id: 'b', title: 'Chat b' })],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await enterSelectionMode(root);
+    await selectChats(root, ['Chat a', 'Chat b']);
+    expect(hasText(root, '2 Selected')).toBe(true);
+
+    await act(async () => {
+      harness.emitEvent({ method: 'thread/deleted', params: { threadId: 'a' } });
+      await Promise.resolve();
+    });
+
+    expect(hasText(root, '1 Selected')).toBe(true);
+    expect(deleteButton(root).props['accessibilityLabel']).toBe('Delete 1 selected session');
+    act(() => tree.unmount());
+  });
+
+  it('expands collapsed lanes on entry so the count can never include hidden rows', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'a', title: 'Chat a' }), createChat({ id: 'b', title: 'Chat b' })],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    const lane = root.findAll(
+      (candidate) =>
+        typeof candidate.props['accessibilityLabel'] === 'string' &&
+        candidate.props['accessibilityLabel'].includes('sessions') &&
+        typeof candidate.props['accessibilityHint'] === 'string' &&
+        candidate.props['accessibilityHint'].includes('activity section'),
+    )[0];
+    if (!lane) {
+      throw new Error('Expected a lane header');
+    }
+    await press(lane);
+    expect(hasText(root, 'Chat a')).toBe(false);
+
+    await enterSelectionMode(root);
+
+    expect(hasText(root, 'Chat a')).toBe(true);
+    await press(findByLabel(root, 'Select all sessions'));
+    expect(hasText(root, '2 Selected')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('forgets the selection when the drawer closes', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'a', title: 'Chat a' }), createChat({ id: 'b', title: 'Chat b' })],
+    });
+    const tree = await renderDrawer(harness);
+    const root = tree.root as Queryable;
+
+    await enterSelectionMode(root);
+    await selectChats(root, ['Chat a']);
+    expect(hasText(root, '1 Selected')).toBe(true);
+
+    await act(async () => {
+      tree.update(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 47, left: 0, right: 0, bottom: 34 },
+          }}
+        >
+          <AppThemeProvider theme={theme}>
+            <DrawerContentProbe api={harness.api} ws={harness.ws} active={false} />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    expect(hasText(root, 'Agent activity')).toBe(true);
+    expect(findOptionalByLabel(root, 'Select all sessions')).toBeUndefined();
     act(() => tree.unmount());
   });
 });

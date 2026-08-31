@@ -8,6 +8,7 @@ import {
   APP_SETTINGS_VERSION,
   DEFAULT_WORKSPACE_CHAT_LIMIT,
   parseAppSettings,
+  type RecentModelIdsByAgent,
   type WorkspaceChatLimit,
 } from '@shell/state/appSettings';
 import {
@@ -51,8 +52,10 @@ export interface AppSettingsState {
   agentSettings: AgentDefaultSettingsMap;
   approvalMode: ApprovalMode;
   showToolCalls: boolean;
+  confirmSessionDeletion: boolean;
   workspaceChatLimit: WorkspaceChatLimit;
   recentBrowserTargetUrls: string[];
+  recentModelIdsByAgent: RecentModelIdsByAgent;
 }
 
 export interface AppStateData {
@@ -118,10 +121,12 @@ export function createDefaultAppSettings(): AppSettingsState {
     defaultStartCwd: null,
     preferredAgentId: null,
     agentSettings: {},
-    approvalMode: 'normal',
+    approvalMode: 'all',
     showToolCalls: true,
+    confirmSessionDeletion: true,
     workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
     recentBrowserTargetUrls: [],
+    recentModelIdsByAgent: {},
   };
 }
 
@@ -266,8 +271,10 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
       agentSettings: record['agentSettings'],
       approvalMode: record['approvalMode'],
       showToolCalls: record['showToolCalls'],
+      confirmSessionDeletion: record['confirmSessionDeletion'],
       workspaceChatLimit: record['workspaceChatLimit'],
       recentBrowserTargetUrls: record['recentBrowserTargetUrls'],
+      recentModelIdsByAgent: record['recentModelIdsByAgent'],
     }),
   );
   return {
@@ -276,12 +283,14 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
     agentSettings: parsed.agentSettings,
     approvalMode: parsed.approvalMode,
     showToolCalls: parsed.showToolCalls,
+    confirmSessionDeletion: parsed.confirmSessionDeletion,
     workspaceChatLimit: parsed.workspaceChatLimit,
     recentBrowserTargetUrls: dedupeRecentPreviewTargets(
       parsed.recentBrowserTargetUrls
         .map(normalizePreviewTargetInput)
         .filter((target): target is string => target !== null),
     ),
+    recentModelIdsByAgent: parsed.recentModelIdsByAgent,
   };
 }
 

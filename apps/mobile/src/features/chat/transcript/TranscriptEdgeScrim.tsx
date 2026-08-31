@@ -17,6 +17,9 @@ export function TranscriptEdgeScrim({
   edgeStyle: StyleProp<ViewStyle>;
 }) {
   const theme = useAppTheme();
+  if (bottomInset <= 0) {
+    return null;
+  }
   const bottomHeight = bottomInset + theme.spacing.xxl;
 
   return (

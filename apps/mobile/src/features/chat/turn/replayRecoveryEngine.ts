@@ -40,6 +40,7 @@ export type MainScreenReplayRecoveryEngineContext = MainScreenComposerSubmitActi
 interface ReplayRecoveryInstallGuard {
   liveAssistantByThread: AgUiLiveAssistantMessages;
   runtimeSnapshotsByThread: Record<string, ThreadRuntimeSnapshot>;
+  scheduledPromptsByThread: Record<string, ThreadRuntimeSnapshot['scheduledPrompts']>;
   selectedThreadId: string | null;
 }
 
@@ -53,10 +54,12 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
     bumpAgentRuntimeRevision,
     chatIdRef,
     chatPlanSnapshotsRef,
+    deletedThreadIdsRef,
     mergeChatWithPendingOptimisticMessages,
     pendingOptimisticQueuedMessagesRef,
     pendingOptimisticUserMessagesRef,
     readThreadContextUsage,
+    readThreadSessionTokenTotals,
     replayRecoveryAbortControllerRef,
     replayRecoveryEpochResetPendingRef,
     replayRecoveryGenerationRef,
@@ -110,7 +113,10 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
         return next;
       });
 
-      for (const { chat, queue } of snapshot.threads) {
+      for (const { chat, queue, schedules } of snapshot.threads) {
+        if (deletedThreadIdsRef.current.has(chat.id)) {
+          continue;
+        }
         api.rememberChat(chat);
         const pendingThreadApproval = approvalsByThread.get(chat.id) ?? null;
         const pendingThreadUserInput = userInputsByThread.get(chat.id) ?? null;
@@ -118,10 +124,24 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
         const plan = chat.latestPlan
           ? toPersistedActivePlanState(chat.latestPlan, chat.updatedAt)
           : null;
-        if (
-          threadRuntimeSnapshotsRef.current[chat.id] !== guard.runtimeSnapshotsByThread[chat.id]
-        ) {
+        const runtimeAdvanced =
+          threadRuntimeSnapshotsRef.current[chat.id] !== guard.runtimeSnapshotsByThread[chat.id];
+        if (runtimeAdvanced) {
           runtimeAdvancedThreadIds.add(chat.id);
+          store.set(threadRuntimeSnapshotsAtom, (current) => {
+            const currentThread = current[chat.id];
+            if (currentThread?.scheduledPrompts !== guard.scheduledPromptsByThread[chat.id]) {
+              return current;
+            }
+            return {
+              ...current,
+              [chat.id]: {
+                ...(currentThread ?? { updatedAtMs: Date.now() }),
+                scheduledPrompts: schedules.schedules,
+                updatedAtMs: Date.now(),
+              },
+            };
+          });
           continue;
         }
         store.set(threadRuntimeSnapshotsAtom, (current) => ({
@@ -150,7 +170,9 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
             waitingForToolCalls: queue.waitingForToolCalls,
             steeringInFlight: queue.steeringInFlight,
             queuedMessageError: queue.lastError,
+            scheduledPrompts: schedules.schedules,
             contextUsage: readThreadContextUsage(chat.acpUsage),
+            tokenTotals: readThreadSessionTokenTotals(chat.tokenTotals),
             plan,
             activeTurnId: chat.activeTurnId ?? chat.acpActive?.sourceTurnId ?? null,
             runWatchdogUntil: running ? Date.now() + RUN_WATCHDOG_MS : 0,
@@ -198,8 +220,10 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
       bumpAgentRuntimeRevision,
       chatIdRef,
       chatPlanSnapshotsRef,
+      deletedThreadIdsRef,
       mergeChatWithPendingOptimisticMessages,
       readThreadContextUsage,
+      readThreadSessionTokenTotals,
       setActiveBridgeUiSurfaces,
       setActivePlan,
       setActiveTurnId,
@@ -226,6 +250,12 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
       const installGuard: ReplayRecoveryInstallGuard = {
         liveAssistantByThread: store.get(liveAssistantByThreadAtom),
         runtimeSnapshotsByThread: { ...threadRuntimeSnapshotsRef.current },
+        scheduledPromptsByThread: Object.fromEntries(
+          Object.entries(threadRuntimeSnapshotsRef.current).map(([threadId, runtime]) => [
+            threadId,
+            runtime.scheduledPrompts,
+          ]),
+        ),
         selectedThreadId: chatIdRef.current,
       };
       replayRecoveryAbortControllerRef.current?.abort();
@@ -236,17 +266,18 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
         replayRecoveryRetryTimerRef.current = null;
       }
 
-      const trackedThreadIds = () => [
-        chatIdRef.current,
-        agentDetailThreadId,
-        agentRootThreadIdRef.current,
-        ...relatedAgentThreads.map((thread) => thread.id),
-        ...(api.peekChats()?.map((thread) => thread.id) ?? []),
-        ...(api.peekAllChats()?.map((thread) => thread.id) ?? []),
-        ...Object.keys(threadRuntimeSnapshotsRef.current),
-        ...Object.keys(pendingOptimisticUserMessagesRef.current),
-        ...Object.keys(pendingOptimisticQueuedMessagesRef.current),
-      ];
+      const trackedThreadIds = () =>
+        [
+          chatIdRef.current,
+          agentDetailThreadId,
+          agentRootThreadIdRef.current,
+          ...relatedAgentThreads.map((thread) => thread.id),
+          ...(api.peekChats()?.map((thread) => thread.id) ?? []),
+          ...(api.peekAllChats()?.map((thread) => thread.id) ?? []),
+          ...Object.keys(threadRuntimeSnapshotsRef.current),
+          ...Object.keys(pendingOptimisticUserMessagesRef.current),
+          ...Object.keys(pendingOptimisticQueuedMessagesRef.current),
+        ].filter((threadId) => !threadId || !deletedThreadIdsRef.current.has(threadId));
 
       const attempt = async () => {
         try {
@@ -254,6 +285,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
             api,
             trackedThreadIds(),
             abortController.signal,
+            deletedThreadIdsRef.current,
           );
           if (generation !== replayRecoveryGenerationRef.current) {
             return;
@@ -293,6 +325,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
       agentRootThreadIdRef,
       api,
       chatIdRef,
+      deletedThreadIdsRef,
       installReplayRecoverySnapshot,
       pendingOptimisticQueuedMessagesRef,
       pendingOptimisticUserMessagesRef,

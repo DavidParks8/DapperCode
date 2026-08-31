@@ -82,13 +82,6 @@ export const createToolCardStyles = (theme: AppTheme) =>
       gap: 4,
       paddingLeft: theme.spacing.sm,
     },
-    horizontalOverflowFade: {
-      position: 'absolute',
-      top: 0,
-      right: 0,
-      bottom: 0,
-      width: theme.spacing.xl,
-    },
     panel: {
       marginLeft: theme.spacing.sm,
       marginTop: theme.spacing.xs,
@@ -112,6 +105,29 @@ export const createToolCardStyles = (theme: AppTheme) =>
     sectionLabel: {
       ...theme.typography.metadata,
       color: theme.colors.textMuted,
+    },
+    timingMetrics: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      columnGap: theme.spacing.lg,
+      rowGap: theme.spacing.xs,
+    },
+    timingMetric: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: theme.spacing.xs,
+    },
+    timingLabel: {
+      ...theme.typography.metadata,
+      color: theme.colors.textMuted,
+    },
+    timingValue: {
+      ...theme.typography.caption,
+      color: theme.colors.textSecondary,
+    },
+    timingDuration: {
+      fontVariant: ['tabular-nums'],
     },
     outputSurface: {
       paddingVertical: theme.spacing.xs,

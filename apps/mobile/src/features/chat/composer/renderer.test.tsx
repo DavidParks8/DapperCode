@@ -69,6 +69,7 @@ function baseContext(
     remainingQueuedMessagesCount: 0,
     removeComposerAttachment: jest.fn(),
     selectedChat: null,
+    selectedScheduledPrompts: [],
     selectedThreadRuntimeSnapshot: null,
     setDraft: jest.fn(),
     showBridgeRecoveryBanner: false,

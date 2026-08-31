@@ -4,6 +4,8 @@ import type { MainScreenPickerOptionBuildersContext } from './pickerOptionBuilde
 import { createTestStore, withAppStore } from '@shell/state/testing';
 import type { AppStore } from '@shell/state/types';
 import type { ModelOption } from '@bridge/types/types';
+import { createDefaultAppStateData } from '@shell/state/appState';
+import { recentModelIdsByAgentAtom } from '@shell/state/appState/settings';
 
 jest.mock('@shared/feedback', () => ({
   feedback: {
@@ -46,7 +48,7 @@ function createContext(
     modelOptions: [model],
     readyAgents: [],
     selectEffort: jest.fn().mockResolvedValue(undefined),
-    selectModel: jest.fn().mockResolvedValue(undefined),
+    selectModel: jest.fn().mockReturnValue(true),
     selectPendingAgent: jest.fn(),
     serverDefaultModel: undefined,
     selectedChatId: null,
@@ -66,18 +68,24 @@ function Harness({
   return null;
 }
 
-function render(context: MainScreenPickerOptionBuildersContext) {
-  const store: AppStore = createTestStore();
+function renderWithStore(context: MainScreenPickerOptionBuildersContext, store: AppStore) {
   const resultRef: { current: ReturnType<typeof useMainScreenPickerOptionBuilders> | null } = {
     current: null,
   };
+  let tree: ReturnType<typeof renderer.create> | undefined;
   act(() => {
-    renderer.create(withAppStore(store, <Harness context={context} resultRef={resultRef} />));
+    tree = renderer.create(
+      withAppStore(store, <Harness context={context} resultRef={resultRef} />),
+    );
   });
-  if (!resultRef.current) {
+  if (!resultRef.current || !tree) {
     throw new Error('Hook did not render');
   }
-  return resultRef.current;
+  return { resultRef, tree };
+}
+
+function render(context: MainScreenPickerOptionBuildersContext) {
+  return renderWithStore(context, createTestStore()).resultRef.current!;
 }
 
 describe('useMainScreenPickerOptionBuilders selection haptics', () => {
@@ -97,6 +105,56 @@ describe('useMainScreenPickerOptionBuilders selection haptics', () => {
 
     expect(mockFeedback.selection).toHaveBeenCalledTimes(1);
     expect(context.selectModel).toHaveBeenCalledWith(model.id);
+  });
+
+  it('keeps the last three successfully selected models at the top', () => {
+    const models = ['gpt-a', 'gpt-b', 'gpt-c', 'gpt-d'].map((id): ModelOption => ({
+      ...model,
+      id,
+      displayName: id.toUpperCase(),
+      reasoningEffort: [],
+    }));
+    const data = createDefaultAppStateData();
+    data.settings.recentModelIdsByAgent = {
+      codex: ['gpt-c', 'gpt-a', 'unavailable'],
+    };
+    const store = createTestStore({ data });
+    const context = createContext({ modelOptions: models });
+    const { resultRef, tree } = renderWithStore(context, store);
+
+    expect(resultRef.current!.modelPickerOptions.map((option) => option.key)).toEqual([
+      'gpt-c',
+      'gpt-a',
+      'server-default',
+      'gpt-b',
+      'gpt-d',
+    ]);
+
+    act(() => {
+      resultRef.current!.modelPickerOptions.find((option) => option.key === 'gpt-b')!.onPress();
+    });
+    expect(store.get(recentModelIdsByAgentAtom)['codex']).toEqual(['gpt-b', 'gpt-c', 'gpt-a']);
+    expect(resultRef.current!.modelPickerOptions.map((option) => option.key)).toEqual([
+      'gpt-b',
+      'gpt-c',
+      'gpt-a',
+      'server-default',
+      'gpt-d',
+    ]);
+
+    act(() => {
+      resultRef.current!.modelPickerOptions.find((option) => option.key === 'gpt-d')!.onPress();
+    });
+    expect(store.get(recentModelIdsByAgentAtom)['codex']).toEqual(['gpt-d', 'gpt-b', 'gpt-c']);
+    expect(resultRef.current!.modelPickerOptions.map((option) => option.key)).toEqual([
+      'gpt-d',
+      'gpt-b',
+      'gpt-c',
+      'server-default',
+      'gpt-a',
+    ]);
+
+    act(() => tree.unmount());
   });
 
   it('does not label model rows with the default reasoning effort', () => {

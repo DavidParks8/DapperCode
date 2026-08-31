@@ -86,7 +86,7 @@ function reduceTextMessageEndEvent(
   if (envelope.event.type !== EventType.TEXT_MESSAGE_END) {
     return current;
   }
-  return markTerminal(current, envelope.event.messageId);
+  return markTerminal(current, envelope.event.messageId, timestampIso(envelope.event.timestamp));
 }
 
 function reduceTextMessageChunkEvent(
@@ -446,8 +446,10 @@ const THREAD_EVENT_HANDLERS: Partial<Record<EventType, ThreadEventHandler>> = {
   [EventType.STEP_FINISHED]: reduceStepFinishedEvent,
   [EventType.RAW]: reduceRawEvent,
   [EventType.CUSTOM]: reduceCustomEvent,
-  [EventType.RUN_FINISHED]: (current, envelope) => markRunTerminal(current, envelope.runId),
-  [EventType.RUN_ERROR]: (current, envelope) => markRunTerminal(current, envelope.runId),
+  [EventType.RUN_FINISHED]: (current, envelope) =>
+    markRunTerminal(current, envelope.runId, timestampIso(envelope.event.timestamp)),
+  [EventType.RUN_ERROR]: (current, envelope) =>
+    markRunTerminal(current, envelope.runId, timestampIso(envelope.event.timestamp)),
 };
 
 export function reduceThreadState(

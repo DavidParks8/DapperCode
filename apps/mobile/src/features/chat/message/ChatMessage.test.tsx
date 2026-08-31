@@ -1,6 +1,7 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import type { ReactElement, ReactNode } from 'react';
 import * as Clipboard from 'expo-clipboard';
+import { getDefaultStore } from 'jotai';
 import {
   ActivityIndicator,
   Image,
@@ -17,7 +18,8 @@ import {
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
-import type { ChatMessage as ApiChatMessage } from '@bridge/types/types';
+import { createAgUiThreadMessageState } from '@bridge/agui/agUiMessages';
+import type { Chat, ChatMessage as ApiChatMessage } from '@bridge/types/types';
 import {
   COMPACTION_ACTIVITY_TYPE,
   createActivityMessage,
@@ -25,9 +27,13 @@ import {
 } from '@bridge/messages';
 import { createAppTheme, AppThemeProvider } from '@shared/theme';
 import { ChatMessage, ToolInvocationRow, areChatMessagePropsEqual } from './ChatMessage';
+import { ResponseUsageOverlay } from './ResponseUsageOverlay';
+import { responseUsageOverlayAtom } from '../state/modals';
 import { resetHuggedTextWidthCache } from './UserBubble';
 import { buildToolInvocations, type ToolInvocation } from './toolInvocationModel';
 import { LinearTransition, ReduceMotion } from '@shared/testing/reanimatedMock';
+import { projectTranscript } from '../transcript/controllers/projectionController';
+import { isMermaidFence } from './markdownRules';
 
 type QueryableTestInstance = ReactTestInstance & {
   type: unknown;
@@ -57,6 +63,25 @@ type TestMessageInput = Omit<ApiChatMessage, 'role' | 'content'> & {
 
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(true) }));
 
+const renderedMessages = new Set<ReactTestRenderer>();
+
+afterEach(() => {
+  act(() => {
+    for (const tree of renderedMessages) {
+      tree.unmount();
+    }
+    renderedMessages.clear();
+    getDefaultStore().set(responseUsageOverlayAtom, null);
+  });
+});
+
+jest.mock('@expo/vector-icons', () => {
+  const React = jest.requireActual('react');
+  const ReactNative = jest.requireActual('react-native');
+  return {
+    Ionicons: (props: Record<string, unknown>) => React.createElement(ReactNative.View, props),
+  };
+});
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 
 jest.mock('react-native-gesture-handler', () => {
@@ -323,6 +348,92 @@ describe('ChatMessage markdown formatting', () => {
     act(() => tree.unmount());
   });
 
+  it('shows a diagram placeholder while an incomplete Mermaid fence streams, then renders it', () => {
+    const pending: ApiChatMessage = {
+      id: 'msg_streamed_mermaid',
+      role: 'assistant',
+      content: '```mermaid\ngraph TD\n  A -->',
+      createdAt: '2026-04-17T00:00:00.000Z',
+      pending: true,
+    };
+    const tree = renderMessage(pending);
+    expect(
+      tree.root.findAll((node) => node.type === View && node.props['testID'] === 'chat-code-block'),
+    ).toHaveLength(0);
+    expect(
+      tree.root.findAll(
+        (node) => node.type === View && node.props['testID'] === 'mermaid-streaming-placeholder',
+      ),
+    ).toHaveLength(1);
+    expect(
+      tree.root.findByProps({
+        accessibilityRole: 'progressbar',
+        accessibilityLabel: 'Building Mermaid diagram',
+      }),
+    ).toBeTruthy();
+    expect(
+      tree.root.findAll((node) => node.type === View && node.props['testID'] === 'mermaid-diagram'),
+    ).toHaveLength(0);
+
+    act(() => {
+      tree.update(
+        renderMessageElement({
+          ...pending,
+          content: '```mermaid\ngraph TD\n  A --> B\n```',
+          pending: false,
+        }),
+      );
+    });
+    expect(
+      tree.root.findAll((node) => node.type === View && node.props['testID'] === 'chat-code-block'),
+    ).toHaveLength(0);
+    expect(
+      tree.root.findAll(
+        (node) => node.type === View && node.props['testID'] === 'mermaid-streaming-placeholder',
+      ),
+    ).toHaveLength(0);
+    expect(
+      tree.root.findAll((node) => node.type === View && node.props['testID'] === 'mermaid-diagram'),
+    ).toHaveLength(1);
+    act(() => tree.unmount());
+  });
+
+  it('recognizes Mermaid as the first case-insensitive info token and preserves other fences', () => {
+    expect(isMermaidFence(' Mermaid theme=dark ')).toBe(true);
+    expect(isMermaidFence('mermaid-js')).toBe(false);
+    expect(isMermaidFence('typescript mermaid')).toBe(false);
+    expect(isMermaidFence(null)).toBe(false);
+
+    const tree = renderMessage({
+      id: 'msg_multiple_mermaid',
+      role: 'assistant',
+      content: [
+        '``` Mermaid theme=dark',
+        'graph TD',
+        '  A --> B',
+        '```',
+        '',
+        '```mermaid',
+        'sequenceDiagram',
+        '  A->>B: Hello',
+        '```',
+        '',
+        '```typescript',
+        'const diagram = "raw code";',
+        '```',
+      ].join('\n'),
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+
+    expect(
+      tree.root.findAll((node) => node.type === View && node.props['testID'] === 'mermaid-diagram'),
+    ).toHaveLength(2);
+    expect(
+      tree.root.findAll((node) => node.type === View && node.props['testID'] === 'chat-code-block'),
+    ).toHaveLength(1);
+    act(() => tree.unmount());
+  });
+
   it('keeps overflowing JSON inside a full-width horizontal scroll viewport', () => {
     const longLine = JSON.stringify({
       request: {
@@ -444,6 +555,77 @@ describe('ChatMessage markdown formatting', () => {
     };
 
     expect(areChatMessagePropsEqual({ message: previous }, { message: next })).toBe(true);
+  });
+
+  it('offers the response info affordance under an assistant message that reported usage', () => {
+    const tree = renderMessage({
+      id: 'msg_usage_render',
+      role: 'assistant',
+      content: 'All set.',
+      createdAt: '2026-04-17T00:00:00.000Z',
+      usage: {
+        inputTokens: 8_000,
+        outputTokens: 500,
+        reasoningTokens: null,
+        cachedReadTokens: 24_000,
+        cachedWriteTokens: null,
+        totalTokens: 32_500,
+        model: 'GPT-5.6 Sol',
+      },
+    });
+    const infoButton = tree.root.findAll(
+      (node) => node.props['accessibilityLabel'] === 'Response details',
+    )[0];
+    expect(infoButton).toBeDefined();
+
+    act(() => {
+      (infoButton!.props['onPress'] as () => void)();
+    });
+
+    expect(
+      tree.root.findAll(
+        (node) =>
+          typeof node.props['accessibilityLabel'] === 'string' &&
+          node.props['accessibilityLabel'].startsWith('Response details. Model: GPT-5.6 Sol'),
+      ).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('repaints a settled response once the turn reports what it cost', () => {
+    const previous: ApiChatMessage = {
+      id: 'msg_usage_arrives',
+      role: 'assistant',
+      content: 'Done',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    };
+    const withUsage: ApiChatMessage = {
+      ...previous,
+      usage: {
+        inputTokens: 10,
+        outputTokens: 2,
+        reasoningTokens: null,
+        cachedReadTokens: null,
+        cachedWriteTokens: null,
+        totalTokens: 12,
+        model: 'GPT-5.6 Sol',
+      },
+    };
+
+    expect(areChatMessagePropsEqual({ message: previous }, { message: withUsage })).toBe(false);
+    expect(areChatMessagePropsEqual({ message: withUsage }, { message: { ...withUsage } })).toBe(
+      true,
+    );
+    expect(
+      areChatMessagePropsEqual(
+        { message: withUsage },
+        {
+          message: {
+            ...withUsage,
+            usage: { ...withUsage.usage!, model: 'Claude Opus 5' },
+          },
+        },
+      ),
+    ).toBe(false);
   });
 
   it('detects a real change nested inside a resource part', () => {
@@ -934,7 +1116,10 @@ describe('ChatMessage transcript width', () => {
           message={createActivityMessage(
             'subagent-width',
             SUBAGENT_ACTIVITY_TYPE,
-            { text: 'Delegated to explore agent' },
+            {
+              text: 'Delegated to explore agent',
+              subAgent: { receiverThreadIds: ['child-width'] },
+            },
             '2026-04-17T00:00:00.000Z',
           )}
         />
@@ -1065,6 +1250,47 @@ describe('ChatMessage user bubble', () => {
     expect(bubbleStyle.borderColor).toBe(theme.colors.userBubbleBorder);
     expect(textStyle.color).toBe(theme.colors.userBubbleText);
 
+    act(() => tree.unmount());
+  });
+
+  it('formats a slash command only when it leads the user message', () => {
+    const theme = createAppTheme('dark');
+    const tree = renderMessage({
+      id: 'user-slash-command',
+      role: 'user',
+      content: '/status for @report.txt',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+    const command = tree.root.findByProps({ testID: 'user-slash-command' });
+    const commandStyle = (StyleSheet.flatten(command.props['style'] as never) ?? {}) as {
+      backgroundColor?: string;
+      color?: string;
+      fontWeight?: string;
+    };
+
+    expect(flattenRenderedText(command.props['children'])).toBe('/status');
+    expect(commandStyle).toMatchObject({
+      backgroundColor: theme.colors.userBubbleInset,
+      color: theme.colors.userBubbleText,
+      fontWeight: '600',
+    });
+    expect(
+      tree.root
+        .findAll((node) => node.type === Text)
+        .some((node) => flattenRenderedText(node.props['children']) === '@report.txt'),
+    ).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('leaves slash syntax later in a user message as regular text', () => {
+    const tree = renderMessage({
+      id: 'user-inline-slash',
+      role: 'user',
+      content: 'Please run /status for this chat.',
+      createdAt: '2026-04-17T00:00:00.000Z',
+    });
+
+    expect(tree.root.findAllByProps({ testID: 'user-slash-command' })).toHaveLength(0);
     act(() => tree.unmount());
   });
 
@@ -1526,13 +1752,86 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => tree.unmount());
   });
 
+  it('opens a running agent after its live child link reaches a persisted card', () => {
+    const onOpenSubAgentThread = jest.fn();
+    const persisted = createActivityMessage(
+      'subagent:task-running',
+      SUBAGENT_ACTIVITY_TYPE,
+      {
+        text: '• Sub-agent working\n  Status: running\n  Latest: Discovering child session',
+        subAgent: {
+          toolCallId: 'task-running',
+          senderThreadId: 'parent',
+          receiverThreadIds: [],
+          agentStatus: 'running',
+        },
+      },
+      '2026-04-17T00:00:00.000Z',
+    );
+    const live = createActivityMessage(
+      'subagent:task-running',
+      SUBAGENT_ACTIVITY_TYPE,
+      {
+        text: '• Sub-agent working\n  Status: running',
+        subAgent: {
+          toolCallId: 'task-running',
+          senderThreadId: 'parent',
+          receiverThreadIds: ['child-running'],
+          agentStatus: 'running',
+        },
+      },
+      '2026-04-17T00:00:01.000Z',
+    );
+    const parent: Chat = {
+      id: 'parent',
+      title: 'Parent',
+      status: 'running',
+      createdAt: '2026-04-17T00:00:00.000Z',
+      updatedAt: '2026-04-17T00:00:01.000Z',
+      statusUpdatedAt: '2026-04-17T00:00:01.000Z',
+      lastMessagePreview: 'Sub-agent working',
+      messages: [persisted],
+    };
+    const message = requireTestValue(
+      projectTranscript({
+        chat: parent,
+        parentChat: null,
+        showToolCalls: true,
+        threadStatuses: new Map([['child-running', 'running']]),
+        liveMessageState: {
+          ...createAgUiThreadMessageState(),
+          messages: [live],
+        },
+      }).messages.find((candidate) => candidate.id === persisted.id),
+      'projected running sub-agent card',
+    );
+    const tree = renderMessage(message, { onOpenSubAgentThread });
+    const control = requireTestValue(
+      tree.root.findAll(
+        (node) =>
+          node.props['accessibilityLabel'] === 'Open agent chat' &&
+          typeof node.props['onPress'] === 'function',
+      )[0],
+      'open running sub-agent control',
+    );
+
+    expect(control.props['accessibilityState']).toMatchObject({ disabled: false });
+    act(() => readOnPress(control.props)());
+    expect(onOpenSubAgentThread).toHaveBeenCalledWith('child-running');
+    act(() => tree.unmount());
+  });
+
   it('animates a running subagent card and stops after completion', () => {
     const running = createActivityMessage(
       'subagent-live',
       SUBAGENT_ACTIVITY_TYPE,
       {
         text: '• Sub-agent working\n  Status: running\n  Latest: Working on Read repository',
-        subAgent: { toolCallId: 'task-live', agentStatus: 'running', receiverThreadIds: [] },
+        subAgent: {
+          toolCallId: 'task-live',
+          agentStatus: 'running',
+          receiverThreadIds: ['child-live'],
+        },
       },
       '2026-04-17T00:00:00.000Z',
     );
@@ -1548,7 +1847,11 @@ describe('ChatMessage system timeline matrices', () => {
       SUBAGENT_ACTIVITY_TYPE,
       {
         text: '• Sub-agent completed\n  Status: completed\n  Latest: Returned result',
-        subAgent: { toolCallId: 'task-live', agentStatus: 'completed', receiverThreadIds: [] },
+        subAgent: {
+          toolCallId: 'task-live',
+          agentStatus: 'completed',
+          receiverThreadIds: ['child-live'],
+        },
       },
       '2026-04-17T00:00:01.000Z',
     );
@@ -1567,6 +1870,8 @@ describe('ChatMessage system timeline matrices', () => {
       kind: 'execute',
       status: 'failed',
       title: 'npm run build',
+      startedAtMs: null,
+      completedAtMs: null,
       monospaceTitle: true,
       isError: true,
       locations: [{ path: 'src/app.ts', line: 12 }],
@@ -1611,6 +1916,8 @@ describe('ChatMessage system timeline matrices', () => {
       kind: 'edit',
       status: 'completed',
       title: 'Edit src/app.ts',
+      startedAtMs: null,
+      completedAtMs: null,
       monospaceTitle: false,
       isError: false,
       locations: [],
@@ -1661,6 +1968,8 @@ describe('ChatMessage system timeline matrices', () => {
       kind: 'read',
       status: 'in_progress',
       title: 'Read package.json',
+      startedAtMs: null,
+      completedAtMs: null,
       monospaceTitle: false,
       isError: false,
       locations: [],
@@ -1739,7 +2048,7 @@ describe('ChatMessage system timeline matrices', () => {
     act(() => rendered.unmount());
   });
 
-  it('renders disabled reasoning, subagent, and empty tool edge cases', () => {
+  it('renders disabled reasoning and suppresses an unlinked subagent edge case', () => {
     const reasoning = renderMessage({
       id: 'reasoning-empty',
       role: 'system',
@@ -1764,11 +2073,9 @@ describe('ChatMessage system timeline matrices', () => {
       createdAt: '2026-04-17T00:00:00.000Z',
     });
     expect(
-      requireTestValue(
-        subagent.root.findAll((node) => node.props['accessibilityLabel'] === 'Open agent chat')[0],
-        'indexed test value',
-      ).props['accessibilityState'],
-    ).toEqual({ disabled: true });
+      subagent.root.findAll((node) => node.props['accessibilityLabel'] === 'Open agent chat'),
+    ).toHaveLength(0);
+    expect(hasRenderedText(subagent.root, 'Agent failed')).toBe(false);
     act(() => subagent.unmount());
 
     expect(buildToolInvocations([])).toEqual([]);
@@ -1785,6 +2092,7 @@ describe('ChatMessage system timeline matrices', () => {
       role: 'system',
       systemKind: 'subAgent',
       content: `• ${title}`,
+      subAgentMeta: { receiverThreadIds: [`child-${title}`] },
       createdAt: '2026-04-17T00:00:00.000Z',
     });
     expect(tree.root.findAll((node) => node.props['name'] === icon).length).toBeGreaterThan(0);
@@ -1819,20 +2127,35 @@ function renderMessage(
 ): QueryableRenderer {
   let tree: ReactTestRenderer | undefined;
   act(() => {
-    tree = renderer.create(
-      <SafeAreaProvider
-        initialMetrics={{
-          frame: { x: 0, y: 0, width: 390, height: 844 },
-          insets: { top: 59, right: 0, bottom: 34, left: 0 },
-        }}
-      >
-        <AppThemeProvider theme={createAppTheme('dark')}>
-          <ChatMessage message={toOfficialMessage(message)} {...props} />
-        </AppThemeProvider>
-      </SafeAreaProvider>,
-    );
+    tree = renderer.create(renderMessageElement(message, props));
   });
-  return expectValue(tree) as QueryableRenderer;
+  const rendered = expectValue(tree) as QueryableRenderer;
+  renderedMessages.add(rendered);
+  return rendered;
+}
+
+function renderMessageElement(
+  message: ApiChatMessage | TestMessageInput,
+  props: {
+    bridgeUrl?: string;
+    bridgeToken?: string;
+    onOpenLocalPreview?: (url: string) => void;
+    onOpenSubAgentThread?: (id: string) => void;
+  } = {},
+): ReactElement {
+  return (
+    <SafeAreaProvider
+      initialMetrics={{
+        frame: { x: 0, y: 0, width: 390, height: 844 },
+        insets: { top: 59, right: 0, bottom: 34, left: 0 },
+      }}
+    >
+      <AppThemeProvider theme={createAppTheme('dark')}>
+        <ChatMessage message={toOfficialMessage(message)} {...props} />
+        <ResponseUsageOverlay />
+      </AppThemeProvider>
+    </SafeAreaProvider>
+  );
 }
 
 function onlyInvocation(messages: TestMessageInput[]): ToolInvocation {
@@ -1893,7 +2216,14 @@ function toOfficialMessage(message: ApiChatMessage | TestMessageInput): ApiChatM
 }
 
 function hasRenderedText(root: QueryableTestInstance, text: string): boolean {
-  return root.findAll((node) => flattenTestTreeText(node).includes(text)).length > 0;
+  if (root.findAll((node) => flattenTestTreeText(node).includes(text)).length > 0) {
+    return true;
+  }
+  return root.findAllByType('mock-web-view').some((node) => {
+    const source = node.props['source'] as { html?: unknown } | undefined;
+    const html = source?.html;
+    return typeof html === 'string' && decodeHtmlText(html).includes(text);
+  });
 }
 
 /** The resolved height of the rendered sub-agent card, which must not depend on its state. */
@@ -1995,6 +2325,15 @@ function flattenTestTreeText(node: QueryableTestInstance): string {
         : flattenTestTreeText(child as QueryableTestInstance),
     )
     .join('');
+}
+
+function decodeHtmlText(value: string): string {
+  return value
+    .replace(/&lt;/gu, '<')
+    .replace(/&gt;/gu, '>')
+    .replace(/&quot;/gu, '"')
+    .replace(/&#39;/gu, "'")
+    .replace(/&amp;/gu, '&');
 }
 
 function flattenRenderedText(value: unknown): string {

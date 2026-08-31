@@ -19,6 +19,7 @@ lives under `apps/mobile/src/shell/state`, with feature-owned state under each f
 | `shell/navigation/actions.ts`              | Router-backed application commands that also coordinate related domain atoms                        |
 | `shell/state/chat/*`                       | Selected/active/pending chat data and the chat-open transition                                      |
 | `shell/state/drawer/atoms.ts`              | Imperative access to the Router drawer from custom in-screen headers                                |
+| `shell/state/drawer/contentAtoms.ts`       | Per-drawer source, derived view-slice, and action atoms for loading, filtering, and selection        |
 | `shell/state/commands.ts`                  | Screen-registered imperative entry points (replaces `useImperativeHandle` refs)                     |
 | `shell/state/theme.ts`                     | Theme derived from settings and the system colour scheme                                            |
 | `features/chat/state/*`                    | MainScreen screen state, grouped by domain, plus the reset registry                                 |
@@ -32,6 +33,10 @@ lives under `apps/mobile/src/shell/state`, with feature-owned state under each f
   prop should be an `atom(null, (get, set, …) => …)` so any component can trigger it with `useSetAtom`.
 - **Read synchronously with `useStore()`** when a callback needs the current value without
   subscribing. This replaces the old "mirror state into a ref" pattern.
+- **Scope transient view atoms by atom identity when component instances must not share them.** The
+  drawer creates one stable atom bundle per profile/client and puts only those atom handles in
+  context. Leaf components subscribe to narrow derived slices, so context never broadcasts changing
+  view-model values and one profile cannot inherit another profile's search or selection state.
 - **Never put a thenable in an atom.** jotai suspends on any value with a `then` method, which renders
   the subtree as `null` with no error. Test doubles built from `Proxy` must return `undefined` for
   `then`.

@@ -29,7 +29,11 @@ import {
   type ScenarioChat,
   type ScenarioOverrides,
 } from './scenario.ts';
-import { conforms, type BridgeThreadCreateResponse } from './shapes.ts';
+import {
+  conforms,
+  type BridgeThreadCreateResponse,
+  type BridgeThreadSchedulesState,
+} from './shapes.ts';
 
 export interface RecordedRequest {
   readonly method: string;
@@ -502,8 +506,15 @@ function registerDefaultHandlers(handlers: Map<string, RpcHandler>, context: Han
   handlers.set('bridge/thread/queue/cancel', (params) =>
     emptyQueueState(readStringParam(params, 'threadId') ?? 'unknown'),
   );
+  handlers.set('bridge/thread/schedules/read', (params) =>
+    conforms<BridgeThreadSchedulesState>({
+      threadId: readStringParam(params, 'threadId') ?? 'unknown',
+      schedules: [],
+    }),
+  );
 
   handlers.set('thread/resume', () => ({ model: 'harness-model', effort: 'medium' }));
+  handlers.set('thread/approvalPolicy/set', () => ({ ok: true }));
   // The client throws unless these echo the updated thread back, so `{ ok: true }` would be a
   // shape the real bridge never sends.
   handlers.set('thread/config/set', (params) => ({

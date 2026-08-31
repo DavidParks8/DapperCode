@@ -13,6 +13,7 @@ import { setMockReducedMotionEnabled } from '@shared/testing/reanimatedMock';
 import { OnboardingScreen, type OnboardingMode } from './OnboardingScreen';
 
 const mockRequestCameraPermission = jest.fn().mockResolvedValue({ granted: false });
+const mockWsConstructor = jest.fn();
 const mockWsConnect = jest.fn();
 const mockWsRequest = jest.fn().mockResolvedValue({ status: 'ok' });
 const mockWsDisconnect = jest.fn();
@@ -42,6 +43,9 @@ jest.mock('expo-camera', () => ({
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('@bridge/ws/ws', () => ({
   HostBridgeWsClient: class {
+    constructor(baseUrl: string, options: unknown) {
+      mockWsConstructor(baseUrl, options);
+    }
     connect = mockWsConnect;
     request = mockWsRequest;
     disconnect = mockWsDisconnect;
@@ -244,6 +248,14 @@ describe('OnboardingScreen behavior', () => {
       }),
     );
     expect(mockWsConnect).toHaveBeenCalledTimes(1);
+    expect(mockWsConstructor).toHaveBeenCalledWith(
+      'http://127.0.0.1:3001/path',
+      expect.objectContaining({
+        clientType: 'mobile',
+        clientName: 'DapperCode Mobile',
+        getClientForeground: expect.any(Function),
+      }),
+    );
     expect(mockWsConnect.mock.invocationCallOrder[0]).toBeLessThan(
       mockWsRequest.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
     );
@@ -252,6 +264,7 @@ describe('OnboardingScreen behavior', () => {
     expect(result.onSave).toHaveBeenCalledWith({
       bridgeUrl: 'http://127.0.0.1:3001/path',
       bridgeToken: 'token',
+      workspaceId: null,
     });
     expect(hasText(root, 'Connected. URL and token both verified.')).toBe(true);
     act(() => result.tree.unmount());
@@ -500,11 +513,44 @@ describe('OnboardingScreen behavior', () => {
       expect.objectContaining({ disabled: true, busy: true }),
     );
     await act(async () => {
-      jest.advanceTimersByTime(7000);
+      jest.advanceTimersByTime(70_000);
       await checkPromise;
     });
     expect(abort).toHaveBeenCalled();
     expect(hasText(root, 'Connection error.')).toBe(true);
+    act(() => result.tree.unmount());
+  });
+
+  it('cancels a cold save probe without saving when connection setup is dismissed', async () => {
+    (global.fetch as jest.Mock).mockImplementation(
+      (_url: string, options: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          options.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          });
+        }),
+    );
+    const result = await renderOnboarding({
+      mode: 'add',
+      initialBridgeUrl: 'http://127.0.0.1:3001',
+      initialBridgeToken: 'token',
+      onCancel: jest.fn(),
+    });
+    const root = result.tree.root as Queryable;
+    let savePromise: Promise<void> | undefined;
+    act(() => {
+      savePromise = (findByLabel(root, 'Continue').props['onPress'] as () => Promise<void>)();
+    });
+
+    await press(findByLabel(root, 'Cancel connection setup'));
+    await act(async () => {
+      await savePromise;
+    });
+
+    expect(result.onSave).not.toHaveBeenCalled();
+    expect(result.onCancel).toHaveBeenCalled();
+    expect(mockWsConnect).not.toHaveBeenCalled();
+    expect(hasText(root, 'Connection error.')).toBe(false);
     act(() => result.tree.unmount());
   });
 
@@ -737,6 +783,7 @@ describe('OnboardingScreen behavior', () => {
     expect(result.onSave).toHaveBeenCalledWith({
       bridgeUrl: 'http://127.0.0.1:3001',
       bridgeToken: 'token',
+      workspaceId: null,
     });
     // No redundant success haptic for a save that skipped a fresh probe.
     expect(feedback.success as jest.Mock).not.toHaveBeenCalled();
@@ -839,6 +886,7 @@ describe('OnboardingScreen behavior', () => {
     expect(result.onSave).toHaveBeenCalledWith({
       bridgeUrl: 'http://127.0.0.1:4002',
       bridgeToken: 'token-b',
+      workspaceId: null,
     });
     act(() => result.tree.unmount());
   });
@@ -870,6 +918,7 @@ describe('OnboardingScreen behavior', () => {
     expect(result.onSave).toHaveBeenCalledWith({
       bridgeUrl: 'http://127.0.0.1:9002',
       bridgeToken: 'token-b',
+      workspaceId: null,
     });
     act(() => result.tree.unmount());
   });

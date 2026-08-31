@@ -1,0 +1,7 @@
+<Project>
+  <ItemDefinitionGroup>
+    <Link>
+      <AdditionalDependencies>%(AdditionalDependencies);DWriteCore.lib</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+</Project>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package>
+  <metadata>
+    <id>Example.ExpressionOnly.Runtime</id>
+    <version>2.0.0</version>
+    <license type="expression">MIT</license>
+  </metadata>
+</package>

@@ -6,6 +6,7 @@ jest.mock('react-native-reanimated', () => require('@shared/testing/reanimatedMo
 jest.mock('react-native-worklets', () => require('@shared/testing/workletsMock'));
 jest.mock('react-native-gesture-handler', () => require('@shared/testing/gestureHandlerMock'));
 jest.mock('expo-glass-effect', () => require('@shared/testing/glassEffectMock'));
+jest.mock('react-native-webview', () => require('@shared/testing/webViewMock'));
 jest.mock('expo-haptics', () => ({
   ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy' },
   NotificationFeedbackType: { Success: 'success', Warning: 'warning', Error: 'error' },

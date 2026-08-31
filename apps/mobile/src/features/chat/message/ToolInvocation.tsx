@@ -1,13 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useAtom } from 'jotai';
 import { memo, useCallback, useMemo } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
-import Animated, { FadeIn, FadeOut, LinearTransition, ReduceMotion } from 'react-native-reanimated';
+import Animated, { FadeIn, LinearTransition, ReduceMotion } from 'react-native-reanimated';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import { expandedToolInvocationIdsAtom } from '../state/toolInvocations';
 import { useAppTheme } from '@shared/theme';
+import { HorizontalFadeMask } from '@shared/ui/HorizontalFadeMask';
 import { motionDuration } from '@shared/ui/motion';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { createStyles } from './styles';
@@ -19,7 +19,7 @@ import {
   resolveToolInvocationHeader,
   type ToolInvocationHeader,
 } from './toolInvocationPresentation';
-import { horizontalFadeColors, useHorizontalOverflow } from './useHorizontalOverflow';
+import { useHorizontalOverflow } from '@shared/ui/useHorizontalOverflow';
 import type { ChatToolStatus } from '@bridge/types/types';
 
 const TOOL_ROW_VISIBLE_SIZE = { width: 200, height: 26 };
@@ -65,7 +65,13 @@ function ToolHeaderText({
 
   if (invocation.monospaceTitle && header.subject) {
     return (
-      <View style={styles.horizontalScrollFrame}>
+      <HorizontalFadeMask
+        style={styles.horizontalScrollFrame}
+        active={commandOverflow.overflowing}
+        fadeStart={commandOverflow.showStartFade}
+        fadeEnd={commandOverflow.showEndFade}
+        testID="tool-command-overflow"
+      >
         <ScrollView
           horizontal
           bounces={false}
@@ -99,17 +105,7 @@ function ToolHeaderText({
             </ToolHeaderShimmer>
           </Pressable>
         </ScrollView>
-        {commandOverflow.showEndFade ? (
-          <LinearGradient
-            colors={horizontalFadeColors(theme.colors.bgMain)}
-            start={{ x: 0, y: 0.5 }}
-            end={{ x: 1, y: 0.5 }}
-            pointerEvents="none"
-            style={styles.horizontalOverflowFade}
-            testID="tool-command-overflow-fade"
-          />
-        ) : null}
-      </View>
+      </HorizontalFadeMask>
     );
   }
 
@@ -189,23 +185,35 @@ function ToolTrailing({
   );
 }
 
+function shouldAnimateToolInvocation(
+  invocation: ToolInvocation,
+  threadRunning: boolean,
+  animationVisible: boolean,
+): boolean {
+  return (
+    animationVisible && threadRunning && invocation.status === 'in_progress' && !invocation.isError
+  );
+}
+
 export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
   invocation,
   bridgeUrl = null,
   bridgeToken = null,
   threadRunning = true,
+  animationVisible = true,
 }: {
   invocation: ToolInvocation;
   bridgeUrl?: string | null;
   bridgeToken?: string | null;
   threadRunning?: boolean;
+  animationVisible?: boolean;
 }) {
   const theme = useAppTheme();
   const messageStyles = useMemo(() => createStyles(theme), [theme]);
   const styles = useMemo(() => createToolCardStyles(theme), [theme]);
   const [expandedIds, setExpandedIds] = useAtom(expandedToolInvocationIdsAtom);
   const expanded = expandedIds[invocation.id] === true;
-  const expandable = !invocation.empty || invocation.truncated;
+  const expandable = !invocation.empty || invocation.truncated || invocation.startedAtMs !== null;
   const header = useMemo(
     () => resolveToolInvocationHeader(invocation, threadRunning),
     [invocation, threadRunning],
@@ -215,7 +223,7 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
       setExpandedIds((previous) => ({ ...previous, [invocation.id]: !previous[invocation.id] }));
     }
   }, [expandable, invocation.id, setExpandedIds]);
-  const running = threadRunning && invocation.status === 'in_progress' && !invocation.isError;
+  const running = shouldAnimateToolInvocation(invocation, threadRunning, animationVisible);
 
   return (
     <Animated.View
@@ -297,7 +305,7 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
       {expanded ? (
         <Animated.View
           entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
-          exiting={FadeOut.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+          testID="tool-output-container"
         >
           <ToolInvocationOutput
             invocation={invocation}

@@ -296,4 +296,89 @@ describe('SwipeToDeleteRow', () => {
 
     expect(latestMockGesture('Pan').config['enabled']).toBe(false);
   });
+
+  it('unmounts the destructive action while swiping is disabled', () => {
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <AppThemeProvider theme={theme}>
+          <SwipeToDeleteRow
+            deleteAccessibilityLabel="Delete Session one"
+            enabled={false}
+            onDelete={jest.fn()}
+          >
+            <Text>Session one</Text>
+          </SwipeToDeleteRow>
+        </AppThemeProvider>,
+      );
+    });
+
+    const findAction = () =>
+      (tree.root as Queryable).findAll(
+        (node) => node.props['accessibilityLabel'] === 'Delete Session one',
+      );
+    expect(findAction()).toHaveLength(0);
+    expect(
+      (tree.root as Queryable).findAll(
+        (node) => node.props['testID'] === 'swipe-delete-action-layer',
+      ),
+    ).toHaveLength(0);
+
+    act(() => {
+      tree.update(
+        <AppThemeProvider theme={theme}>
+          <SwipeToDeleteRow deleteAccessibilityLabel="Delete Session one" onDelete={jest.fn()}>
+            <Text>Session one</Text>
+          </SwipeToDeleteRow>
+        </AppThemeProvider>,
+      );
+    });
+
+    expect(findAction().length).toBeGreaterThan(0);
+  });
+
+  it('closes an open row when swiping becomes disabled', () => {
+    const onDelete = jest.fn();
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <AppThemeProvider theme={theme}>
+          <SwipeToDeleteRow deleteAccessibilityLabel="Delete Session one" onDelete={onDelete}>
+            <Text>Session one</Text>
+          </SwipeToDeleteRow>
+        </AppThemeProvider>,
+      );
+    });
+    const translateXValue = requireTestValue(mockSharedValues[0], 'translate shared value');
+    act(() => {
+      const layoutNode = requireTestValue(
+        (tree.root as Queryable).findAll((node) => typeof node.props['onLayout'] === 'function')[0],
+        'indexed test value',
+      );
+      (layoutNode.props['onLayout'] as (event: unknown) => void)({
+        nativeEvent: { layout: { width: ROW_WIDTH, height: 68 } },
+      });
+    });
+    act(() => {
+      simulatePan(latestMockGesture('Pan'), [{ translationX: -70 }], { velocityX: 0 });
+    });
+    expect(translateXValue.value).toBe(-SWIPE_ACTION_WIDTH);
+
+    act(() => {
+      tree.update(
+        <AppThemeProvider theme={theme}>
+          <SwipeToDeleteRow
+            deleteAccessibilityLabel="Delete Session one"
+            enabled={false}
+            onDelete={onDelete}
+          >
+            <Text>Session one</Text>
+          </SwipeToDeleteRow>
+        </AppThemeProvider>,
+      );
+    });
+
+    expect(translateXValue.value).toBe(0);
+    expect(onDelete).not.toHaveBeenCalled();
+  });
 });

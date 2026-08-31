@@ -1,13 +1,17 @@
 import type {
   BridgeQueuedMessage,
+  BridgeScheduledPrompt,
   BridgeThreadQueueError,
   BridgeUiSurface,
   PendingApproval,
   PendingUserInputRequest,
   RunEvent,
+  SessionTokenTotals,
   TurnPlanStep,
 } from '@bridge/types/types';
 import { screenAtom } from './registry';
+
+export type { SessionTokenTotals };
 
 export type ActivityTone = 'running' | 'complete' | 'error' | 'idle';
 
@@ -47,7 +51,9 @@ export interface ThreadRuntimeSnapshot {
   waitingForToolCalls?: boolean;
   steeringInFlight?: boolean;
   queuedMessageError?: BridgeThreadQueueError | null;
+  scheduledPrompts?: BridgeScheduledPrompt[];
   contextUsage?: ThreadContextUsage | null;
+  tokenTotals?: SessionTokenTotals | null;
   plan?: ActivePlanState | null;
   activeTurnId?: string | null;
   runWatchdogUntil?: number;

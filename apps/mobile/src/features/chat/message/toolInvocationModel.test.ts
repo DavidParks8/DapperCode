@@ -40,7 +40,12 @@ describe('buildToolInvocations', () => {
         toolCalls: [
           { id: 'call-1', type: 'function', function: { name: 'read', arguments: '{}' } },
         ],
-        toolMeta: meta({ kind: 'read', status: 'in_progress', title: 'Read package.json' }),
+        toolMeta: meta({
+          kind: 'read',
+          status: 'in_progress',
+          title: 'Read package.json',
+          startedAtMs: 1_000,
+        }),
       },
       toolMessage(
         'tool-result:call-1',
@@ -49,6 +54,8 @@ describe('buildToolInvocations', () => {
           kind: 'read',
           status: 'completed',
           title: 'Read package.json',
+          startedAtMs: 1_000,
+          completedAtMs: 2_500,
           locations: [{ path: 'package.json', line: 2 }],
         }),
         'call-1',
@@ -63,11 +70,34 @@ describe('buildToolInvocations', () => {
       kind: 'read',
       status: 'completed',
       title: 'Read package.json',
+      startedAtMs: 1_000,
+      completedAtMs: 2_500,
       monospaceTitle: false,
       isError: false,
       locations: [{ path: 'package.json', line: 2 }],
       textLines: ['name dappercode'],
       empty: false,
+    });
+  });
+
+  it('falls back to message timestamps when metadata has no timing fields', () => {
+    const invocations = buildToolInvocations([
+      {
+        id: 'tool-call:call-1',
+        role: 'assistant',
+        content: '',
+        createdAt: '2026-05-01T00:00:00.000Z',
+        completedAt: '2026-05-01T00:00:02.500Z',
+        toolCalls: [
+          { id: 'call-1', type: 'function', function: { name: 'read', arguments: '{}' } },
+        ],
+        toolMeta: meta({ kind: 'read', status: 'completed', title: 'Read package.json' }),
+      },
+    ]);
+
+    expect(invocations[0]).toMatchObject({
+      startedAtMs: Date.parse('2026-05-01T00:00:00.000Z'),
+      completedAtMs: Date.parse('2026-05-01T00:00:02.500Z'),
     });
   });
 
@@ -107,6 +137,29 @@ describe('buildToolInvocations', () => {
     ]);
     expect(requireTestValue(invocations[0], 'indexed test value').textLines).toEqual(['leftover']);
     expect(requireTestValue(invocations[0], 'indexed test value').truncated).toBe(true);
+  });
+
+  it('does not keep flattened location markers as loose response lines', () => {
+    const invocation = requireTestValue(
+      buildToolInvocations([
+        toolMessage(
+          'tool-result:call-1',
+          '[terminal: term-1]\ncompile error\n[location: ./src//app.ts:12]',
+          meta({
+            kind: 'execute',
+            title: 'npm run build',
+            content: [{ type: 'terminal', terminalId: 'term-1', output: 'compile error' }],
+            locations: [{ path: './src//app.ts', line: 12 }],
+          }),
+          'call-1',
+        ),
+      ])[0],
+      'terminal invocation with a location',
+    );
+
+    expect(invocation.locations).toEqual([{ path: 'src/app.ts', line: 12 }]);
+    expect(invocation.terminals).toEqual([{ terminalId: 'term-1', output: 'compile error' }]);
+    expect(invocation.textLines).toEqual([]);
   });
 
   it('marks a failed invocation and keeps execute titles monospaced', () => {
@@ -307,6 +360,8 @@ describe('buildToolInvocations', () => {
       kind: 'read',
       status: 'completed',
       title: 'Read package.json',
+      startedAtMs: null,
+      completedAtMs: null,
       statusLanguage: true,
       monospaceTitle: false,
       isError: false,

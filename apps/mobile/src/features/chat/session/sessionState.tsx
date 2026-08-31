@@ -270,6 +270,7 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
   const pendingOptimisticQueuedMessagesRef = useRef<
     Record<string, PendingOptimisticQueuedMessage[]>
   >({});
+  const deletedThreadIdsRef = useRef<Set<string>>(new Set());
   const chatModelPreferencesRef = useRef<Record<string, ChatModelPreference>>({});
   const chatModelPreferencesLoaded = useAtomValue(chatModelPreferencesLoadedAtom);
   const setChatModelPreferencesLoaded = useSetAtom(chatModelPreferencesLoadedAtom);
@@ -379,6 +380,7 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     threadReasoningBuffersRef,
     pendingOptimisticUserMessagesRef,
     pendingOptimisticQueuedMessagesRef,
+    deletedThreadIdsRef,
     chatModelPreferencesRef,
     chatModelPreferencesLoaded,
     setChatModelPreferencesLoaded,

@@ -10,7 +10,6 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { GestureDetector } from 'react-native-gesture-handler';
 
 import type { Chat } from '@bridge/types/types';
 import type { ChatScrollRailJumpController } from './scrollRail/jumpController';
@@ -34,7 +33,7 @@ import {
 import { createStyles } from '../styles/styles';
 import {
   buildTranscriptDisplayItems,
-  forkBoundariesByActionMessageId,
+  transcriptDisplayItemKey,
   type TranscriptDisplayItem,
 } from './messages';
 import { projectTranscript } from './controllers/projectionController';
@@ -43,8 +42,8 @@ import type { TranscriptContinuationState } from './controllers/continuationCont
 import { areChatTranscriptViewPropsEqual } from './comparison';
 import { renderChatTranscriptItem } from './item';
 import { computeHitSlop } from '@shared/ui/touchTarget';
-import { useForkConversationAction } from './useForkConversationAction';
-import { ActivityEvent } from './ActivityEvent';
+import { useForkBoundaries, useForkConversationAction } from './useForkConversationAction';
+import { TranscriptActivitySlot, useCollapsibleActivity } from './TranscriptActivitySlot';
 import { TranscriptEdgeScrim } from './TranscriptEdgeScrim';
 import {
   ensureRailJumpController,
@@ -56,6 +55,10 @@ import {
   resolveRailRestingActiveIndex,
   resolveResetRailActiveIndex,
 } from './viewChrome';
+import { useMessageTimestampReveal } from './useMessageTimestampReveal';
+import { useTranscriptAnimationVisibility } from './animationVisibility';
+import { PINNED_SCROLL_EPSILON_PX, updateAutoScrollStickiness } from './autoScroll';
+import { TranscriptRenderRoot } from './TranscriptRenderRoot';
 
 export interface ChatTranscriptViewProps {
   chat: Chat;
@@ -114,6 +117,8 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   const { width: windowWidth } = useWindowDimensions();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const { activityVisible, updateActivityVisibility, updateVisibleItems, visibleItemIds } =
+    useTranscriptAnimationVisibility(chat.id);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [restingRailActiveIndex, setRestingRailActiveIndex] = useState(-1);
   const { forkingMessageId, handleForkConversation } =
@@ -183,21 +188,13 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     () => (inlineChoicesEnabled ? findInlineChoiceSet(paginatedMessages) : null),
     [inlineChoicesEnabled, paginatedMessages],
   );
-  const forkBoundaries = useMemo(
-    () =>
-      supportsConversationFork &&
-      !chat.parentThreadId &&
-      (continuationState?.unavailableCount ?? 0) === 0
-        ? forkBoundariesByActionMessageId(visibleMessages, chat.status)
-        : new Map<string, string>(),
-    [
-      chat.parentThreadId,
-      chat.status,
-      continuationState?.unavailableCount,
-      supportsConversationFork,
-      visibleMessages,
-    ],
-  );
+  const forkBoundaries = useForkBoundaries({
+    messages: visibleMessages,
+    chatStatus: chat.status,
+    parentThreadId: chat.parentThreadId,
+    unavailableCount: continuationState?.unavailableCount,
+    supportsConversationFork,
+  });
   const userMessageAnchorCount = userMessageAnchors.length;
   useEffect(() => {
     visibleMessageCountRef.current = visibleMessages.length;
@@ -301,9 +298,12 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       scrollingTowardOlderMessagesRef.current = nextOffsetY > previousScrollOffsetYRef.current + 1;
       previousScrollOffsetYRef.current = nextOffsetY;
 
-      const distanceFromBottom = contentOffset.y;
-      const shouldStickToBottom = distanceFromBottom <= theme.spacing.xl * 2;
-      autoScrollStateRef.current.shouldStickToBottom = shouldStickToBottom;
+      // Streaming growth and keyboard insets move native offsets; only user interaction can unpin.
+      const shouldStickToBottom = updateAutoScrollStickiness(
+        autoScrollStateRef.current,
+        contentOffset.y <= theme.spacing.xl * 2,
+      );
+      updateActivityVisibility(shouldStickToBottom);
       const hasScrollableHistory =
         contentSize.height - layoutMeasurement.height > CHAT_JUMP_TO_LATEST_MIN_SCROLLABLE_PX;
       const nextShowJumpToLatest = hasScrollableHistory && !shouldStickToBottom;
@@ -313,7 +313,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       }
       maybeAutoLoadOlderMessages(false);
     },
-    [autoScrollStateRef, maybeAutoLoadOlderMessages, theme.spacing.xl],
+    [autoScrollStateRef, maybeAutoLoadOlderMessages, theme.spacing.xl, updateActivityVisibility],
   );
 
   const hideJumpToLatestWhenContentFits = useCallback(() => {
@@ -332,12 +332,8 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   }, []);
 
   const onViewableItemsChanged = useRef(
-    ({
-      viewableItems,
-    }: {
-      viewableItems: Array<ViewToken<TranscriptDisplayItem>>;
-      changed: Array<ViewToken<TranscriptDisplayItem>>;
-    }) => {
+    ({ viewableItems }: { viewableItems: Array<ViewToken<TranscriptDisplayItem>> }) => {
+      updateVisibleItems(viewableItems);
       const visualTopDisplayIndex = viewableItems.reduce(
         (top, token) => (typeof token.index === 'number' ? Math.max(top, token.index) : top),
         -1,
@@ -392,6 +388,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     onInteractionEnd: handleRailInteractionEnd,
     onReachStart: handleRailReachStart,
   });
+  const timestampReveal = useMessageTimestampReveal(rail.gesture);
 
   useEffect(() => {
     autoScrollStateRef.current.shouldStickToBottom = true;
@@ -425,17 +422,18 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     [displayMessages.length, isLargeChat],
   );
   const threadRunning = chat.status === 'running';
+  const activityPresentation = useCollapsibleActivity(activity);
   const listExtraData = useMemo(
     () => ({ liveMessageState, chatStatus: chat.status }),
     [chat.status, liveMessageState],
   );
-  const activityEvent = activity ? (
-    <ActivityEvent title={activity.title} detail={activity.detail} tone={activity.tone} />
+  const activityEvent = activityPresentation ? (
+    <TranscriptActivitySlot
+      chat={chat}
+      presentation={activityPresentation}
+      animationActive={activityVisible}
+    />
   ) : null;
-  const keyExtractor = useCallback(
-    (item: TranscriptDisplayItem) => (item.kind === 'message' ? item.renderKey : item.id),
-    [],
-  );
   const renderMessageItem = useCallback<ListRenderItem<TranscriptDisplayItem>>(
     ({ item }) =>
       renderChatTranscriptItem({
@@ -454,7 +452,9 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
         forkBusy:
           item.kind === 'message' && forkBoundaries.get(item.message.id) === forkingMessageId,
         onForkConversation: handleForkConversation,
+        timestampRevealTranslationX: timestampReveal.translationX,
         threadRunning,
+        animationVisible: item.kind !== 'toolInvocation' || visibleItemIds.has(item.invocation.id),
       }),
     [
       bridgeToken,
@@ -468,25 +468,29 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       onOpenSubAgentThread,
       onForkConversation,
       styles,
+      timestampReveal.translationX,
       threadRunning,
+      visibleItemIds,
     ],
   );
 
   return (
-    <GestureDetector gesture={rail.gesture}>
-      <View style={styles.messageListShell}>
+    <TranscriptRenderRoot gesture={timestampReveal.gesture}>
+      <View style={styles.messageListShell} testID="chat-transcript">
         <FlatList
           key={chat.id}
           ref={scrollRef}
           data={displayMessages}
           extraData={listExtraData}
-          keyExtractor={keyExtractor}
+          keyExtractor={transcriptDisplayItemKey}
           renderItem={renderMessageItem}
           ListHeaderComponent={activityEvent}
           ListFooterComponent={historyBoundary}
           style={styles.messageList}
           contentContainerStyle={messageListContentStyle}
-          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          // Preserving the first response cell while it grows shifts this inverted list's activity
+          // header toward the overlay composer. Preserve cells only after the user leaves latest.
+          maintainVisibleContentPosition={showJumpToLatest ? { minIndexForVisible: 0 } : undefined}
           inverted
           scrollEnabled={rail.scrollEnabled}
           showsVerticalScrollIndicator={false}
@@ -533,7 +537,11 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
             contentHeightRef.current = height;
             railJumpControllerRef.current?.notifyLayoutProgress();
             hideJumpToLatestWhenContentFits();
-            onPinnedAutoScroll(false);
+            // At offset zero, another scrollToOffset(0) races Fabric's native position adjustment
+            // and can briefly paint a rapidly inserted tool row over the activity header.
+            if (scrollOffsetYRef.current > PINNED_SCROLL_EPSILON_PX) {
+              onPinnedAutoScroll(false);
+            }
             maybeAutoLoadOlderMessages(true);
           }}
           initialNumToRender={listBatchingConfig.initialNumToRender}
@@ -542,7 +550,6 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           windowSize={listBatchingConfig.windowSize}
           removeClippedSubviews={false}
           accessibilityLabel={`${chat.title || 'Chat'} transcript`}
-          testID="chat-transcript"
         />
         <TranscriptEdgeScrim bottomInset={bottomInset} edgeStyle={styles.transcriptEdgeScrim} />
         {renderScrollRail({
@@ -570,6 +577,6 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           theme,
         })}
       </View>
-    </GestureDetector>
+    </TranscriptRenderRoot>
   );
 }, areChatTranscriptViewPropsEqual);

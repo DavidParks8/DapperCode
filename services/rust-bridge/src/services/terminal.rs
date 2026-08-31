@@ -20,7 +20,10 @@ fn hardened_git_args(args: &[String]) -> Vec<String> {
     let mut hardened_args = vec![
         "--no-pager".to_string(),
         "-c".to_string(),
-        "core.hooksPath=/dev/null".to_string(),
+        format!(
+            "core.hooksPath={}",
+            crate::platform::git_global_config_path()
+        ),
         "-c".to_string(),
         "core.fsmonitor=false".to_string(),
         "-c".to_string(),
@@ -112,12 +115,14 @@ impl TerminalService {
             .env_clear()
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env(
+                "GIT_CONFIG_GLOBAL",
+                crate::platform::git_global_config_path(),
+            )
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        #[cfg(unix)]
-        command.process_group(0);
+        crate::platform::configure_git_command(&mut command);
         for name in ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "SystemRoot"] {
             if let Some(value) = std::env::var_os(name) {
                 command.env(name, value);
@@ -153,15 +158,7 @@ impl TerminalService {
                 )));
             }
             Err(_) => {
-                #[cfg(unix)]
-                if let Some(pid) = child.id() {
-                    let pid = pid as i32;
-                    if unsafe { libc::getpgid(pid) } == pid {
-                        unsafe {
-                            libc::kill(-pid, libc::SIGKILL);
-                        }
-                    }
-                }
+                crate::platform::kill_git_process_group(&child);
                 let _ = child.kill().await;
                 let _ = child.wait().await;
                 None

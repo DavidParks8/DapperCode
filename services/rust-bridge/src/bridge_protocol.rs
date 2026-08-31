@@ -750,7 +750,8 @@ pub(super) struct BridgeThreadForkResponse {
     pub(super) thread: Value,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct BridgeThreadForkCacheEntry {
     pub(super) source_thread_id: String,
     pub(super) message_id: String,
@@ -761,6 +762,19 @@ pub(super) struct BridgeThreadForkCacheEntry {
 #[serde(rename_all = "camelCase")]
 pub(super) struct BridgeThreadQueueReadRequest {
     pub(super) thread_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct BridgeThreadSchedulesReadRequest {
+    pub(super) thread_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct BridgeThreadSchedulesState {
+    pub(super) thread_id: String,
+    pub(super) schedules: Vec<crate::scheduled_prompts::ScheduledPromptSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -807,14 +821,18 @@ pub(super) struct BridgeQueuedMessage {
     pub(super) id: String,
     pub(super) created_at: String,
     pub(super) content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) agent_message: Option<crate::agent_messaging::AgentMessageOrigin>,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct BridgeQueuedMessageEntry {
     pub(super) id: String,
+    pub(super) submission_id: String,
     pub(super) created_at: String,
     pub(super) content: String,
     pub(super) turn_start: Value,
+    pub(super) agent_message: Option<crate::agent_messaging::AgentMessageOrigin>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -855,6 +873,14 @@ pub(super) struct BridgeThreadQueueSendResponse {
     pub(super) turn_id: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct BridgeQueueSubmissionReceipt {
+    pub(super) submission_id: String,
+    pub(super) thread_id: String,
+    pub(super) disposition: BridgeThreadQueueDisposition,
+    pub(super) turn_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct BridgeThreadQueueActionResponse {
@@ -862,7 +888,7 @@ pub(super) struct BridgeThreadQueueActionResponse {
     pub(super) queue: BridgeThreadQueueState,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(super) struct BridgeThreadQueueRuntime {
     pub(super) items: VecDeque<BridgeQueuedMessageEntry>,
     pub(super) pending_steers: VecDeque<BridgeQueuedMessageEntry>,
@@ -876,11 +902,14 @@ pub(super) struct BridgeThreadQueueRuntime {
     pub(super) live_generation_known: bool,
     pub(super) thread_running: bool,
     pub(super) turn_start_in_flight: bool,
+    pub(super) dispatch_retry_attempt: u32,
+    pub(super) dispatch_retry_scheduled: bool,
     pub(super) action_in_flight_item_id: Option<String>,
     pub(super) pending_approval_ids: HashSet<String>,
     pub(super) pending_user_input_ids: HashSet<String>,
     pub(super) pending_completion_event_ids: Vec<u64>,
     pub(super) last_error: Option<BridgeThreadQueueError>,
+    pub(super) last_error_submission_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -905,9 +934,29 @@ pub(super) struct BridgeQueueService {
     pub(super) thread_actors: Arc<RwLock<HashMap<String, Arc<Mutex<()>>>>>,
     pub(super) completion_dispositions: Arc<Mutex<HashMap<u64, QueueCompletionDisposition>>>,
     pub(super) completion_disposition_notify: Arc<Notify>,
-    pub(super) submission_results: Arc<Mutex<HashMap<String, BridgeThreadQueueSendResponse>>>,
+    pub(super) submission_results: Arc<Mutex<HashMap<String, BridgeQueueSubmissionReceipt>>>,
     pub(super) submission_order: Arc<Mutex<VecDeque<String>>>,
+    pub(super) submission_volatile_pending: Arc<Mutex<HashMap<String, String>>>,
+    pub(super) submission_pending: Arc<Mutex<HashMap<String, String>>>,
+    pub(super) submission_pending_order: Arc<Mutex<VecDeque<String>>>,
+    pub(super) submission_store_path: Option<std::path::PathBuf>,
+    pub(super) submission_persist: Arc<Mutex<()>>,
+    pub(super) submission_dirty: AtomicBool,
+    pub(super) definitive_settlement_shutdown: tokio_util::sync::CancellationToken,
+    pub(super) definitive_settlements_active: std::sync::atomic::AtomicUsize,
+    pub(super) definitive_settlement_notify: Notify,
+    pub(super) interrupted_definitive_settlements: Arc<Mutex<HashMap<String, (String, String)>>>,
+    pub(super) retirement_fence: Arc<crate::queue_service::ThreadRetirementFence>,
+    pub(super) submission_completion_wake: std::sync::Mutex<std::sync::Weak<Notify>>,
     pub(super) next_queue_item_id: AtomicU64,
+    #[cfg(test)]
+    pub(super) fail_next_submission_persist: AtomicBool,
+    #[cfg(test)]
+    pub(super) fail_all_submission_persists: AtomicBool,
+    #[cfg(test)]
+    pub(super) submission_persist_barrier: std::sync::Mutex<Option<(Arc<Notify>, Arc<Notify>)>>,
+    #[cfg(test)]
+    pub(super) retirement_retry_barrier: std::sync::Mutex<Option<(Arc<Notify>, Arc<Notify>)>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -916,6 +965,7 @@ pub(super) struct RpcQuery {
     pub(super) token: Option<String>,
     pub(super) client_type: Option<String>,
     pub(super) client_name: Option<String>,
+    pub(super) client_foreground: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -46,24 +46,9 @@ type BodyContentProps = Pick<
   | 'transcriptContinuationState'
   | 'handleLoadEarlier'
   | 'defaultStartWorkspaceLabel'
-  | 'readyAgents'
-  | 'activeAgentLabel'
   | 'activeAgentSupports'
-  | 'modelOptions'
-  | 'activeModelLabel'
-  | 'activeModelEffortOptions'
-  | 'activeEffortLabel'
-  | 'collaborationModeLabel'
-  | 'supportsFastMode'
-  | 'fastModeEnabled'
-  | 'fastModeLabel'
   | 'setDraft'
   | 'openWorkspaceModal'
-  | 'openAgentModal'
-  | 'openModelModal'
-  | 'openEffortModal'
-  | 'openCollaborationModeMenu'
-  | 'toggleFastMode'
   | 'forkConversation'
 > & {
   pendingApproval: unknown;
@@ -119,26 +104,11 @@ function TranscriptOrComposerContent({
   transcriptContinuationState,
   handleLoadEarlier,
   defaultStartWorkspaceLabel,
-  readyAgents,
-  activeAgentLabel,
   activeAgentSupports,
-  modelOptions,
-  activeModelLabel,
-  activeModelEffortOptions,
-  activeEffortLabel,
-  collaborationModeLabel,
-  supportsFastMode,
-  fastModeEnabled,
-  fastModeLabel,
   keyboardVisible,
   activity,
   setDraft,
   openWorkspaceModal,
-  openAgentModal,
-  openModelModal,
-  openEffortModal,
-  openCollaborationModeMenu,
-  toggleFastMode,
   forkConversation,
 }: BodyContentProps) {
   const handleLoadEarlierPress = useCallback(() => {
@@ -183,28 +153,11 @@ function TranscriptOrComposerContent({
   return (
     <ComposeView
       startWorkspaceLabel={defaultStartWorkspaceLabel}
-      showAgentPicker={readyAgents.length > 1}
-      agentLabel={activeAgentLabel}
-      showModelControls={modelOptions.length > 0}
-      modelLabel={activeModelLabel}
-      showThinkingControls={activeModelEffortOptions.length > 0}
-      thinkingLabel={activeEffortLabel}
-      collaborationModeLabel={collaborationModeLabel}
-      showFastMode={supportsFastMode}
-      fastModeEnabled={fastModeEnabled}
-      fastModeLabel={fastModeLabel}
       keyboardVisible={keyboardVisible}
       bottomInset={bottomInset}
       topInset={topInset}
       onSuggestion={(suggestion) => setDraft(suggestion)}
       onOpenWorkspacePicker={openWorkspaceModal}
-      onOpenAgentPicker={openAgentModal}
-      onOpenModelPicker={openModelModal}
-      onOpenThinkingPicker={() => openEffortModal()}
-      onOpenCollaborationModePicker={openCollaborationModeMenu}
-      onToggleFastMode={() => {
-        void toggleFastMode();
-      }}
     />
   );
 }
@@ -290,24 +243,10 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
     transcriptContinuationState,
     handleLoadEarlier,
     defaultStartWorkspaceLabel,
-    readyAgents,
     activeAgentLabel,
     activeAgentSupports,
-    modelOptions,
-    activeModelLabel,
-    activeModelEffortOptions,
-    activeEffortLabel,
-    collaborationModeLabel,
-    supportsFastMode,
-    fastModeEnabled,
-    fastModeLabel,
     setDraft,
     openWorkspaceModal,
-    openAgentModal,
-    openModelModal,
-    openEffortModal,
-    openCollaborationModeMenu,
-    toggleFastMode,
     forkConversation,
     shouldShowComposer,
     renderComposer,
@@ -357,24 +296,9 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
     transcriptContinuationState,
     handleLoadEarlier,
     defaultStartWorkspaceLabel,
-    readyAgents,
-    activeAgentLabel,
     activeAgentSupports,
-    modelOptions,
-    activeModelLabel,
-    activeModelEffortOptions,
-    activeEffortLabel,
-    collaborationModeLabel,
-    supportsFastMode,
-    fastModeEnabled,
-    fastModeLabel,
     setDraft,
     openWorkspaceModal,
-    openAgentModal,
-    openModelModal,
-    openEffortModal,
-    openCollaborationModeMenu,
-    toggleFastMode,
     forkConversation,
     liveMessageState: selectedChat ? (liveAssistantByThread[selectedChat.id] ?? null) : null,
     activity: showTranscriptActivity ? displayedActivity : null,

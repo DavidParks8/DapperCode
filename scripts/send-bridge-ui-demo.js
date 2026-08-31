@@ -7,8 +7,8 @@ const { execFileSync } = require('node:child_process');
 
 function usage() {
   console.log(`Usage:
-  npm run bridge:ui:demo
-  npm run bridge:ui:demo -- --thread <thread-id>
+  pnpm run bridge:ui:demo
+  pnpm run bridge:ui:demo --thread <thread-id>
 
 Options:
   --thread <id>     Send the demo surface to a specific thread.

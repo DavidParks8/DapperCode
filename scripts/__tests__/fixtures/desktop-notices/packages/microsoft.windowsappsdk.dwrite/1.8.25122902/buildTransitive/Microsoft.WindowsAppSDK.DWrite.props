@@ -1,0 +1,5 @@
+<Project>
+  <ItemGroup>
+    <WindowsAppSdkComponentPackages Include="$(MSBuildThisFileDirectory)..\" />
+  </ItemGroup>
+</Project>

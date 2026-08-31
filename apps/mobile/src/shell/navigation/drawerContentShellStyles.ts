@@ -113,6 +113,55 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
       marginBottom: theme.spacing.xs,
       color: theme.colors.textMuted,
     },
+    headerTextButton: {
+      minHeight: theme.touchTarget.minimum,
+      paddingHorizontal: theme.spacing.sm,
+      borderRadius: theme.radius.md,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    headerTextButtonPressed: {
+      backgroundColor: theme.colors.bgCanvasAccent,
+    },
+    headerTextButtonLabel: {
+      ...theme.typography.label,
+      color: theme.colors.userBubbleOnSurface,
+    },
+    selectionToolbar: {
+      minHeight: 56,
+      paddingHorizontal: theme.spacing.md,
+      paddingTop: StyleSheet.hairlineWidth,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: theme.spacing.sm,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.borderLight,
+    },
+    selectionToolbarButton: {
+      minHeight: theme.touchTarget.minimum,
+      paddingHorizontal: theme.spacing.sm,
+      borderRadius: theme.radius.md,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    selectionToolbarButtonPressed: {
+      backgroundColor: theme.colors.bgCanvasAccent,
+    },
+    selectionToolbarLabel: {
+      ...theme.typography.label,
+      color: theme.colors.userBubbleOnSurface,
+    },
+    selectionToolbarDeleteLabel: {
+      ...theme.typography.label,
+      color: theme.colors.error,
+      fontWeight: '700',
+    },
+    selectionToolbarLabelDisabled: {
+      color: theme.colors.textMuted,
+      opacity: 0.6,
+    },
     footer: {
       minHeight: 56,
       paddingHorizontal: theme.spacing.md,

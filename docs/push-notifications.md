@@ -6,11 +6,11 @@ turn completions remain visible in the live UI but do not send push notification
 
 ## Why the bridge sends them
 
-The mobile app can only run JavaScript (and therefore keep its bridge WebSocket
-open) while it is foregrounded. The instant it is backgrounded or killed, the
-socket closes, so the **device can never observe a turn completing**. The bridge,
-on the other hand, owns the ACP agent sessions and stays alive regardless of
-whether any device is connected. So the bridge is the sender:
+The mobile app cannot reliably run JavaScript or render live events after it is
+backgrounded. Its bridge WebSocket can remain connected for part or all of that
+time, but connectivity does not mean the user can observe a turn completing. The
+bridge owns the ACP agent sessions and stays alive regardless of app lifecycle,
+so the bridge is the sender:
 
 ```
 ACP canonical event ──▶ bridge ──HTTPS POST──▶ Expo push service ──▶ APNs/FCM ──▶ device
@@ -50,6 +50,8 @@ not sent. Approval notifications never include reply content.
 ## Bridge side
 
 - Push registration RPC methods (over the existing authenticated WS):
+  - `bridge/push/presence` `{ foreground, sequence }` (ordered lifecycle notification)
+  - `bridge/push/observed` `{ candidateId, presenceSequence }` (ordered event observation)
   - `bridge/push/register` `{ profileId, registrationId, token, platform, deviceName, events }`
   - `bridge/push/unregister` `{ profileId, registrationId }`
 - Registrations persist to `.dappercode-push-registry.json` in the bridge working
@@ -60,6 +62,26 @@ not sent. Approval notifications never include reply content.
   `DeviceNotRegistered` are pruned automatically. Re-registering the same
   `registrationId` atomically replaces a rotated token; a registration cannot be
   rebound to another `profileId`.
+- Native mobile WebSockets identify themselves through bounded client metadata,
+  including their current foreground state for the connection handshake. Ordered,
+  monotonically sequenced lifecycle reports then update that state and renew a
+  bounded foreground lease. First-party web clients identify as web and do not
+  hold mobile push presence; as with every bridge operation, authenticated clients
+  are trusted not to forge another client type.
+- For each completion or approval candidate, the bridge first queues the normal
+  live event and then sends an unnumbered `bridge/push/candidate` marker on the
+  same socket. The marker carries the numbered-stream watermark that must be
+  delivered first, so replay gaps cannot produce a premature acknowledgement. A
+  native client acknowledges the marker only while the user is present and
+  includes the exact applied presence sequence. The bridge suppresses the push
+  for **every** registered device only when it receives that observation proof
+  within a short bounded window. Missing, stale, background, overloaded, or
+  disconnected clients therefore fail open and still receive the push instead of
+  losing it permanently.
+- DapperCode is single-user: one phone proving it observed the live event means a
+  second locked phone does not need a redundant alert. A connected background
+  phone never acknowledges candidates. Server-driven WebSocket heartbeats remove
+  half-open connections, while renewable leases bound stale foreground claims.
 - A top-level completion is also suppressed when the bridge queue immediately
   starts the next queued message. The completion push is sent only when that
   top-level thread reaches a final completion with no queued continuation.
@@ -84,9 +106,14 @@ not sent. Approval notifications never include reply content.
 - The shared registration logic lives in `src/shell/push/controller.ts`, used by both
   the root Router lifecycle (`src/shell/boot/useAppBridgeLifecycle.ts`) and the Settings toggle so
   they cannot drift.
-- **Foreground:** while the app is active the banner is suppressed (you are
-  already watching, and the result also streams in over the WebSocket).
-- **Backgrounded but not quit / killed:** the OS delivers and displays the push.
+- **Foreground or transiently inactive:** the native app reports ordered presence
+  and acknowledges candidate markers only after the preceding live event reaches
+  its event stream. That proof suppresses pushes bridge-wide across all registered
+  phones. The Expo notification handler also suppresses a foreground/inactive
+  delivery as a fallback for connection and lifecycle races.
+- **Backgrounded but not quit / killed:** the app reports background before its
+  normal disconnect attempt. Pushes remain enabled even if the WebSocket stays
+  connected, and the OS delivers and displays them.
 - Tapping a notification opens the app and navigates to the relevant thread.
 - **Approval notifications carry Approve / Deny action buttons** (iOS notification
   category `approval`). The approval push includes the `approvalId`; tapping a
@@ -98,6 +125,24 @@ not sent. Approval notifications never include reply content.
   purpose: resolving needs the WS, which only runs while the app is active, so a
   fully-background resolve isn't reliable for this transport. The in-app approval
   banner remains as a fallback if the action can't complete.
+
+## iOS Live Activities
+
+On iOS 16.2 and later, DapperCode publishes one native Live Activity for the currently selected
+chat while its agent turn is running. The Lock Screen and Dynamic Island show only generic state:
+working, planning, waiting, completed, failed, or stopped. They do not show the chat title,
+workspace, prompt, command, approval detail, or error text. Tapping the activity opens the selected
+chat.
+
+Live Activities are enabled by default and respect the per-app iOS system setting. A completed,
+failed, or stopped result remains visible for one minute unless another selected turn starts first.
+They require a development, preview, or TestFlight build and do not work in Expo Go.
+
+This first phase uses local ActivityKit updates only. When the app is backgrounded, iOS suspends its
+JavaScript and the activity retains its last state until DapperCode returns to the foreground and
+reconciles with the bridge. Continuous background updates would require a separate ActivityKit
+push-token and direct APNs integration; ordinary Expo notification pushes do not update a Live
+Activity.
 
 ## Build requirements (standalone apps)
 

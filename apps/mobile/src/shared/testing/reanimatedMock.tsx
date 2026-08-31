@@ -36,13 +36,13 @@ export default {
 };
 
 export const Easing = {
-  bezier: () => 'bezier',
-  cubic: 'cubic',
-  ease: 'ease',
-  in: (value: unknown) => value,
-  inOut: (value: unknown) => value,
-  linear: 'linear',
-  out: (value: unknown) => value,
+  bezier: () => (value: number) => value,
+  cubic: (value: number) => value,
+  ease: (value: number) => value,
+  in: (easing: (value: number) => number) => easing,
+  inOut: (easing: (value: number) => number) => easing,
+  linear: (value: number) => value,
+  out: (easing: (value: number) => number) => easing,
 };
 
 export const ReduceMotion = { System: 'system', Always: 'always', Never: 'never' };
@@ -85,8 +85,60 @@ export const runOnJS =
   <Args extends unknown[], Result>(callback: (...args: Args) => Result) =>
   (...args: Args) =>
     callback(...args);
+export const useAnimatedProps = (factory: () => unknown) => factory();
 export const useAnimatedStyle = (factory: () => unknown) => factory();
 export const useDerivedValue = <T,>(factory: () => T) => ({ value: factory() });
+interface MockFrameCallback {
+  callback: (frame: {
+    timestamp: number;
+    timeSinceFirstFrame: number;
+    timeSincePreviousFrame: number | null;
+  }) => void;
+  active: boolean;
+  elapsedMs: number;
+  setActive(active: boolean): void;
+}
+
+export const mockFrameCallbacks: MockFrameCallback[] = [];
+
+export function resetMockFrameCallbacks(): void {
+  mockFrameCallbacks.length = 0;
+}
+
+export function advanceMockAnimationFrame(deltaMs: number): void {
+  mockFrameCallbacks.forEach((frameCallback) => {
+    if (!frameCallback.active) {
+      return;
+    }
+    frameCallback.elapsedMs += deltaMs;
+    frameCallback.callback({
+      timestamp: frameCallback.elapsedMs,
+      timeSinceFirstFrame: frameCallback.elapsedMs,
+      timeSincePreviousFrame: deltaMs,
+    });
+  });
+}
+
+export function useFrameCallback(
+  callback: MockFrameCallback['callback'],
+  autostart = true,
+): MockFrameCallback {
+  const ref = useRef<MockFrameCallback | null>(null);
+  if (!ref.current) {
+    const frameCallback: MockFrameCallback = {
+      callback,
+      active: autostart,
+      elapsedMs: 0,
+      setActive(active) {
+        frameCallback.active = active;
+      },
+    };
+    ref.current = frameCallback;
+    mockFrameCallbacks.push(frameCallback);
+  }
+  ref.current.callback = callback;
+  return ref.current;
+}
 /**
  * Shared values created since the last reset, in hook order, so tests can assert on the settled
  * animation target instead of reaching into worklet internals.

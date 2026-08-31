@@ -23,6 +23,7 @@ import type {
 } from './loadPipeline';
 import { agentThreadMenuVisibleAtom } from '../state/modals';
 import { openSubAgentAtom } from '@shell/navigation/actions';
+import { navigateRoot } from '@shell/navigation/routeNavigation';
 import { routes } from '@shell/navigation/routes';
 
 export type MainScreenChatNavigationContext = MainScreenChatLoadPipelineContext &
@@ -218,7 +219,10 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
         api.rememberChat(forked);
         openChatThread(forked.id, forked);
         if (profileId) {
-          router.push(routes.chat(profileId, forked.id));
+          // Pushing would stack a second chat screen whose route still names the source chat.
+          // Both screens stay mounted and drive the shared selected-chat state, so they reopen
+          // each other's thread in a loop that strobes the transcript until the app dies.
+          navigateRoot(routes.chat(profileId, forked.id));
         }
         return forked;
       } catch (error) {
@@ -232,7 +236,7 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
         throw error;
       }
     },
-    [api, openChatThread, profileId, router, selectedChatRef, setActivity, setError],
+    [api, openChatThread, profileId, selectedChatRef, setActivity, setError],
   );
 
   const closeAgentDetail = useCallback(() => {

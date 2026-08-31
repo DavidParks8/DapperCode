@@ -8,9 +8,9 @@
  * not whatever is on the remote.
  *
  * Usage:
- *   npm run release:testflight
- *   npm run release:testflight -- --dry-run
- *   npm run release:testflight -- --platform android --profile preview --no-submit
+ *   pnpm run release:testflight
+ *   pnpm run release:testflight --dry-run
+ *   pnpm run release:testflight --platform android --profile preview --no-submit
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -98,7 +98,7 @@ function parseOptions(argv: ReadonlyArray<string>): Options {
       case '-h':
         info(
           [
-            'Usage: npm run release:testflight -- [options]',
+            'Usage: pnpm run release:testflight [options]',
             '',
             'Options:',
             '  --platform ios|android|all   Target platform (default: ios)',
@@ -155,9 +155,9 @@ function checkEasConfiguration(options: Options): void {
 }
 
 function checkAuthentication(): void {
-  const whoami = tryRun('npx', ['eas-cli', 'whoami', '--non-interactive'], MOBILE_DIR);
+  const whoami = tryRun('pnpm', ['dlx', 'eas-cli', 'whoami', '--non-interactive'], MOBILE_DIR);
   if (whoami === null) {
-    fail("not signed in to EAS; run 'npx eas-cli login' from apps/mobile");
+    fail("not signed in to EAS; run 'pnpm dlx eas-cli login' from apps/mobile");
   }
   if (!whoami.includes(EXPECTED_ACCOUNT)) {
     fail(`signed-in EAS account cannot access ${EXPECTED_ACCOUNT}:\n${whoami.trim()}`);
@@ -189,8 +189,9 @@ function checkWorkingTree(options: Options): void {
 function latestBuild(platform: Platform): EasBuild | null {
   const requested = platform === 'all' ? 'ios' : platform;
   const output = tryRun(
-    'npx',
+    'pnpm',
     [
+      'dlx',
       'eas-cli',
       'build:list',
       '--platform',
@@ -210,6 +211,7 @@ function latestBuild(platform: Platform): EasBuild | null {
 
 function buildArguments(options: Options): Array<string> {
   const args = [
+    'dlx',
     'eas-cli',
     'build',
     '--platform',
@@ -235,18 +237,18 @@ function main(): void {
 
   const args = buildArguments(options);
   if (options.dryRun) {
-    info(`\nDry run. Would execute from apps/mobile:\n  npx ${args.join(' ')}`);
+    info(`\nDry run. Would execute from apps/mobile:\n  pnpm ${args.join(' ')}`);
     return;
   }
 
-  info(`\nnpx ${args.join(' ')}\n`);
-  const result = spawnSync('npx', args, { cwd: MOBILE_DIR, stdio: 'inherit' });
+  info(`\npnpm ${args.join(' ')}\n`);
+  const result = spawnSync('pnpm', args, { cwd: MOBILE_DIR, stdio: 'inherit' });
   if (result.status !== 0) {
     fail(`eas build exited with status ${String(result.status ?? 'unknown')}`);
   }
 
   if (!options.wait) {
-    info('\nBuild queued. Track it with: npx eas-cli build:list --limit 5');
+    info('\nBuild queued. Track it with: pnpm dlx eas-cli build:list --limit 5');
     return;
   }
 

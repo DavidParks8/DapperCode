@@ -52,6 +52,7 @@ use tokio_tungstenite::{
 use uuid::Uuid;
 
 mod acp;
+mod agent_messaging;
 mod agui;
 #[allow(clippy::all)]
 mod agui_generated;
@@ -61,12 +62,15 @@ mod health;
 mod observability;
 mod owner_watchdog;
 mod path_policy;
+mod platform;
 mod preview;
 mod protocol_constants;
 mod push;
 mod replay;
 mod resource_limits;
+mod retirement_journal;
 mod rpc;
+mod scheduled_prompts;
 mod services;
 mod storage;
 
@@ -75,7 +79,8 @@ use attachments::{
 };
 use config::BridgeConfig;
 use health::{
-    bridge_status, BridgeDeviceConnection, BridgeOperationalStatus, BridgeStatus, QueueStatus,
+    bridge_status, runtime_activity, BridgeDeviceConnection, BridgeOperationalStatus, BridgeStatus,
+    QueueStatus,
 };
 use observability::OperationalMetrics;
 use path_policy::{PathKind, PathPolicy};
@@ -99,6 +104,7 @@ use rpc::{is_forwarded_method, parse_client_request_id, parse_request, RpcReques
 mod app_state;
 mod bridge_protocol;
 mod client_hub;
+mod client_outbox;
 mod http_routes;
 mod interaction_validation;
 mod pairing;
@@ -113,6 +119,7 @@ use agui::*;
 use app_state::*;
 use bridge_protocol::*;
 use client_hub::*;
+use client_outbox::*;
 use http_routes::*;
 use interaction_validation::*;
 use pairing::*;
@@ -190,7 +197,72 @@ async fn main() {
         config.preview_connect_url.clone(),
         config.connect_url.clone(),
     ));
-    let queue = BridgeQueueService::new(backend.clone(), hub.clone());
+    let queue_submission_path = config.state_dir.join("queue-idempotency.json");
+    let queue_submissions =
+        match BridgeQueueService::load_submission_store(&queue_submission_path).await {
+            Ok(state) => state,
+            Err(error) => {
+                eprintln!("{error}");
+                backend.shutdown().await;
+                std::process::exit(1);
+            }
+        };
+    let queue = BridgeQueueService::with_submission_store(
+        backend.clone(),
+        hub.clone(),
+        Some(queue_submission_path),
+        queue_submissions,
+    );
+    let scheduler = match scheduled_prompts::ScheduledPromptService::start_paused(
+        config.state_dir.join("scheduled-prompts.json"),
+        Arc::downgrade(&queue),
+        hub.clone(),
+    )
+    .await
+    {
+        Ok(scheduler) => scheduler,
+        Err(error) => {
+            eprintln!("{error}");
+            backend.shutdown().await;
+            std::process::exit(1);
+        }
+    };
+    if let Err(error) = backend
+        .attach_thread_lifecycle(Arc::downgrade(&queue), Arc::downgrade(&scheduler))
+        .await
+    {
+        eprintln!("{error}");
+        scheduler.shutdown().await;
+        backend.shutdown().await;
+        std::process::exit(1);
+    }
+    if let Err(error) = scheduler.start_worker() {
+        eprintln!("{error}");
+        scheduler.shutdown().await;
+        backend.shutdown().await;
+        std::process::exit(1);
+    }
+    let agent_messaging = match agent_messaging::AgentMessagingService::start(
+        Arc::downgrade(&backend),
+        Arc::downgrade(&queue),
+        scheduler.clone(),
+    )
+    .await
+    {
+        Ok(service) => service,
+        Err(error) => {
+            eprintln!("{error}");
+            scheduler.shutdown().await;
+            backend.shutdown().await;
+            std::process::exit(1);
+        }
+    };
+    if let Err(error) = backend.attach_agent_messaging(agent_messaging).await {
+        eprintln!("{error}");
+        scheduler.shutdown().await;
+        backend.shutdown().await;
+        std::process::exit(1);
+    }
 
     let project_label = config
         .workdir
@@ -199,7 +271,16 @@ async fn main() {
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "DapperCode".to_string());
     let push = PushService::load(&config.state_dir, project_label, metrics.clone()).await;
-    push.spawn_event_loop_with_queue(&hub, backend.clone(), Some(queue.clone()));
+    let _push_event_loop = push.spawn_event_loop_with_queue(&hub, Some(queue.clone()));
+    let operation_dedupe_path = config.state_dir.join("operation-idempotency.json");
+    let operation_dedupe = match load_operation_dedupe(&operation_dedupe_path).await {
+        Ok(state) => state,
+        Err(error) => {
+            eprintln!("{error}");
+            backend.shutdown().await;
+            std::process::exit(1);
+        }
+    };
 
     let state = Arc::new(AppState {
         config: config.clone(),
@@ -208,15 +289,13 @@ async fn main() {
         hub,
         backend,
         queue,
-        thread_create_results: Arc::new(Mutex::new(HashMap::new())),
-        thread_create_order: Arc::new(Mutex::new(VecDeque::new())),
+        scheduler: scheduler.clone(),
+        operation_dedupe: Arc::new(Mutex::new(operation_dedupe)),
         thread_create_actor: Arc::new(Mutex::new(())),
-        thread_fork_results: Arc::new(Mutex::new(HashMap::new())),
-        thread_fork_order: Arc::new(Mutex::new(VecDeque::new())),
         thread_fork_actor: Arc::new(Mutex::new(())),
-        approval_resolution_results: Arc::new(Mutex::new(HashMap::new())),
-        approval_resolution_order: Arc::new(Mutex::new(VecDeque::new())),
         approval_resolution_actor: Arc::new(Mutex::new(())),
+        operation_dedupe_path,
+        operation_dedupe_dirty: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         thread_list_streams: Arc::new(Mutex::new(HashMap::new())),
         git,
         preview,
@@ -307,10 +386,32 @@ where
     Start: FnOnce() -> StartFuture,
     StartFuture: Future<Output = Result<T, String>>,
 {
-    let bind_addr = format!("{host}:{port}");
-    let listener = tokio::net::TcpListener::bind(&bind_addr)
+    let requested_bind_addr = format!("{host}:{port}");
+    let listener = tokio::net::TcpListener::bind(&requested_bind_addr)
         .await
-        .map_err(|error| format!("failed to bind {bind_addr}: {error}"))?;
+        .map_err(|error| format!("failed to bind {requested_bind_addr}: {error}"))?;
+    let bind_addr = listener
+        .local_addr()
+        .map_err(|error| format!("failed to read bound bridge address: {error}"))?
+        .to_string();
     let backend = start_backend().await?;
     Ok((bind_addr, listener, backend))
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::bind_then_start_backend;
+
+    #[tokio::test]
+    async fn port_zero_reports_the_os_assigned_bridge_address() {
+        let (address, listener, backend) =
+            bind_then_start_backend("127.0.0.1", 0, || async { Ok::<_, String>("ready") })
+                .await
+                .expect("bind bridge listener");
+
+        assert_eq!(address, listener.local_addr().unwrap().to_string());
+        assert_ne!(listener.local_addr().unwrap().port(), 0);
+        assert_eq!(backend, "ready");
+    }
 }

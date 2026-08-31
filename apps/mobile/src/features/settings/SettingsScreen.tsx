@@ -1,22 +1,22 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { AgentDescriptor, BridgeCapabilities } from '@bridge/types/types';
+import type { HostBridgeApiClient } from '@bridge/client/client';
 import type { WorkspaceChatLimit } from '@shell/state/appSettings';
 import { AgentIcon } from '@shared/ui/AgentIcon';
-import { feedback } from '@shared/feedback';
+import { SelectionSheet } from '@shared/ui/SelectionSheet';
 import { disablePush, enablePush, updatePushEvents } from '@shell/push/controller';
 import { retryPersistenceAtom } from '@shell/state/appState/actions';
 import {
@@ -25,7 +25,7 @@ import {
   bridgeProfilesAtom,
 } from '@shell/state/appState/atoms';
 import {
-  approvalModeAtom,
+  confirmSessionDeletionAtom,
   showToolCallsAtom,
   workspaceChatLimitAtom,
 } from '@shell/state/appState/settings';
@@ -39,6 +39,17 @@ import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { routes } from '@shell/navigation/routes';
 import { replaceRoot } from '@shell/navigation/routeNavigation';
 import { useAppTheme, type AppTheme } from '@shared/theme';
+import { LARGE_TITLE_COLLAPSE_OFFSET, SettingsHeader } from './SettingsHeader';
+import {
+  SettingsCardNote,
+  SettingsGroup,
+  SettingsNotice,
+  SettingsNoteText,
+  SettingsRow,
+  SettingsToggleRow,
+} from './SettingsList';
+import { ICON_ROW_SEPARATOR_INSET } from './settingsListStyles';
+import { approvalModeTitle, useApprovalModeSettings } from './useApprovalModeSettings';
 
 function cycleWorkspaceChatLimit(current: WorkspaceChatLimit): WorkspaceChatLimit {
   if (current === 5) {
@@ -71,25 +82,37 @@ function ConnectionSection({
   router,
 }: ConnectionSectionProps) {
   return (
-    <Section title="Connection">
-      <Row
-        label={activeBridgeProfile?.name ?? 'Current bridge'}
-        value={bridgeConnected ? 'Connected' : 'Disconnected'}
-        onPress={() => router.push(routes.settingsConnection(profileId, 'edit'))}
-      />
-      <Row
-        label="Add bridge"
-        onPress={() => router.push(routes.settingsConnection(profileId, 'add'))}
-      />
-      {bridgeProfiles.map((profile) => (
-        <Row
-          key={profile.id}
-          label={profile.name}
-          value={profile.id === activeBridgeProfileId ? 'Active' : undefined}
-          onPress={() => replaceRoot(routes.newChat(profile.id))}
+    <>
+      <SettingsGroup title="Connection">
+        <SettingsRow
+          label={activeBridgeProfile?.name ?? 'Current bridge'}
+          value={bridgeConnected ? 'Connected' : 'Disconnected'}
+          accessory="chevron"
+          onPress={() => router.push(routes.settingsConnection(profileId, 'edit'))}
         />
-      ))}
-    </Section>
+        <SettingsRow
+          label="Add bridge"
+          tone="accent"
+          onPress={() => router.push(routes.settingsConnection(profileId, 'add'))}
+        />
+      </SettingsGroup>
+      {bridgeProfiles.length > 0 ? (
+        <SettingsGroup
+          title="Bridges"
+          footer="Switching bridges opens a new chat on that workspace."
+        >
+          {bridgeProfiles.map((profile) => (
+            <SettingsRow
+              key={profile.id}
+              label={profile.name}
+              accessory="check"
+              selected={profile.id === activeBridgeProfileId}
+              onPress={() => replaceRoot(routes.newChat(profile.id))}
+            />
+          ))}
+        </SettingsGroup>
+      ) : null}
+    </>
   );
 }
 
@@ -100,51 +123,83 @@ interface InstalledAgentsSectionProps {
 }
 
 function InstalledAgentsSection({ loading, capabilities, theme }: InstalledAgentsSectionProps) {
-  const styles = useMemo(() => createStyles(theme), [theme]);
   return (
-    <Section title="Installed ACP agents">
-      {loading ? <ActivityIndicator color={theme.colors.accent} /> : null}
+    <SettingsGroup
+      title="Installed ACP agents"
+      footer="Agents are installed and registered on the desktop host."
+      separatorInset={ICON_ROW_SEPARATOR_INSET}
+    >
+      {loading ? (
+        <SettingsCardNote>
+          <ActivityIndicator color={theme.colors.accent} />
+        </SettingsCardNote>
+      ) : null}
       {!loading && (capabilities?.agents.length ?? 0) === 0 ? (
-        <Text style={styles.muted}>No agents reported by this bridge.</Text>
+        <SettingsCardNote>
+          <SettingsNoteText>No agents reported by this bridge.</SettingsNoteText>
+        </SettingsCardNote>
       ) : null}
       {capabilities?.agents.map((agent) => (
         <AgentRow key={agent.agentId} agent={agent} capabilities={capabilities} />
       ))}
-    </Section>
+    </SettingsGroup>
   );
 }
 
 interface ChatSettingsSectionProps {
-  approvalMode: string;
-  setApprovalMode: (mode: 'normal' | 'yolo') => void;
-  showToolCalls: boolean;
-  setShowToolCalls: (value: boolean) => void;
-  workspaceChatLimit: WorkspaceChatLimit;
-  setWorkspaceChatLimit: (value: WorkspaceChatLimit) => void;
+  api: HostBridgeApiClient | null;
+  bridgeConnected: boolean;
+  onError: (message: string | null) => void;
 }
 
-function ChatSettingsSection({
-  approvalMode,
-  setApprovalMode,
-  showToolCalls,
-  setShowToolCalls,
-  workspaceChatLimit,
-  setWorkspaceChatLimit,
-}: ChatSettingsSectionProps) {
+function ChatSettingsSection({ api, bridgeConnected, onError }: ChatSettingsSectionProps) {
+  const [confirmSessionDeletion, setConfirmSessionDeletion] = useAtom(confirmSessionDeletionAtom);
+  const [showToolCalls, setShowToolCalls] = useAtom(showToolCallsAtom);
+  const [workspaceChatLimit, setWorkspaceChatLimit] = useAtom(workspaceChatLimitAtom);
+  const {
+    approvalBusy,
+    approvalMode,
+    approvalOptions,
+    approvalSheetVisible,
+    setApprovalSheetVisible,
+  } = useApprovalModeSettings({ api, bridgeConnected, onError });
+
   return (
-    <Section title="Chat">
-      <Toggle
-        label="Require approvals"
-        value={approvalMode !== 'yolo'}
-        onChange={(value) => setApprovalMode(value ? 'normal' : 'yolo')}
+    <>
+      <SettingsGroup title="Chat" footer="Approvals decide when an agent must ask before it acts.">
+        <SettingsRow
+          label="Approvals"
+          value={approvalModeTitle(approvalMode)}
+          accessory="expand"
+          onPress={() => setApprovalSheetVisible(true)}
+        />
+        <SettingsToggleRow
+          label="Show tool calls"
+          value={showToolCalls}
+          onChange={setShowToolCalls}
+        />
+        <SettingsToggleRow
+          label="Confirm before deleting sessions"
+          value={confirmSessionDeletion}
+          onChange={setConfirmSessionDeletion}
+        />
+        <SettingsRow
+          label="Chats per workspace"
+          value={workspaceChatLimit === null ? 'All' : String(workspaceChatLimit)}
+          accessory="expand"
+          onPress={() => setWorkspaceChatLimit(cycleWorkspaceChatLimit(workspaceChatLimit))}
+        />
+      </SettingsGroup>
+      <SelectionSheet
+        visible={approvalSheetVisible}
+        title="Approval requirements"
+        subtitle="Choose when agents must ask before acting."
+        options={approvalOptions}
+        onClose={() => setApprovalSheetVisible(false)}
+        loading={approvalBusy}
+        loadingLabel="Applying approval requirement"
       />
-      <Toggle label="Show tool calls" value={showToolCalls} onChange={setShowToolCalls} />
-      <Row
-        label="Chats per workspace"
-        value={workspaceChatLimit === null ? 'All' : String(workspaceChatLimit)}
-        onPress={() => setWorkspaceChatLimit(cycleWorkspaceChatLimit(workspaceChatLimit))}
-      />
-    </Section>
+    </>
   );
 }
 
@@ -168,24 +223,27 @@ function NotificationsSection({
   updatePushEvent,
 }: NotificationsSectionProps) {
   return (
-    <Section title="Notifications">
-      <Toggle
+    <SettingsGroup
+      title="Notifications"
+      footer="Alerts arrive when a turn finishes or an agent asks for approval."
+    >
+      <SettingsToggleRow
         label="Push notifications"
         value={!pushSettings.optedOut}
         disabled={pushBusy}
         onChange={(value) => void updatePush(value)}
       />
-      <Toggle
+      <SettingsToggleRow
         label="Turn completed"
         value={pushSettings.events.turnCompleted}
         onChange={(value) => void updatePushEvent('turnCompleted', value)}
       />
-      <Toggle
+      <SettingsToggleRow
         label="Approval requested"
         value={pushSettings.events.approvalRequested}
         onChange={(value) => void updatePushEvent('approvalRequested', value)}
       />
-    </Section>
+    </SettingsGroup>
   );
 }
 
@@ -197,10 +255,18 @@ function LegalSection({
   router: ReturnType<typeof useRouter>;
 }) {
   return (
-    <Section title="Legal">
-      <Row label="Privacy policy" onPress={() => router.push(routes.privacy(profileId))} />
-      <Row label="Terms of service" onPress={() => router.push(routes.terms(profileId))} />
-    </Section>
+    <SettingsGroup title="Legal">
+      <SettingsRow
+        label="Privacy policy"
+        accessory="chevron"
+        onPress={() => router.push(routes.privacy(profileId))}
+      />
+      <SettingsRow
+        label="Terms of service"
+        accessory="chevron"
+        onPress={() => router.push(routes.terms(profileId))}
+      />
+    </SettingsGroup>
   );
 }
 
@@ -209,6 +275,7 @@ export function SettingsScreen() {
   const router = useRouter();
   const { profileId: routeProfileId } = useLocalSearchParams<{ profileId?: string }>();
   const store = useStore();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const api = useAtomValue(apiClientAtom);
   const bridgeConnected = useAtomValue(bridgeConnectedAtom);
@@ -219,9 +286,6 @@ export function SettingsScreen() {
   const pushSettings = useAtomValue(pushSettingsAtom);
   const persistenceError = useAtomValue(appStatePersistenceErrorAtom);
   const drawerCommands = useAtomValue(drawerCommandsAtom);
-  const [approvalMode, setApprovalMode] = useAtom(approvalModeAtom);
-  const [showToolCalls, setShowToolCalls] = useAtom(showToolCallsAtom);
-  const [workspaceChatLimit, setWorkspaceChatLimit] = useAtom(workspaceChatLimitAtom);
   const retryPersistence = useSetAtom(retryPersistenceAtom);
 
   const {
@@ -232,6 +296,12 @@ export function SettingsScreen() {
   const loading = capabilitiesRefreshing && !capabilities;
   const [error, setError] = useState<string | null>(null);
   const [pushBusy, setPushBusy] = useState(false);
+  const [titleCollapsed, setTitleCollapsed] = useState(false);
+
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const collapsed = event.nativeEvent.contentOffset.y > LARGE_TITLE_COLLAPSE_OFFSET;
+    setTitleCollapsed((current) => (current === collapsed ? current : collapsed));
+  };
 
   const updatePush = async (enabled: boolean) => {
     if (!api || !activeBridgeProfileId || pushBusy) {
@@ -264,24 +334,30 @@ export function SettingsScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <View style={styles.header}>
-        {drawerCommands?.toggleNavigation ? (
-          <Pressable
-            onPress={drawerCommands.toggleNavigation}
-            accessibilityRole="button"
-            accessibilityLabel="Open navigation drawer"
-          >
-            <Ionicons name="menu" size={22} color={theme.colors.textPrimary} />
-          </Pressable>
-        ) : null}
-        <Text style={styles.title}>Settings</Text>
-      </View>
-      <ScrollView contentContainerStyle={styles.content}>
+      <SettingsHeader
+        title="Settings"
+        collapsed={titleCollapsed}
+        onMenuPress={drawerCommands?.toggleNavigation}
+      />
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+        scrollIndicatorInsets={{ right: 1 }}
+      >
+        <Text accessibilityRole="header" style={styles.largeTitle}>
+          Settings
+        </Text>
+
         {persistenceError ? (
-          <Notice text={persistenceError.message} action="Retry" onPress={retryPersistence} />
+          <SettingsNotice
+            text={persistenceError.message}
+            action="Retry"
+            onPress={retryPersistence}
+          />
         ) : null}
-        {capabilitiesError ? <Notice text={capabilitiesError} /> : null}
-        {error ? <Notice text={error} /> : null}
+        {capabilitiesError ? <SettingsNotice text={capabilitiesError} /> : null}
+        {error ? <SettingsNotice text={error} /> : null}
 
         <ConnectionSection
           activeBridgeProfile={activeBridgeProfile}
@@ -294,14 +370,7 @@ export function SettingsScreen() {
 
         <InstalledAgentsSection loading={loading} capabilities={capabilities} theme={theme} />
 
-        <ChatSettingsSection
-          approvalMode={approvalMode}
-          setApprovalMode={setApprovalMode}
-          showToolCalls={showToolCalls}
-          setShowToolCalls={setShowToolCalls}
-          workspaceChatLimit={workspaceChatLimit}
-          setWorkspaceChatLimit={setWorkspaceChatLimit}
-        />
+        <ChatSettingsSection api={api} bridgeConnected={bridgeConnected} onError={setError} />
 
         <NotificationsSection
           pushSettings={pushSettings}
@@ -336,111 +405,14 @@ function AgentRow({
     <View style={styles.agentRow}>
       <AgentIcon agent={agent} size={28} />
       <View style={styles.agentText}>
-        <Text style={styles.rowLabel}>{agent.displayName}</Text>
-        <Text style={styles.muted}>
+        <Text style={styles.agentName}>{agent.displayName}</Text>
+        <Text style={styles.agentMeta}>
           {statuses} · {agent.version} · {agent.provenance}
         </Text>
         {agent.lastError ? (
-          <Text style={styles.error}>Agent unavailable (details redacted)</Text>
+          <Text style={styles.agentError}>Agent unavailable (details redacted)</Text>
         ) : null}
       </View>
-    </View>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
-  return (
-    <View style={styles.section}>
-      <Text accessibilityRole="header" style={styles.sectionTitle}>
-        {title}
-      </Text>
-      {children}
-    </View>
-  );
-}
-
-function Row({ label, value, onPress }: { label: string; value?: string; onPress?: () => void }) {
-  const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
-  return (
-    <Pressable
-      accessibilityLabel={value ? `${label}, ${value}` : label}
-      accessibilityRole={onPress ? 'button' : undefined}
-      disabled={!onPress}
-      onPress={() => {
-        if (!onPress) {
-          return;
-        }
-        void feedback.selection();
-        onPress();
-      }}
-      style={({ pressed }) => [styles.row, pressed && onPress && styles.rowPressed]}
-    >
-      <Text style={styles.rowLabel}>{label}</Text>
-      {value ? <Text style={styles.muted}>{value}</Text> : null}
-    </Pressable>
-  );
-}
-
-function Toggle({
-  label,
-  value,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: boolean;
-  disabled?: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
-  return (
-    <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Switch
-        accessibilityLabel={label}
-        value={value}
-        disabled={disabled}
-        onValueChange={(next) => {
-          void feedback.selection();
-          onChange(next);
-        }}
-      />
-    </View>
-  );
-}
-
-function Notice({
-  text,
-  action,
-  onPress,
-}: {
-  text: string;
-  action?: string;
-  onPress?: () => void | Promise<void>;
-}) {
-  const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
-  return (
-    <View style={styles.notice}>
-      <Text style={styles.error}>{text}</Text>
-      {action ? (
-        <Pressable
-          accessibilityLabel={action}
-          accessibilityRole="button"
-          hitSlop={8}
-          onPress={() => {
-            void feedback.selection();
-            void onPress?.();
-          }}
-          style={styles.noticeAction}
-        >
-          <Text style={styles.action}>{action}</Text>
-        </Pressable>
-      ) : null}
     </View>
   );
 }
@@ -449,56 +421,25 @@ function createStyles(theme: AppTheme) {
   const { colors } = theme;
   return StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: colors.bgMain },
-    header: {
-      minHeight: 52,
-      paddingHorizontal: 18,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 16,
+    content: {
+      paddingHorizontal: theme.spacing.lg,
+      paddingTop: theme.spacing.xs,
+      paddingBottom: 48,
+      gap: theme.spacing.xxl,
     },
-    title: {
-      ...theme.typography.title,
-      color: colors.textPrimary,
-    },
-    content: { padding: 18, gap: 24, paddingBottom: 48 },
-    section: { gap: 4 },
-    sectionTitle: {
-      ...theme.typography.label,
-      color: colors.textMuted,
-      fontWeight: '700',
-      textTransform: 'uppercase',
-      marginBottom: 6,
-    },
-    row: {
+    largeTitle: { ...theme.typography.largeTitle },
+    agentRow: {
       minHeight: theme.touchTarget.minimum,
       flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 12,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.borderLight,
-    },
-    rowPressed: { backgroundColor: colors.bgCanvasAccent },
-    rowLabel: { ...theme.typography.subheadline, color: colors.textPrimary, flexShrink: 1 },
-    muted: { ...theme.typography.caption, color: colors.textMuted },
-    error: { ...theme.typography.caption, color: colors.error },
-    action: { ...theme.typography.label, color: colors.accent, fontWeight: '700' },
-    noticeAction: { minHeight: theme.touchTarget.minimum, justifyContent: 'center' },
-    notice: {
-      padding: 12,
-      borderWidth: 1,
-      borderRadius: theme.radius.md,
-      borderColor: colors.error,
-      gap: 8,
-    },
-    agentRow: {
-      flexDirection: 'row',
       alignItems: 'flex-start',
-      gap: 12,
-      paddingVertical: 12,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.borderLight,
+      gap: theme.spacing.md,
+      paddingHorizontal: theme.spacing.lg,
+      paddingVertical: 11,
+      backgroundColor: colors.bgItem,
     },
-    agentText: { flex: 1, gap: 3 },
+    agentText: { flex: 1, gap: 2 },
+    agentName: { ...theme.typography.headline, fontWeight: '400' },
+    agentMeta: { ...theme.typography.caption, color: colors.textMuted },
+    agentError: { ...theme.typography.caption, color: colors.error },
   });
 }

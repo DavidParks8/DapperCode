@@ -4,7 +4,7 @@ import { Text, useWindowDimensions, View, type TextLayoutEvent } from 'react-nat
 
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { useAppTheme } from '@shared/theme';
-import { MarkdownImage, renderUserTextWithMentions, SelectableMessageText } from './Primitives';
+import { MarkdownImage, renderUserText, SelectableMessageText } from './Primitives';
 import { createStyles } from './styles';
 import type { MessageBlock } from './types';
 
@@ -111,7 +111,12 @@ export function ChatMessageUserBubble({
                 style={styles.userMessageText}
                 onTextLayout={textOnly ? onTextLayout : undefined}
               >
-                {renderUserTextWithMentions(block.value, styles.userInlineMentionText)}
+                {renderUserText(
+                  block.value,
+                  styles.userInlineMentionText,
+                  styles.userInlineSlashCommandText,
+                  index === 0,
+                )}
               </SelectableMessageText>
             );
           })}

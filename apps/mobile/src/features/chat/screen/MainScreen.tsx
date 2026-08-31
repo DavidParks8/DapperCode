@@ -1,4 +1,4 @@
-import { useStore } from 'jotai';
+import { useAtomValue, useStore } from 'jotai';
 import { useRef } from 'react';
 import type { Chat } from '@bridge/types/types';
 import { resetMainScreenStateAtom } from '../state/registry';
@@ -45,6 +45,9 @@ import type {
   MainScreenPanelCollapseCoordinatorResult,
 } from './panelCollapseCoordinator';
 import { MainScreenView } from './View';
+import { ChatAnimationClockProvider } from '../animation/ChatAnimationClock';
+import { bridgeConnectedAtom } from '@shell/state/bridge/atoms';
+import { useSelectedTurnLiveActivity } from '../liveActivities/useSelectedTurnLiveActivity';
 
 export interface MainScreenHandle {
   openChat: (id: string, optimisticChat?: Chat | null) => void;
@@ -53,6 +56,7 @@ export interface MainScreenHandle {
 
 export function MainScreen() {
   const store = useStore();
+  const bridgeConnected = useAtomValue(bridgeConnectedAtom);
   // MainScreen state lives in atoms that outlive this component, so a fresh mount (a new bridge
   // profile) has to clear it before any child reads it. A ref guard rather than useMemo: React
   // may discard a memo cache and recompute it later, which would wipe live state mid-session.
@@ -212,6 +216,10 @@ export function MainScreen() {
     ...uiActionHandlersContext,
     ...headerActivityViewModelResult,
   };
+  useSelectedTurnLiveActivity({
+    profileId: headerActivityViewModelContext.bridgeProfileId,
+    threadId: headerActivityViewModelContext.selectedChat?.id ?? null,
+  });
   const workflowQueueStateResult = useMainScreenWorkflowQueueState(headerActivityViewModelContext);
   const workflowQueueStateContext = {
     ...headerActivityViewModelContext,
@@ -231,5 +239,9 @@ export function MainScreen() {
   const mainScreenContext =
     panelCollapseCoordinatorContext as MainScreenPanelCollapseCoordinatorContext &
       MainScreenPanelCollapseCoordinatorResult;
-  return <MainScreenView context={mainScreenContext} />;
+  return (
+    <ChatAnimationClockProvider enabled={bridgeConnected}>
+      <MainScreenView context={mainScreenContext} />
+    </ChatAnimationClockProvider>
+  );
 }

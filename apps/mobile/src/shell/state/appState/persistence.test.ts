@@ -2,6 +2,7 @@ import type * as AppStatePersistenceModule from '@shell/state/appState/persisten
 
 describe('appStatePersistence', () => {
   const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const originalE2EFilePersistence = process.env['EXPO_PUBLIC_E2E_FILE_PERSISTENCE'];
 
   afterEach(() => {
     jest.dontMock('react-native');
@@ -13,6 +14,11 @@ describe('appStatePersistence', () => {
       Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
     } else {
       Reflect.deleteProperty(globalThis, 'localStorage');
+    }
+    if (originalE2EFilePersistence === undefined) {
+      delete process.env['EXPO_PUBLIC_E2E_FILE_PERSISTENCE'];
+    } else {
+      process.env['EXPO_PUBLIC_E2E_FILE_PERSISTENCE'] = originalE2EFilePersistence;
     }
   });
 
@@ -26,7 +32,7 @@ describe('appStatePersistence', () => {
     jest.doMock('react-native', () => ({ Platform: { OS: 'web' } }));
     jest.doMock('expo-secure-store', () => ({}));
     jest.doMock('expo-file-system/legacy', () => ({
-      documentDirectory: 'file:///documents/',
+      cacheDirectory: 'file:///cache/',
       readAsStringAsync: jest.fn().mockResolvedValue('{"version":11}'),
     }));
 
@@ -51,7 +57,7 @@ describe('appStatePersistence', () => {
     jest.doMock('react-native', () => ({ Platform: { OS: 'ios' } }));
     jest.doMock('expo-secure-store', () => secureStore);
     jest.doMock('expo-file-system/legacy', () => ({
-      documentDirectory: null,
+      cacheDirectory: null,
       readAsStringAsync: jest.fn(),
     }));
 
@@ -70,6 +76,47 @@ describe('appStatePersistence', () => {
     );
   });
 
+  it('uses a relaunch-safe cache file only when native development E2E explicitly enables it', async () => {
+    process.env['EXPO_PUBLIC_E2E_FILE_PERSISTENCE'] = 'true';
+    const secureStore = {
+      AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 'after-first-unlock',
+      getItemAsync: jest.fn(),
+      setItemAsync: jest.fn(),
+    };
+    const getInfoAsync = jest
+      .fn()
+      .mockResolvedValueOnce({ exists: false, isDirectory: false })
+      .mockResolvedValueOnce({ exists: true, isDirectory: false });
+    const readAsStringAsync = jest.fn().mockResolvedValue('{"version":1}');
+    const writeAsStringAsync = jest.fn().mockResolvedValue(undefined);
+    jest.doMock('react-native', () => ({ Platform: { OS: 'ios' } }));
+    jest.doMock('expo-secure-store', () => secureStore);
+    jest.doMock('expo-file-system/legacy', () => ({
+      cacheDirectory: 'file:///cache/',
+      getInfoAsync,
+      readAsStringAsync,
+      writeAsStringAsync,
+    }));
+
+    let module!: typeof AppStatePersistenceModule;
+    jest.isolateModules(() => {
+      module = jest.requireActual('@shell/state/appState/persistence');
+    });
+    const persistence = module.createAppStatePersistence();
+
+    await expect(persistence.readCurrent()).resolves.toBeNull();
+    await expect(persistence.readCurrent()).resolves.toBe('{"version":1}');
+    await persistence.writeCurrent('{"version":2}');
+
+    expect(readAsStringAsync).toHaveBeenCalledWith('file:///cache/dappercode-e2e-app-state.json');
+    expect(writeAsStringAsync).toHaveBeenCalledWith(
+      'file:///cache/dappercode-e2e-app-state.json',
+      '{"version":2}',
+    );
+    expect(secureStore.getItemAsync).not.toHaveBeenCalled();
+    expect(secureStore.setItemAsync).not.toHaveBeenCalled();
+  });
+
   it('reports unavailable browser storage', async () => {
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
@@ -79,7 +126,7 @@ describe('appStatePersistence', () => {
     jest.doMock('react-native', () => ({ Platform: { OS: 'web' } }));
     jest.doMock('expo-secure-store', () => ({}));
     jest.doMock('expo-file-system/legacy', () => ({
-      documentDirectory: 'file:///documents/',
+      cacheDirectory: 'file:///cache/',
       readAsStringAsync,
     }));
 

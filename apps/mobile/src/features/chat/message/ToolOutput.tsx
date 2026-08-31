@@ -1,8 +1,8 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { useMemo, type ReactElement, type ReactNode } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 
 import { useAppTheme } from '@shared/theme';
+import { HorizontalFadeMask } from '@shared/ui/HorizontalFadeMask';
 import { toMarkdownImageSource } from './imageSource';
 import { MarkdownImage, SelectableMessageText } from './Primitives';
 import {
@@ -14,11 +14,14 @@ import {
 import { createToolCardStyles } from './toolCardStyles';
 import type { ToolInvocation, ToolInvocationDiff } from './toolInvocationModel';
 import { compactToolDiff } from './toolInvocationPresentation';
+import { useHorizontalOverflow } from '@shared/ui/useHorizontalOverflow';
+import { SelectableOutput } from './SelectableOutput/SelectableOutput';
 import {
-  compositeOverlayColor,
-  horizontalFadeColors,
-  useHorizontalOverflow,
-} from './useHorizontalOverflow';
+  formatToolElapsedAccessibilityLabel,
+  formatToolElapsedTime,
+  formatToolStartTime,
+  useToolElapsedMs,
+} from './toolInvocationTiming';
 
 const SCROLL_LINE_THRESHOLD = 24;
 const MAX_LOCATION_CHIPS = 8;
@@ -103,11 +106,11 @@ export function ToolInvocationOutput({
             key={`${terminal.terminalId ?? 'terminal'}-${String(index)}`}
             style={[styles.outputSurface, styles.consoleSurface]}
           >
-            {splitLines(terminal.output).map((line, lineIndex) => (
-              <SelectableMessageText key={`line-${String(lineIndex)}`} style={styles.outputLine}>
-                {line}
-              </SelectableMessageText>
-            ))}
+            <SelectableOutput
+              text={terminal.output}
+              testID={`selectable-output-terminal-${String(index)}`}
+              accessibilityLabel={`Tool output: ${terminal.output}`}
+            />
           </View>
         ))}
       </>,
@@ -128,11 +131,11 @@ export function ToolInvocationOutput({
       <>
         <Text style={styles.sectionLabel}>Response</Text>
         <View style={styles.outputSurface}>
-          {invocation.textLines.map((line, index) => (
-            <SelectableMessageText key={`text-${String(index)}`} style={styles.outputLine}>
-              {line}
-            </SelectableMessageText>
-          ))}
+          <SelectableOutput
+            text={invocation.textLines.join('\n')}
+            testID="selectable-output-text"
+            accessibilityLabel={`Tool output: ${invocation.textLines.join('\n')}`}
+          />
         </View>
       </>,
     );
@@ -147,6 +150,10 @@ export function ToolInvocationOutput({
           : 'Output truncated by the bridge.'}
       </Text>,
     );
+  }
+
+  if (invocation.startedAtMs !== null) {
+    addSection('timing', <ToolTiming invocation={invocation} />);
   }
 
   if (sections.length === 0) {
@@ -172,6 +179,43 @@ export function ToolInvocationOutput({
   );
 }
 
+function ToolTiming({ invocation }: { invocation: ToolInvocation }): ReactElement | null {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createToolCardStyles(theme), [theme]);
+  const elapsedMs = useToolElapsedMs(invocation.startedAtMs, invocation.completedAtMs);
+  if (invocation.startedAtMs === null || elapsedMs === null) {
+    return null;
+  }
+
+  const settled = invocation.completedAtMs !== null;
+  const timestampLabel = 'Started';
+  const durationLabel = settled ? 'Duration' : 'Elapsed';
+  const startTime = formatToolStartTime(invocation.startedAtMs);
+  const duration = formatToolElapsedTime(elapsedMs);
+  const accessibilityLabel =
+    `${timestampLabel} at ${startTime}. ` +
+    `${durationLabel} ${formatToolElapsedAccessibilityLabel(elapsedMs)}.`;
+
+  return (
+    <View
+      style={styles.timingMetrics}
+      accessible
+      accessibilityRole="text"
+      accessibilityLabel={accessibilityLabel}
+      testID="tool-timing"
+    >
+      <View style={styles.timingMetric} accessible={false}>
+        <Text style={styles.timingLabel}>{timestampLabel}</Text>
+        <Text style={styles.timingValue}>{startTime}</Text>
+      </View>
+      <View style={styles.timingMetric} accessible={false}>
+        <Text style={styles.timingLabel}>{durationLabel}</Text>
+        <Text style={[styles.timingValue, styles.timingDuration]}>{duration}</Text>
+      </View>
+    </View>
+  );
+}
+
 function ToolDiffBlock({
   diff,
   showHeader,
@@ -193,7 +237,6 @@ function ToolDiffBlock({
     [stats.lines, syntax.grammar],
   );
   const overflow = useHorizontalOverflow();
-  const fadeSurface = compositeOverlayColor(theme.colors.bgMain, theme.colors.bgCanvasAccent);
   return (
     <View
       style={[styles.diffBlock, separated && styles.diffBlockSeparated]}
@@ -227,7 +270,13 @@ function ToolDiffBlock({
       {stats.unavailable ? (
         <Text style={[styles.errorNote, styles.diffBlockNote]}>Diff too large to display.</Text>
       ) : (
-        <View style={styles.diffScrollFrame}>
+        <HorizontalFadeMask
+          style={styles.diffScrollFrame}
+          active={overflow.overflowing}
+          fadeStart={overflow.showStartFade}
+          fadeEnd={overflow.showEndFade}
+          testID="tool-diff-overflow"
+        >
           <ScrollView
             horizontal
             nestedScrollEnabled
@@ -280,17 +329,7 @@ function ToolDiffBlock({
               ))}
             </View>
           </ScrollView>
-          {overflow.showEndFade ? (
-            <LinearGradient
-              colors={horizontalFadeColors(fadeSurface)}
-              start={{ x: 0, y: 0.5 }}
-              end={{ x: 1, y: 0.5 }}
-              pointerEvents="none"
-              style={styles.horizontalOverflowFade}
-              testID="tool-diff-overflow-fade"
-            />
-          ) : null}
-        </View>
+        </HorizontalFadeMask>
       )}
       {stats.omittedChangedLines > 0 ? (
         <Text style={[styles.note, styles.diffBlockNote]}>

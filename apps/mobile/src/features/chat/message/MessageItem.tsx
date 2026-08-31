@@ -2,7 +2,7 @@ import { memo, useCallback, useMemo, useState } from 'react';
 
 import { getMessageText } from '@bridge/messages';
 import { extractLocalPreviewUrls } from '../../browser/preview';
-import type { ChatMessagePart } from '@bridge/types/types';
+import type { ChatMessagePart, MessageTokenUsage } from '@bridge/types/types';
 import { useAppTheme } from '@shared/theme';
 import { messagePartToBlocks, parseMessageBlocks } from './contentHelpers';
 import { createMarkdownRules } from './markdownRules';
@@ -31,8 +31,12 @@ function ChatMessageComponent({
   const markdownRules = useMemo(
     // The chat surface offers its own selection sheet, so the markdown must not claim the long
     // press for React Native's copy-the-whole-block edit menu.
-    () => createMarkdownRules(bridgeUrl, bridgeToken, onOpenLocalPreview, { selectable: false }),
-    [bridgeToken, bridgeUrl, onOpenLocalPreview],
+    () =>
+      createMarkdownRules(bridgeUrl, bridgeToken, onOpenLocalPreview, {
+        selectable: false,
+        mermaidPending: message.pending === true,
+      }),
+    [bridgeToken, bridgeUrl, message.pending, onOpenLocalPreview],
   );
   const [expandedTimelineEntries, setExpandedTimelineEntries] = useState<Record<string, boolean>>(
     {},
@@ -177,6 +181,31 @@ function isShallowRecordEqual(
   return previousKeys.every((key) => previous[key] === next[key]);
 }
 
+/**
+ * A settled turn reports its cost after the response text has stopped changing, so the comparator
+ * has to notice a usage-only update or the info affordance never appears.
+ */
+function isMessageUsageEqual(
+  previous: MessageTokenUsage | null | undefined,
+  next: MessageTokenUsage | null | undefined,
+): boolean {
+  if (previous === next) {
+    return true;
+  }
+  if (!previous || !next) {
+    return false;
+  }
+  return (
+    previous.inputTokens === next.inputTokens &&
+    previous.outputTokens === next.outputTokens &&
+    previous.reasoningTokens === next.reasoningTokens &&
+    previous.cachedReadTokens === next.cachedReadTokens &&
+    previous.cachedWriteTokens === next.cachedWriteTokens &&
+    previous.totalTokens === next.totalTokens &&
+    previous.model === next.model
+  );
+}
+
 function areChatMessageActionPropsEqual(
   previous: ChatMessageProps,
   next: ChatMessageProps,
@@ -206,7 +235,9 @@ export function areChatMessagePropsEqual(
     previous.role === next.role &&
     previous.content === next.content &&
     previous.createdAt === next.createdAt &&
+    previous.completedAt === next.completedAt &&
     previous.pending === next.pending &&
+    isMessageUsageEqual(previous.usage, next.usage) &&
     // Ordered parts take priority over `content` when rendering, so a parts-only
     // change still has to repaint the bubble.
     arePartsEqual(previous.parts, next.parts) &&

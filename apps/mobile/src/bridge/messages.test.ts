@@ -1,8 +1,11 @@
 import {
+  AGENT_MESSAGE_ACTIVITY_TYPE,
   createActivityMessage,
+  getAgentMessageMeta,
   getMessageText,
   getSubAgentMeta,
   getToolCallDisplayLines,
+  preserveKnownSubAgentThreadLink,
   SUBAGENT_ACTIVITY_TYPE,
 } from '@bridge/messages';
 import type { ChatMessage } from '@bridge/types/types';
@@ -103,7 +106,100 @@ describe('messages', () => {
         },
       },
     });
+
     expect(malformedMeta).toBeUndefined();
+  });
+
+  it('accepts only complete agent-message metadata on its dedicated activity type', () => {
+    const agentMessage = {
+      messageId: 'agent-message-1',
+      direction: 'sent' as const,
+      relatedThreadId: 'child',
+      relatedTitle: 'Review agent',
+      relation: 'sub_agent' as const,
+      disposition: 'steering' as const,
+      body: 'Please check the queue lifecycle.',
+    };
+    const activity = createActivityMessage(
+      'agent-message-1',
+      AGENT_MESSAGE_ACTIVITY_TYPE,
+      { text: agentMessage.body, agentMessage },
+      'now',
+    );
+
+    expect(getAgentMessageMeta(activity)).toBe(agentMessage);
+    expect(
+      getAgentMessageMeta(
+        createActivityMessage(
+          'cancelled',
+          AGENT_MESSAGE_ACTIVITY_TYPE,
+          {
+            text: agentMessage.body,
+            agentMessage: { ...agentMessage, disposition: 'cancelled' },
+          },
+          'now',
+        ),
+      )?.disposition,
+    ).toBe('cancelled');
+    expect(
+      getAgentMessageMeta(
+        createActivityMessage(
+          'wrong-type',
+          'status',
+          { text: agentMessage.body, agentMessage },
+          'now',
+        ),
+      ),
+    ).toBeUndefined();
+    expect(
+      getAgentMessageMeta(
+        createActivityMessage(
+          'malformed',
+          AGENT_MESSAGE_ACTIVITY_TYPE,
+          {
+            text: 'Malformed',
+            agentMessage: { ...agentMessage, disposition: 'delivered' } as never,
+          },
+          'now',
+        ),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('does not let a later snapshot discard a known sub-agent thread link', () => {
+    const linked = createActivityMessage(
+      'subagent',
+      SUBAGENT_ACTIVITY_TYPE,
+      {
+        text: 'Working',
+        subAgent: {
+          toolCallId: 'task-1',
+          receiverThreadIds: [' child '],
+          agentStatus: 'running',
+        },
+      },
+      'now',
+    );
+    const unlinkedUpdate = createActivityMessage(
+      'subagent',
+      SUBAGENT_ACTIVITY_TYPE,
+      {
+        text: 'Still working',
+        subAgent: {
+          toolCallId: 'task-1',
+          receiverThreadIds: [],
+          agentStatus: 'running',
+        },
+      },
+      'later',
+    );
+
+    expect(getSubAgentMeta(preserveKnownSubAgentThreadLink(linked, unlinkedUpdate))).toMatchObject({
+      toolCallId: 'task-1',
+      receiverThreadIds: ['child'],
+      agentStatus: 'running',
+    });
+    expect(preserveKnownSubAgentThreadLink(undefined, unlinkedUpdate)).toBe(unlinkedUpdate);
   });
 
   it('formats assistant tool calls and omits empty arguments', () => {

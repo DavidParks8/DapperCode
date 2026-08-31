@@ -10,11 +10,12 @@ import {
 } from '@bridge/mapping/chatMappingChatProjection';
 import {
   readCoercedFiniteNumber,
+  readNonNegativeIntegerLike,
   readString,
   readTrimmedStringArray,
   toRecord,
 } from '@shared/runtimeValidation';
-import type { ChatSummary } from '@bridge/types/types';
+import type { ChatSummary, MessageTokenUsage, SessionTokenTotals } from '@bridge/types/types';
 import {
   type RawAcpSnapshot,
   type RawSnapshotCollectionMetadata,
@@ -24,6 +25,7 @@ import {
   toPreview,
   unixSecondsToIso,
 } from '@bridge/mapping/chatMappingRawTypesAndReaders';
+import { parseAgentMessageMeta } from '@bridge/messages';
 
 function parseSnapshotMessages(snapshot: Record<string, unknown>): RawAcpSnapshot['messages'] {
   return (Array.isArray(snapshot['messages']) ? snapshot['messages'] : [])
@@ -34,8 +36,41 @@ function parseSnapshotMessages(snapshot: Record<string, unknown>): RawAcpSnapsho
       role: readString(entry['role']) ?? '',
       parts: Array.isArray(entry['parts']) ? entry['parts'] : [],
       truncated: entry['truncated'] === true,
+      usage: parseSnapshotMessageUsage(entry['usage']),
+      agentMessage: parseAgentMessageMeta(entry['agentMessage']),
     }))
     .filter((entry) => entry.id && entry.role);
+}
+
+function parseSnapshotMessageUsage(value: unknown): MessageTokenUsage | null {
+  const usage = toRecord(value);
+  if (!usage) {
+    return null;
+  }
+  const inputTokens = readFirstNonNegativeInteger([usage['inputTokens'], usage['input_tokens']]);
+  const outputTokens = readFirstNonNegativeInteger([usage['outputTokens'], usage['output_tokens']]);
+  const totalTokens = readFirstNonNegativeInteger([usage['totalTokens'], usage['total_tokens']]);
+  if (inputTokens === null || outputTokens === null || totalTokens === null) {
+    return null;
+  }
+  return {
+    inputTokens,
+    outputTokens,
+    reasoningTokens: readFirstNonNegativeInteger([
+      usage['reasoningTokens'],
+      usage['reasoning_tokens'],
+    ]),
+    cachedReadTokens: readFirstNonNegativeInteger([
+      usage['cachedReadTokens'],
+      usage['cached_read_tokens'],
+    ]),
+    cachedWriteTokens: readFirstNonNegativeInteger([
+      usage['cachedWriteTokens'],
+      usage['cached_write_tokens'],
+    ]),
+    totalTokens,
+    model: readString(usage['model'])?.trim() || null,
+  };
 }
 
 function parseSnapshotTools(snapshot: Record<string, unknown>): RawAcpSnapshot['tools'] {
@@ -48,6 +83,8 @@ function parseSnapshotTools(snapshot: Record<string, unknown>): RawAcpSnapshot['
       kind: readString(entry['kind']) ?? '',
       status: readString(entry['status']) ?? '',
       title: readString(entry['title']) ?? '',
+      startedAtMs: readSnapshotTimestamp(entry['startedAtMs']),
+      completedAtMs: readSnapshotTimestamp(entry['completedAtMs']),
       content: readString(entry['content']) ?? '',
       structuredContent: Array.isArray(entry['structuredContent'])
         ? entry['structuredContent']
@@ -57,6 +94,11 @@ function parseSnapshotTools(snapshot: Record<string, unknown>): RawAcpSnapshot['
       subagent: entry['subagent'] === true,
     }))
     .filter((entry) => entry.id);
+}
+
+function readSnapshotTimestamp(value: unknown): number | null {
+  const timestamp = readNonNegativeIntegerLike(value);
+  return timestamp !== null && Number(value) >= 0 ? timestamp : null;
 }
 
 function parseSnapshotTimeline(
@@ -130,6 +172,52 @@ function parseSnapshotUsage(usageValue: unknown): RawAcpSnapshot['usage'] {
     used: readCoercedFiniteNumber(usage['used']),
     size: readCoercedFiniteNumber(usage['size']),
     cost: readString(usage['cost']),
+  };
+}
+
+function readFirstNonNegativeInteger(values: unknown[]): number | null {
+  for (const value of values) {
+    const parsed = readNonNegativeIntegerLike(value);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function parseSnapshotTokenTotals(value: unknown): SessionTokenTotals | null {
+  const totals = toRecord(value);
+  if (!totals) {
+    return null;
+  }
+  const turns = readNonNegativeIntegerLike(totals['turns']);
+  const inputTokens = readFirstNonNegativeInteger([totals['inputTokens'], totals['input_tokens']]);
+  const outputTokens = readFirstNonNegativeInteger([
+    totals['outputTokens'],
+    totals['output_tokens'],
+  ]);
+  const totalTokens = readFirstNonNegativeInteger([totals['totalTokens'], totals['total_tokens']]);
+  if (turns === null || inputTokens === null || outputTokens === null || totalTokens === null) {
+    return null;
+  }
+
+  return {
+    turns,
+    inputTokens,
+    outputTokens,
+    reasoningTokens: readFirstNonNegativeInteger([
+      totals['reasoningTokens'],
+      totals['reasoning_tokens'],
+    ]),
+    cachedReadTokens: readFirstNonNegativeInteger([
+      totals['cachedReadTokens'],
+      totals['cached_read_tokens'],
+    ]),
+    cachedWriteTokens: readFirstNonNegativeInteger([
+      totals['cachedWriteTokens'],
+      totals['cached_write_tokens'],
+    ]),
+    totalTokens,
   };
 }
 
@@ -207,6 +295,7 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
     continuation: parseSnapshotContinuation(snapshot['continuation']),
     plan: parseSnapshotPlan(snapshot),
     usage: parseSnapshotUsage(snapshot['usage']),
+    tokenTotals: parseSnapshotTokenTotals(snapshot['tokenTotals'] ?? snapshot['token_totals']),
     mode: readString(snapshot['mode']),
     config: parseSnapshotConfig(snapshot),
     commands: parseSnapshotCommands(snapshot),

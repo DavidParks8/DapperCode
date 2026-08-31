@@ -1,6 +1,6 @@
 # Open Source License Requirements
 
-This project includes third-party open source software through npm and Cargo dependencies.
+This project includes third-party open source software through Node, Cargo, and NuGet dependencies.
 
 ## Distribution Requirements
 
@@ -34,6 +34,21 @@ distribution notices.
 The macOS desktop shell uses operating-system SwiftUI/AppKit frameworks and bundles only the Rust
 operator and Rust bridge. Include generated `THIRD_PARTY_NOTICES.txt` for both Cargo dependency
 closures and the DapperCode license in every distributed `.app` or archive.
+
+The Windows desktop package uses a C# WinUI 3 shell and packages managed .NET/NuGet components
+alongside the Rust operator and bridge. Windows notice generation must consume the restored NuGet
+assets and Rust target triple for the exact architecture-specific package build; it must not
+describe that payload as Rust-only or attribute restore-only build/reference packages. NuGet
+attribution also includes packages whose imported `build` or `buildTransitive` targets inject
+package-local runtime payloads, such as framework MSIX files or self-contained native DLLs, even
+when `project.assets.json` does not list those files in its runtime dictionaries. Include
+`THIRD_PARTY_NOTICES.txt`, covering both target-filtered Cargo closures and the shipped per-RID
+NuGet runtime, native, resource, build-injected, and self-contained .NET pack closure, plus the
+DapperCode license in every architecture-specific MSIX and the x64/ARM64 MSIX bundle. Preserve
+license files referenced from NuGet package metadata. A shipped package with only an MIT expression
+must receive the complete MIT text; notice generation must fail if no supported expression or
+license file supplies license terms. The packaged paths are
+`Licenses\THIRD_PARTY_NOTICES.txt` and `Licenses\DapperCode-LICENSE.txt`.
 
 ## Practical Policy
 

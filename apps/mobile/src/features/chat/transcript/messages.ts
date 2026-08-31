@@ -3,6 +3,7 @@ import { buildToolInvocations, type ToolInvocation } from '../message/toolInvoca
 import { isComputerUseTraceEntry } from '../message/computerUseTrace';
 import type { ChatMessage, ChatStatus } from '@bridge/types/types';
 import {
+  AGENT_MESSAGE_ACTIVITY_TYPE,
   COMPACTION_ACTIVITY_TYPE,
   getMessageText,
   getSubAgentMeta,
@@ -32,10 +33,15 @@ export type TranscriptDisplayItem =
   | ToolTranscriptGroup
   | ToolTranscriptInvocation;
 
+export function transcriptDisplayItemKey(item: TranscriptDisplayItem): string {
+  return item.kind === 'message' ? item.renderKey : item.id;
+}
+
 /** Keeps a computer-use trace bounded so very long runs don’t dominate the transcript. */
 export const MAX_TOOL_MESSAGES_PER_TRANSCRIPT_GROUP = 14;
 
 const HIDDEN_TRANSCRIPT_MARKERS = [
+  '<<<dappercode.dev/agent-message:',
   'FINAL_TASK_RESULT_JSON',
   'Current working directory is:',
   'You are operating in task worktree',
@@ -128,48 +134,49 @@ export function buildTranscriptDisplayItems(messages: ChatMessage[]): Transcript
   return items;
 }
 
+/**
+ * Maps the message that carries the fork action to the boundary the bridge is asked to fork at.
+ *
+ * Every completed turn - including the newest one - offers the action on its last settled response
+ * and names that response. The bridge resolves the response to the end of its complete turn.
+ */
 export function forkBoundariesByActionMessageId(
   messages: ChatMessage[],
   chatStatus: ChatStatus,
 ): ReadonlyMap<string, string> {
-  const boundaries = new Map<string, string>();
   if (chatStatus === 'running') {
-    return boundaries;
+    return new Map<string, string>();
   }
-  let userOrdinal = 0;
-  let precedingResponseId: string | null = null;
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index];
-    if (message?.role === 'assistant' && !message.pending) {
-      precedingResponseId = message.id;
+  return forkBoundariesAtResponses(messages);
+}
+
+function forkBoundariesAtResponses(messages: ChatMessage[]): ReadonlyMap<string, string> {
+  const boundaries = new Map<string, string>();
+  let requestSeen = false;
+  let turnResponseId: string | null = null;
+  const closeTurn = () => {
+    if (requestSeen && turnResponseId) {
+      boundaries.set(turnResponseId, turnResponseId);
+    }
+    turnResponseId = null;
+  };
+  for (const message of messages) {
+    if (message.role === 'user') {
+      closeTurn();
+      requestSeen = true;
       continue;
     }
-    if (message?.role !== 'user') {
-      continue;
+    if (message.role === 'assistant' && !message.pending && !isLocallyMintedMessageId(message.id)) {
+      turnResponseId = message.id;
     }
-    userOrdinal += 1;
-    if (
-      userOrdinal === 1 ||
-      !precedingResponseId ||
-      message.id.startsWith('msg-') ||
-      message.id.startsWith('local-user-')
-    ) {
-      precedingResponseId = null;
-      continue;
-    }
-    const remainder = messages.slice(index + 1);
-    const nextUserIndex = remainder.findIndex((candidate) => candidate.role === 'user');
-    const turnMessages = nextUserIndex >= 0 ? remainder.slice(0, nextUserIndex) : remainder;
-    const hasSettledResponse = turnMessages.some(
-      (candidate) =>
-        (candidate.role === 'assistant' || candidate.role === 'reasoning') && !candidate.pending,
-    );
-    if (hasSettledResponse) {
-      boundaries.set(precedingResponseId, message.id);
-    }
-    precedingResponseId = null;
   }
+  closeTurn();
   return boundaries;
+}
+
+/** Optimistic ids the bridge has never seen, so they cannot name a fork boundary. */
+function isLocallyMintedMessageId(messageId: string): boolean {
+  return messageId.startsWith('msg-') || messageId.startsWith('local-user-');
 }
 
 function isComputerUseTrace(invocations: ToolInvocation[]): boolean {
@@ -186,10 +193,12 @@ function isComputerUseTrace(invocations: ToolInvocation[]): boolean {
 function shouldDisplayTranscriptMessage(message: ChatMessage, showToolCalls: boolean): boolean {
   const text = getMessageText(message);
   const hasToolCalls = getToolCallDisplayLines(message).length > 0;
+  const isAgentMessageActivity =
+    message.role === 'activity' && message.activityType === AGENT_MESSAGE_ACTIVITY_TYPE;
 
   return !(
     shouldHideToolTranscriptMessage(message, text, hasToolCalls, showToolCalls) ||
-    hasHiddenTranscriptMarker(text) ||
+    (!isAgentMessageActivity && hasHiddenTranscriptMarker(text)) ||
     isBlankAssistantTranscriptMessage(message, text, hasToolCalls)
   );
 }
@@ -215,6 +224,7 @@ function shouldHideToolTranscriptMessage(
 function isHiddenActivityTranscriptMessage(message: ChatMessage): boolean {
   return (
     message.role === 'activity' &&
+    message.activityType !== AGENT_MESSAGE_ACTIVITY_TYPE &&
     message.activityType !== SUBAGENT_ACTIVITY_TYPE &&
     message.activityType !== COMPACTION_ACTIVITY_TYPE
   );

@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
-import { ActivityEvent, type ActivityTone } from './ActivityEvent';
+import { ActivityEvent, COMPLETED_TITLE_HOLD_MS, type ActivityTone } from './ActivityEvent';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
@@ -19,12 +19,17 @@ type Queryable = ReactTestInstance & {
 
 const theme = createAppTheme('dark');
 
-function render(tone: ActivityTone, title: string, detail?: string | null): ReactTestRenderer {
+function render(
+  tone: ActivityTone,
+  title: string,
+  detail?: string | null,
+  elapsedMs?: number | null,
+): ReactTestRenderer {
   let tree: ReactTestRenderer | undefined;
   act(() => {
     tree = renderer.create(
       <AppThemeProvider theme={theme}>
-        <ActivityEvent tone={tone} title={title} detail={detail} />
+        <ActivityEvent tone={tone} title={title} detail={detail} elapsedMs={elapsedMs} />
       </AppThemeProvider>,
     );
   });
@@ -87,6 +92,18 @@ describe('ActivityEvent', () => {
     }
   });
 
+  it('shows compact elapsed metadata and exposes a spoken duration', () => {
+    const tree = render('running', 'Editing file', 'src/main.ts', 65_000);
+    expect(textContent(tree.root as Queryable)).toContain('1m 5s');
+    expect(tree.root.findByProps({ testID: 'activity-elapsed-time' })).toBeTruthy();
+    expect(
+      tree.root.findByProps({
+        accessibilityLabel: 'Editing file, src/main.ts, Elapsed 1 minute 5 seconds',
+      }),
+    ).toBeTruthy();
+    act(() => tree.unmount());
+  });
+
   it('uses an opaque elevated surface for errors instead of translucent glass', () => {
     const tree = render('error', 'Turn failed', 'agent exited 1');
     const errorSurface = tree.root.findByProps({ testID: 'activity-error-surface' });
@@ -114,6 +131,64 @@ describe('ActivityEvent', () => {
 
     reduceMotionSpy.mockRestore();
     act(() => tree.unmount());
+  });
+
+  it('dissolves the completed verdict but keeps the duration onscreen', () => {
+    jest.useFakeTimers();
+    try {
+      const tree = render('complete', 'Turn completed', null, 65_000);
+      const verdictOpacities = () =>
+        ['transcript-activity-title', 'transcript-activity-icon'].map(
+          (testID) =>
+            (
+              StyleSheet.flatten(tree.root.findByProps({ testID }).props['style'] as never) as Props
+            )['opacity'],
+        );
+
+      expect(verdictOpacities()).toEqual([1, 1]);
+      expect(textContent(tree.root as Queryable)).toContain('Turn completed');
+
+      act(() => jest.advanceTimersByTime(COMPLETED_TITLE_HOLD_MS));
+
+      // The checkmark is a second way of saying "Turn completed", so it leaves with the words.
+      expect(verdictOpacities()).toEqual([0, 0]);
+      // The row stays put until the next turn starts, so the duration has to survive the fade.
+      expect(tree.root.findByProps({ testID: 'activity-elapsed-time' })).toBeTruthy();
+      expect(textContent(tree.root as Queryable)).toContain('1m 5s');
+      expect(
+        tree.root.findByProps({
+          accessibilityLabel: 'Turn completed, Elapsed 1 minute 5 seconds',
+        }),
+      ).toBeTruthy();
+      act(() => tree.unmount());
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('never fades a row that has nothing left to say', () => {
+    jest.useFakeTimers();
+    try {
+      for (const [tone, title, elapsed] of [
+        ['complete', 'Turn completed', null],
+        ['error', 'Turn failed', 65_000],
+      ] as const) {
+        const tree = render(tone, title, null, elapsed);
+        act(() => jest.advanceTimersByTime(COMPLETED_TITLE_HOLD_MS * 4));
+        expect(
+          (
+            StyleSheet.flatten(
+              tree.root.findByProps({ testID: 'transcript-activity-title' }).props[
+                'style'
+              ] as never,
+            ) as Props
+          )['opacity'],
+        ).toBe(1);
+        act(() => tree.unmount());
+      }
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('spins an atom while running and shows a settled icon otherwise', () => {

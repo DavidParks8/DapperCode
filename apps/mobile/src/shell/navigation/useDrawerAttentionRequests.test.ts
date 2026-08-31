@@ -173,6 +173,51 @@ describe('useDrawerAttentionRequests event burst debouncing', () => {
     act(() => tree.unmount());
   });
 
+  it('discards an in-flight old client result and refreshes the replacement client', async () => {
+    const original = createHarness();
+    const replacement = createHarness();
+    let resolveOriginalApprovals!: (approvals: PendingApproval[]) => void;
+    original.listApprovals.mockImplementationOnce(
+      () =>
+        new Promise<PendingApproval[]>((resolve) => {
+          resolveOriginalApprovals = resolve;
+        }),
+    );
+    replacement.listApprovals.mockResolvedValue([approval('replacement')]);
+    replacement.listPendingUserInputs.mockResolvedValue([userInput('replacement')]);
+
+    let activeHarness = original;
+    let latestResult!: HookResult;
+    function Probe() {
+      latestResult = useDrawerAttentionRequests(activeHarness.api, activeHarness.ws, true);
+      return null;
+    }
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(createElement(Probe));
+      await Promise.resolve();
+    });
+    expect(original.listApprovals).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      activeHarness = replacement;
+      tree.update(createElement(Probe));
+    });
+
+    await act(async () => {
+      resolveOriginalApprovals([approval('stale')]);
+      for (let index = 0; index < 6; index += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(replacement.listApprovals).toHaveBeenCalledTimes(1);
+    expect(replacement.listPendingUserInputs).toHaveBeenCalledTimes(1);
+    expect(latestResult.pendingApprovals).toEqual([approval('replacement')]);
+    expect(latestResult.pendingUserInputs).toEqual([userInput('replacement')]);
+    act(() => tree.unmount());
+  });
+
   it('preserves error reporting behavior for a debounced burst refresh', async () => {
     const harness = createHarness({ approvalFailure: true });
     const { latest, tree } = renderAttentionRequests(harness);

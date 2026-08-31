@@ -1,5 +1,5 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -8,26 +8,28 @@ import {
   type ViewStyle,
 } from 'react-native';
 import Animated, {
-  cancelAnimation,
   Easing,
   FadeIn,
   FadeOut,
-  ReduceMotion,
   type SharedValue,
   useAnimatedStyle,
+  useDerivedValue,
   useReducedMotion,
-  useSharedValue,
-  withRepeat,
-  withTiming,
 } from 'react-native-reanimated';
 
 import { useAppTheme, type AppTheme } from '@shared/theme';
+import {
+  repeatingProgress,
+  reversingProgress,
+  useChatAnimationTime,
+} from '../animation/ChatAnimationClock';
 
 const SHIMMER_WIDTH = 180;
 const SHIMMER_SPEED_POINTS_PER_SECOND = 430;
 const REDUCED_MOTION_PULSE_MS = 1200;
 const USER_BUBBLE_WIDTH_RATIO = 0.72;
 const USER_BUBBLE_WIDTH = `${USER_BUBBLE_WIDTH_RATIO * 100}%` as `${number}%`;
+const PULSE_EASING = Easing.inOut(Easing.quad);
 
 interface ShimmerBoneProps {
   containerWidth: number;
@@ -83,43 +85,20 @@ export function SubAgentTranscriptShimmer() {
   const theme = useAppTheme();
   const componentStyles = useMemo(() => createStyles(theme), [theme]);
   const reduceMotion = useReducedMotion();
-  const progress = useSharedValue(0);
   const [containerWidth, setContainerWidth] = useState(0);
   const userBubbleOffset = containerWidth * (1 - USER_BUBBLE_WIDTH_RATIO);
   const userContentOffset = userBubbleOffset + theme.spacing.lg;
-
-  useEffect(() => {
+  const animationTime = useChatAnimationTime(containerWidth > 0);
+  const progress = useDerivedValue(() => {
     if (containerWidth <= 0) {
-      return;
+      return 0;
     }
-
-    progress.value = 0;
-    const shimmerDurationMs =
-      ((containerWidth + SHIMMER_WIDTH) / SHIMMER_SPEED_POINTS_PER_SECOND) * 1000;
-    progress.value = reduceMotion
-      ? withRepeat(
-          withTiming(1, {
-            duration: REDUCED_MOTION_PULSE_MS,
-            easing: Easing.inOut(Easing.quad),
-            reduceMotion: ReduceMotion.Never,
-          }),
-          -1,
-          true,
-          undefined,
-          ReduceMotion.Never,
-        )
-      : withRepeat(
-          withTiming(1, {
-            duration: shimmerDurationMs,
-            easing: Easing.linear,
-          }),
-          -1,
-          false,
-        );
-    return () => {
-      cancelAnimation(progress);
-    };
-  }, [containerWidth, progress, reduceMotion]);
+    if (reduceMotion) {
+      return PULSE_EASING(reversingProgress(animationTime.value, REDUCED_MOTION_PULSE_MS));
+    }
+    const duration = ((containerWidth + SHIMMER_WIDTH) / SHIMMER_SPEED_POINTS_PER_SECOND) * 1000;
+    return repeatingProgress(animationTime.value, duration);
+  }, [animationTime, containerWidth, reduceMotion]);
 
   const handleLayout = useCallback((event: LayoutChangeEvent) => {
     const nextWidth = event.nativeEvent.layout.width;

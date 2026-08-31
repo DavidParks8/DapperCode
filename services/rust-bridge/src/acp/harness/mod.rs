@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -14,11 +15,13 @@ pub struct HarnessCapabilities {
     pub session_delete: bool,
     pub session_steer: bool,
     pub session_fork: bool,
+    pub live_agent_message: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HarnessLaunchConfig {
     pub extra_args: Vec<String>,
+    pub extra_environment: BTreeMap<String, String>,
     pub http_base: String,
 }
 
@@ -47,8 +50,36 @@ pub struct HarnessSteerRequest {
 }
 
 #[derive(Debug, Clone)]
+pub struct HarnessAgentMessageRequest {
+    pub prompt: Vec<ContentBlock>,
+    pub promote_blocking_subagents: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HarnessAgentMessageOutcome {
+    Delivered,
+    Deferred,
+}
+
+#[derive(Debug, Clone)]
 pub struct HarnessForkRequest {
+    /// Number of complete user turns the fork must keep, as counted in the canonical transcript.
     pub user_message_ordinal: usize,
+    pub boundary: HarnessForkBoundary,
+}
+
+#[derive(Debug, Clone)]
+pub enum HarnessForkBoundary {
+    /// The fork must stop before this user request.
+    BeforeRequest(HarnessForkBoundaryMessage),
+    /// The fork keeps every recorded turn. The carried request is the newest one, so a harness can
+    /// confirm the conversation has not grown since the snapshot was read without assuming its own
+    /// message count matches the canonical transcript's.
+    EndOfHistory(HarnessForkBoundaryMessage),
+}
+
+#[derive(Debug, Clone)]
+pub struct HarnessForkBoundaryMessage {
     pub first_text: String,
     pub first_text_truncated: bool,
     pub raw_message_id_hint: Option<String>,
@@ -82,6 +113,44 @@ pub enum HarnessError {
     StatusTimeout,
 }
 
+#[derive(Debug)]
+pub struct HarnessOperationFailure {
+    error: HarnessError,
+    indeterminate: bool,
+}
+
+impl HarnessOperationFailure {
+    pub fn definitive(error: HarnessError) -> Self {
+        Self {
+            error,
+            indeterminate: false,
+        }
+    }
+
+    pub fn indeterminate(error: HarnessError) -> Self {
+        Self {
+            error,
+            indeterminate: true,
+        }
+    }
+
+    pub fn is_indeterminate(&self) -> bool {
+        self.indeterminate
+    }
+
+    pub fn into_error(self) -> HarnessError {
+        self.error
+    }
+}
+
+impl std::fmt::Display for HarnessOperationFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl std::error::Error for HarnessOperationFailure {}
+
 pub trait HarnessAdapter: Send + Sync {
     fn capabilities(&self, context: &HarnessContext<'_>) -> HarnessCapabilities;
 
@@ -93,17 +162,35 @@ pub trait HarnessAdapter: Send + Sync {
         request: HarnessDeleteRequest,
     ) -> BoxFuture<'a, Result<(), HarnessError>>;
 
+    fn session_exists<'a>(
+        &'a self,
+        context: &'a SessionContext,
+    ) -> BoxFuture<'a, Result<bool, HarnessError>>;
+
     fn steer<'a>(
         &'a self,
         context: &'a SessionContext,
         request: HarnessSteerRequest,
     ) -> BoxFuture<'a, Result<(), HarnessError>>;
 
+    fn deliver_agent_message<'a>(
+        &'a self,
+        context: &'a SessionContext,
+        request: HarnessAgentMessageRequest,
+    ) -> BoxFuture<'a, Result<HarnessAgentMessageOutcome, HarnessOperationFailure>>;
+
+    #[cfg(test)]
     fn fork<'a>(
         &'a self,
         context: &'a SessionContext,
         request: HarnessForkRequest,
     ) -> BoxFuture<'a, Result<HarnessForkedSession, HarnessError>>;
+
+    fn fork_with_outcome<'a>(
+        &'a self,
+        context: &'a SessionContext,
+        request: HarnessForkRequest,
+    ) -> BoxFuture<'a, Result<HarnessForkedSession, HarnessOperationFailure>>;
 
     fn wait_until_idle<'a>(
         &'a self,

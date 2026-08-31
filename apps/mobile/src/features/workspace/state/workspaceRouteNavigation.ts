@@ -1,7 +1,6 @@
 import { router } from 'expo-router';
 import type { Getter } from 'jotai';
 
-import { routes } from '@shell/navigation/routes';
 import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
 import { activeChatAtom, selectedChatIdAtom } from '@shell/state/chat/atoms';
 
@@ -11,9 +10,8 @@ export function getWorkspaceRouteIds(get: Getter) {
   return { profileId, chatId };
 }
 
-export function returnToChat(get: Getter): void {
-  const { profileId, chatId } = getWorkspaceRouteIds(get);
-  if (profileId) {
-    router.dismissTo(routes.chat(profileId, chatId));
-  }
+export function returnToChat(): void {
+  // The picker is always pushed over its anchored chat. Pop that route instead of resolving the
+  // dynamic chat URL again, which can remount MainScreen and clear the pending new-chat settings.
+  router.back();
 }

@@ -4,6 +4,8 @@ import type { RenderRules } from 'react-native-markdown-display';
 import { toMarkdownImageSource } from './imageSource';
 import { openMarkdownLink, toLocalFileReferenceLabel } from './contentHelpers';
 import { ChatCodeBlock } from './ChatCodeBlock';
+import { MermaidDiagram } from './mermaid/MermaidDiagram';
+import { MermaidStreamingPlaceholder } from './mermaid/MermaidStreamingPlaceholder';
 import { MarkdownImage, SelectableMessageText } from './Primitives';
 
 function readMarkdownAttr(value: unknown): string | null {
@@ -21,11 +23,18 @@ function trimTrailingParserNewline(content: string): string {
   return content.endsWith('\n') ? content.substring(0, content.length - 1) : content;
 }
 
+export function isMermaidFence(sourceInfo: string | null): boolean {
+  return sourceInfo?.trim().split(/\s+/u, 1)[0]?.toLowerCase() === 'mermaid';
+}
+
 export function createMarkdownRules(
   bridgeUrl: string | null,
   bridgeToken: string | null,
   onOpenLocalPreview?: (targetUrl: string) => void,
-  { selectable = true }: { selectable?: boolean } = {},
+  {
+    selectable = true,
+    mermaidPending = false,
+  }: { selectable?: boolean; mermaidPending?: boolean } = {},
 ): RenderRules {
   // React Native flattens nested `Text` into the block's outermost node, so only these three
   // rules become real paragraph views. Turning `selectable` off on them releases the long press
@@ -69,14 +78,19 @@ export function createMarkdownRules(
         selectable={selectable}
       />
     ),
-    fence: (node) => (
-      <ChatCodeBlock
-        key={node.key}
-        code={trimTrailingParserNewline(node.content)}
-        language={readFenceLanguage(node)}
-        selectable={selectable}
-      />
-    ),
+    fence: (node) => {
+      const code = trimTrailingParserNewline(node.content);
+      const language = readFenceLanguage(node);
+      return isMermaidFence(language) ? (
+        mermaidPending ? (
+          <MermaidStreamingPlaceholder key={node.key} />
+        ) : (
+          <MermaidDiagram key={node.key} source={code} />
+        )
+      ) : (
+        <ChatCodeBlock key={node.key} code={code} language={language} selectable={selectable} />
+      );
+    },
     table: (node, children, _parent, styles) => (
       <ScrollView
         key={node.key}

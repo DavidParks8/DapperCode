@@ -1,4 +1,5 @@
 import {
+  AGENT_MESSAGE_ACTIVITY_TYPE,
   COMPACTION_ACTIVITY_TYPE,
   createActivityMessage,
   SUBAGENT_ACTIVITY_TYPE,
@@ -93,6 +94,8 @@ function buildSnapshotToolMessage(tool: SnapshotTool, createdAt: string): ChatMe
       kind: toToolKind(tool.kind),
       status: toToolStatus(tool.status),
       title: tool.title || toToolKind(tool.kind),
+      ...(tool.startedAtMs == null ? {} : { startedAtMs: tool.startedAtMs }),
+      ...(tool.completedAtMs == null ? {} : { completedAtMs: tool.completedAtMs }),
       content: tool.structuredContent,
       locations: tool.locations,
       truncated: tool.truncated,
@@ -140,8 +143,18 @@ function mapSnapshotMessageEntry(
     parts,
     createdAt: new Date(context.baseTs + index * 1000).toISOString(),
   };
+  if (message.agentMessage) {
+    return [
+      createActivityMessage(
+        message.id,
+        AGENT_MESSAGE_ACTIVITY_TYPE,
+        { text: message.agentMessage.body, agentMessage: message.agentMessage },
+        common.createdAt,
+      ),
+    ];
+  }
   if (message.role === 'agent') {
-    return [{ ...common, role: 'assistant' as const }];
+    return [{ ...common, role: 'assistant' as const, usage: message.usage ?? null }];
   }
   if (message.role === 'user') {
     return [{ ...common, role: 'user' as const }];

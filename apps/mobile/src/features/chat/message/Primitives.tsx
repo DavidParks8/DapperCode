@@ -29,7 +29,7 @@ export function SelectableMessageText({ children, ...props }: TextProps): ReactE
   );
 }
 
-export function renderUserTextWithMentions(
+function renderUserTextWithMentions(
   value: string,
   mentionStyle: TextProps['style'],
 ): Array<string | ReactElement> {
@@ -61,6 +61,28 @@ export function renderUserTextWithMentions(
     parts.push(value.slice(lastIndex));
   }
   return parts.length > 0 ? parts : [value];
+}
+
+const LEADING_SLASH_COMMAND_PATTERN = /^(\/(?:[A-Za-z0-9_-]+|$))(?=\s|$)/;
+
+export function renderUserText(
+  value: string,
+  mentionStyle: TextProps['style'],
+  slashCommandStyle: TextProps['style'],
+  formatLeadingSlashCommand: boolean,
+): Array<string | ReactElement> {
+  const commandMatch = formatLeadingSlashCommand ? LEADING_SLASH_COMMAND_PATTERN.exec(value) : null;
+  const command = commandMatch?.[1];
+  if (!command) {
+    return renderUserTextWithMentions(value, mentionStyle);
+  }
+
+  return [
+    <Text key="slash-command" testID="user-slash-command" style={slashCommandStyle}>
+      {command}
+    </Text>,
+    ...renderUserTextWithMentions(value.slice(command.length), mentionStyle),
+  ];
 }
 
 export function MarkdownImage({

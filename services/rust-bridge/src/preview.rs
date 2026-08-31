@@ -1,6 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
-    process::Stdio,
+    collections::HashMap,
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, SystemTime},
 };
@@ -11,7 +10,7 @@ use futures_util::{stream, StreamExt};
 use getrandom::fill as fill_random;
 use reqwest::{Client as HttpClient, Url};
 use serde::Serialize;
-use tokio::{process::Command, sync::RwLock, time::timeout};
+use tokio::{sync::RwLock, time::timeout};
 
 use crate::{config::constant_time_eq, now_iso, BridgeError};
 
@@ -162,6 +161,12 @@ impl BrowserPreviewService {
 
     pub(crate) fn secure_cookie(&self) -> bool {
         self.secure_cookie
+    }
+
+    pub(crate) async fn active_session_count(&self) -> usize {
+        let mut sessions = self.sessions.write().await;
+        prune_expired_preview_sessions(&mut sessions);
+        sessions.len()
     }
 
     pub(crate) async fn resolve_bootstrap(
@@ -324,119 +329,9 @@ fn build_preview_bootstrap_path(
 }
 
 async fn discover_loopback_listening_ports(excluded_ports: &[u16]) -> Vec<u16> {
-    let mut ports = HashSet::new();
-    let excluded: HashSet<u16> = excluded_ports.iter().copied().collect();
-    if let Some(output) = read_command_stdout("lsof", &["-nP", "-iTCP", "-sTCP:LISTEN"]).await {
-        collect_ports_from_lsof(&output, &mut ports);
-    }
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(contents) = tokio::fs::read_to_string("/proc/net/tcp").await {
-            collect_ports_from_linux_proc_net(&contents, false, &mut ports);
-        }
-        if let Ok(contents) = tokio::fs::read_to_string("/proc/net/tcp6").await {
-            collect_ports_from_linux_proc_net(&contents, true, &mut ports);
-        }
-    }
-    #[cfg(target_os = "windows")]
-    if let Some(output) = read_command_stdout("netstat", &["-ano", "-p", "tcp"]).await {
-        collect_ports_from_netstat(&output, &mut ports);
-    }
-    let mut result = ports
-        .into_iter()
-        .filter(|port| !excluded.contains(port))
-        .collect::<Vec<_>>();
-    result.sort_unstable();
-    result.dedup();
-    result
-}
-
-async fn read_command_stdout(program: &str, args: &[&str]) -> Option<String> {
-    let output = Command::new(program)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .await
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-fn collect_ports_from_lsof(output: &str, ports: &mut HashSet<u16>) {
-    for line in output.lines().filter(|line| line.contains("(LISTEN)")) {
-        if let Some(port) = line
-            .split(" TCP ")
-            .nth(1)
-            .and_then(|rest| rest.split_whitespace().next())
-            .and_then(parse_listening_socket_port)
-        {
-            ports.insert(port);
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn collect_ports_from_linux_proc_net(output: &str, is_ipv6: bool, ports: &mut HashSet<u16>) {
-    for line in output.lines().skip(1) {
-        let columns = line.split_whitespace().collect::<Vec<_>>();
-        if columns.len() < 4 || columns[3] != "0A" {
-            continue;
-        }
-        let Some((address_hex, port_hex)) = columns[1].split_once(':') else {
-            continue;
-        };
-        if linux_proc_address_is_loopback_or_any(address_hex, is_ipv6) {
-            if let Ok(port) = u16::from_str_radix(port_hex, 16) {
-                ports.insert(port);
-            }
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn linux_proc_address_is_loopback_or_any(value: &str, is_ipv6: bool) -> bool {
-    if !is_ipv6 {
-        return matches!(value, "00000000" | "0100007F");
-    }
-    matches!(
-        value,
-        "00000000000000000000000000000000"
-            | "00000000000000000000000000000001"
-            | "00000000000000000000000001000000"
-    )
-}
-
-#[cfg(target_os = "windows")]
-fn collect_ports_from_netstat(output: &str, ports: &mut HashSet<u16>) {
-    for line in output.lines() {
-        let columns = line.split_whitespace().collect::<Vec<_>>();
-        if columns.len() >= 4 && columns[0] == "TCP" && columns[3] == "LISTENING" {
-            if let Some(port) = parse_listening_socket_port(columns[1]) {
-                ports.insert(port);
-            }
-        }
-    }
-}
-
-pub(crate) fn parse_listening_socket_port(value: &str) -> Option<u16> {
-    let value = value.trim();
-    if let Some(rest) = value.strip_prefix('[') {
-        let (host, remainder) = rest.split_once(']')?;
-        return is_loopback_listen_host(host)
-            .then_some(remainder.strip_prefix(':')?.parse::<u16>().ok())?;
-    }
-    let (host, port) = value.rsplit_once(':')?;
-    is_loopback_listen_host(host).then_some(port.parse::<u16>().ok())?
-}
-
-fn is_loopback_listen_host(host: &str) -> bool {
-    matches!(
-        host,
-        "*" | "127.0.0.1" | "0.0.0.0" | "::1" | "::" | "localhost"
-    )
+    let mut ports = crate::platform::discover_loopback_listening_ports().await;
+    ports.retain(|port| !excluded_ports.contains(port));
+    ports
 }
 
 async fn is_loopback_http_port_reachable(http: &HttpClient, port: u16) -> bool {
@@ -671,55 +566,6 @@ mod tests {
             build_preview_bootstrap_path(&target, "sid", "token"),
             "/?sid=sid&st=token"
         );
-    }
-
-    #[test]
-    fn socket_parser_rejects_non_loopback_and_malformed_addresses() {
-        for (value, expected) in [
-            ("*:3000", Some(3000)),
-            ("127.0.0.1:5173", Some(5173)),
-            ("0.0.0.0:8080", Some(8080)),
-            ("localhost:4200", Some(4200)),
-            ("[::1]:4321", Some(4321)),
-            ("[::]:8000", Some(8000)),
-            ("10.0.0.1:3000", None),
-            ("[2001:db8::1]:3000", None),
-            ("[::1]3000", None),
-            ("localhost:not-a-port", None),
-            ("missing-port", None),
-        ] {
-            assert_eq!(parse_listening_socket_port(value), expected, "{value}");
-        }
-    }
-
-    #[test]
-    fn lsof_parser_collects_only_loopback_listeners() {
-        let mut ports = HashSet::new();
-        collect_ports_from_lsof(
-            "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n\
-             node 1 user 1u IPv4 0 0t0 TCP 127.0.0.1:3000 (LISTEN)\n\
-             node 2 user 1u IPv4 0 0t0 UDP 127.0.0.1:4000\n\
-             node 3 user 1u IPv4 0 0t0 TCP 10.0.0.1:5000 (LISTEN)\n\
-             malformed TCP missing (LISTEN)",
-            &mut ports,
-        );
-        assert_eq!(ports, HashSet::from([3000]));
-    }
-
-    #[tokio::test]
-    async fn command_reader_distinguishes_success_failure_and_missing_program() {
-        assert_eq!(
-            read_command_stdout("/bin/sh", &["-c", "printf success"])
-                .await
-                .as_deref(),
-            Some("success")
-        );
-        assert!(read_command_stdout("/bin/sh", &["-c", "exit 1"])
-            .await
-            .is_none());
-        assert!(read_command_stdout("/definitely/missing/program", &[])
-            .await
-            .is_none());
     }
 
     async fn local_http_server(response: &'static [u8]) -> (u16, tokio::task::JoinHandle<()>) {

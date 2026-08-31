@@ -1,139 +1,154 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import type { Ref, RefObject } from 'react';
+import { Pressable, Text, TextInput, View } from 'react-native';
 
 import type { WorkspaceSummary } from '@bridge/types/types';
-import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
+import { decorativeAccessibilityProps } from '@shared/accessibility';
 import type { AppTheme } from '@shared/theme';
-import { toPathBasename } from './helpers';
-import { WorkspaceTile } from './Primitives';
+import { SwipeToDeleteRow } from '@shared/ui/SwipeToDeleteRow';
+import { formatWorkspaceMeta, toPathBasename } from './helpers';
+import { GroupedRow } from './Primitives';
 import type { WorkspacePickerStyles } from './styles';
 
-interface Props {
+export interface WorkspacePickerListHeaderProps {
   styles: WorkspacePickerStyles;
   theme: AppTheme;
-  bridgeRoot: string | null;
-  selectedPath: string | null;
+  screenFocusRef: RefObject<Text | null>;
+  titleAnchorRef: Ref<View>;
+  currentFolderTitle: string;
+  onOpenPathMenu: () => void;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
+  bridgeRoot: string | null;
+  selectedPath: string | null;
   onSelectPath: (path: string | null) => void;
-  actionLabel: string | null;
-  actionDescription: string | null;
-  actionDisabled: boolean;
-  onActionPress?: () => void;
   favoriteWorkspaces: WorkspaceSummary[];
-  favoritePathSet: Set<string>;
   pendingSelectionPath: string | null;
   onBrowsePath: (path: string | null) => void;
   onToggleFavorite?: (path: string | null) => void;
-  parentPath: string | null;
-  loadingEntries: boolean;
-  hasVisibleEntries: boolean;
-  currentFolderTitle: string;
-  currentFolderPath: string | null;
-  error: string | null;
-  refreshError: string | null;
-  truncationMessage: string | null;
+  folderCountLabel: string | null;
 }
 
-function WorkspacePickerConnectionRow({
+function WorkspacePickerLargeTitle({
   styles,
-  bridgeRoot,
-  selectedPath,
-  onSelectPath,
-}: Pick<Props, 'styles' | 'bridgeRoot' | 'selectedPath' | 'onSelectPath'>) {
-  const isDefault = selectedPath === null;
+  theme,
+  screenFocusRef,
+  titleAnchorRef,
+  currentFolderTitle,
+  onOpenPathMenu,
+}: Pick<
+  WorkspacePickerListHeaderProps,
+  'styles' | 'theme' | 'screenFocusRef' | 'titleAnchorRef' | 'currentFolderTitle' | 'onOpenPathMenu'
+>) {
   return (
-    <View style={styles.connectionRow}>
-      <Text style={styles.connectionText} numberOfLines={1}>
-        {bridgeRoot ? `Start folder: ${toPathBasename(bridgeRoot)}` : 'Computer folders'}
-      </Text>
+    <View ref={titleAnchorRef} collapsable={false} style={styles.largeTitleWrap}>
       <Pressable
-        onPress={() => onSelectPath(null)}
-        style={({ pressed }) => [
-          styles.defaultButton,
-          isDefault && styles.defaultButtonSelected,
-          pressed && styles.pressed,
-        ]}
+        onPress={onOpenPathMenu}
+        style={({ pressed }) => [styles.largeTitleButton, pressed && styles.pressed]}
         accessibilityRole="button"
-        accessibilityLabel="Use default workspace"
-        accessibilityState={controlAccessibilityState({ selected: isDefault })}
+        accessibilityLabel={`${currentFolderTitle}, current folder`}
+        accessibilityHint="Shows the folders this one sits inside"
       >
-        <Text style={[styles.defaultButtonText, isDefault && styles.defaultButtonTextSelected]}>
-          {isDefault ? 'Default' : 'Use Default'}
+        <Text
+          ref={screenFocusRef}
+          accessibilityRole="header"
+          style={styles.largeTitle}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+        >
+          {currentFolderTitle}
         </Text>
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name="chevron-down"
+          size={17}
+          color={theme.colors.textMuted}
+          style={styles.largeTitleChevron}
+        />
       </Pressable>
     </View>
   );
 }
 
-function WorkspacePickerActionCard({
+function WorkspacePickerSearchField({
   styles,
   theme,
-  actionLabel,
-  actionDescription,
-  actionDisabled,
-  onActionPress,
+  searchQuery,
+  setSearchQuery,
+  currentFolderTitle,
 }: Pick<
-  Props,
-  'styles' | 'theme' | 'actionLabel' | 'actionDescription' | 'actionDisabled' | 'onActionPress'
+  WorkspacePickerListHeaderProps,
+  'styles' | 'theme' | 'searchQuery' | 'setSearchQuery' | 'currentFolderTitle'
 >) {
-  if (!actionLabel || !onActionPress) {
-    return null;
-  }
-  const description =
-    actionDescription ??
-    'Clone into the selected or currently open folder and start the chat there.';
   return (
-    <Pressable
-      onPress={onActionPress}
-      disabled={actionDisabled}
-      style={({ pressed }) => [
-        styles.actionCard,
-        actionDisabled && styles.buttonDisabled,
-        pressed && !actionDisabled && styles.pressed,
-      ]}
-      accessibilityRole="button"
-      accessibilityLabel={actionLabel}
-      accessibilityHint={actionDescription ?? 'Clones a repository into this folder'}
-      accessibilityState={controlAccessibilityState({ disabled: actionDisabled })}
-    >
-      <View style={styles.actionIconWrap}>
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name="git-branch-outline"
-          size={16}
-          color={theme.colors.textSecondary}
-        />
-      </View>
-      <View style={styles.actionCopy}>
-        <Text style={styles.actionTitle}>{actionLabel}</Text>
-        <Text style={styles.actionSubtitle} numberOfLines={2}>
-          {description}
-        </Text>
-      </View>
+    <View style={styles.searchField}>
       <Ionicons
         {...decorativeAccessibilityProps}
-        name="chevron-forward"
-        size={14}
+        name="search"
+        size={16}
         color={theme.colors.textMuted}
       />
-    </Pressable>
+      <TextInput
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+        keyboardAppearance={theme.keyboardAppearance}
+        placeholder={`Search ${currentFolderTitle}`}
+        placeholderTextColor={theme.colors.textMuted}
+        style={styles.searchInput}
+        autoCapitalize="none"
+        autoCorrect={false}
+        returnKeyType="search"
+        clearButtonMode="while-editing"
+        accessibilityLabel="Search folders"
+      />
+    </View>
   );
 }
 
-function WorkspacePickerFavoritesSection({
+function WorkspacePickerDefaultGroup({
   styles,
+  theme,
+  bridgeRoot,
+  selectedPath,
+  onSelectPath,
+}: Pick<
+  WorkspacePickerListHeaderProps,
+  'styles' | 'theme' | 'bridgeRoot' | 'selectedPath' | 'onSelectPath'
+>) {
+  const isDefault = selectedPath === null;
+  return (
+    <View style={styles.section}>
+      <View style={styles.group}>
+        <GroupedRow
+          styles={styles}
+          theme={theme}
+          icon="home"
+          title="Default workspace"
+          subtitle={bridgeRoot ? toPathBasename(bridgeRoot) : 'Chosen by the bridge'}
+          accessory="check"
+          selected={isDefault}
+          last
+          accessibilityLabel="Use default workspace"
+          onPress={() => onSelectPath(null)}
+        />
+      </View>
+    </View>
+  );
+}
+
+function WorkspacePickerPinnedGroup({
+  styles,
+  theme,
   favoriteWorkspaces,
   pendingSelectionPath,
-  favoritePathSet,
   onBrowsePath,
   onToggleFavorite,
 }: Pick<
-  Props,
+  WorkspacePickerListHeaderProps,
   | 'styles'
+  | 'theme'
   | 'favoriteWorkspaces'
   | 'pendingSelectionPath'
-  | 'favoritePathSet'
   | 'onBrowsePath'
   | 'onToggleFavorite'
 >) {
@@ -141,183 +156,93 @@ function WorkspacePickerFavoritesSection({
     return null;
   }
   return (
-    <>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Pinned</Text>
-      </View>
-      <View style={styles.favoriteGrid}>
-        {favoriteWorkspaces.map((workspace) => (
-          <WorkspaceTile
-            key={workspace.path}
-            workspace={workspace}
-            iconName="star"
-            selected={workspace.path === pendingSelectionPath}
-            onPress={() => onBrowsePath(workspace.path)}
-            isPinned={favoritePathSet.has(workspace.path)}
-            onPinAction={() => onToggleFavorite?.(workspace.path)}
-          />
-        ))}
-      </View>
-    </>
-  );
-}
-
-function WorkspacePickerBreadcrumbRow({
-  styles,
-  theme,
-  parentPath,
-  loadingEntries,
-  hasVisibleEntries,
-  onBrowsePath,
-  currentFolderTitle,
-  currentFolderPath,
-}: Pick<
-  Props,
-  | 'styles'
-  | 'theme'
-  | 'parentPath'
-  | 'loadingEntries'
-  | 'hasVisibleEntries'
-  | 'onBrowsePath'
-  | 'currentFolderTitle'
-  | 'currentFolderPath'
->) {
-  const upDisabled = !parentPath || (loadingEntries && !hasVisibleEntries);
-  return (
-    <View style={styles.breadcrumbRow}>
-      <Pressable
-        onPress={() => parentPath && onBrowsePath(parentPath)}
-        disabled={upDisabled}
-        style={({ pressed }) => [
-          styles.upButton,
-          upDisabled && styles.buttonDisabled,
-          pressed && !upDisabled && styles.pressed,
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel="Go to parent folder"
-        accessibilityState={controlAccessibilityState({ disabled: upDisabled })}
-      >
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name="return-up-back"
-          size={14}
-          color={theme.colors.textSecondary}
-        />
-        <Text style={styles.upButtonText}>Up</Text>
-      </Pressable>
-      <View style={styles.currentFolderChip}>
-        <Text style={styles.currentFolderTitle} numberOfLines={1}>
-          {currentFolderTitle}
-        </Text>
-        <Text style={styles.currentFolderPath} numberOfLines={2} ellipsizeMode="middle">
-          {currentFolderPath ?? 'Loading path'}
-        </Text>
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>Pinned</Text>
+      <View style={styles.group}>
+        {favoriteWorkspaces.map((workspace, index) => {
+          const name = toPathBasename(workspace.path);
+          const row = (
+            <GroupedRow
+              styles={styles}
+              theme={theme}
+              icon="star"
+              title={name}
+              subtitle={formatWorkspaceMeta(workspace)}
+              accessory="chevron"
+              selected={workspace.path === pendingSelectionPath}
+              last={index === favoriteWorkspaces.length - 1}
+              accessibilityLabel={`Open folder ${name}`}
+              accessibilityHint={
+                onToggleFavorite ? 'Swipe left to unpin this workspace' : undefined
+              }
+              onPress={() => onBrowsePath(workspace.path)}
+            />
+          );
+          if (!onToggleFavorite) {
+            return <View key={workspace.path}>{row}</View>;
+          }
+          return (
+            <SwipeToDeleteRow
+              key={workspace.path}
+              onDelete={() => onToggleFavorite(workspace.path)}
+              deleteAccessibilityLabel={`Unpin ${name}`}
+              deleteLabel="Unpin"
+              actionIconName="star-outline"
+              actionBackgroundColor={theme.colors.accent}
+              actionForegroundColor={theme.colors.accentText}
+              actionAccessibilityHint="Removes this workspace from Pinned."
+              contentBackgroundColor={theme.colors.bgItem}
+            >
+              {row}
+            </SwipeToDeleteRow>
+          );
+        })}
       </View>
     </View>
   );
 }
 
-function WorkspacePickerStatusMessages({
-  styles,
-  error,
-  refreshError,
-  truncationMessage,
-}: Pick<Props, 'styles' | 'error' | 'refreshError' | 'truncationMessage'>) {
+/**
+ * Everything above the folder list, rendered inside the list so it scrolls away like an iOS large
+ * title instead of permanently eating the top third of the screen.
+ */
+export function WorkspacePickerListHeader(props: WorkspacePickerListHeaderProps) {
+  const { styles } = props;
   return (
-    <>
-      {error ? (
-        <Text
-          accessibilityRole="alert"
-          accessibilityLiveRegion="assertive"
-          style={styles.errorText}
-        >
-          {error}
-        </Text>
-      ) : null}
-      {refreshError ? (
-        <Text accessibilityLiveRegion="polite" style={styles.errorText}>
-          {refreshError}
-        </Text>
-      ) : null}
-      {truncationMessage ? (
-        <Text accessibilityLiveRegion="polite" style={styles.errorText}>
-          {truncationMessage}
-        </Text>
-      ) : null}
-    </>
-  );
-}
-
-export function WorkspacePickerTopSection(props: Props) {
-  const { styles, theme } = props;
-  return (
-    <ScrollView
-      style={styles.topContentScroll}
-      contentContainerStyle={styles.topContentContainer}
-      showsVerticalScrollIndicator={false}
-    >
-      <WorkspacePickerConnectionRow
+    <View style={styles.listHeader}>
+      <WorkspacePickerLargeTitle
         styles={styles}
+        theme={props.theme}
+        screenFocusRef={props.screenFocusRef}
+        titleAnchorRef={props.titleAnchorRef}
+        currentFolderTitle={props.currentFolderTitle}
+        onOpenPathMenu={props.onOpenPathMenu}
+      />
+      <WorkspacePickerSearchField
+        styles={styles}
+        theme={props.theme}
+        searchQuery={props.searchQuery}
+        setSearchQuery={props.setSearchQuery}
+        currentFolderTitle={props.currentFolderTitle}
+      />
+      <WorkspacePickerDefaultGroup
+        styles={styles}
+        theme={props.theme}
         bridgeRoot={props.bridgeRoot}
         selectedPath={props.selectedPath}
         onSelectPath={props.onSelectPath}
       />
-
-      <View style={styles.searchField}>
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name="search"
-          size={16}
-          color={theme.colors.textMuted}
-        />
-        <TextInput
-          value={props.searchQuery}
-          onChangeText={props.setSearchQuery}
-          keyboardAppearance={theme.keyboardAppearance}
-          placeholder="Search folders"
-          placeholderTextColor={theme.colors.textMuted}
-          style={styles.searchInput}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
-          accessibilityLabel="Search folders"
-        />
-      </View>
-
-      <WorkspacePickerActionCard
+      <WorkspacePickerPinnedGroup
         styles={styles}
-        theme={theme}
-        actionLabel={props.actionLabel}
-        actionDescription={props.actionDescription}
-        actionDisabled={props.actionDisabled}
-        onActionPress={props.onActionPress}
-      />
-
-      <WorkspacePickerFavoritesSection
-        styles={styles}
+        theme={props.theme}
         favoriteWorkspaces={props.favoriteWorkspaces}
         pendingSelectionPath={props.pendingSelectionPath}
-        favoritePathSet={props.favoritePathSet}
         onBrowsePath={props.onBrowsePath}
         onToggleFavorite={props.onToggleFavorite}
       />
-
-      <WorkspacePickerBreadcrumbRow
-        styles={styles}
-        theme={theme}
-        parentPath={props.parentPath}
-        loadingEntries={props.loadingEntries}
-        hasVisibleEntries={props.hasVisibleEntries}
-        onBrowsePath={props.onBrowsePath}
-        currentFolderTitle={props.currentFolderTitle}
-        currentFolderPath={props.currentFolderPath}
-      />
-      <WorkspacePickerStatusMessages
-        styles={styles}
-        error={props.error}
-        refreshError={props.refreshError}
-        truncationMessage={props.truncationMessage}
-      />
-    </ScrollView>
+      {props.folderCountLabel ? (
+        <Text style={styles.sectionTitle}>{props.folderCountLabel}</Text>
+      ) : null}
+    </View>
   );
 }

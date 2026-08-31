@@ -71,7 +71,7 @@ impl BridgeConfig {
         // The desktop app points these at its central data directory so nothing app-owned lands in
         // a repository. The development flow keeps working through the workdir-relative defaults.
         let state_dir = parse_absolute_dir_env("BRIDGE_STATE_DIR", workdir.join(".dappercode"))?;
-        let attachments_dir = parse_absolute_dir_env(
+        let attachments_dir = parse_unresolved_absolute_dir_env(
             "BRIDGE_ATTACHMENTS_DIR",
             workdir.join(crate::attachments::DEFAULT_ATTACHMENTS_DIR_NAME),
         )?;
@@ -260,7 +260,7 @@ pub(crate) fn constant_time_eq(left: &str, right: &str) -> bool {
 }
 
 pub(crate) fn resolve_bridge_workdir(raw_workdir: PathBuf) -> Result<PathBuf, String> {
-    PathPolicy::new(raw_workdir, false).map(|policy| policy.root().to_path_buf())
+    PathPolicy::validate_workdir(raw_workdir)
 }
 
 /// Resolves a directory environment variable, creating it when absent.
@@ -278,6 +278,7 @@ fn parse_absolute_dir_env(name: &str, default: PathBuf) -> Result<PathBuf, Strin
             configured.to_string_lossy()
         ));
     }
+
     std::fs::create_dir_all(&configured).map_err(|error| {
         format!(
             "{name} could not be created ({}): {error}",
@@ -290,6 +291,20 @@ fn parse_absolute_dir_env(name: &str, default: PathBuf) -> Result<PathBuf, Strin
             configured.to_string_lossy()
         )
     })
+}
+
+fn parse_unresolved_absolute_dir_env(name: &str, default: PathBuf) -> Result<PathBuf, String> {
+    let configured = match env::var(name) {
+        Ok(raw) if !raw.trim().is_empty() => PathBuf::from(raw.trim()),
+        _ => default,
+    };
+    if !configured.is_absolute() {
+        return Err(format!(
+            "{name} must be an absolute path (got: {})",
+            configured.to_string_lossy()
+        ));
+    }
+    Ok(configured)
 }
 
 pub(crate) fn parse_bool_env(name: &str) -> bool {
@@ -537,6 +552,30 @@ mod tests {
         .expect("default state dir");
         assert_eq!(state, workdir.join(".dappercode"));
         assert!(state.is_dir(), "the default state directory is created");
+
+        let attachments = workdir.join(".dappercode-attachments");
+        let unresolved = parse_unresolved_absolute_dir_env(
+            "BRIDGE_ATTACHMENTS_DIR_UNSET_FOR_TEST",
+            attachments.clone(),
+        )
+        .expect("default attachments dir");
+        assert_eq!(unresolved, attachments);
+        assert!(
+            !unresolved.exists(),
+            "attachment creation and reparse validation belong to PathPolicy"
+        );
+    }
+
+    #[test]
+    fn workdir_validation_does_not_create_an_unused_attachment_directory() {
+        let temp = TestDir::new();
+        let workdir = temp.path().canonicalize().expect("canonical workdir");
+
+        assert_eq!(
+            resolve_bridge_workdir(workdir.clone()).expect("valid workdir"),
+            workdir
+        );
+        assert!(!workdir.join(".dappercode-attachments").exists());
     }
 
     #[test]

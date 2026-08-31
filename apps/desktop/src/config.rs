@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    fs,
     net::{SocketAddr, TcpListener, ToSocketAddrs},
     path::{Path, PathBuf},
 };
@@ -7,6 +8,7 @@ use std::{
 use anyhow::{bail, Context, Result};
 
 use crate::{
+    platform,
     secrets::SecretBackend,
     store::{AppConfig, AppPaths, Profile},
 };
@@ -20,7 +22,7 @@ impl RuntimePaths {
     pub fn discover() -> Result<Self> {
         let mut candidates = Vec::new();
         if let Ok(executable) = std::env::current_exe() {
-            candidates.extend(platform_runtime_candidates(&executable));
+            candidates.extend(platform::runtime_candidates(&executable));
         }
 
         #[cfg(debug_assertions)]
@@ -38,7 +40,7 @@ impl RuntimePaths {
             let Ok(package_root) = candidate.canonicalize() else {
                 continue;
             };
-            let contains_bridge = package_root.join("bin/dappercode-bridge").is_file()
+            let contains_bridge = contains_bundled_bridge(&package_root)
                 || cfg!(debug_assertions)
                     && package_root
                         .join("services/rust-bridge/Cargo.toml")
@@ -54,21 +56,13 @@ impl RuntimePaths {
 
     #[cfg(not(debug_assertions))]
     pub fn bridge_binary_candidates(&self) -> Vec<PathBuf> {
-        let binary_name = if cfg!(windows) {
-            "dappercode-bridge.exe"
-        } else {
-            "dappercode-bridge"
-        };
+        let binary_name = platform::bridge_binary_name();
         vec![self.package_root.join("bin").join(binary_name)]
     }
 
     #[cfg(debug_assertions)]
     pub fn bridge_binary_candidates(&self) -> Vec<PathBuf> {
-        let binary_name = if cfg!(windows) {
-            "dappercode-bridge.exe"
-        } else {
-            "dappercode-bridge"
-        };
+        let binary_name = platform::bridge_binary_name();
         let mut candidates = vec![self.package_root.join("bin").join(binary_name)];
         if let Some(target) = runtime_target() {
             candidates.push(
@@ -77,6 +71,14 @@ impl RuntimePaths {
                     .join(target)
                     .join(binary_name),
             );
+        }
+        if let (true, Some(target_dir)) = (
+            self.package_root
+                .join("services/rust-bridge/Cargo.toml")
+                .is_file(),
+            std::env::var_os("CARGO_TARGET_DIR"),
+        ) {
+            candidates.push(PathBuf::from(target_dir).join("release").join(binary_name));
         }
         candidates.push(
             self.package_root
@@ -87,44 +89,45 @@ impl RuntimePaths {
     }
 }
 
-#[cfg(target_os = "macos")]
-fn platform_runtime_candidates(executable: &Path) -> Vec<PathBuf> {
-    executable
-        .parent()
-        .and_then(Path::parent)
-        .map(|resources| vec![resources.to_path_buf()])
-        .unwrap_or_default()
+pub(crate) fn runtime_executable_available(path: &Path) -> bool {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return false,
+        Err(_) => return true,
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    true
 }
 
-#[cfg(target_os = "windows")]
-fn platform_runtime_candidates(executable: &Path) -> Vec<PathBuf> {
-    executable
-        .parent()
-        .map(|directory| vec![directory.join("runtime")])
-        .unwrap_or_default()
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn platform_runtime_candidates(executable: &Path) -> Vec<PathBuf> {
-    executable
-        .parent()
-        .map(|directory| {
-            vec![
-                directory.join("../share/dappercode/runtime"),
-                directory.join("runtime"),
-            ]
-        })
-        .unwrap_or_default()
+fn contains_bundled_bridge(package_root: &Path) -> bool {
+    ["dappercode-bridge", "dappercode-bridge.exe"]
+        .iter()
+        .any(|binary| package_root.join("bin").join(binary).is_file())
 }
 
 #[cfg(debug_assertions)]
 fn runtime_target() -> Option<&'static str> {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
+    runtime_target_for(std::env::consts::OS, std::env::consts::ARCH)
+}
+
+#[cfg(debug_assertions)]
+fn runtime_target_for(os: &str, arch: &str) -> Option<&'static str> {
+    match (os, arch) {
         ("macos", "aarch64") => Some("darwin-arm64"),
         ("macos", "x86_64") => Some("darwin-x64"),
         ("linux", "x86_64") => Some("linux-x64"),
         ("linux", "aarch64") => Some("linux-arm64"),
         ("windows", "x86_64") => Some("win32-x64"),
+        ("windows", "aarch64") => Some("win32-arm64"),
         _ => None,
     }
 }
@@ -236,9 +239,11 @@ impl BridgeRuntimeConfig {
         format!("http://{}:{}", format_host(host), self.port)
     }
 
-    pub fn pairing_payload(&self) -> Result<String> {
+    pub fn pairing_payload(&self, workspace_id: &str) -> Result<String> {
         Ok(serde_json::to_string(&serde_json::json!({
             "type": "dappercode-bridge-pair",
+            "brokerProtocolVersion": 1,
+            "workspaceId": workspace_id,
             "bridgeUrl": self.connect_url,
             "bridgeToken": self.auth_token,
         }))?)
@@ -246,6 +251,7 @@ impl BridgeRuntimeConfig {
 
     /// Stable fingerprint of the configuration a running bridge was started with, excluding the
     /// token so that the digest can be recorded in a plain ownership record.
+    #[allow(dead_code)]
     pub fn fingerprint_source(&self) -> String {
         self.values
             .iter()
@@ -330,6 +336,62 @@ pub fn allocate_port_pair(
         }
     }
     bail!("no free bridge port pair is available on {host} at or above {start}")
+}
+
+pub fn allocate_broker_replacement_ports(
+    config: &AppConfig,
+    host: &str,
+    current_bridge_port: u16,
+    current_preview_port: u16,
+    requested_port: Option<u16>,
+) -> Result<(u16, u16)> {
+    let bridge_port = requested_port.unwrap_or(current_bridge_port);
+    if config
+        .profiles
+        .iter()
+        .any(|profile| profile.preview_port == bridge_port)
+    {
+        bail!(
+            "port {bridge_port} is already assigned to a workspace browser preview; choose another --port"
+        );
+    }
+    if !port_is_bindable(host, bridge_port) {
+        bail!("port {bridge_port} is already in use on {host}");
+    }
+    Ok((bridge_port, current_preview_port))
+}
+
+pub fn allocate_preview_port(
+    config: &AppConfig,
+    profile_id: &str,
+    host: &str,
+    start: u16,
+) -> Result<u16> {
+    if let Some(existing) = config.find(profile_id) {
+        return Ok(existing.preview_port);
+    }
+    let mut reserved = config
+        .profiles
+        .iter()
+        .flat_map(|profile| [profile.bridge_port, profile.preview_port])
+        .collect::<std::collections::HashSet<_>>();
+    if let Some(broker) = &config.broker {
+        reserved.extend(
+            broker
+                .legacy_bridge_endpoints
+                .iter()
+                .map(|endpoint| endpoint.port),
+        );
+    }
+    let mut candidate = start.max(1);
+    loop {
+        if !reserved.contains(&candidate) && port_is_bindable(host, candidate) {
+            return Ok(candidate);
+        }
+        candidate = candidate
+            .checked_add(1)
+            .context("no free browser preview port is available")?;
+    }
 }
 
 fn pair_is_bindable(host: &str, bridge_port: u16, preview_port: u16) -> bool {
@@ -450,8 +512,10 @@ mod tests {
 
         assert_eq!(config.local_base_url(), "http://[::1]:8787");
         let payload: serde_json::Value =
-            serde_json::from_str(&config.pairing_payload().unwrap()).unwrap();
+            serde_json::from_str(&config.pairing_payload("workspace-1").unwrap()).unwrap();
         assert_eq!(payload["type"], "dappercode-bridge-pair");
+        assert_eq!(payload["workspaceId"], "workspace-1");
+        assert_eq!(payload["brokerProtocolVersion"], 1);
         assert_eq!(payload["bridgeToken"], "secret");
     }
 
@@ -459,7 +523,8 @@ mod tests {
     fn allocates_a_free_pair_that_skips_ports_owned_by_other_profiles() {
         let workspace = tempdir().unwrap();
         let mut config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
         config.upsert(profile("beta-000000000002", workspace.path(), 18801));
@@ -479,7 +544,8 @@ mod tests {
     #[test]
     fn reuses_the_requested_pair_when_nothing_else_claims_it() {
         let config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
         let (bridge, preview) = allocate_port_pair(
@@ -497,7 +563,8 @@ mod tests {
     fn rejects_an_explicit_port_that_another_workspace_owns() {
         let workspace = tempdir().unwrap();
         let mut config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
         config.upsert(profile("beta-000000000002", workspace.path(), 18811));
@@ -640,7 +707,8 @@ mod tests {
     #[test]
     fn refuses_to_allocate_when_the_port_range_is_exhausted() {
         let config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
         let error = allocate_port_pair(
@@ -668,7 +736,8 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let taken = listener.local_addr().unwrap().port();
         let config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
 
@@ -686,7 +755,8 @@ mod tests {
     #[test]
     fn defaults_to_the_standard_pair_when_no_port_is_requested() {
         let config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
         let (bridge, preview) =
@@ -705,13 +775,26 @@ mod tests {
 
     #[test]
     fn discovers_runtime_resources_from_an_explicit_package_root() {
-        struct Guard;
+        struct Guard {
+            package_root: Option<std::ffi::OsString>,
+            cargo_target_dir: Option<std::ffi::OsString>,
+        }
         impl Drop for Guard {
             fn drop(&mut self) {
-                std::env::remove_var("DAPPERCODE_PACKAGE_ROOT");
+                match &self.package_root {
+                    Some(value) => std::env::set_var("DAPPERCODE_PACKAGE_ROOT", value),
+                    None => std::env::remove_var("DAPPERCODE_PACKAGE_ROOT"),
+                }
+                match &self.cargo_target_dir {
+                    Some(value) => std::env::set_var("CARGO_TARGET_DIR", value),
+                    None => std::env::remove_var("CARGO_TARGET_DIR"),
+                }
             }
         }
-        let _guard = Guard;
+        let _guard = Guard {
+            package_root: std::env::var_os("DAPPERCODE_PACKAGE_ROOT"),
+            cargo_target_dir: std::env::var_os("CARGO_TARGET_DIR"),
+        };
         let temp = tempdir().unwrap();
 
         // A candidate that holds neither a bundled binary nor a bridge source tree is skipped, and
@@ -728,12 +811,50 @@ mod tests {
         let candidates = runtime.bridge_binary_candidates();
         assert!(candidates
             .iter()
-            .any(|candidate| candidate.ends_with("bin/dappercode-bridge")));
+            .any(|candidate| candidate
+                .ends_with(Path::new("bin").join(platform::bridge_binary_name()))));
         assert!(runtime_target().is_some(), "this platform should be mapped");
+
+        let managed_target = temp.path().join("managed-target");
+        std::env::set_var("CARGO_TARGET_DIR", &managed_target);
+        let candidates = runtime.bridge_binary_candidates();
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.starts_with(&managed_target)
+                && candidate
+                    .parent()
+                    .is_some_and(|parent| parent.ends_with("release"))));
 
         // A package root that cannot be canonicalized is skipped rather than failing discovery.
         std::env::set_var("DAPPERCODE_PACKAGE_ROOT", temp.path().join("missing"));
         assert!(RuntimePaths::discover().is_ok());
+    }
+
+    #[test]
+    fn recognizes_the_windows_release_bridge_and_arm64_runtime() {
+        let temp = tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("bin")).unwrap();
+        std::fs::write(temp.path().join("bin/dappercode-bridge.exe"), b"bridge").unwrap();
+
+        assert!(contains_bundled_bridge(temp.path()));
+        assert_eq!(
+            runtime_target_for("windows", "aarch64"),
+            Some("win32-arm64")
+        );
+        assert_eq!(runtime_target_for("windows", "x86_64"), Some("win32-x64"));
+    }
+
+    #[test]
+    fn discovers_windows_runtime_from_operator_bin_layouts() {
+        assert_eq!(
+            platform::windows_runtime_candidates(Path::new("package/bin/dappercode.exe"))[0],
+            PathBuf::from("package")
+        );
+        assert_eq!(
+            platform::windows_runtime_candidates(Path::new("package/runtime/bin/dappercode.exe"))
+                [0],
+            PathBuf::from("package/runtime")
+        );
     }
 
     #[test]
@@ -761,7 +882,8 @@ mod tests {
     fn rejects_an_explicit_port_whose_preview_slot_another_workspace_owns() {
         let workspace = tempdir().unwrap();
         let mut config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
         config.upsert(profile("beta-000000000002", workspace.path(), 18861));
@@ -776,6 +898,36 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("18861"));
+    }
+
+    #[test]
+    fn preview_allocation_skips_migrated_broker_alias_ports() {
+        let alias_port = wildcard_free_port();
+        let mut broker = crate::store::BrokerSettings::new(
+            "local".to_string(),
+            "127.0.0.1".to_string(),
+            8787,
+            8788,
+            "http://127.0.0.1:8787".to_string(),
+            "http://127.0.0.1:8788".to_string(),
+        )
+        .unwrap();
+        broker
+            .legacy_bridge_endpoints
+            .push(crate::store::BrokerEndpoint {
+                host: "127.0.0.1".to_string(),
+                port: alias_port,
+            });
+        let config = AppConfig {
+            version: 2,
+            broker: Some(broker),
+            profiles: Vec::new(),
+        };
+
+        assert_ne!(
+            allocate_preview_port(&config, "new-profile", "127.0.0.1", alias_port).unwrap(),
+            alias_port
+        );
     }
 
     fn wildcard_free_port() -> u16 {
@@ -794,7 +946,8 @@ mod tests {
         assert!(port_is_bindable("192.0.2.1", taken) == wildcard_port_is_bindable(taken));
 
         let config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
         let (bridge, preview) = allocate_port_pair(
@@ -815,7 +968,8 @@ mod tests {
         assert!(!port_is_bindable("127.0.0.1", taken));
 
         let config = AppConfig {
-            version: 1,
+            version: 2,
+            broker: None,
             profiles: Vec::new(),
         };
         let (bridge, _) = allocate_port_pair(
@@ -827,5 +981,37 @@ mod tests {
         )
         .unwrap();
         assert_ne!(bridge, taken);
+    }
+
+    #[test]
+    fn broker_replacement_ignores_shared_bridge_copies_but_keeps_preview_reservations() {
+        let first = tempdir().unwrap();
+        let second = tempdir().unwrap();
+        let mut config = AppConfig {
+            version: 2,
+            broker: None,
+            profiles: vec![
+                profile("alpha-000000000001", first.path(), 18_871),
+                profile("beta-000000000002", second.path(), 18_871),
+            ],
+        };
+        config.profiles[0].preview_port = 18_872;
+        config.profiles[1].preview_port = 18_873;
+
+        assert_eq!(
+            allocate_broker_replacement_ports(&config, "127.0.0.1", 18_871, 18_872, Some(18_871),)
+                .unwrap(),
+            (18_871, 18_872)
+        );
+        assert!(allocate_broker_replacement_ports(
+            &config,
+            "127.0.0.1",
+            18_871,
+            18_872,
+            Some(18_873),
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("browser preview"));
     }
 }

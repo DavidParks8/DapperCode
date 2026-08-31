@@ -126,9 +126,9 @@ The projected AG-UI event shape is:
 
 Every ACP tool call carries a `kind` (`read`, `edit`, `execute`, …) and a per-call `status`
 (`pending`, `in_progress`, `completed`, `failed`). Neither fits an AG-UI `TOOL_CALL_START`, so the
-projector emits them as a `CUSTOM` event named `dappercode.dev/tool-meta` whenever the
-`(kind, status, title)` tuple moves. It cannot ride on `dappercode.dev/tool-content`, which only
-fires when structured content changes: a pure `in_progress` → `completed` transition would be lost.
+projector emits them as a `CUSTOM` event named `dappercode.dev/tool-meta` whenever the metadata
+revision moves. It cannot ride on `dappercode.dev/tool-content`, which only fires when structured
+content changes: a pure `in_progress` → `completed` transition would be lost.
 
 ```json
 {
@@ -140,7 +140,9 @@ fires when structured content changes: a pure `in_progress` → `completed` tran
     "toolCallId": "call-1",
     "kind": "execute",
     "status": "in_progress",
-    "title": "npm test"
+    "title": "pnpm test",
+    "startedAtMs": 1784505600000,
+    "completedAtMs": null
   }
 }
 ```
@@ -152,15 +154,100 @@ pair, holding the same payload plus the bounded `content`, `locations`, and `tru
 Mobile folds it into the tool row and never renders it on its own. Sub-agent tools are excluded from
 both paths because they already have their own `dappercode.subagent` card.
 
+`startedAtMs` and `completedAtMs` are Unix epoch milliseconds measured by the bridge. The start is
+the first time the bridge observes the call and remains stable across updates. Completion is frozen
+on the first completed or failed update; run termination also completes any dangling active call,
+never earlier than its start. Mobile uses these fields for the expanded row's local start time and
+duration, including a live elapsed value while `completedAtMs` is null.
+
 Raw tool input is deliberately absent. The bridge strips `rawInput`, `rawOutput`, and `_meta` in
 `acp/handlers.rs` and `acp/snapshot.rs`; rows are built from the ACP `title` and `locations` instead.
 
 For a local smoke test of the generic renderer only, open a chat in the mobile app and run:
 ```bash
-npm run bridge:ui:demo
+pnpm run bridge:ui:demo
 ```
 
-That sends a sample workflow card to the latest chat. Use `npm run bridge:ui:demo -- --modal` or `npm run bridge:ui:demo -- --banner` to test the other presentations. Use `npm run bridge:ui:demo -- --thread <thread-id>` when the latest chat is not the one visible on the device.
+That sends a sample workflow card to the latest chat. Use `pnpm run bridge:ui:demo --modal` or `pnpm run bridge:ui:demo --banner` to test the other presentations. Use `pnpm run bridge:ui:demo --thread <thread-id>` when the latest chat is not the one visible on the device.
+
+## Implemented Session Token Totals Example
+
+ACP returns an optional per-turn `usage` object on `PromptResponse`, carrying `inputTokens`,
+`outputTokens`, `thoughtTokens`, `cachedReadTokens`, `cachedWriteTokens`, and `totalTokens`. It is
+gated behind the `unstable_end_turn_token_usage` cargo feature, which the bridge enables
+unconditionally: support is detected at runtime from the data itself, never from a build flag or an
+agent name.
+
+Two properties of the upstream data drive the design:
+
+- **The values are per-turn, not cumulative.** The ACP field documentation says "across session", but
+  agents populate it from the latest assistant message only, so the bridge accumulates the totals
+  itself in the session snapshot.
+- **Absent is not zero.** Agents omit `thoughtTokens`, `cachedReadTokens`, and `cachedWriteTokens`
+  entirely when they are zero, so those three stay `null` in the totals unless some turn actually
+  reported them. Mobile omits a row rather than printing a misleading `0`.
+
+`runtime.rs` emits a `CanonicalEvent::TurnTokenUsage` alongside the existing `RunFinished` whenever a
+prompt response carries usage. The projector emits the running totals as a `CUSTOM` event named
+`dappercode.dev/tokenTotals`:
+
+```json
+{
+  "type": "CUSTOM",
+  "threadId": "v1.YWNwLWFnZW50.c2Vzc2lvbi0x",
+  "runId": "v1.YWNwLWFnZW50.c2Vzc2lvbi0x::turn::7",
+  "name": "dappercode.dev/tokenTotals",
+  "value": {
+    "turns": 14,
+    "inputTokens": 48200,
+    "outputTokens": 12400,
+    "reasoningTokens": 8900,
+    "cachedReadTokens": 386000,
+    "cachedWriteTokens": 52300,
+    "totalTokens": 507800
+  }
+}
+```
+
+The same object is exposed on the thread snapshot as `tokenTotals`, and is `null` until a turn
+reports usage. That null is the capability signal: mobile renders the session-meta usage chip and its
+ledger sheet only when the field is present, so agents that never report usage show no affordance at
+all.
+
+This is distinct from `dappercode.dev/usage`, which carries context-window pressure
+(`used`, `size`, `cost`) from the ACP `usage_update` session update. The two are independent, and
+neither substitutes for the other.
+
+### Per-Response Usage
+
+The same `TurnTokenUsage` event also attaches the turn's usage to the snapshot message the turn ended
+on, as `messages[].usage`:
+
+```json
+{
+  "id": "message-1",
+  "role": "agent",
+  "usage": {
+    "inputTokens": 4100,
+    "outputTokens": 860,
+    "reasoningTokens": 240,
+    "cachedReadTokens": 31200,
+    "cachedWriteTokens": 1900,
+    "totalTokens": 38300,
+    "model": "Example Model"
+  }
+}
+```
+
+- **It anchors to the last agent message.** A turn that produced no agent response reports nothing,
+  and the field stays `null` on every other message including user and reasoning entries.
+- **`model` is the session's configured model label**, snapshotted when the usage lands, because ACP
+  reports the model as a session config option rather than per turn. It falls back to the raw option
+  value when no matching display name exists, and is `null` when the agent exposes no model option.
+- **No live event carries it.** Mobile reloads the snapshot when a run terminates, so the value
+  arrives with the settled turn. Live projection preserves any usage already persisted.
+- Mobile renders it as the collapsible response-details card under the message action row, and the
+  card is absent entirely when `usage` is `null`.
 
 ## Rules For Future Integrations
 

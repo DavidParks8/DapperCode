@@ -8,10 +8,10 @@ import test from 'node:test';
 const root = path.resolve(import.meta.dirname, '../..');
 const checker = path.join(root, 'scripts/check-production-audit.mjs');
 
-function runChecker(vulnerabilities) {
+function runChecker(advisories) {
   const directory = mkdtempSync(path.join(tmpdir(), 'dappercode-production-audit-'));
   const reportPath = path.join(directory, 'audit.json');
-  writeFileSync(reportPath, JSON.stringify({ vulnerabilities }));
+  writeFileSync(reportPath, JSON.stringify({ advisories }));
   const result = spawnSync(process.execPath, [checker, reportPath], {
     cwd: root,
     encoding: 'utf8',
@@ -21,12 +21,17 @@ function runChecker(vulnerabilities) {
 }
 
 const reviewed = {
-  'linkify-it': {
-    via: [
-      { source: 1121797, name: 'linkify-it', severity: 'high' },
-      { source: 1124012, name: 'linkify-it', severity: 'high' },
-    ],
-    fixAvailable: false,
+  1138808: {
+    id: 1138808,
+    module_name: 'image-size',
+    severity: 'high',
+    findings: [{ version: '1.2.1' }],
+  },
+  1138809: {
+    id: 1138809,
+    module_name: 'image-size',
+    severity: 'high',
+    findings: [{ version: '1.2.1' }],
   },
 };
 
@@ -36,12 +41,14 @@ test('production audit accepts only the reviewed high-severity advisories', () =
   assert.match(result.stdout, /2 reviewed high-severity advisories/);
 });
 
-test('production audit rejects new, stale, or newly fixable advisories', () => {
+test('production audit rejects new, stale, or changed advisories', () => {
   const unexpected = runChecker({
     ...reviewed,
-    dangerous: {
-      via: [{ source: 9999999, name: 'dangerous', severity: 'critical' }],
-      fixAvailable: false,
+    9999999: {
+      id: 9999999,
+      module_name: 'dangerous',
+      severity: 'critical',
+      findings: [{ version: '9.9.9' }],
     },
   });
   assert.notEqual(unexpected.status, 0);
@@ -49,35 +56,25 @@ test('production audit rejects new, stale, or newly fixable advisories', () => {
 
   const stale = runChecker({});
   assert.notEqual(stale.status, 0);
-  assert.match(stale.stderr, /stale exceptions: linkify-it#1121797, linkify-it#1124012/);
+  assert.match(stale.stderr, /stale exceptions: image-size#1138808, image-size#1138809/);
 
-  const fixable = runChecker({
+  const changed = runChecker({
     ...reviewed,
-    'linkify-it': { ...reviewed['linkify-it'], fixAvailable: true },
-  });
-  assert.notEqual(fixable.status, 0);
-  assert.match(fixable.stderr, /fix now available: linkify-it/);
-
-  const compatibleUpgrade = runChecker({
-    ...reviewed,
-    'linkify-it': {
-      ...reviewed['linkify-it'],
-      fixAvailable: { name: 'linkify-it', version: '6.0.0', isSemVerMajor: false },
+    1138808: {
+      ...reviewed[1138808],
+      findings: [{ version: '2.0.2' }],
     },
   });
-  assert.notEqual(compatibleUpgrade.status, 0);
-  assert.match(compatibleUpgrade.stderr, /fix now available: linkify-it/);
+  assert.notEqual(changed.status, 0);
+  assert.match(changed.stderr, /unexpected: image-size#1138808@2\.0\.2/);
 
   const escalated = runChecker({
     ...reviewed,
-    'linkify-it': {
-      ...reviewed['linkify-it'],
-      via: reviewed['linkify-it'].via.map((advisory) => ({
-        ...advisory,
-        severity: 'critical',
-      })),
+    1138808: {
+      ...reviewed[1138808],
+      severity: 'critical',
     },
   });
   assert.notEqual(escalated.status, 0);
-  assert.match(escalated.stderr, /critical: linkify-it#1121797, linkify-it#1124012/);
+  assert.match(escalated.stderr, /critical: image-size#1138808@1\.2\.1/);
 });

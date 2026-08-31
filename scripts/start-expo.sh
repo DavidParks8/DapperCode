@@ -145,12 +145,12 @@ has_mobile_react_native_runtime() {
 
 install_mobile_dependencies() {
   info "Installing project dependencies (one-time setup for Expo runtime)..."
-  run_quiet_command "Project dependency install" bash -lc "cd \"$ROOT_DIR\" && npm install --include=dev && npm dedupe"
+  run_quiet_command "Project dependency install" bash -lc "cd \"$ROOT_DIR\" && pnpm install --frozen-lockfile --prod=false"
 }
 
 repair_mobile_runtime_dependencies() {
   warn "Detected incomplete React Native runtime. Running dependency repair..."
-  run_quiet_command "React Native dependency repair" bash -lc "cd \"$ROOT_DIR\" && npm install --include=dev --force && npm install --include=dev --force -w \"$MOBILE_WORKSPACE\" && npm dedupe"
+  run_quiet_command "React Native dependency repair" bash -lc "cd \"$ROOT_DIR\" && pnpm install --force --frozen-lockfile --prod=false"
   RUNTIME_REPAIRED="true"
 }
 
@@ -166,7 +166,7 @@ ensure_mobile_runtime() {
   fi
 
   if [[ "$AUTO_REPAIR" != "true" ]]; then
-    fail "mobile runtime is incomplete. Re-run with EXPO_AUTO_REPAIR=true or run npm install --include=dev --force"
+    fail "mobile runtime is incomplete. Re-run with EXPO_AUTO_REPAIR=true or run pnpm install --force --frozen-lockfile --prod=false"
     return 1
   fi
 
@@ -174,7 +174,7 @@ ensure_mobile_runtime() {
 
   if ! has_expo_dependency || ! has_typescript_dependency || ! has_mobile_react_native_runtime; then
     fail "mobile runtime is still incomplete after repair."
-    fail "Try: npm install --include=dev --force && npm install --include=dev --force -w $MOBILE_WORKSPACE"
+    fail "Try: pnpm install --force --frozen-lockfile --prod=false"
     return 1
   fi
 }
@@ -189,13 +189,13 @@ run_expo() {
 
   case "$MODE" in
     mobile)
-      cmd=(npm run -w "$MOBILE_WORKSPACE" start -- "${extra_args[@]}")
+      cmd=(pnpm --filter @dappercode/mobile run start "${extra_args[@]}")
       ;;
     ios)
-      cmd=(npm run -w "$MOBILE_WORKSPACE" ios)
+      cmd=(pnpm --filter @dappercode/mobile run ios)
       ;;
     android)
-      cmd=(npm run -w "$MOBILE_WORKSPACE" android)
+      cmd=(pnpm --filter @dappercode/mobile run android)
       ;;
     *)
       echo "error: unknown mode '$MODE' (expected: mobile|ios|android)" >&2

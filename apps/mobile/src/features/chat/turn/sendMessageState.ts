@@ -279,25 +279,30 @@ export function createGoalSurfaceState(args: GoalSurfaceStateArgs) {
   };
 }
 
-const hasLocalQueueSignal = (args: QueuedMessageStateArgs) =>
-  Boolean(args.activeTurnId || args.selectedThreadSnapshot?.activeTurnId) ||
-  Boolean(args.selectedChat && isChatLikelyRunning(args.selectedChat));
-const hasPendingInputSignal = (args: QueuedMessageStateArgs) =>
+const hasLiveQueueSignal = (args: QueuedMessageStateArgs) =>
+  Boolean(args.activeTurnId) ||
+  Boolean(args.selectedChat && isChatLikelyRunning(args.selectedChat)) ||
+  [args.pendingApproval?.requestId, args.pendingUserInputRequest?.requestId].some(Boolean);
+const hasCachedQueueSignal = (args: QueuedMessageStateArgs) =>
+  Boolean(args.selectedThreadSnapshot?.activeTurnId);
+const hasCachedPendingInputSignal = (args: QueuedMessageStateArgs) =>
   [
     args.selectedThreadSnapshot?.pendingApproval?.requestId,
-    args.pendingApproval?.requestId,
     args.selectedThreadSnapshot?.pendingUserInputRequest?.requestId,
-    args.pendingUserInputRequest?.requestId,
   ].some(Boolean);
 
 export function createQueuedMessageState(args: QueuedMessageStateArgs) {
   const knownQueuedMessages = args.selectedThreadSnapshot?.queuedMessages ?? [];
+  const hasLiveSignal = hasLiveQueueSignal(args);
   const likelyQueuesLocally =
-    knownQueuedMessages.length > 0 || hasLocalQueueSignal(args) || hasPendingInputSignal(args);
+    knownQueuedMessages.length > 0 ||
+    hasLiveSignal ||
+    hasCachedQueueSignal(args) ||
+    hasCachedPendingInputSignal(args);
   return {
     likelyQueuesLocally,
     optimisticQueuedMessage:
-      knownQueuedMessages.length === 0 && likelyQueuesLocally
+      knownQueuedMessages.length === 0 && hasLiveSignal
         ? args.queueOptimisticQueuedMessage(args.targetChatId, args.content)
         : null,
   };

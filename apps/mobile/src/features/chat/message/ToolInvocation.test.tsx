@@ -6,13 +6,18 @@ import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'r
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { ToolInvocationRow } from './ToolInvocation';
 import { createToolCardStyles } from './toolCardStyles';
-import type { ToolInvocation } from './toolInvocationModel';
+import { buildToolInvocations, type ToolInvocation } from './toolInvocationModel';
+import { formatToolElapsedAccessibilityLabel, formatToolElapsedTime } from './toolInvocationTiming';
 import {
   LinearTransition,
   ReduceMotion,
   setMockReducedMotionEnabled,
 } from '@shared/testing/reanimatedMock';
-import { compositeOverlayColor } from './useHorizontalOverflow';
+
+const MASK_CLEAR = 'rgba(0, 0, 0, 0)';
+const MASK_OPAQUE = 'rgba(0, 0, 0, 1)';
+const CLEAR_TO_OPAQUE = [MASK_CLEAR, MASK_OPAQUE];
+const OPAQUE_TO_CLEAR = [MASK_OPAQUE, MASK_CLEAR];
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 
@@ -39,6 +44,8 @@ function invocation(overrides: Partial<ToolInvocation> = {}): ToolInvocation {
     kind: 'other',
     status: 'completed',
     title: 'Did a thing',
+    startedAtMs: null,
+    completedAtMs: null,
     statusLanguage: true,
     monospaceTitle: false,
     isError: false,
@@ -97,12 +104,107 @@ function expand(tree: QueryableRenderer, title: string) {
   });
 }
 
-function textLines(tree: QueryableRenderer): string[] {
+function fadeVisible(tree: QueryableRenderer, testID: string): boolean {
+  return tree.root.findAllByProps({ testID }).length > 0;
+}
+
+function maskApplied(tree: QueryableRenderer, testID: string): boolean {
   return tree.root
+    .findAllByProps({ testID })
+    .some((node) => node.props['maskElement'] !== undefined);
+}
+
+function measureOverflow(
+  tree: QueryableRenderer,
+  testID: string,
+  viewportWidth = 100,
+  contentWidth = 300,
+) {
+  act(() => {
+    (
+      tree.root.findByProps({ testID }).props['onLayout'] as (event: {
+        nativeEvent: { layout: { width: number } };
+      }) => void
+    )({ nativeEvent: { layout: { width: viewportWidth } } });
+  });
+  act(() => {
+    (
+      tree.root.findByProps({ testID }).props['onContentSizeChange'] as (
+        width: number,
+        height: number,
+      ) => void
+    )(contentWidth, 16);
+  });
+}
+
+function emitScroll(tree: QueryableRenderer, testID: string, offsetX: number) {
+  act(() => {
+    (
+      tree.root.findByProps({ testID }).props['onScroll'] as (event: {
+        nativeEvent: { contentOffset: { x: number } };
+      }) => void
+    )({ nativeEvent: { contentOffset: { x: offsetX } } });
+  });
+}
+
+function surfaceColouredFades(tree: QueryableRenderer): string[][] {
+  return tree.root
+    .findAll((node) => Array.isArray(node.props['colors']))
+    .map((node) => node.props['colors'] as unknown[])
+    .filter((colors): colors is string[] => colors.every((color) => typeof color === 'string'))
+    .filter((colors) => colors.some((color) => color !== MASK_CLEAR && color !== MASK_OPAQUE));
+}
+
+function compositeOverlayColor(backgroundColor: string, overlayColor: string): string {
+  const background = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(backgroundColor);
+  const overlay = /^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)$/i.exec(
+    overlayColor,
+  );
+  if (!background || !overlay) {
+    return backgroundColor;
+  }
+  const alpha = Math.min(1, Math.max(0, Number.parseFloat(overlay[4] ?? '0')));
+  const blended = [1, 2, 3].map((channel) => {
+    const base = Number.parseInt(background[channel] ?? '0', 16);
+    const top = Number.parseInt(overlay[channel] ?? '0', 10);
+    return Math.round(top * alpha + base * (1 - alpha));
+  });
+  return `#${blended.map((channel) => channel.toString(16).padStart(2, '0')).join('')}`.toUpperCase();
+}
+
+function textLines(tree: QueryableRenderer): string[] {
+  const nativeLines = tree.root
     .findAllByType(Text)
     .filter((node) => !hasTextAncestor(node))
     .map((node) => flattenTestText(node))
     .filter(Boolean);
+  return [...nativeLines, ...selectableOutputLines(tree.root)];
+}
+
+function selectableOutputLines(root: Queryable): string[] {
+  const lines: string[] = [];
+  for (const node of root.findAllByType('mock-web-view')) {
+    const source = node.props['source'] as { html?: unknown } | undefined;
+    const html = source?.html;
+    if (typeof html !== 'string') {
+      continue;
+    }
+    const match = /<pre id="content">([\s\S]*?)<\/pre>/u.exec(html);
+    if (!match?.[1]) {
+      continue;
+    }
+    lines.push(...decodeHtmlText(match[1]).split('\n'));
+  }
+  return lines;
+}
+
+function decodeHtmlText(value: string): string {
+  return value
+    .replace(/&lt;/gu, '<')
+    .replace(/&gt;/gu, '>')
+    .replace(/&quot;/gu, '"')
+    .replace(/&#39;/gu, "'")
+    .replace(/&amp;/gu, '&');
 }
 
 function flattenTestText(node: Queryable): string {
@@ -221,7 +323,10 @@ function hexContrastRatio(left: string, right: string): number {
 }
 
 describe('ToolInvocationRow', () => {
-  afterEach(() => setMockReducedMotionEnabled(false));
+  afterEach(() => {
+    setMockReducedMotionEnabled(false);
+    jest.useRealTimers();
+  });
 
   it('marks a pending tool with a waiting affordance', () => {
     const tree = render(invocation({ id: 'tool-pending', status: 'pending', empty: true }));
@@ -229,6 +334,90 @@ describe('ToolInvocationRow', () => {
     expect(JSON.stringify(tree.toJSON())).toContain('ellipsis-horizontal');
     expect(tree.root.findAllByProps({ testID: 'tool-header-shimmer' })).toHaveLength(0);
 
+    act(() => tree.unmount());
+  });
+
+  it('expands a running timing-only tool and updates elapsed time only while open', () => {
+    jest.useFakeTimers();
+    const nowMs = Date.parse('2026-05-01T12:34:10.000Z');
+    jest.setSystemTime(nowMs);
+    const clearIntervalSpy = jest.spyOn(global, 'clearInterval');
+    const value = invocation({
+      id: 'tool-running-timing',
+      status: 'in_progress',
+      startedAtMs: nowMs - 5_000,
+      empty: true,
+    });
+    const tree = render(value);
+    const row = tree.root.findByProps({ testID: 'tool-row' });
+
+    expect(row.props['accessibilityState']).toMatchObject({ disabled: false, expanded: false });
+    expand(tree, value.title);
+
+    const startTime = new Intl.DateTimeFormat(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(value.startedAtMs!));
+    expect(textLines(tree)).toEqual(
+      expect.arrayContaining(['Started', startTime, 'Elapsed', '5s']),
+    );
+    expect(tree.root.findByProps({ testID: 'tool-row' }).props['accessibilityState']).toMatchObject(
+      {
+        disabled: false,
+        expanded: true,
+      },
+    );
+    expect(tree.root.findByProps({ testID: 'tool-timing' }).props['accessibilityLabel']).toBe(
+      `Started at ${startTime}. Elapsed 5 seconds.`,
+    );
+
+    act(() => jest.advanceTimersByTime(2_000));
+    expect(textLines(tree)).toContain('7s');
+    expect(tree.root.findByProps({ testID: 'tool-timing' }).props['accessibilityLabel']).toBe(
+      `Started at ${startTime}. Elapsed 7 seconds.`,
+    );
+
+    expand(tree, value.title);
+    expect(clearIntervalSpy).toHaveBeenCalled();
+    expect(tree.root.findAllByProps({ testID: 'tool-timing' })).toHaveLength(0);
+
+    clearIntervalSpy.mockRestore();
+    act(() => tree.unmount());
+  });
+
+  it('freezes settled and failed tool duration from authoritative timestamps', () => {
+    jest.useFakeTimers();
+    const completedAtMs = Date.parse('2026-05-01T12:34:10.000Z');
+    const startedAtMs = completedAtMs - 65_000;
+    jest.setSystemTime(completedAtMs);
+    const setIntervalSpy = jest.spyOn(global, 'setInterval');
+    const value = invocation({
+      id: 'tool-failed-timing',
+      status: 'failed',
+      isError: true,
+      startedAtMs,
+      completedAtMs,
+      empty: true,
+    });
+    const tree = render(value);
+    expand(tree, value.title);
+
+    const startTime = new Intl.DateTimeFormat(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(startedAtMs));
+    expect(textLines(tree)).toEqual(
+      expect.arrayContaining(['Started', startTime, 'Duration', '1m 5s']),
+    );
+    expect(tree.root.findByProps({ testID: 'tool-timing' }).props['accessibilityLabel']).toBe(
+      `Started at ${startTime}. Duration 1 minute 5 seconds.`,
+    );
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+
+    act(() => jest.advanceTimersByTime(30_000));
+    expect(textLines(tree)).toContain('1m 5s');
+
+    setIntervalSpy.mockRestore();
     act(() => tree.unmount());
   });
 
@@ -390,21 +579,28 @@ describe('ToolInvocationRow', () => {
     act(() => tree.unmount());
   });
 
-  it('animates expand/collapse without throwing, and the transition config is reduce-motion aware', () => {
+  it('animates the row layout while removing collapsed output immediately', () => {
     const value = invocation({ id: 'tool-animated', textLines: ['out'] });
     const tree = render(value);
 
-    // Toggling twice exercises both the entering and exiting animation branches without crashing;
-    // this is the regression the mocked reanimated layer protects against.
     expand(tree, value.title);
     expect(textLines(tree)).toContain('out');
+    const outputPanel = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-output-panel' })[0],
+      'tool output panel',
+    );
+    const outputContainer = tree.root.findByProps({ testID: 'tool-output-container' });
+    expect(outputContainer.props['entering']).toBeDefined();
+    expect(outputContainer.props['exiting']).toBeUndefined();
+    expect(ancestorTestIDs(outputPanel)).toContain('tool-output-container');
+
     expand(tree, value.title);
     expect(textLines(tree)).not.toContain('out');
 
     act(() => tree.unmount());
   });
 
-  it('clips exiting output to the animated row layout', () => {
+  it('clips expanding output to the animated row layout', () => {
     const value = invocation({ id: 'tool-collapse-clip', textLines: ['out'] });
     const tree = render(value);
     const layout = requireTestValue(
@@ -563,6 +759,77 @@ describe('ToolInvocationRow', () => {
 });
 
 describe('ToolInvocationOutput', () => {
+  it('uses compact duration precision in the metadata footer', () => {
+    expect(formatToolElapsedTime(425)).toBe('425ms');
+    expect(formatToolElapsedAccessibilityLabel(425)).toBe('425 milliseconds');
+    expect(formatToolElapsedTime(1_600)).toBe('1.6s');
+    expect(formatToolElapsedAccessibilityLabel(1_600)).toBe('1.6 seconds');
+    expect(formatToolElapsedTime(60_000)).toBe('1m 0s');
+  });
+
+  it('renders terminal and text responses as an in-line selectable surface', () => {
+    const value = invocation({
+      id: 'tool-selectable-output',
+      kind: 'execute',
+      terminals: [{ terminalId: 'term-1', output: 'compile error\nexit 1' }],
+      textLines: ['fix the import', 'then rerun'],
+    });
+    const tree = render(value);
+    expand(tree, value.title);
+
+    const frames = tree.root.findAllByType('mock-web-view');
+    expect(frames).toHaveLength(2);
+    const htmls = frames.map((frame) => {
+      const source = frame.props['source'] as { html?: unknown } | undefined;
+      return typeof source?.html === 'string' ? source.html : '';
+    });
+    expect(htmls.some((html) => html.includes('compile error\nexit 1'))).toBe(true);
+    expect(htmls.some((html) => html.includes('fix the import\nthen rerun'))).toBe(true);
+    for (const html of htmls) {
+      expect(html).toContain('user-select: text');
+    }
+
+    const outputLines = tree.root
+      .findAllByType(Text)
+      .filter((node) =>
+        ['compile error', 'exit 1', 'fix the import', 'then rerun'].includes(flattenTestText(node)),
+      );
+    expect(outputLines).toHaveLength(0);
+
+    act(() => tree.unmount());
+  });
+
+  it('places timing below the response and formats subsecond durations in milliseconds', () => {
+    const startedAtMs = Date.parse('2026-05-01T12:34:10.000Z');
+    const value = invocation({
+      id: 'tool-subsecond-timing',
+      startedAtMs,
+      completedAtMs: startedAtMs + 425,
+      textLines: ['done'],
+    });
+    const tree = render(value);
+    expand(tree, value.title);
+
+    const lines = textLines(tree);
+    const startTime = new Intl.DateTimeFormat(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(startedAtMs));
+    expect(lines.indexOf('Started')).toBeGreaterThan(lines.lastIndexOf('Response'));
+    expect(lines).toContain('425ms');
+    expect(lines).not.toContain('0s');
+    const timing = tree.root.findByProps({ testID: 'tool-timing' });
+    expect(StyleSheet.flatten(timing.props['style'] as object)).toMatchObject({
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+    });
+    expect(timing.props['accessibilityLabel']).toBe(
+      `Started at ${startTime}. Duration 425 milliseconds.`,
+    );
+
+    act(() => tree.unmount());
+  });
+
   it('renders a location chip when the header does not already contain it', () => {
     const value = invocation({
       id: 'tool-read',
@@ -574,6 +841,40 @@ describe('ToolInvocationOutput', () => {
     expand(tree, value.title);
 
     expect(textLines(tree)).toContain('README.md');
+
+    act(() => tree.unmount());
+  });
+
+  it('keeps a terminal location at the top without repeating its raw marker in the response', () => {
+    const value = requireTestValue(
+      buildToolInvocations([
+        {
+          id: 'tool-result:terminal-location',
+          role: 'tool',
+          toolCallId: 'terminal-location',
+          content: '[terminal: term-1]\ncompile error\n[location: src/app.ts:12]',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          toolMeta: {
+            toolCallId: 'terminal-location',
+            kind: 'execute',
+            status: 'failed',
+            title: 'npm run build',
+            content: [{ type: 'terminal', terminalId: 'term-1', output: 'compile error' }],
+            locations: [{ path: 'src/app.ts', line: 12 }],
+          },
+        },
+      ])[0],
+      'terminal invocation with a location',
+    );
+    const tree = render(value);
+    expand(tree, value.title);
+    const lines = textLines(tree);
+
+    expect(lines).toContain('Locations');
+    expect(lines).toContain('src/app.ts:12');
+    expect(lines).toContain('compile error');
+    expect(lines).not.toContain('[location: src/app.ts:12]');
+    expect(lines.filter((line) => line === 'Response')).toHaveLength(1);
 
     act(() => tree.unmount());
   });
@@ -846,7 +1147,7 @@ describe('ToolInvocationOutput', () => {
     act(() => longTree.unmount());
   });
 
-  it('shows measured overflow fades until horizontal content reaches the end', () => {
+  it('masks overflowing content on the edges it can still scroll toward', () => {
     const value = invocation({
       id: 'tool-overflow',
       kind: 'execute',
@@ -855,61 +1156,87 @@ describe('ToolInvocationOutput', () => {
       diffs: [{ path: 'src/a.ts', oldText: 'short', newText: 'a very long replacement line' }],
     });
     const tree = render(value);
-    const commandScroll = tree.root.findByProps({ testID: 'tool-command-scroll' });
-    const commandLayout = commandScroll.props['onLayout'] as (event: {
-      nativeEvent: { layout: { width: number } };
-    }) => void;
-    const commandContentSize = commandScroll.props['onContentSizeChange'] as (
-      width: number,
-      height: number,
-    ) => void;
-    act(() => {
-      commandLayout({ nativeEvent: { layout: { width: 100 } } });
-      commandContentSize(300, 16);
-    });
+    expect(maskApplied(tree, 'tool-command-overflow')).toBe(false);
+    measureOverflow(tree, 'tool-command-scroll');
+    expect(maskApplied(tree, 'tool-command-overflow')).toBe(true);
     const commandFade = requireTestValue(
-      tree.root.findAllByProps({ testID: 'tool-command-overflow-fade' })[0],
+      tree.root.findAllByProps({ testID: 'tool-command-overflow-fade-end' })[0],
       'command overflow fade',
     );
     expect(commandFade.props['start']).toEqual({ x: 0, y: 0.5 });
     expect(commandFade.props['end']).toEqual({ x: 1, y: 0.5 });
-    expect(commandFade.props['colors']).toEqual(['rgba(0, 0, 0, 0)', theme.colors.bgMain]);
+    expect(commandFade.props['colors']).toEqual(OPAQUE_TO_CLEAR);
+    expect(fadeVisible(tree, 'tool-command-overflow-fade-start')).toBe(false);
 
     expand(tree, value.title);
-    const diffScroll = tree.root.findByProps({ testID: 'tool-diff-scroll' });
-    const diffLayout = diffScroll.props['onLayout'] as (event: {
-      nativeEvent: { layout: { width: number } };
-    }) => void;
-    const diffContentSize = diffScroll.props['onContentSizeChange'] as (
-      width: number,
-      height: number,
-    ) => void;
-    act(() => {
-      diffLayout({ nativeEvent: { layout: { width: 100 } } });
-      diffContentSize(300, 16);
-    });
+    measureOverflow(tree, 'tool-diff-scroll');
     const diffFade = requireTestValue(
-      tree.root.findAllByProps({ testID: 'tool-diff-overflow-fade' })[0],
+      tree.root.findAllByProps({ testID: 'tool-diff-overflow-fade-end' })[0],
       'diff overflow fade',
     );
-    expect(diffFade.props['colors']).toEqual(['rgba(10, 10, 10, 0)', '#0A0A0A']);
+    expect(diffFade.props['colors']).toEqual(OPAQUE_TO_CLEAR);
+    expect(fadeVisible(tree, 'tool-diff-overflow-fade-start')).toBe(false);
 
-    const scrolledToEnd = { nativeEvent: { contentOffset: { x: 200 } } };
-    const commandOnScroll = commandScroll.props['onScroll'] as (
-      event: typeof scrolledToEnd,
-    ) => void;
-    const diffOnScroll = diffScroll.props['onScroll'] as (event: typeof scrolledToEnd) => void;
-    act(() => {
-      commandOnScroll(scrolledToEnd);
-      diffOnScroll(scrolledToEnd);
-    });
-    expect(tree.root.findAllByProps({ testID: 'tool-command-overflow-fade' })).toHaveLength(0);
-    expect(tree.root.findAllByProps({ testID: 'tool-diff-overflow-fade' })).toHaveLength(0);
+    emitScroll(tree, 'tool-command-scroll', 100);
+    emitScroll(tree, 'tool-diff-scroll', 100);
+    expect(fadeVisible(tree, 'tool-command-overflow-fade-start')).toBe(true);
+    expect(fadeVisible(tree, 'tool-command-overflow-fade-end')).toBe(true);
+    expect(fadeVisible(tree, 'tool-diff-overflow-fade-start')).toBe(true);
+    expect(fadeVisible(tree, 'tool-diff-overflow-fade-end')).toBe(true);
+
+    emitScroll(tree, 'tool-command-scroll', 200);
+    emitScroll(tree, 'tool-diff-scroll', 200);
+    const commandStartFade = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-command-overflow-fade-start' })[0],
+      'command start overflow fade',
+    );
+    expect(commandStartFade.props['colors']).toEqual(CLEAR_TO_OPAQUE);
+    const diffStartFade = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-diff-overflow-fade-start' })[0],
+      'diff start overflow fade',
+    );
+    expect(diffStartFade.props['colors']).toEqual(CLEAR_TO_OPAQUE);
+    expect(fadeVisible(tree, 'tool-command-overflow-fade-end')).toBe(false);
+    expect(fadeVisible(tree, 'tool-diff-overflow-fade-end')).toBe(false);
+    expect(maskApplied(tree, 'tool-command-overflow')).toBe(true);
 
     act(() => tree.unmount());
   });
 
-  it('composites the diff overflow fade against the actual panel surface', () => {
+  it('dissolves a failed command instead of painting a surface-coloured scrim over it', () => {
+    const value = invocation({
+      id: 'tool-failed-overflow',
+      kind: 'execute',
+      status: 'failed',
+      isError: true,
+      monospaceTitle: true,
+      title: 'rm -rf /var/folders/tt/4843kq2n6zdgh8vh3f3lmr_c0000gn/T/dappercode-cache',
+    });
+    const tree = render(value);
+    expect(
+      StyleSheet.flatten(tree.root.findByProps({ testID: 'tool-row' }).props['style'] as object),
+    ).toMatchObject({ backgroundColor: theme.colors.errorBg });
+
+    measureOverflow(tree, 'tool-command-scroll');
+    expect(maskApplied(tree, 'tool-command-overflow')).toBe(true);
+    const endFade = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-command-overflow-fade-end' })[0],
+      'failed command overflow fade',
+    );
+    expect(endFade.props['colors']).toEqual(OPAQUE_TO_CLEAR);
+
+    emitScroll(tree, 'tool-command-scroll', 200);
+    const startFade = requireTestValue(
+      tree.root.findAllByProps({ testID: 'tool-command-overflow-fade-start' })[0],
+      'failed command start overflow fade',
+    );
+    expect(startFade.props['colors']).toEqual(CLEAR_TO_OPAQUE);
+    expect(surfaceColouredFades(tree)).toEqual([]);
+
+    act(() => tree.unmount());
+  });
+
+  it('composites translucent overlays correctly in the contrast test helper', () => {
     expect(compositeOverlayColor('#DDE7F0', 'rgba(41, 58, 84, 0.09)')).toBe('#CDD7E2');
   });
 });

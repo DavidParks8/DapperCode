@@ -5,6 +5,7 @@ import { useWindowDimensions } from 'react-native';
 
 import { TABLET_LAYOUT_MIN_WIDTH, TABLET_SIDEBAR_WIDTH } from '@shell/boot/appConstants';
 import { DrawerContent } from '@shell/navigation/DrawerContent';
+import { useDrawerForegroundSync } from '@shell/navigation/useDrawerForegroundSync';
 import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { useAppTheme } from '@shared/theme';
@@ -48,6 +49,7 @@ function RouterDrawerContent({
   const drawerStatus = useDrawerStatus();
   const activeProfileId = useAtomValue(activeBridgeProfileAtom)?.id;
   const setDrawerCommands = useSetAtom(drawerCommandsAtom);
+  useDrawerForegroundSync(permanent ? null : navigation, drawerStatus);
 
   useEffect(() => {
     setDrawerCommands({

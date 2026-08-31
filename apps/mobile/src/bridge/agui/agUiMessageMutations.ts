@@ -6,7 +6,12 @@ import {
   timestampIso,
   upsertToolCall,
 } from '@bridge/agui/agUiReducerUtilities';
-import { createActivityMessage, getMessageText, SUBAGENT_ACTIVITY_TYPE } from '@bridge/messages';
+import {
+  createActivityMessage,
+  getMessageText,
+  preserveKnownSubAgentThreadLink,
+  SUBAGENT_ACTIVITY_TYPE,
+} from '@bridge/messages';
 import { findMessage, toolCall } from '@bridge/agui/agUiStructuredAndTerminalReducers';
 import {
   findMessageIndex,
@@ -56,7 +61,7 @@ export function textMessage(
       return { ...base, role: 'user' };
     case 'assistant':
     default:
-      return { ...base, role: 'assistant' };
+      return { ...base, role: 'assistant', pending: true };
   }
 }
 
@@ -143,7 +148,11 @@ export function appendText(
       : appendOrderedPart(existingParts, { type: 'text', text: delta });
     const content = onlyTextParts ? appendedContent : renderOrderedParts(parts);
     const message = existing
-      ? ({ ...withText(existing, content), parts } as ChatMessage)
+      ? ({
+          ...withText(existing, content),
+          parts,
+          ...(existing.role === 'assistant' ? { pending: true } : {}),
+        } as ChatMessage)
       : ({
           ...textMessage(messageId, defaultRole, content),
           parts,
@@ -244,14 +253,15 @@ export function reduceActivitySnapshot(
         },
       }
     : withoutGenericTool;
+  const incoming = createActivityMessage(
+    messageId,
+    activityType,
+    content as { text: string; [key: string]: unknown },
+    timestampIso(timestamp),
+  );
   return upsertMessage(
     withSuppressedTool,
-    createActivityMessage(
-      messageId,
-      activityType,
-      content as { text: string; [key: string]: unknown },
-      timestampIso(timestamp),
-    ),
+    preserveKnownSubAgentThreadLink(findMessage(withSuppressedTool, messageId), incoming),
     runId,
     timestamp,
   );

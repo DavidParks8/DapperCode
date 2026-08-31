@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { Chat, RpcNotification } from '@bridge/types/types';
 import { showToolCallsAtom } from '@shell/state/appState/settings';
-import { bridgeTokenAtom, bridgeUrlAtom } from '@shell/state/bridge/atoms';
+import { bridgeConnectedAtom, bridgeTokenAtom, bridgeUrlAtom } from '@shell/state/bridge/atoms';
 import { useBridgeApi, useBridgeWs } from '@shell/state/bridge/hooks';
 import { liveAssistantByThreadAtom } from '../state/turn';
 import { runWatchdogNowAtom } from '../state/session';
@@ -45,6 +45,7 @@ import {
   SubAgentStatusBar,
   SubAgentTranscriptContent,
 } from './SubAgentDetailViewSections';
+import { ChatAnimationClockProvider } from '../animation/ChatAnimationClock';
 
 interface SubAgentDetailViewProps {
   threadId: string;
@@ -99,6 +100,7 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
   const ws = useBridgeWs();
   const bridgeUrl = useAtomValue(bridgeUrlAtom) ?? '';
   const bridgeToken = useAtomValue(bridgeTokenAtom);
+  const bridgeConnected = useAtomValue(bridgeConnectedAtom);
   const showToolCalls = useAtomValue(showToolCallsAtom);
   const liveAssistantByThread = useAtomValue(liveAssistantByThreadAtom);
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
@@ -270,52 +272,54 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
   );
 
   return (
-    <SafeAreaView style={styles.page}>
-      <SubAgentHeader
-        title={title}
-        navigateBack={navigateBack}
-        headingFocusRef={headingFocusRef}
-        styles={styles}
-        theme={theme}
-      />
-      <SubAgentStatusBar
-        display={display}
-        loading={detail.loading}
-        activityDetail={activityDetail}
-        styles={styles}
-        theme={theme}
-      />
+    <ChatAnimationClockProvider enabled={bridgeConnected}>
+      <SafeAreaView style={styles.page}>
+        <SubAgentHeader
+          title={title}
+          navigateBack={navigateBack}
+          headingFocusRef={headingFocusRef}
+          styles={styles}
+          theme={theme}
+        />
+        <SubAgentStatusBar
+          display={display}
+          loading={detail.loading}
+          activityDetail={activityDetail}
+          styles={styles}
+          theme={theme}
+        />
 
-      {detail.error ? (
-        <Text
-          accessibilityRole="alert"
-          accessibilityLiveRegion="assertive"
-          style={styles.errorText}
-        >
-          {detail.error}
-        </Text>
-      ) : null}
-      <SubAgentTranscriptContent
-        chat={chat}
-        parentChat={detail.parentChat}
-        bridgeUrl={bridgeUrl}
-        bridgeToken={bridgeToken}
-        openBrowser={openBrowser}
-        showToolCalls={showToolCalls}
-        onOpenSubAgentThread={openSubAgentThread}
-        agentThreadStatusById={agentThreadStatusById}
-        scrollRef={scrollRef}
-        autoScrollStateRef={autoScrollStateRef}
-        liveMessageState={liveMessageState}
-        projectedMessageCount={projectedMessageCount}
-        isStarting={isStarting}
-        isEmpty={isEmpty}
-        isHydratingTranscript={isHydratingTranscript}
-        showHydrationShimmer={showHydrationShimmer}
-        detailLoading={detail.loading}
-        styles={styles}
-        theme={theme}
-      />
-    </SafeAreaView>
+        {detail.error ? (
+          <Text
+            accessibilityRole="alert"
+            accessibilityLiveRegion="assertive"
+            style={styles.errorText}
+          >
+            {detail.error}
+          </Text>
+        ) : null}
+        <SubAgentTranscriptContent
+          chat={chat}
+          parentChat={detail.parentChat}
+          bridgeUrl={bridgeUrl}
+          bridgeToken={bridgeToken}
+          openBrowser={openBrowser}
+          showToolCalls={showToolCalls}
+          onOpenSubAgentThread={openSubAgentThread}
+          agentThreadStatusById={agentThreadStatusById}
+          scrollRef={scrollRef}
+          autoScrollStateRef={autoScrollStateRef}
+          liveMessageState={liveMessageState}
+          projectedMessageCount={projectedMessageCount}
+          isStarting={isStarting}
+          isEmpty={isEmpty}
+          isHydratingTranscript={isHydratingTranscript}
+          showHydrationShimmer={showHydrationShimmer}
+          detailLoading={detail.loading}
+          styles={styles}
+          theme={theme}
+        />
+      </SafeAreaView>
+    </ChatAnimationClockProvider>
   );
 }

@@ -1,3 +1,4 @@
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, useWindowDimensions } from 'react-native';
 
@@ -13,6 +14,7 @@ import type {
   GitStatusResponse,
 } from '@bridge/types/types';
 import { feedback } from '@shared/feedback';
+import { toApprovalPolicyForMode } from '../../chat/helpers/helpers';
 import { useGitScreenDerived } from './derived';
 import { useGitScreenReviewController } from './reviewController';
 
@@ -106,12 +108,20 @@ export function useGitScreenController({
   const [unstagingAll, setUnstagingAll] = useState(false);
   const [bodyScrollEnabled, setBodyScrollEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [screenFocused, setScreenFocused] = useState(false);
   const mountedRef = useRef(true);
   const hasLoadedRef = useRef(false);
   const refreshRequestIdRef = useRef(0);
   const refreshInFlightRef = useRef(false);
 
   const { height: windowHeight } = useWindowDimensions();
+
+  useFocusEffect(
+    useCallback(() => {
+      setScreenFocused(true);
+      return () => setScreenFocused(false);
+    }, []),
+  );
 
   useEffect(() => {
     setActiveChat(chat);
@@ -219,6 +229,10 @@ export function useGitScreenController({
   refreshRef.current = refresh;
 
   useEffect(() => {
+    if (!screenFocused) {
+      return;
+    }
+
     let interval: ReturnType<typeof setInterval> | null = null;
     let active = AppState.currentState !== 'background' && AppState.currentState !== 'inactive';
 
@@ -261,7 +275,7 @@ export function useGitScreenController({
       stop();
       subscription?.remove();
     };
-  }, []);
+  }, [screenFocused]);
 
   const saveWorkspace = useCallback(async () => {
     const nextWorkspace = workspaceDraft.trim();
@@ -271,7 +285,11 @@ export function useGitScreenController({
 
     try {
       setSavingWorkspace(true);
-      const updated = await api.setChatWorkspace(activeChat.id, nextWorkspace);
+      const updated = await api.setChatWorkspace(
+        activeChat.id,
+        nextWorkspace,
+        toApprovalPolicyForMode(approvalMode),
+      );
       setActiveChat(updated);
       setWorkspaceDraft(updated.cwd ?? nextWorkspace);
       setError(null);
@@ -281,7 +299,7 @@ export function useGitScreenController({
     } finally {
       setSavingWorkspace(false);
     }
-  }, [activeChat.id, api, onChatUpdated, savingWorkspace, workspaceDraft]);
+  }, [activeChat.id, api, approvalMode, onChatUpdated, savingWorkspace, workspaceDraft]);
 
   const commit = useCallback(async () => {
     const trimmedMessage = commitMessage.trim();

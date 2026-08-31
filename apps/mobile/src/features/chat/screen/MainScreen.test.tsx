@@ -4,6 +4,13 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 jest.mock('expo-router/react-navigation', () => ({ usePreventRemove: jest.fn() }));
+jest.mock('../liveActivities/adapter.ios', () => ({
+  agentTurnActivityAdapter: {
+    supported: false,
+    getInstances: jest.fn().mockResolvedValue([]),
+    start: jest.fn(),
+  },
+}));
 import { router, useGlobalSearchParams, usePathname } from 'expo-router';
 import { AppState, FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -42,7 +49,8 @@ import {
 import { startNewChatAtom } from '@shell/navigation/actions';
 import { pendingBrowserTargetUrlAtom } from '../../browser/state/browser';
 import { agentThreadMenuVisibleAtom } from '../state/modals';
-import { selectedChatAtom } from '../state/session';
+import { selectedChatAtom, selectedChatIdAtom } from '../state/session';
+import { threadRuntimeSnapshotsAtom } from '../state/runtime';
 import { activeTurnIdAtom } from '../state/turn';
 import { liveAssistantByThreadAtom } from '../state/turn';
 import { createAgUiThreadMessageState } from '@bridge/agui/agUiMessages';
@@ -56,6 +64,7 @@ import { toggleWorkspaceFavoriteAtom } from '../../workspace/state/workspaceActi
 import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
 import type { AppStore } from '@shell/state/types';
 import { refreshBridgeCapabilitiesAtom } from '@shell/state/bridge/capabilities';
+import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { routes } from '@shell/navigation/routes';
 import { WORKING_PHRASES } from '../helpers/workingPhrases';
 
@@ -300,6 +309,7 @@ function MainRouteShell() {
       }),
       listApprovals: jest.fn().mockResolvedValue([]),
       readThreadQueue: jest.fn().mockResolvedValue(emptyQueue),
+      readThreadSchedules: jest.fn().mockResolvedValue({ threadId: chat.id, schedules: [] }),
       resolveApproval: jest.fn().mockResolvedValue({ ok: true }),
       resolveUserInput: jest.fn().mockResolvedValue({ ok: true }),
       steerQueuedThreadMessage: jest.fn().mockResolvedValue({ ok: true, queue: emptyQueue }),
@@ -405,8 +415,8 @@ function MainRouteShell() {
         command: 'npm test',
         cwd: '/workspace',
         options: [
-          { id: 'allow-once', label: 'Allow once', kind: 'accept' },
-          { id: 'decline', label: 'Decline', kind: 'decline' },
+          { id: 'allow-once', label: 'Allow once', kind: 'AllowOnce' },
+          { id: 'reject-once', label: 'Reject', kind: 'RejectOnce' },
         ],
       },
     };
@@ -534,6 +544,81 @@ function MainRouteShell() {
       expect(
         root.findAllByType(TextInput).some((node) => node.props['placeholder'] === 'Reply...'),
       ).toBe(true);
+      act(() => tree.unmount());
+    });
+
+    it('restores session token totals after replay so the usage chip survives reconnect', async () => {
+      const tokenTotals = {
+        turns: 2,
+        inputTokens: 48200,
+        outputTokens: 12400,
+        reasoningTokens: null,
+        cachedReadTokens: 386000,
+        cachedWriteTokens: null,
+        totalTokens: 446600,
+      };
+      const chatWithTokenTotals = { ...chat, tokenTotals };
+      const api = createApi({ loadedChat: chatWithTokenTotals, cachedChat: chatWithTokenTotals });
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chatWithTokenTotals,
+      });
+      const root = tree.root as Queryable;
+      const label = 'Token usage, 446,600 tokens this session';
+
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === label).length,
+      ).toBeGreaterThan(0);
+      await emitWs({
+        method: 'bridge/events/snapshotRequired',
+        params: { reason: 'replayTruncated', resumeAfterEventId: 44 },
+      });
+      await act(async () => {
+        for (let index = 0; index < 20; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === label).length,
+      ).toBeGreaterThan(0);
+      act(() => tree.unmount());
+    });
+
+    it('shows token usage after a generic AG-UI token totals event', async () => {
+      const { tree } = await renderMain({
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const root = tree.root as Queryable;
+      const label = 'Token usage, 507,800 tokens this session';
+
+      expect(root.findAll((node) => node.props['accessibilityLabel'] === label)).toHaveLength(0);
+      await emitWs({
+        method: 'bridge/agui.event',
+        params: {
+          threadId: chat.id,
+          runId: 'run-token-totals',
+          event: {
+            type: 'CUSTOM',
+            name: 'dappercode.dev/tokenTotals',
+            value: {
+              turns: 14,
+              inputTokens: 48200,
+              outputTokens: 12400,
+              reasoningTokens: 8900,
+              cachedReadTokens: 386000,
+              cachedWriteTokens: 52300,
+              totalTokens: 507800,
+            },
+          },
+        },
+      });
+
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === label).length,
+      ).toBeGreaterThan(0);
       act(() => tree.unmount());
     });
 
@@ -810,6 +895,246 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
+    it('reads pending schedules when the selected chat loads', async () => {
+      const api = createApi();
+      (api.readThreadSchedules as jest.Mock).mockResolvedValueOnce({
+        threadId: chat.id,
+        schedules: [
+          {
+            scheduleId: 'scheduled-load',
+            threadId: chat.id,
+            promptPreview: 'Loaded schedule preview',
+            promptBytes: 23,
+            scheduledFor: '2026-08-30T16:00:00.000Z',
+            createdAt: '2026-08-29T20:00:00.000Z',
+            status: 'scheduled',
+            retryAttempt: 0,
+          },
+        ],
+      });
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+
+      expect(api.readThreadSchedules).toHaveBeenCalledWith(chat.id);
+      expect(hasText(tree.root as Queryable, 'Loaded schedule preview')).toBe(true);
+      act(() => tree.unmount());
+    });
+
+    it('logs background queue and schedule read failures', async () => {
+      const api = createApi();
+      const queueError = new Error('queue read failed');
+      const schedulesError = new Error('schedule read failed');
+      (api.readThreadQueue as jest.Mock).mockRejectedValueOnce(queueError);
+      (api.readThreadSchedules as jest.Mock).mockRejectedValueOnce(schedulesError);
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+
+      expect(warn).toHaveBeenCalledWith(
+        `Could not read queued messages for thread ${chat.id}.`,
+        queueError,
+      );
+      expect(warn).toHaveBeenCalledWith(
+        `Could not read scheduled prompts for thread ${chat.id}.`,
+        schedulesError,
+      );
+      warn.mockRestore();
+      act(() => tree.unmount());
+    });
+
+    it('replay recovery converges schedules despite an unrelated runtime update', async () => {
+      const api = createApi();
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const root = tree.root as Queryable;
+      const schedule = (
+        scheduleId: string,
+        threadId: string,
+        prompt: string,
+        scheduledFor: string,
+      ) => ({
+        scheduleId,
+        threadId,
+        promptPreview: prompt,
+        promptBytes: prompt.length,
+        scheduledFor,
+        createdAt: '2026-08-29T20:00:00.000Z',
+        status: 'scheduled',
+        retryAttempt: 0,
+      });
+
+      await emitWs({
+        method: 'bridge/thread/schedules/updated',
+        params: {
+          threadId: 'other-thread',
+          schedules: [
+            schedule('other', 'other-thread', 'Other thread schedule', '2026-08-30T15:00:00.000Z'),
+          ],
+        },
+      });
+      expect(hasText(root, 'Other thread schedule')).toBe(false);
+
+      await emitWs({
+        method: 'bridge/thread/schedules/updated',
+        params: {
+          threadId: chat.id,
+          schedules: [
+            schedule('later', chat.id, 'Later schedule', '2026-08-31T16:00:00.000Z'),
+            schedule('earlier', chat.id, 'Earliest schedule', '2026-08-30T16:00:00.000Z'),
+          ],
+        },
+      });
+      expect(hasText(root, 'Earliest schedule')).toBe(true);
+      expect(hasText(root, 'Later schedule')).toBe(false);
+      expect(hasText(root, '+1 more')).toBe(true);
+
+      let resolveSchedules!: (value: { threadId: string; schedules: [] }) => void;
+      (api.readThreadSchedules as jest.Mock).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSchedules = resolve;
+          }),
+      );
+      await emitWs({
+        method: 'bridge/events/snapshotRequired',
+        params: { reason: 'replayTruncated', resumeAfterEventId: 45 },
+      });
+      await emitWs({
+        method: 'bridge/thread/queue/updated',
+        params: {
+          ...emptyQueue,
+          items: [
+            {
+              id: 'unrelated-queue-update',
+              createdAt: '2026-08-29T20:00:01.000Z',
+              content: 'Runtime changed while schedules loaded.',
+            },
+          ],
+        },
+      });
+      await act(async () => {
+        resolveSchedules({ threadId: chat.id, schedules: [] });
+        for (let index = 0; index < 20; index += 1) {
+          await Promise.resolve();
+        }
+      });
+      expect(hasText(root, 'Earliest schedule')).toBe(false);
+      expect(hasText(root, '+1 more')).toBe(false);
+      act(() => tree.unmount());
+    });
+
+    it('does not let a stale replay schedule read undo a newer complete-list notification', async () => {
+      const api = createApi();
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const root = tree.root as Queryable;
+      const staleSchedule = {
+        scheduleId: 'stale-replay',
+        threadId: chat.id,
+        promptPreview: 'Stale replay schedule',
+        promptBytes: 21,
+        scheduledFor: '2026-08-30T16:00:00.000Z',
+        createdAt: '2026-08-29T20:00:00.000Z',
+        status: 'scheduled',
+        retryAttempt: 0,
+      };
+      await emitWs({
+        method: 'bridge/thread/schedules/updated',
+        params: { threadId: chat.id, schedules: [staleSchedule] },
+      });
+      expect(hasText(root, 'Stale replay schedule')).toBe(true);
+
+      let resolveSchedules!: (value: {
+        threadId: string;
+        schedules: Array<typeof staleSchedule>;
+      }) => void;
+      (api.readThreadSchedules as jest.Mock).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSchedules = resolve;
+          }),
+      );
+      await emitWs({
+        method: 'bridge/events/snapshotRequired',
+        params: { reason: 'replayTruncated', resumeAfterEventId: 46 },
+      });
+      await emitWs({
+        method: 'bridge/thread/schedules/updated',
+        params: { threadId: chat.id, schedules: [] },
+      });
+      expect(hasText(root, 'Stale replay schedule')).toBe(false);
+      await act(async () => {
+        resolveSchedules({ threadId: chat.id, schedules: [staleSchedule] });
+        for (let index = 0; index < 20; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      expect(hasText(root, 'Stale replay schedule')).toBe(false);
+      act(() => tree.unmount());
+    });
+
+    it('does not let a stale load response restore a schedule removed by notification', async () => {
+      const api = createApi();
+      let resolveSchedules!: (value: {
+        threadId: string;
+        schedules: Array<Record<string, unknown>>;
+      }) => void;
+      const initialRead = new Promise<{
+        threadId: string;
+        schedules: Array<Record<string, unknown>>;
+      }>((resolve) => {
+        resolveSchedules = resolve;
+      });
+      (api.readThreadSchedules as jest.Mock).mockReturnValueOnce(initialRead);
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const root = tree.root as Queryable;
+
+      await emitWs({
+        method: 'bridge/thread/schedules/updated',
+        params: { threadId: chat.id, schedules: [] },
+      });
+      await act(async () => {
+        resolveSchedules({
+          threadId: chat.id,
+          schedules: [
+            {
+              scheduleId: 'stale',
+              threadId: chat.id,
+              promptPreview: 'Stale delivered schedule',
+              promptBytes: 24,
+              scheduledFor: '2026-08-30T16:00:00.000Z',
+              createdAt: '2026-08-29T20:00:00.000Z',
+              status: 'scheduled',
+              retryAttempt: 0,
+            },
+          ],
+        });
+        await initialRead;
+        await Promise.resolve();
+      });
+
+      expect(hasText(root, 'Stale delivered schedule')).toBe(false);
+      act(() => tree.unmount());
+    });
+
     it('pauses a queued message before opening it for editing and commits without sending', async () => {
       const api = createApi();
       let resolveEditStart:
@@ -916,7 +1241,7 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
-    it('preserves a selected-thread draft while interrupting a known running turn', async () => {
+    it('interrupts a known running turn while the composer is empty', async () => {
       const runningChat = { ...chat, status: 'running' as const, activeTurnId: 'turn-1' };
       const api = createApi({ loadedChat: runningChat, cachedChat: runningChat });
       const { tree } = await renderMain({
@@ -925,22 +1250,64 @@ function MainRouteShell() {
         pendingOpenChatSnapshot: runningChat,
       });
       const root = tree.root as Queryable;
-      const message = root
-        .findAllByType(TextInput)
-        .find((node) => node.props['accessibilityLabel'] === 'Message');
-      if (!message) {
-        throw new Error('Missing composer');
-      }
-      act(() => message.props.onChangeText('Follow up'));
       expect(
         root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
       ).toHaveLength(0);
-      expect(message.props['value']).toBe('Follow up');
       await pressLabel(root, 'Stop agent');
       expect(api.interruptLatestTurn).toHaveBeenCalledWith(chat.id);
       expect(api.interruptTurn).not.toHaveBeenCalled();
       expect(api.sendOrQueueChatMessage).not.toHaveBeenCalled();
-      expect(message.props['value']).toBe('Follow up');
+      act(() => tree.unmount());
+    });
+
+    it('replaces Stop with Send and queues a typed follow-up while a turn runs', async () => {
+      const runningChat = { ...chat, status: 'running' as const, activeTurnId: 'turn-1' };
+      const queuedState = {
+        ...emptyQueue,
+        items: [
+          { id: 'queued-follow-up', createdAt: '2026-07-20T00:00:03.000Z', content: 'Follow up' },
+        ],
+      };
+      const api = createApi({ loadedChat: runningChat, cachedChat: runningChat });
+      (api.sendOrQueueChatMessage as jest.Mock).mockResolvedValueOnce({
+        disposition: 'queued',
+        queue: queuedState,
+      });
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: runningChat,
+      });
+      const root = tree.root as Queryable;
+
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).not.toHaveLength(0);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
+      ).toHaveLength(0);
+
+      act(() => messageInput(root).props.onChangeText('Follow up'));
+
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).toHaveLength(0);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
+      ).not.toHaveLength(0);
+
+      await pressLabel(root, 'Send message');
+
+      expect(api.sendOrQueueChatMessage).toHaveBeenCalledWith(
+        chat.id,
+        expect.objectContaining({ content: 'Follow up' }),
+        expect.objectContaining({ skipResume: true, submissionId: expect.any(String) }),
+      );
+      expect(messageInput(root).props['value']).toBe('');
+      expect(hasText(root, 'Follow up')).toBe(true);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).not.toHaveLength(0);
       act(() => tree.unmount());
     });
 
@@ -1532,6 +1899,57 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
+    it('keeps a rejected permission terminal when its resolved event arrives after run finish', async () => {
+      const api = createApi();
+      const { tree, store } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const root = tree.root as Queryable;
+      const runEvent = (type: 'RUN_STARTED' | 'RUN_FINISHED') => ({
+        method: 'bridge/agui.event',
+        params: {
+          threadId: chat.id,
+          runId: 'run-rejected',
+          sourceTurnId: 'turn-1',
+          event: { type, threadId: chat.id, runId: 'run-rejected' },
+        },
+      });
+
+      await emitWs(runEvent('RUN_STARTED'));
+      await emitWs(approvalRequested());
+      await act(async () => {
+        await (
+          approvalBannerProps?.['onResolve'] as (id: string, optionId: string) => Promise<void>
+        )('approval-1', 'reject-once');
+      });
+      expect(api.resolveApproval).toHaveBeenCalledWith(
+        'approval-1',
+        'reject-once',
+        expect.any(String),
+      );
+
+      await emitWs(runEvent('RUN_FINISHED'));
+      await emitWs({
+        method: 'bridge/approval.resolved',
+        params: { id: 'approval-1', threadId: chat.id, outcome: 'reject-once' },
+      });
+
+      expect(store.get(selectedChatAtom)?.status).toBe('complete');
+      expect(store.get(activeTurnIdAtom)).toBeNull();
+      expect(store.get(activityAtom)).toEqual({ tone: 'complete', title: 'Turn completed' });
+      expect(hasWorkingStatus(root, hasText)).toBe(false);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).toHaveLength(0);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Send message'),
+      ).not.toHaveLength(0);
+      expect(messageInput(root).props['editable']).not.toBe(false);
+      act(() => tree.unmount());
+    });
+
     it('labels a pending approval by what it does, not by its protocol kind', async () => {
       // Regression: the activity strip showed the raw "commandExecution" kind.
       const api = createApi();
@@ -1578,13 +1996,21 @@ function MainRouteShell() {
     });
 
     it('shows a queued send from the returned disposition and restores a failed queued draft', async () => {
+      const runningQueuedChat = {
+        ...chat,
+        status: 'running' as const,
+        activeTurnId: 'turn-queued',
+      };
       const queuedState = {
         ...emptyQueue,
         items: [
           { id: 'queued-returned', createdAt: '2026-07-20T00:00:03.000Z', content: 'Queue this' },
         ],
       };
-      const queuedApi = createApi();
+      const queuedApi = createApi({
+        loadedChat: runningQueuedChat,
+        cachedChat: runningQueuedChat,
+      });
       (queuedApi.sendOrQueueChatMessage as jest.Mock).mockResolvedValueOnce({
         disposition: 'queued',
         queue: queuedState,
@@ -1592,7 +2018,7 @@ function MainRouteShell() {
       const queuedHarness = await renderMain({
         api: queuedApi,
         pendingOpenChatId: chat.id,
-        pendingOpenChatSnapshot: chat,
+        pendingOpenChatSnapshot: runningQueuedChat,
       });
       const queuedRoot = queuedHarness.tree.root as Queryable;
       act(() => messageInput(queuedRoot).props.onChangeText('Queue this'));
@@ -1823,6 +2249,7 @@ function MainRouteShell() {
       listPendingApprovals: jest.fn().mockResolvedValue([]),
       listApprovals: jest.fn().mockResolvedValue([]),
       readThreadQueue: jest.fn().mockResolvedValue(emptyQueue),
+      readThreadSchedules: jest.fn().mockResolvedValue({ threadId: rootChat.id, schedules: [] }),
       createChatIdempotent: jest.fn().mockResolvedValue({
         ...rootChat,
         id: 'thread-created',
@@ -2325,6 +2752,88 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
+    it('keeps a newly picked model selected after the new chat is created', async () => {
+      let resolveCreate!: (chat: Chat) => void;
+      const createPending = new Promise<Chat>((resolve) => {
+        resolveCreate = resolve;
+      });
+      let resolveSend!: (chat: Chat) => void;
+      const sendPending = new Promise<Chat>((resolve) => {
+        resolveSend = resolve;
+      });
+      const api = createApi();
+      (api.listModelOptions as jest.Mock).mockResolvedValue([
+        {
+          id: 'server/default-model',
+          displayName: 'Default Model',
+          providerName: 'Bridge',
+          isDefault: true,
+        },
+        {
+          id: 'alt/chosen-model',
+          displayName: 'Chosen Model',
+          providerName: 'Bridge',
+        },
+      ]);
+      const createdChat: Chat = { ...rootChat, id: 'thread-created', messages: [] };
+      (api.createChatIdempotent as jest.Mock).mockReturnValue(createPending);
+      (api.sendChatMessageIdempotent as jest.Mock).mockReturnValue(sendPending);
+      const { tree } = await renderMain({ api });
+      const root = rootOf(tree);
+      await act(async () => {
+        await flush();
+        await flush();
+      });
+
+      await press(byLabelPrefix(root, 'Model, '));
+      await press(byLabel(root, 'Bridge · Chosen Model'));
+      expect(byLabel(root, 'Model, Bridge · Chosen Model')).toBeTruthy();
+
+      await act(async () => {
+        textInput(root, 'Message').props.onChangeText('Hi there');
+        await flush();
+      });
+      let sendPromise: Promise<void> | undefined;
+      await act(async () => {
+        sendPromise = (byLabel(root, 'Send message').props.onPress as () => Promise<void>)();
+        await Promise.resolve();
+      });
+
+      expect(byLabel(root, 'Model, Bridge · Chosen Model')).toBeTruthy();
+      expect(
+        root.findAll(
+          (node) => node.props['accessibilityLabel'] === 'Model, Bridge · Default Model',
+        ),
+      ).toHaveLength(0);
+
+      await act(async () => {
+        resolveCreate(createdChat);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(byLabel(root, 'Model, Bridge · Chosen Model')).toBeTruthy();
+      expect(
+        root.findAll(
+          (node) => node.props['accessibilityLabel'] === 'Model, Bridge · Default Model',
+        ),
+      ).toHaveLength(0);
+
+      await act(async () => {
+        resolveSend(createdChat);
+        await sendPromise;
+      });
+
+      expect((api.createChatIdempotent as jest.Mock).mock.calls[0][0].model).toBe(
+        'alt/chosen-model',
+      );
+      expect((api.sendChatMessageIdempotent as jest.Mock).mock.calls[0][1].model).toBe(
+        'alt/chosen-model',
+      );
+      expect(byLabel(root, 'Model, Bridge · Chosen Model')).toBeTruthy();
+      act(() => tree.unmount());
+    });
+
     it('opens and applies model, thinking, and mode controls before creating a chat', async () => {
       const api = createApi();
       (api.listModelOptions as jest.Mock).mockResolvedValue([
@@ -2627,6 +3136,158 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
+    it('keeps an in-flight transcript visible when switching models', async () => {
+      const messages: Chat['messages'] = [
+        {
+          id: 'user-in-flight',
+          role: 'user',
+          content: 'Inspect the current state',
+          createdAt: '2026-08-15T21:00:00.000Z',
+        },
+        {
+          id: 'reasoning-in-flight',
+          role: 'reasoning',
+          content: 'Checking the state transitions',
+          createdAt: '2026-08-15T21:00:01.000Z',
+          pending: true,
+        },
+        {
+          id: 'tool-in-flight',
+          role: 'tool',
+          toolCallId: 'call-in-flight',
+          content: 'Reading files',
+          createdAt: '2026-08-15T21:00:02.000Z',
+          toolMeta: {
+            toolCallId: 'call-in-flight',
+            kind: 'read',
+            status: 'in_progress',
+            title: 'Read files',
+          },
+        },
+        {
+          id: 'assistant-in-flight',
+          role: 'assistant',
+          content: 'Partial answer',
+          createdAt: '2026-08-15T21:00:03.000Z',
+          pending: true,
+        },
+      ];
+      const configuredChat: Chat = {
+        ...rootChat,
+        status: 'running',
+        updatedAt: '2026-08-15T21:00:03.000Z',
+        statusUpdatedAt: '2026-08-15T21:00:00.000Z',
+        lastMessagePreview: 'Partial answer',
+        messages,
+        activeTurnId: 'turn-in-flight',
+        latestTurnStatus: 'inProgress',
+        acpActive: {
+          runId: 'run-in-flight',
+          sourceTurnId: 'turn-in-flight',
+          generation: 1,
+          toolIds: ['call-in-flight'],
+        },
+        acpConfig: [
+          {
+            id: 'model',
+            value: 'github-copilot/gpt-5.4',
+            category: 'model',
+            options: [
+              { value: 'github-copilot/gpt-5.4', name: 'GitHub Copilot/GPT-5.4' },
+              { value: 'github-copilot/gpt-5-mini', name: 'GitHub Copilot/GPT-5 Mini' },
+            ],
+          },
+        ],
+      };
+      let resolveConfig!: (chat: Chat) => void;
+      const api = createApi();
+      (api.getChat as jest.Mock).mockResolvedValue(configuredChat);
+      (api.peekChat as jest.Mock).mockReturnValue(configuredChat);
+      (api.listModelOptions as jest.Mock).mockResolvedValue([
+        {
+          id: 'github-copilot/gpt-5.4',
+          displayName: 'GPT-5.4',
+          providerName: 'GitHub Copilot',
+        },
+        {
+          id: 'github-copilot/gpt-5-mini',
+          displayName: 'GPT-5 Mini',
+          providerName: 'GitHub Copilot',
+        },
+      ]);
+      (api.setThreadConfigOption as jest.Mock).mockImplementation(
+        () =>
+          new Promise<Chat>((resolve) => {
+            resolveConfig = resolve;
+          }),
+      );
+      const { tree, store } = await renderMain({ api, selectedChat: configuredChat });
+      const root = rootOf(tree);
+
+      act(() => textInput(root, 'Message').props.onChangeText('Follow up'));
+      expect(hasText(root, 'Inspect the current state')).toBe(true);
+      expect(hasText(root, 'Checking the state transitions')).toBe(true);
+      expect(hasText(root, 'tool:Read files')).toBe(true);
+      expect(hasText(root, 'Partial answer')).toBe(true);
+      expect(hasWorkingStatus(root, hasText)).toBe(true);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).toHaveLength(0);
+      expect(byLabel(root, 'Send message')).toBeTruthy();
+
+      await press(byLabelPrefix(root, 'Model, '));
+      await act(async () => {
+        await flush();
+      });
+      await press(byLabel(root, 'GitHub Copilot · GPT-5 Mini'));
+      expect(api.setThreadConfigOption).toHaveBeenCalledWith(
+        configuredChat.id,
+        'model',
+        'github-copilot/gpt-5-mini',
+      );
+
+      await act(async () => {
+        resolveConfig({
+          ...configuredChat,
+          status: 'complete',
+          statusUpdatedAt: '2026-08-15T21:00:04.000Z',
+          lastMessagePreview: '',
+          messages: [],
+          activeTurnId: null,
+          latestTurnStatus: 'completed',
+          acpActive: null,
+          acpConfig: configuredChat.acpConfig?.map((option) => ({
+            ...option,
+            value: 'github-copilot/gpt-5-mini',
+          })),
+        });
+        await flush();
+      });
+
+      expect(store.get(selectedChatAtom)).toEqual(
+        expect.objectContaining({
+          status: 'running',
+          activeTurnId: 'turn-in-flight',
+          latestTurnStatus: 'inProgress',
+          acpActive: configuredChat.acpActive,
+          messages,
+        }),
+      );
+      expect(hasText(root, 'Inspect the current state')).toBe(true);
+      expect(hasText(root, 'Checking the state transitions')).toBe(true);
+      expect(hasText(root, 'tool:Read files')).toBe(true);
+      expect(hasText(root, 'Partial answer')).toBe(true);
+      expect(hasWorkingStatus(root, hasText)).toBe(true);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).toHaveLength(0);
+      expect(byLabel(root, 'Send message')).toBeTruthy();
+      expect(textInput(root, 'Message').props['value']).toBe('Follow up');
+      expect(byLabel(root, 'Model, GitHub Copilot · GPT-5 Mini')).toBeTruthy();
+      expect(api.rememberChat).toHaveBeenLastCalledWith(store.get(selectedChatAtom));
+      act(() => tree.unmount());
+    });
+
     it('switches authoritative ACP values immediately and ignores late stale preferences', async () => {
       let resolvePreferences: ((value: string) => void) | null = null;
       (FileSystem.readAsStringAsync as jest.Mock).mockImplementation((path: string) => {
@@ -2775,15 +3436,97 @@ function MainRouteShell() {
         });
         await flush();
       });
+      await press(byLabel(root, 'More actions'));
       await press(byLabel(root, 'Pin workspace'));
       expect(byLabel(root, 'Unpin workspace')).toBeTruthy();
       await press(byLabel(root, 'Open folder mobile'));
       expect(hasText(root, 'Showing 0 of 12 entries.')).toBe(true);
-      await press(byLabel(root, 'Go to parent folder'));
+      await press(byLabel(root, 'mobile, current folder'));
+      await press(byLabel(root, 'Go to workspace'));
       expect(hasText(root, 'browse denied')).toBe(true);
       await press(byLabel(root, 'Use default workspace'));
       expect(store.get(defaultStartCwdAtom)).toBeNull();
 
+      act(() => tree.unmount());
+    });
+
+    it('keeps the selected model when changing workspace before the first message', async () => {
+      const api = createApi({
+        filesystem: [
+          {
+            bridgeRoot: '/workspace',
+            path: '/workspace',
+            parentPath: null,
+            truncated: false,
+            entries: [
+              {
+                name: 'mobile',
+                path: '/workspace/mobile',
+                isDirectory: true,
+                isGitRepo: true,
+              },
+            ],
+          },
+          {
+            bridgeRoot: '/workspace',
+            path: '/workspace/mobile',
+            parentPath: '/workspace',
+            truncated: false,
+            entries: [],
+          },
+        ],
+      });
+      (api.listModelOptions as jest.Mock).mockResolvedValue([
+        {
+          id: 'server/default',
+          displayName: 'Server Default',
+          isDefault: true,
+        },
+        {
+          id: 'selected/model',
+          displayName: 'Selected Model',
+        },
+      ]);
+      const { tree, store } = await renderShell({ api, defaultStartCwd: '/workspace' });
+      const root = rootOf(tree);
+      await act(async () => {
+        await flush();
+        await flush();
+      });
+
+      await press(byLabelPrefix(root, 'Model, '));
+      await press(byLabel(root, 'Selected Model'));
+      expect(byLabel(root, 'Model, Selected Model')).toBeTruthy();
+
+      await press(byLabelPrefix(root, 'Workspace, '));
+      await press(byLabel(root, 'Open folder mobile'));
+      await press(byLabel(root, 'Use mobile'));
+      expect(store.get(defaultStartCwdAtom)).toBe('/workspace/mobile');
+      expect(router.back).toHaveBeenCalledTimes(1);
+      expect(router.dismissTo).not.toHaveBeenCalled();
+      expect(byLabel(root, 'Model, Selected Model')).toBeTruthy();
+
+      await act(async () => {
+        textInput(root, 'Message').props.onChangeText('Use the selected model');
+        await flush();
+      });
+      await press(byLabel(root, 'Send message'));
+
+      expect(api.createChatIdempotent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cwd: '/workspace/mobile',
+          model: 'selected/model',
+        }),
+        expect.any(String),
+      );
+      expect(api.sendChatMessageIdempotent).toHaveBeenCalledWith(
+        'thread-created',
+        expect.objectContaining({
+          model: 'selected/model',
+        }),
+        expect.any(String),
+        expect.any(Object),
+      );
       act(() => tree.unmount());
     });
 
@@ -2828,6 +3571,7 @@ function MainRouteShell() {
 
       await press(byLabelPrefix(root, 'Workspace, '));
       await flush();
+      await press(byLabel(root, 'More actions'));
       await press(byLabel(root, 'Clone Repo'));
       await act(async () => {
         textInput(root, 'Repository URL').props.onChangeText('git@github.com:org/repo.git');
@@ -2836,7 +3580,7 @@ function MainRouteShell() {
       expect(textInput(root, 'Clone directory name').props['value']).toBe('repo');
       await press(byLabelPrefix(root, 'Clone into '));
       await press(byLabel(root, 'Open folder destination'));
-      await press(byLabel(root, 'Use destination workspace'));
+      await press(byLabel(root, 'Use destination'));
       expect(hasText(root, 'Git checkout')).toBe(true);
 
       await press(pressForText(root, 'Clone and use'));
@@ -3347,6 +4091,7 @@ function MainRouteShell() {
       }),
       listApprovals: jest.fn().mockResolvedValue([]),
       readThreadQueue: jest.fn().mockResolvedValue(emptyQueue),
+      readThreadSchedules: jest.fn().mockResolvedValue({ threadId, schedules: [] }),
       dismissBridgeUiSurface: jest.fn().mockResolvedValue({ ok: true, id: 'surface', threadId }),
       resolveBridgeUiSurface: jest.fn().mockResolvedValue({ ok: true }),
     };
@@ -3699,7 +4444,11 @@ function MainRouteShell() {
         }
         return { node, props: messageProps(node) };
       };
-      const subagentActivity = (status: 'running' | 'completed', latest: string) =>
+      const subagentActivity = (
+        status: 'running' | 'completed',
+        latest: string,
+        receiverThreadIds = [childThreadId],
+      ) =>
         agUi({
           type: 'ACTIVITY_SNAPSHOT',
           messageId: 'subagent:task-live',
@@ -3712,11 +4461,21 @@ function MainRouteShell() {
               toolCallId: 'task-live',
               tool: 'spawnAgent',
               senderThreadId: threadId,
-              receiverThreadIds: [childThreadId],
+              receiverThreadIds,
               agentStatus: status,
             },
           },
         });
+
+      await emit(subagentActivity('running', 'Discovering child session', []));
+      expect(
+        renderedMessages().some(
+          (candidate) => messageProps(candidate).message.id === 'subagent:task-live',
+        ),
+      ).toBe(false);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Open agent chat'),
+      ).toHaveLength(0);
 
       await emit(subagentActivity('running', 'Thinking: Reviewing architecture'));
       const liveCard = () => renderedMessage('subagent:task-live');
@@ -3935,8 +4694,215 @@ function MainRouteShell() {
       await unmount(tree);
     });
 
-    it('leaves a deleted session and keeps unrelated deletions on screen', async () => {
-      const { tree } = await renderMain();
+    it('purges a deleted non-selected thread from live recovery state', async () => {
+      const api = createApi();
+      const { tree, store } = await renderMain({ api });
+      let rejectDeletedRecovery!: (reason: Error) => void;
+      (api.getChat as jest.Mock).mockImplementation((requestedThreadId: string) =>
+        requestedThreadId === otherThreadId
+          ? new Promise<Chat>((_resolve, reject) => {
+              rejectDeletedRecovery = reject;
+            })
+          : Promise.resolve(chat),
+      );
+      await act(async () => {
+        store.set(threadRuntimeSnapshotsAtom, {
+          [otherThreadId]: {
+            activity: { tone: 'running', title: 'Working' },
+            scheduledPrompts: [],
+            updatedAtMs: Date.now(),
+          },
+        });
+        store.set(liveAssistantByThreadAtom, {
+          [otherThreadId]: {
+            ...createAgUiThreadMessageState(),
+            messages: [],
+          },
+        });
+        store.set(relatedAgentThreadsAtom, [
+          { ...chat, id: otherThreadId, title: 'Deleted agent' },
+        ]);
+        await Promise.resolve();
+      });
+
+      (api.rememberChat as jest.Mock).mockClear();
+      (api.getChat as jest.Mock).mockClear();
+      (api.listLoadedChatIds as jest.Mock).mockResolvedValue([otherThreadId]);
+      await emit({
+        method: 'bridge/events/snapshotRequired',
+        params: { reason: 'replayTruncated', resumeAfterEventId: 87 },
+      });
+      expect(api.getChat).toHaveBeenCalledWith(otherThreadId, { forceRefresh: true });
+      await emit({ method: 'thread/deleted', params: { threadId: otherThreadId } });
+
+      expect(api.forgetChat).toHaveBeenCalledWith(otherThreadId);
+      expect(store.get(threadRuntimeSnapshotsAtom)[otherThreadId]).toBeUndefined();
+      expect(store.get(liveAssistantByThreadAtom)[otherThreadId]).toBeUndefined();
+      expect(store.get(relatedAgentThreadsAtom)).toEqual([]);
+      expect(hasText(tree.root as Queryable, 'Event thread')).toBe(true);
+
+      await act(async () => {
+        rejectDeletedRecovery(new Error('deleted recovery read failed'));
+        for (let index = 0; index < 10; index += 1) {
+          await Promise.resolve();
+        }
+      });
+      const deletedRecoveryReads = () =>
+        (api.getChat as jest.Mock).mock.calls.filter(([id]) => id === otherThreadId).length;
+      expect(deletedRecoveryReads()).toBe(1);
+      await act(async () => {
+        jest.advanceTimersByTime(1_000);
+        for (let index = 0; index < 10; index += 1) {
+          await Promise.resolve();
+        }
+      });
+      expect(deletedRecoveryReads()).toBe(1);
+      expect(
+        (api.readThreadQueue as jest.Mock).mock.calls.filter(([id]) => id === otherThreadId),
+      ).toHaveLength(1);
+      expect(
+        (api.readThreadSchedules as jest.Mock).mock.calls.filter(([id]) => id === otherThreadId),
+      ).toHaveLength(1);
+      expect(api.rememberChat).not.toHaveBeenCalledWith(
+        expect.objectContaining({ id: otherThreadId }),
+      );
+      await unmount(tree);
+    });
+
+    it('keeps a deleted thread tombstoned across runtime reads, notifications, and recovery', async () => {
+      const api = createApi();
+      let resolveQueue!: (value: BridgeThreadQueueState) => void;
+      let resolveSchedules!: (value: {
+        threadId: string;
+        schedules: Array<Record<string, unknown>>;
+      }) => void;
+      const pendingQueue = new Promise<BridgeThreadQueueState>((resolve) => {
+        resolveQueue = resolve;
+      });
+      const pendingSchedules = new Promise<{
+        threadId: string;
+        schedules: Array<Record<string, unknown>>;
+      }>((resolve) => {
+        resolveSchedules = resolve;
+      });
+      (api.readThreadQueue as jest.Mock).mockReturnValueOnce(pendingQueue);
+      (api.readThreadSchedules as jest.Mock).mockReturnValueOnce(pendingSchedules);
+      const { tree, store } = await renderMain({ api });
+      const staleQueue = {
+        ...emptyQueue,
+        items: [
+          {
+            id: 'deleted-thread-queue-item',
+            createdAt: '2026-08-29T20:00:00.000Z',
+            content: 'Must stay deleted',
+          },
+        ],
+      };
+      const staleSchedule = {
+        scheduleId: 'deleted-thread-schedule',
+        threadId,
+        promptPreview: 'Must stay deleted',
+        promptBytes: 17,
+        scheduledFor: '2026-08-30T16:00:00.000Z',
+        createdAt: '2026-08-29T20:00:00.000Z',
+        status: 'scheduled',
+        retryAttempt: 0,
+      };
+
+      await act(async () => {
+        store.set(threadRuntimeSnapshotsAtom, {
+          [threadId]: {
+            activity: { tone: 'idle', title: 'Ready' },
+            updatedAtMs: Date.now(),
+          },
+        });
+        store.set(selectedChatIdAtom, otherThreadId);
+        await Promise.resolve();
+      });
+      await emit({ method: 'thread/deleted', params: { threadId } });
+      expect(store.get(threadRuntimeSnapshotsAtom)[threadId]).toBeUndefined();
+
+      await act(async () => {
+        resolveQueue(staleQueue);
+        resolveSchedules({ threadId, schedules: [staleSchedule] });
+        await pendingQueue;
+        await pendingSchedules;
+        for (let index = 0; index < 10; index += 1) {
+          await Promise.resolve();
+        }
+      });
+      expect(store.get(threadRuntimeSnapshotsAtom)[threadId]).toBeUndefined();
+
+      for (const event of [
+        {
+          method: 'thread/tokenUsage/updated',
+          params: { thread_id: threadId, total_tokens: 10, model_context_window: 100 },
+        },
+        {
+          method: 'item/started',
+          params: {
+            threadId,
+            item: { type: 'commandExecution', command: 'must not recreate runtime' },
+          },
+        },
+        {
+          method: 'bridge/thread/queue/updated',
+          params: staleQueue,
+        },
+        {
+          method: 'bridge/thread/schedules/updated',
+          params: { threadId, schedules: [staleSchedule] },
+        },
+      ]) {
+        await emit(event);
+      }
+      expect(store.get(threadRuntimeSnapshotsAtom)[threadId]).toBeUndefined();
+
+      const legitimateThreadId = 'thread-created-after-delete';
+      await emit({
+        method: 'bridge/thread/queue/updated',
+        params: { ...emptyQueue, threadId: legitimateThreadId },
+      });
+      expect(store.get(threadRuntimeSnapshotsAtom)[legitimateThreadId]).toBeDefined();
+
+      (api.getChat as jest.Mock).mockClear();
+      (api.readThreadQueue as jest.Mock).mockClear();
+      (api.readThreadSchedules as jest.Mock).mockClear();
+      (api.listLoadedChatIds as jest.Mock).mockResolvedValue([threadId, legitimateThreadId]);
+      (api.getChat as jest.Mock).mockImplementation((requestedThreadId: string) =>
+        Promise.resolve({ ...chat, id: requestedThreadId }),
+      );
+      (api.readThreadQueue as jest.Mock).mockImplementation((requestedThreadId: string) =>
+        Promise.resolve({ ...emptyQueue, threadId: requestedThreadId }),
+      );
+      (api.readThreadSchedules as jest.Mock).mockImplementation((requestedThreadId: string) =>
+        Promise.resolve({ threadId: requestedThreadId, schedules: [] }),
+      );
+      await emit({
+        method: 'bridge/events/snapshotRequired',
+        params: { reason: 'replayTruncated', resumeAfterEventId: 91 },
+      });
+      await act(async () => {
+        for (let index = 0; index < 10; index += 1) {
+          await Promise.resolve();
+        }
+      });
+      expect(api.getChat).not.toHaveBeenCalledWith(threadId, { forceRefresh: true });
+      expect(api.readThreadQueue).not.toHaveBeenCalledWith(threadId);
+      expect(api.readThreadSchedules).not.toHaveBeenCalledWith(threadId);
+      expect(api.getChat).toHaveBeenCalledWith(legitimateThreadId, { forceRefresh: true });
+      expect(store.get(threadRuntimeSnapshotsAtom)[threadId]).toBeUndefined();
+      expect(store.get(threadRuntimeSnapshotsAtom)[legitimateThreadId]).toBeDefined();
+      await unmount(tree);
+    });
+
+    it('leaves a deleted session without closing an open session list', async () => {
+      const { tree, store } = await renderMain();
+      const closeDrawer = jest.fn();
+      await act(async () => {
+        store.set(drawerCommandsAtom, { closeDrawer });
+        await Promise.resolve();
+      });
       expect(hasText(tree.root as Queryable, 'Event thread')).toBe(true);
 
       await emit({ method: 'thread/deleted', params: { threadId: otherThreadId } });
@@ -3950,6 +4916,8 @@ function MainRouteShell() {
       expect(
         transcript(tree).some(({ message }) => message.content.includes('Existing answer')),
       ).toBe(false);
+      expect(router.navigate).toHaveBeenCalledWith(routes.newChat('profile-events'));
+      expect(closeDrawer).not.toHaveBeenCalled();
       await unmount(tree);
     });
 
@@ -4171,6 +5139,168 @@ function MainRouteShell() {
       await unmount(tree);
     });
 
+    it('keeps the final response and its usage after a backgrounded turn fast-forwards', async () => {
+      const currentUser = {
+        id: 'background-user',
+        role: 'user' as const,
+        content: 'Finish this while the phone is locked',
+        createdAt: '2026-07-20T00:00:02.000Z',
+      };
+      const runningChat: Chat = {
+        ...chat,
+        status: 'running',
+        activeTurnId: 'turn-background',
+        lastMessagePreview: currentUser.content,
+        messages: [
+          {
+            id: 'older-user',
+            role: 'user',
+            content: 'Earlier question',
+            createdAt: '2026-07-20T00:00:00.000Z',
+          },
+          {
+            id: 'older-answer',
+            role: 'assistant',
+            content: 'Earlier answer',
+            createdAt: '2026-07-20T00:00:01.000Z',
+          },
+          currentUser,
+        ],
+      };
+      const responseUsage = {
+        inputTokens: 1_024,
+        outputTokens: 512,
+        reasoningTokens: 128,
+        cachedReadTokens: 384,
+        cachedWriteTokens: null,
+        totalTokens: 2_048,
+        model: 'gpt-5.4',
+      };
+      const tokenTotals = {
+        turns: 1,
+        inputTokens: 1_024,
+        outputTokens: 512,
+        reasoningTokens: 128,
+        cachedReadTokens: 384,
+        cachedWriteTokens: null,
+        totalTokens: 2_048,
+      };
+      const recoveredChat: Chat = {
+        ...chat,
+        status: 'complete',
+        activeTurnId: null,
+        updatedAt: '2026-07-20T00:00:04.000Z',
+        statusUpdatedAt: '2026-07-20T00:00:04.000Z',
+        lastMessagePreview: 'Recovered while backgrounded',
+        messages: [
+          currentUser,
+          {
+            id: 'background-answer',
+            role: 'assistant',
+            content: 'Recovered while backgrounded',
+            createdAt: '2026-07-20T00:00:03.000Z',
+            completedAt: '2026-07-20T00:00:04.000Z',
+            usage: responseUsage,
+          },
+        ],
+        tokenTotals,
+      };
+      let latestChat = runningChat;
+      const api = createApi();
+      (api.peekChat as jest.Mock).mockReturnValue(runningChat);
+      (api.getChat as jest.Mock).mockImplementation(() => Promise.resolve(latestChat));
+      const { tree, store, ws } = await renderMain({ api });
+      const root = tree.root as Queryable;
+
+      await act(async () => {
+        store.set(selectedChatAtom, runningChat);
+        appStateHandler?.('background');
+        await Promise.resolve();
+      });
+      latestChat = recoveredChat;
+      await act(async () => {
+        appStateHandler?.('active');
+        statusHandlers.forEach((handler) => handler(true));
+        jest.advanceTimersByTime(2_000);
+        for (let index = 0; index < 8; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      await emit(agUi({ type: 'RUN_STARTED', threadId, runId: 'run-background' }));
+      await emit(
+        agUi({
+          type: 'TEXT_MESSAGE_START',
+          messageId: 'background-answer',
+          role: 'assistant',
+        }),
+      );
+      await emit(
+        agUi({
+          type: 'TEXT_MESSAGE_CONTENT',
+          messageId: 'background-answer',
+          delta: 'Recovered while backgrounded',
+        }),
+      );
+      await emit(agUi({ type: 'TEXT_MESSAGE_END', messageId: 'background-answer' }));
+      await emit(
+        agUi({
+          type: 'CUSTOM',
+          name: 'dappercode.dev/tokenTotals',
+          value: tokenTotals,
+        }),
+      );
+      await emit(agUi({ type: 'RUN_FINISHED', threadId, runId: 'run-background' }));
+      expect(
+        transcript(tree).some(
+          ({ message }) =>
+            message.id === 'background-answer' &&
+            message.content === 'Recovered while backgrounded',
+        ),
+      ).toBe(true);
+
+      await emit({
+        method: 'bridge/events/snapshotRequired',
+        params: { reason: 'replayTruncated', resumeAfterEventId: 84 },
+      });
+      await act(async () => {
+        for (let index = 0; index < 20; index += 1) {
+          await Promise.resolve();
+        }
+      });
+
+      const settled = store.get(selectedChatAtom);
+      expect(settled?.messages.map(({ id }) => id)).toEqual([
+        'older-user',
+        'older-answer',
+        'background-user',
+        'background-answer',
+      ]);
+      expect(settled?.messages.at(-1)?.usage).toEqual(responseUsage);
+      expect(settled?.tokenTotals).toEqual(tokenTotals);
+      expect(settled?.status).toBe('complete');
+      expect(store.get(activeTurnIdAtom)).toBeNull();
+      expect(store.get(activityAtom)).toEqual({ tone: 'complete', title: 'Turn completed' });
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).toHaveLength(0);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Send message').length,
+      ).toBeGreaterThan(0);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Message')[0]?.props[
+          'editable'
+        ],
+      ).not.toBe(false);
+      expect(
+        root.findAll(
+          (node) => node.props['accessibilityLabel'] === 'Token usage, 2,048 tokens this session',
+        ).length,
+      ).toBeGreaterThan(0);
+      expect(ws.acknowledgeSnapshotRecovery).toHaveBeenCalledWith(84);
+      await unmount(tree);
+    });
+
     it('recovers snapshots and covers reconnect, disconnect, status callbacks, and app state', async () => {
       const api = createApi();
       const { tree, ws } = await renderMain({ api, connected: false });
@@ -4318,6 +5448,7 @@ function MainRouteShell() {
       listApprovals: jest.fn().mockResolvedValue([]),
       listPendingUserInputs: jest.fn().mockResolvedValue([]),
       readThreadQueue: jest.fn().mockResolvedValue(emptyQueue),
+      readThreadSchedules: jest.fn().mockResolvedValue({ threadId: baseChat.id, schedules: [] }),
       listWorkspaceRoots: jest.fn().mockResolvedValue({
         bridgeRoot: '/workspace',
         allowOutsideRootCwd: false,
@@ -5582,6 +6713,7 @@ function MainRouteShell() {
       listApprovals: jest.fn().mockResolvedValue([]),
       listPendingUserInputs: jest.fn().mockResolvedValue([]),
       readThreadQueue: jest.fn().mockResolvedValue(emptyQueue),
+      readThreadSchedules: jest.fn().mockResolvedValue({ threadId, schedules: [] }),
       listWorkspaceRoots: jest.fn().mockResolvedValue({
         bridgeRoot: '/workspace',
         allowOutsideRootCwd: false,
@@ -5958,6 +7090,124 @@ function MainRouteShell() {
         harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
       ).toHaveLength(0);
       expect(input(harness.root).props['placeholder']).toBe('Reply...');
+      harness.unmount();
+    });
+
+    it('never flashes the queue card when sending after an existing turn settles', async () => {
+      const running: Chat = {
+        ...baseChat,
+        status: 'running',
+        activeTurnId: 'turn-previous',
+      };
+      let latest: Chat = running;
+      const getChat = jest.fn().mockImplementation(() => Promise.resolve(latest));
+      const sendRequest = deferred<unknown>();
+      const api = createApi({
+        getChat,
+        sendOrQueueChatMessage: jest.fn().mockReturnValue(sendRequest.promise),
+      });
+      const harness = await renderMain({ api, chat: running });
+
+      latest = {
+        ...baseChat,
+        status: 'idle',
+        activeTurnId: null,
+        updatedAt: '2026-07-20T12:00:01.000Z',
+        statusUpdatedAt: '2026-07-20T12:00:01.000Z',
+      };
+      await act(async () => {
+        jest.advanceTimersByTime(15_000);
+        await flush();
+      });
+
+      expect(harness.store.get(selectedChatAtom)?.status).toBe('idle');
+      expect(
+        harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).toHaveLength(0);
+
+      await act(async () => {
+        input(harness.root).props.onChangeText('Start the next turn');
+        await flush();
+      });
+      await act(async () => {
+        (labeled(harness.root, 'Send message').props['onPress'] as () => void)();
+        await flush();
+      });
+
+      expect(hasText(harness.root, 'Queueing message')).toBe(false);
+      expect(
+        harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Steer queued message'),
+      ).toHaveLength(0);
+      expect(api['sendOrQueueChatMessage']).toHaveBeenCalledWith(
+        threadId,
+        expect.objectContaining({ content: 'Start the next turn' }),
+        expect.objectContaining({ skipResume: false, submissionId: expect.any(String) }),
+      );
+
+      latest = {
+        ...latest,
+        status: 'running',
+        activeTurnId: 'turn-next',
+      };
+      sendRequest.resolve({
+        disposition: 'sent',
+        queue: emptyQueue,
+        turnId: 'turn-next',
+        chat: latest,
+      });
+      await act(async () => {
+        await flush();
+      });
+
+      expect(hasText(harness.root, 'Queueing message')).toBe(false);
+      expect(
+        harness.root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).not.toHaveLength(0);
+      harness.unmount();
+    });
+
+    it('shows the queue card immediately for a message sent during an active turn', async () => {
+      const running: Chat = {
+        ...baseChat,
+        status: 'running',
+        activeTurnId: 'turn-current',
+      };
+      const sendRequest = deferred<unknown>();
+      const api = createApi({
+        getChat: jest.fn().mockResolvedValue(running),
+        sendOrQueueChatMessage: jest.fn().mockReturnValue(sendRequest.promise),
+      });
+      const harness = await renderMain({ api, chat: running });
+
+      await act(async () => {
+        input(harness.root).props.onChangeText('Steer the active turn');
+        await flush();
+      });
+      await act(async () => {
+        (labeled(harness.root, 'Send message').props['onPress'] as () => void)();
+        await flush();
+      });
+
+      expect(hasText(harness.root, 'Queueing message')).toBe(true);
+
+      sendRequest.resolve({
+        disposition: 'queued',
+        queue: {
+          ...emptyQueue,
+          items: [
+            {
+              id: 'queued-active-turn',
+              content: 'Steer the active turn',
+              createdAt: '2026-07-20T12:00:01.000Z',
+            },
+          ],
+        },
+      });
+      await act(async () => {
+        await flush();
+      });
+
+      expect(hasText(harness.root, 'Queued message')).toBe(true);
       harness.unmount();
     });
 

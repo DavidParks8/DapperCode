@@ -647,7 +647,7 @@ pub(super) async fn ws_handler(
         return response;
     }
 
-    let client_metadata = ClientConnectionMetadata::from_query(&query);
+    let client_metadata = ClientConnectionMetadata::from_request(&query, &headers);
 
     ws.max_frame_size(state.config.ws_limits.max_frame_bytes)
         .max_message_size(state.config.ws_limits.max_message_bytes)

@@ -7,7 +7,7 @@
  * name-level check passed.
  *
  * These helpers close it by borrowing the mobile client's own response types. Those types are the
- * contract the app is written against, and `npm run contract:check` already holds them against the
+ * contract the app is written against, and `pnpm run contract:check` already holds them against the
  * Rust bridge, so a harness payload that satisfies them is a payload the real bridge could send.
  *
  * Passing an object literal is what makes this work: TypeScript then reports both missing fields
@@ -17,6 +17,7 @@
 import type {
   BridgeThreadCreateResponse,
   BridgeThreadQueueSendResponse,
+  BridgeThreadSchedulesState,
   WorkspaceListResponse,
 } from '../../apps/mobile/src/bridge/types/chat.ts';
 
@@ -30,4 +31,9 @@ export function conforms<T>(value: T): Record<string, unknown> {
   return value as unknown as Record<string, unknown>;
 }
 
-export type { BridgeThreadCreateResponse, BridgeThreadQueueSendResponse, WorkspaceListResponse };
+export type {
+  BridgeThreadCreateResponse,
+  BridgeThreadQueueSendResponse,
+  BridgeThreadSchedulesState,
+  WorkspaceListResponse,
+};

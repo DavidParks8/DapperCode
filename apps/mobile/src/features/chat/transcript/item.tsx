@@ -1,9 +1,12 @@
 import { Pressable, Text, View } from 'react-native';
+import type { SharedValue } from 'react-native-reanimated';
 
 import { ChatMessage, ToolInvocationRow } from '../message/ChatMessage';
 import { ComputerUseTimeline } from '../message/ComputerUse';
 import type { findInlineChoiceSet } from '../helpers/helpers';
 import type { createStyles } from '../styles/styles';
+import { MessageTimestampReveal } from './MessageTimestampReveal';
+import { resolveMessageTimestamp } from './messageTimestamp';
 import type { TranscriptDisplayItem } from './messages';
 
 type ChatTranscriptStyles = ReturnType<typeof createStyles>;
@@ -21,7 +24,9 @@ interface RenderChatTranscriptItemOptions {
   forkBoundaryMessageId?: string;
   forkBusy: boolean;
   onForkConversation?: (messageId: string) => void;
+  timestampRevealTranslationX: SharedValue<number>;
   threadRunning: boolean;
+  animationVisible: boolean;
 }
 
 export function renderChatTranscriptItem({
@@ -36,7 +41,9 @@ export function renderChatTranscriptItem({
   forkBoundaryMessageId,
   forkBusy,
   onForkConversation,
+  timestampRevealTranslationX,
   threadRunning,
+  animationVisible,
 }: RenderChatTranscriptItemOptions) {
   if (item.kind === 'toolGroup') {
     return (
@@ -62,6 +69,7 @@ export function renderChatTranscriptItem({
           bridgeUrl={bridgeUrl}
           bridgeToken={bridgeToken}
           threadRunning={threadRunning}
+          animationVisible={animationVisible}
         />
       </View>
     );
@@ -69,7 +77,7 @@ export function renderChatTranscriptItem({
 
   const message = item.message;
   const showInlineChoices = inlineChoiceSet?.messageId === message.id;
-  const chatMessage = (
+  const chatMessageContent = (
     <ChatMessage
       message={message}
       bridgeUrl={bridgeUrl}
@@ -81,6 +89,18 @@ export function renderChatTranscriptItem({
       }
       forkBusy={forkBusy}
     />
+  );
+  const timestamp = resolveMessageTimestamp(message);
+  const chatMessage = timestamp ? (
+    <MessageTimestampReveal
+      messageId={message.id}
+      timestamp={timestamp}
+      translationX={timestampRevealTranslationX}
+    >
+      {chatMessageContent}
+    </MessageTimestampReveal>
+  ) : (
+    chatMessageContent
   );
   const inlineChoices = showInlineChoices ? (
     <View style={styles.inlineChoiceOptions}>

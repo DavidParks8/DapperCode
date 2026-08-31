@@ -12,6 +12,7 @@ import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
 import { OnboardingScreen } from '../../features/onboarding/screen/OnboardingScreen';
 import type { AppTheme } from '@shared/theme';
 import type { AppStyles } from '@shell/boot/appStyles';
+import type { BridgeProfile } from '@shell/state/bridgeProfiles';
 
 interface ShellProps {
   theme: AppTheme;
@@ -73,6 +74,13 @@ interface ConnectionScreenProps {
   onSaved?: (nextProfileId: string) => void;
 }
 
+function initialWorkspaceIdForMode(
+  mode: ConnectionScreenProps['mode'],
+  profile: BridgeProfile | null,
+): string | null {
+  return mode === 'edit' || mode === 'reconnect' ? (profile?.workspaceId ?? null) : null;
+}
+
 export function ConnectionScreen({ mode, profileId = null, onSaved }: ConnectionScreenProps) {
   const router = useRouter();
   const activeBridgeProfile = useAtomValue(activeBridgeProfileAtom);
@@ -94,6 +102,7 @@ export function ConnectionScreen({ mode, profileId = null, onSaved }: Connection
       mode={mode}
       initialBridgeUrl={initialUrl}
       initialBridgeToken={initialToken}
+      initialWorkspaceId={initialWorkspaceIdForMode(mode, activeBridgeProfile)}
       allowInsecureRemoteBridge={env.allowInsecureRemoteBridge}
       allowQueryTokenAuth={env.allowWsQueryTokenAuth}
       onSave={async (draft) => {

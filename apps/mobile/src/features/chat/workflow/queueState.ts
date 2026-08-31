@@ -398,6 +398,9 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     selectedChat,
     threadRuntimeSnapshotsRef,
   );
+  const selectedScheduledPrompts = isOpeningChat
+    ? []
+    : (selectedThreadRuntimeSnapshot?.scheduledPrompts ?? []);
   const {
     selectedBridgeUiSurfaces,
     workflowBridgeUiSurfaces,
@@ -494,6 +497,7 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
 
   return {
     selectedThreadRuntimeSnapshot,
+    selectedScheduledPrompts,
     selectedBridgeUiSurfaces,
     workflowBridgeUiSurfaces,
     bannerBridgeUiSurfaces,

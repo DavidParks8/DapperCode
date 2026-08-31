@@ -490,6 +490,22 @@ describe('SubAgentDetailView starting state', () => {
     expect(router.back).toHaveBeenCalled();
     act(() => tree.unmount());
   });
+
+  it('keeps the latest row clear of a scrim in a long sub-agent transcript', async () => {
+    const messages = Array.from({ length: 60 }, (_, index) => ({
+      id: `message-${String(index)}`,
+      role: index % 2 === 0 ? ('assistant' as const) : ('user' as const),
+      content: `Transcript row ${String(index)}`,
+      createdAt: `2026-07-20T00:00:${String(index % 60).padStart(2, '0')}.000Z`,
+    }));
+    const { tree } = await render({ loadedChat: chat(messages) });
+    const transcript = tree.root.findByType(ChatTranscriptView);
+
+    expect((transcript.props['chat'] as Chat).messages).toHaveLength(60);
+    expect(transcript.props['bottomInset']).toBe(0);
+    expect(countByTestId(tree, 'transcript-bottom-scrim')).toBe(0);
+    act(() => tree.unmount());
+  });
 });
 
 describe('SubAgentDetailView transcript ordering', () => {

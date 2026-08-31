@@ -7,9 +7,18 @@ import type {
   StatusListener,
   TurnCompletionSnapshot,
 } from '@bridge/ws/types';
+import { PUSH_OBSERVED_METHOD, PUSH_PRESENCE_METHOD } from '@bridge/ws/types';
 
 export abstract class HostBridgeWsClientCore {
   static readonly PROTOCOL_VERSION = 2;
+  /**
+   * How long a socket must stay open before its connection counts as usable.
+   *
+   * A bridge that accepts the upgrade and then immediately closes it (for example because the
+   * workspace runtime cannot start) would otherwise reset the backoff on every attempt and leave
+   * the client dialing at the minimum delay forever.
+   */
+  protected static readonly CONNECTION_STABLE_MS = 10_000;
   protected static readonly TURN_COMPLETION_TTL_MS = 5 * 60 * 1000;
   protected static readonly MAX_RECOVERY_BUFFERED_EVENTS = 2048;
   protected socket: WebSocket | null = null;
@@ -18,14 +27,20 @@ export abstract class HostBridgeWsClientCore {
   protected shouldReconnect = false;
   protected reconnectAttempts = 0;
   protected reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  protected connectionStableTimer: ReturnType<typeof setTimeout> | null = null;
   protected connectPromise: Promise<void> | null = null;
   protected connectGeneration = 0;
   protected readonly eventListeners = new Set<EventListener>();
   protected readonly statusListeners = new Set<StatusListener>();
+  protected readonly beforeDisconnectListeners = new Set<() => void>();
   protected readonly pendingRequests = new Map<string | number, PendingRequest>();
   protected readonly recentTurnCompletions = new Map<string, TurnCompletionSnapshot>();
   protected readonly pendingEvents = new Map<number, RpcNotification>();
   protected readonly authToken: string | null;
+  protected readonly workspaceId: string | null;
+  protected readonly clientType: string | null;
+  protected readonly clientName: string | null;
+  protected readonly getClientForeground: (() => boolean) | null;
   protected readonly allowQueryTokenAuth: boolean;
   protected readonly baseUrl: string;
   protected readonly requestTimeoutMs: number;
@@ -36,13 +51,24 @@ export abstract class HostBridgeWsClientCore {
   protected recoveryWatermark: number | null = null;
   protected awaitingFreshRecoveryBaseline = false;
   protected requestCounter = 0;
+  protected pushPresenceSequence = 0;
   protected streamId: string | null = null;
   protected protocolError: BridgeProtocolVersionError | null = null;
   constructor(baseUrl: string, options: HostBridgeWsClientOptions = {}) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.authToken = options.authToken?.trim() || null;
+    this.workspaceId = options.workspaceId?.trim() || null;
+    this.clientType = options.clientType?.trim() || null;
+    this.clientName = options.clientName?.trim() || null;
+    this.getClientForeground = options.getClientForeground ?? null;
     this.allowQueryTokenAuth = options.allowQueryTokenAuth ?? false;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 180000;
+  }
+  protected clearConnectionStableTimer(): void {
+    if (this.connectionStableTimer) {
+      clearTimeout(this.connectionStableTimer);
+      this.connectionStableTimer = null;
+    }
   }
   public abstract get isConnected(): boolean;
   public abstract get bridgeProtocolError(): BridgeProtocolVersionError | null;
@@ -51,6 +77,24 @@ export abstract class HostBridgeWsClientCore {
   abstract resetRecoveryEpoch(): void;
   protected abstract startConnect(): void;
   abstract disconnect(): void;
+  onBeforeDisconnect(listener: () => void): () => void {
+    this.beforeDisconnectListeners.add(listener);
+    return () => this.beforeDisconnectListeners.delete(listener);
+  }
+  abstract notify(method: string, params?: unknown): boolean;
+  reportPushPresence(foreground: boolean): boolean {
+    this.pushPresenceSequence += 1;
+    return this.notify(PUSH_PRESENCE_METHOD, {
+      foreground,
+      sequence: this.pushPresenceSequence,
+    });
+  }
+  reportPushObservation(candidateId: string): boolean {
+    return this.notify(PUSH_OBSERVED_METHOD, {
+      candidateId,
+      presenceSequence: this.pushPresenceSequence,
+    });
+  }
   abstract request<T>(method: string, params?: unknown): Promise<T>;
   abstract waitForTurnCompletion(
     threadId: string,

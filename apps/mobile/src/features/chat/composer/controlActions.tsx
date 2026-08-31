@@ -85,7 +85,7 @@ export function useMainScreenComposerControlActions(
               : undefined,
           )
         ) {
-          return;
+          return false;
         }
       }
       setSelectedModelId(normalizedModelId);
@@ -118,6 +118,7 @@ export function useMainScreenComposerControlActions(
           setEffortModalVisible(true);
         }
       }
+      return true;
     },
     [
       activeServiceTier,

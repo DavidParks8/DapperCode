@@ -14,7 +14,13 @@ import {
   type RawThreadItem,
 } from '@bridge/mapping/chatMapping';
 import { renderAgUiCustomContent } from '@bridge/agui/agUi';
-import { COMPACTION_ACTIVITY_TYPE, getMessageText, SUBAGENT_ACTIVITY_TYPE } from '@bridge/messages';
+import { toRawAcpSnapshot } from '@bridge/mapping/chatMappingSnapshotAndSummaryProjection';
+import {
+  AGENT_MESSAGE_ACTIVITY_TYPE,
+  COMPACTION_ACTIVITY_TYPE,
+  getMessageText,
+  SUBAGENT_ACTIVITY_TYPE,
+} from '@bridge/messages';
 import type { Chat, ChatSummary } from '@bridge/types/types';
 
 function makeSnapshot(overrides: Partial<RawAcpSnapshot> = {}): RawAcpSnapshot {
@@ -36,11 +42,197 @@ function makeSnapshot(overrides: Partial<RawAcpSnapshot> = {}): RawAcpSnapshot {
   };
 }
 
+it('rejects invalid snapshot tool timestamps', () => {
+  const snapshot = toRawAcpSnapshot(
+    makeSnapshot({
+      tools: [
+        {
+          id: 'tool-invalid-timing',
+          kind: 'read',
+          status: 'completed',
+          title: 'Read',
+          startedAtMs: -1,
+          completedAtMs: Number.POSITIVE_INFINITY,
+          content: '',
+          structuredContent: [],
+          locations: [],
+          truncated: false,
+          subagent: false,
+        },
+      ],
+    }),
+  );
+
+  expect(snapshot?.tools[0]).toMatchObject({
+    startedAtMs: null,
+    completedAtMs: null,
+  });
+});
+
 function malformedItems(items: unknown[]): RawThreadItem[] {
   return items as RawThreadItem[];
 }
 
 describe('chatMapping', () => {
+  it('preserves agent-message activities across raw snapshot hydration and reconnect replay', () => {
+    const agentMessage = {
+      messageId: 'message-1',
+      direction: 'received',
+      relatedThreadId: 'parent-thread',
+      relatedTitle: 'Parent agent',
+      relation: 'parent',
+      disposition: 'queued',
+      body: 'Inspect the queue lifecycle.',
+    };
+    const snapshot = toRawAcpSnapshot(
+      makeSnapshot({
+        messages: [
+          {
+            id: 'agent-message:message-1',
+            role: 'user',
+            parts: [{ type: 'text', text: agentMessage.body }],
+            truncated: false,
+            agentMessage,
+          },
+        ] as RawAcpSnapshot['messages'],
+        timeline: [
+          {
+            sequence: 0,
+            kind: 'message',
+            canonicalId: 'agent-message:message-1',
+          },
+        ],
+      }),
+    );
+    expect(snapshot).not.toBeNull();
+
+    const hydrated = mapChat(
+      toRawThread({
+        id: 'child-thread',
+        acpSnapshot: snapshot,
+      }),
+    );
+    expect(hydrated.messages).toHaveLength(1);
+    expect(hydrated.messages[0]).toMatchObject({
+      id: 'agent-message:message-1',
+      role: 'activity',
+      activityType: AGENT_MESSAGE_ACTIVITY_TYPE,
+      content: {
+        text: agentMessage.body,
+        agentMessage,
+      },
+    });
+
+    const replayed = applySnapshotToChat(hydrated, snapshot!);
+    expect(replayed.messages).toEqual(hydrated.messages);
+  });
+
+  it('projects cumulative session token totals independently from context usage', () => {
+    const tokenTotals = {
+      turns: 14,
+      inputTokens: 48200,
+      outputTokens: 12400,
+      reasoningTokens: 8900,
+      cachedReadTokens: 386000,
+      cachedWriteTokens: 52300,
+      totalTokens: 507800,
+    };
+    const chat = mapChat(
+      toRawThread({
+        id: 'thread-token-totals',
+        acpSnapshot: makeSnapshot({ tokenTotals }),
+      }),
+    );
+
+    expect(chat.tokenTotals).toEqual(tokenTotals);
+    expect(chat.acpUsage).toEqual({ used: null, size: null, cost: null });
+  });
+
+  it('carries per-response usage from the snapshot onto the assistant message it belongs to', () => {
+    const chat = mapChat(
+      toRawThread({
+        id: 'thread-response-usage',
+        acpSnapshot: makeSnapshot({
+          messages: [
+            {
+              id: 'user-1',
+              role: 'user',
+              parts: [{ type: 'text', text: 'question' }],
+              truncated: false,
+              usage: null,
+            },
+            {
+              id: 'agent-1',
+              role: 'agent',
+              parts: [{ type: 'text', text: 'answer' }],
+              truncated: false,
+              usage: {
+                inputTokens: 12_400,
+                outputTokens: 1_280,
+                reasoningTokens: 300,
+                cachedReadTokens: 111_600,
+                cachedWriteTokens: null,
+                totalTokens: 125_580,
+                model: 'GPT-5.6 Sol',
+              },
+            },
+          ] as unknown as RawAcpSnapshot['messages'],
+          timeline: [
+            { sequence: 0, kind: 'message', canonicalId: 'user-1' },
+            { sequence: 1, kind: 'message', canonicalId: 'agent-1' },
+          ],
+        }),
+      }),
+    );
+
+    expect(chat.messages.map((message) => [message.id, message.usage ?? null])).toEqual([
+      ['user-1', null],
+      [
+        'agent-1',
+        {
+          inputTokens: 12_400,
+          outputTokens: 1_280,
+          reasoningTokens: 300,
+          cachedReadTokens: 111_600,
+          cachedWriteTokens: null,
+          totalTokens: 125_580,
+          model: 'GPT-5.6 Sol',
+        },
+      ],
+    ]);
+  });
+
+  it('reports no per-response usage when the bridge omitted or malformed it', () => {
+    const chat = mapChat(
+      toRawThread({
+        id: 'thread-response-usage-missing',
+        acpSnapshot: makeSnapshot({
+          messages: [
+            {
+              id: 'agent-1',
+              role: 'agent',
+              parts: [{ type: 'text', text: 'answer' }],
+              truncated: false,
+            },
+            {
+              id: 'agent-2',
+              role: 'agent',
+              parts: [{ type: 'text', text: 'second' }],
+              truncated: false,
+              usage: { outputTokens: 4 },
+            },
+          ] as unknown as RawAcpSnapshot['messages'],
+          timeline: [
+            { sequence: 0, kind: 'message', canonicalId: 'agent-1' },
+            { sequence: 1, kind: 'message', canonicalId: 'agent-2' },
+          ],
+        }),
+      }),
+    );
+
+    expect(chat.messages.map((message) => message.usage ?? null)).toEqual([null, null]);
+  });
+
   it('uses bridge session titles and ISO activity timestamps for drawer summaries', () => {
     const summary = mapChatSummary(
       toRawThread({
@@ -196,6 +388,8 @@ describe('chatMapping', () => {
               kind: 'read',
               status: 'completed',
               title: 'T',
+              startedAtMs: 1_000,
+              completedAtMs: 2_500,
               content: 'updated',
               structuredContent: [],
               locations: [],
@@ -223,6 +417,8 @@ describe('chatMapping', () => {
       kind: 'read',
       status: 'completed',
       title: 'T',
+      startedAtMs: 1_000,
+      completedAtMs: 2_500,
       content: [],
       locations: [],
       truncated: false,

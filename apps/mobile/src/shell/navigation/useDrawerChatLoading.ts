@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAtom, useAtomValue } from 'jotai';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import type { HostBridgeApiClient } from '@bridge/client/client';
 import type { HostBridgeWsClient } from '@bridge/ws/ws';
 import {
+  advanceDrawerClientGeneration,
+  createDrawerClientGenerationGuard,
   DRAWER_CHAT_CACHE_TTL_MS,
   DRAWER_DEEP_CHAT_CACHE_TTL_MS,
   DRAWER_DEEP_CHAT_PAGE_LIMIT,
@@ -18,6 +21,10 @@ import { useDrawerPrioritySessionHydration } from '@shell/navigation/useDrawerPr
 import { useDrawerChatCollection } from '@shell/navigation/useDrawerChatCollection';
 import { useDrawerLoadedChatHydration } from '@shell/navigation/useDrawerLoadedChatHydration';
 import { useDrawerChatLiveSync } from '@shell/navigation/useDrawerChatLiveSync';
+import {
+  createDrawerContentAtoms,
+  type DrawerContentAtoms,
+} from '@shell/state/drawer/contentAtoms';
 
 export function useDrawerChatLoading(
   api: HostBridgeApiClient,
@@ -25,16 +32,31 @@ export function useDrawerChatLoading(
   active: boolean,
   priorityThreadIds: readonly string[] = [],
   profileId: string | null = api.profileId,
+  contentAtoms?: DrawerContentAtoms,
 ): DrawerChatLoadingState {
-  const [loading, setLoading] = useState(true);
-  const [loadingOlderChats, setLoadingOlderChats] = useState(false);
-  const [deepHistoryDiagnostics, setDeepHistoryDiagnostics] = useState<string[]>([]);
-  const [hydrationDiagnostics, setHydrationDiagnostics] = useState<string[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
-  const [wsConnected, setWsConnected] = useState(ws.isConnected);
+  const fallbackAtomsRef = useRef<{
+    atoms: DrawerContentAtoms;
+    profileId: string | null;
+  } | null>(null);
+  let atoms = contentAtoms;
+  if (!atoms) {
+    if (!fallbackAtomsRef.current || fallbackAtomsRef.current.profileId !== profileId) {
+      fallbackAtomsRef.current = {
+        atoms: createDrawerContentAtoms({ profileId, wsConnected: ws.isConnected }),
+        profileId,
+      };
+    }
+    atoms = fallbackAtomsRef.current.atoms;
+  }
+  const [loading, setLoading] = useAtom(atoms.loadingAtom);
+  const [loadingOlderChats, setLoadingOlderChats] = useAtom(atoms.loadingOlderChatsAtom);
+  const [, setDeepHistoryDiagnostics] = useAtom(atoms.deepHistoryDiagnosticsAtom);
+  const [, setHydrationDiagnostics] = useAtom(atoms.hydrationDiagnosticsAtom);
+  const [refreshing, setRefreshing] = useAtom(atoms.refreshingAtom);
+  const [wsConnected, setWsConnected] = useAtom(atoms.wsConnectedAtom);
   const handleChatsApplied = useCallback(() => {
     setLoading(false);
-  }, []);
+  }, [setLoading]);
   const {
     applyChats,
     chats,
@@ -46,8 +68,11 @@ export function useDrawerChatLoading(
     restoreChat,
     runIndicatorsByThread,
     setRunIndicatorsByThread,
-  } = useDrawerChatCollection(api, profileId, handleChatsApplied);
+  } = useDrawerChatCollection(api, profileId, handleChatsApplied, atoms);
   const loadChatsInFlightRef = useRef<Promise<void> | null>(null);
+  const latestLoadChatsRef = useRef<
+    (showRefresh?: boolean, forceRefresh?: boolean) => Promise<void>
+  >(async () => {});
   const queuedLoadChatsRef = useRef<{ showRefresh: boolean; forceRefresh: boolean } | null>(null);
   const scheduledLoadChatsRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduledLoadChatsForceRefreshRef = useRef(false);
@@ -57,6 +82,8 @@ export function useDrawerChatLoading(
   const hasLoadedDeepChatListRef = useRef(false);
   const hasLoadedWhileActiveRef = useRef(false);
   const activeRef = useRef(active);
+  const clientGenerationRef = useRef(0);
+  const clientIdentityRef = useRef({ api, profileId, ws });
   const hydrateLoadedChats = useDrawerLoadedChatHydration({
     activeRef,
     api,
@@ -82,11 +109,15 @@ export function useDrawerChatLoading(
 
   const loadChatsNow = useCallback(
     async (showRefresh = false, forceRefresh = false) => {
+      const isCurrentClient = createDrawerClientGenerationGuard(clientGenerationRef);
       if (showRefresh) {
         setRefreshing(true);
       }
 
       const applyCachedDeepChats = () => {
+        if (!isCurrentClient()) {
+          return false;
+        }
         const cachedDeepChats = api.peekAllChats({ includeSubAgents: true });
         if (!cachedDeepChats) {
           return false;
@@ -101,7 +132,7 @@ export function useDrawerChatLoading(
       };
 
       const loadDeepChatsOnce = async (forceDeepRefresh = false) => {
-        if (hasLoadedDeepChatListRef.current || deepLoadInFlightRef.current) {
+        if (!isCurrentClient() || hasLoadedDeepChatListRef.current || deepLoadInFlightRef.current) {
           return;
         }
         if (!forceDeepRefresh && applyCachedDeepChats()) {
@@ -115,12 +146,15 @@ export function useDrawerChatLoading(
             cacheTtlMs: DRAWER_DEEP_CHAT_CACHE_TTL_MS,
             forceRefresh: forceDeepRefresh,
             onPage: (loadedChats) => {
-              if (activeRef.current) {
+              if (isCurrentClient() && activeRef.current) {
                 applyChats(loadedChats);
               }
             },
           })
           .then((result) => {
+            if (!isCurrentClient()) {
+              return;
+            }
             hasLoadedDeepChatListRef.current = true;
             if (activeRef.current) {
               applyChats(result.chats, undefined, true, !result.partial);
@@ -130,13 +164,15 @@ export function useDrawerChatLoading(
           })
           .catch(() => {})
           .finally(() => {
-            deepLoadInFlightRef.current = null;
-            if (activeRef.current) {
+            if (deepLoadInFlightRef.current === request) {
+              deepLoadInFlightRef.current = null;
+            }
+            if (isCurrentClient() && activeRef.current) {
               setLoadingOlderChats(false);
             }
           });
 
-        if (activeRef.current) {
+        if (isCurrentClient() && activeRef.current) {
           setLoadingOlderChats(true);
         }
         deepLoadInFlightRef.current = request;
@@ -144,6 +180,9 @@ export function useDrawerChatLoading(
       };
 
       const scheduleDeepLoadChatsOnce = () => {
+        if (!isCurrentClient()) {
+          return;
+        }
         if (deepLoadInFlightRef.current) {
           if (activeRef.current) {
             setLoadingOlderChats(true);
@@ -159,13 +198,16 @@ export function useDrawerChatLoading(
 
         scheduledDeepLoadChatsRef.current = setTimeout(() => {
           scheduledDeepLoadChatsRef.current = null;
-          if (activeRef.current) {
+          if (isCurrentClient() && activeRef.current) {
             void loadDeepChatsOnce();
           }
         }, DRAWER_DEEP_LOAD_DELAY_MS);
       };
 
       retryDeepChatListRef.current = async () => {
+        if (!isCurrentClient()) {
+          return;
+        }
         hasLoadedDeepChatListRef.current = false;
         await loadDeepChatsOnce(true);
       };
@@ -178,13 +220,15 @@ export function useDrawerChatLoading(
             cacheTtlMs: DRAWER_CHAT_CACHE_TTL_MS,
             forceRefresh,
           });
-          // Apply while hidden too, otherwise the drawer keeps showing its
-          // loading placeholder the first time it is opened.
-          applyChats(primedChats, DRAWER_FAST_CHAT_LIST_LIMIT);
+          if (isCurrentClient()) {
+            applyChats(primedChats, DRAWER_FAST_CHAT_LIST_LIMIT);
+          }
         } catch {
           // Hidden drawer priming is best effort.
         } finally {
-          setLoading(false);
+          if (isCurrentClient()) {
+            setLoading(false);
+          }
         }
       };
 
@@ -196,7 +240,7 @@ export function useDrawerChatLoading(
             cacheTtlMs: DRAWER_CHAT_CACHE_TTL_MS,
             forceRefresh,
           });
-          if (activeRef.current) {
+          if (isCurrentClient() && activeRef.current) {
             applyChats(
               latestChats,
               showRefresh ? DRAWER_FULL_CHAT_LIST_LIMIT : DRAWER_FAST_CHAT_LIST_LIMIT,
@@ -208,6 +252,9 @@ export function useDrawerChatLoading(
       };
 
       const seedListFromPeekedCache = () => {
+        if (!isCurrentClient()) {
+          return;
+        }
         const cachedFullChats = api.peekChats({
           includeSubAgents: true,
           limit: DRAWER_FULL_CHAT_LIST_LIMIT,
@@ -226,6 +273,9 @@ export function useDrawerChatLoading(
       };
 
       const fallbackReloadChats = async () => {
+        if (!isCurrentClient()) {
+          return;
+        }
         try {
           const fastListedChats = await api.listChats({
             includeSubAgents: true,
@@ -233,17 +283,20 @@ export function useDrawerChatLoading(
             cacheTtlMs: DRAWER_CHAT_CACHE_TTL_MS,
             forceRefresh,
           });
-          if (activeRef.current) {
+          if (isCurrentClient() && activeRef.current) {
             applyChats(fastListedChats, DRAWER_FAST_CHAT_LIST_LIMIT);
           }
 
+          if (!isCurrentClient()) {
+            return;
+          }
           const fullListedChats = await api.listChats({
             includeSubAgents: true,
             limit: DRAWER_FULL_CHAT_LIST_LIMIT,
             cacheTtlMs: DRAWER_CHAT_CACHE_TTL_MS,
             forceRefresh,
           });
-          if (activeRef.current) {
+          if (isCurrentClient() && activeRef.current) {
             applyChats(fullListedChats, DRAWER_FULL_CHAT_LIST_LIMIT);
             void hydrateLoadedChats(fullListedChats, DRAWER_FULL_CHAT_LIST_LIMIT);
             scheduleDeepLoadChatsOnce();
@@ -253,8 +306,17 @@ export function useDrawerChatLoading(
         }
       };
 
-      if (!activeRef.current) {
+      const shouldSkipVisibleLoad = async () => {
+        if (!isCurrentClient()) {
+          return true;
+        }
+        if (activeRef.current) {
+          return false;
+        }
         await primeHiddenDrawerChats();
+        return true;
+      };
+      if (await shouldSkipVisibleLoad()) {
         return;
       }
       hasLoadedWhileActiveRef.current = true;
@@ -279,6 +341,9 @@ export function useDrawerChatLoading(
             delayMs: DRAWER_STREAM_BATCH_DELAY_MS,
           },
           (batch) => {
+            if (!isCurrentClient()) {
+              return;
+            }
             if (batch.done) {
               streamFinished = true;
               chatListStreamRef.current = null;
@@ -297,6 +362,9 @@ export function useDrawerChatLoading(
             }
           },
           () => {
+            if (!isCurrentClient()) {
+              return;
+            }
             streamFinished = true;
             chatListStreamRef.current = null;
             if (showRefresh) {
@@ -306,10 +374,12 @@ export function useDrawerChatLoading(
           },
         );
         streamStarted = true;
-        if (!activeRef.current) {
+        if (!isCurrentClient() || !activeRef.current) {
           stream.cancel();
           streamFinished = true;
-          chatListStreamRef.current = null;
+          if (isCurrentClient()) {
+            chatListStreamRef.current = null;
+          }
           return;
         }
         if (!streamFinished) {
@@ -318,7 +388,7 @@ export function useDrawerChatLoading(
       } catch {
         await fallbackReloadChats();
       } finally {
-        if (!streamStarted || streamFinished) {
+        if (isCurrentClient() && (!streamStarted || streamFinished)) {
           if (showRefresh) {
             setRefreshing(false);
           }
@@ -326,7 +396,16 @@ export function useDrawerChatLoading(
         }
       }
     },
-    [api, applyChats, cancelChatListStream, hydrateLoadedChats],
+    [
+      api,
+      applyChats,
+      cancelChatListStream,
+      hydrateLoadedChats,
+      setDeepHistoryDiagnostics,
+      setLoading,
+      setLoadingOlderChats,
+      setRefreshing,
+    ],
   );
 
   const loadChats = useCallback(
@@ -357,7 +436,7 @@ export function useDrawerChatLoading(
         const queuedRequest = queuedLoadChatsRef.current;
         queuedLoadChatsRef.current = null;
         if (queuedRequest && !(chatListStreamRef.current && !queuedRequest.showRefresh)) {
-          void loadChats(queuedRequest.showRefresh, queuedRequest.forceRefresh);
+          void latestLoadChatsRef.current(queuedRequest.showRefresh, queuedRequest.forceRefresh);
         }
       });
 
@@ -366,9 +445,10 @@ export function useDrawerChatLoading(
     },
     [active, hasHydratedOnceRef, loadChatsNow],
   );
+  latestLoadChatsRef.current = loadChats;
   const retryDeepChatListRef = useRef<() => Promise<void>>(async () => {});
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     activeRef.current = active;
     return () => {
       activeRef.current = false;
@@ -415,25 +495,59 @@ export function useDrawerChatLoading(
     },
     [active, loadChats],
   );
+  const cancelMaintenanceWork = useCallback(() => {
+    if (scheduledLoadChatsRef.current) {
+      clearTimeout(scheduledLoadChatsRef.current);
+      scheduledLoadChatsRef.current = null;
+    }
+    scheduledLoadChatsForceRefreshRef.current = false;
+    cancelChatListStream();
+    queuedLoadChatsRef.current = null;
+    setRefreshing(false);
+    setLoadingOlderChats(false);
+  }, [cancelChatListStream, setLoadingOlderChats, setRefreshing]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const clientIdentityChanged = advanceDrawerClientGeneration(
+      clientIdentityRef,
+      clientGenerationRef,
+      { api, profileId, ws },
+    );
+    if (clientIdentityChanged) {
+      cancelMaintenanceWork();
+      deepLoadInFlightRef.current = null;
+      hasLoadedDeepChatListRef.current = false;
+      hasLoadedWhileActiveRef.current = false;
+    }
+
     setWsConnected(ws.isConnected);
     const shouldPrimeHiddenDrawer = !hasHydratedOnceRef.current;
-    // Priming while hidden only fetches the short list, so the first time the
-    // drawer actually opens it still needs the full load.
+    // Hidden priming only fetches the short list; opening still needs the full load.
     const shouldRefreshVisibleDrawer =
       active &&
-      (!hasLoadedWhileActiveRef.current ||
+      (clientIdentityChanged ||
+        !hasLoadedWhileActiveRef.current ||
         Date.now() - lastLoadedAtRef.current > DRAWER_OPEN_STALE_REFRESH_MS);
     if (!shouldPrimeHiddenDrawer && !shouldRefreshVisibleDrawer) {
       return;
     }
 
     void loadChats(false, shouldRefreshVisibleDrawer);
-  }, [active, hasHydratedOnceRef, lastLoadedAtRef, loadChats, ws]);
+  }, [
+    active,
+    api,
+    cancelMaintenanceWork,
+    hasHydratedOnceRef,
+    lastLoadedAtRef,
+    loadChats,
+    profileId,
+    setWsConnected,
+    ws,
+  ]);
 
   const { resetPollTimer } = useDrawerChatLiveSync({
     active,
+    cancelMaintenanceWork,
     onThreadDeleted: handleThreadDeleted,
     scheduleLoadChats,
     setRunIndicators: setRunIndicatorsByThread,
@@ -447,16 +561,8 @@ export function useDrawerChatLoading(
       return;
     }
 
-    if (scheduledLoadChatsRef.current) {
-      clearTimeout(scheduledLoadChatsRef.current);
-      scheduledLoadChatsRef.current = null;
-    }
-    scheduledLoadChatsForceRefreshRef.current = false;
-    cancelChatListStream();
-    queuedLoadChatsRef.current = null;
-    setRefreshing(false);
-    setLoadingOlderChats(false);
-  }, [active, cancelChatListStream]);
+    cancelMaintenanceWork();
+  }, [active, cancelMaintenanceWork]);
 
   useEffect(() => {
     return () => {
@@ -464,15 +570,11 @@ export function useDrawerChatLoading(
         clearTimeout(scheduledLoadChatsRef.current);
         scheduledLoadChatsRef.current = null;
       }
-      scheduledLoadChatsForceRefreshRef.current = false;
       cancelChatListStream();
     };
   }, [cancelChatListStream]);
 
-  const partialHistoryDiagnostics = useMemo(
-    () => Array.from(new Set([...deepHistoryDiagnostics, ...hydrationDiagnostics])),
-    [deepHistoryDiagnostics, hydrationDiagnostics],
-  );
+  const partialHistoryDiagnostics = useAtomValue(atoms.partialHistoryDiagnosticsAtom);
   return {
     chats,
     loading,

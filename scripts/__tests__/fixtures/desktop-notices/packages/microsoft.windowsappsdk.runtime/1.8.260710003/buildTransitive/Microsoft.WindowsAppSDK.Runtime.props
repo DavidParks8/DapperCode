@@ -1,0 +1,3 @@
+<Project>
+  <ProjectCapability Include="Microsoft.WindowsAppSDK.Runtime" />
+</Project>

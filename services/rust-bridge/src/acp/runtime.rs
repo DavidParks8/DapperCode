@@ -21,7 +21,8 @@ use tokio::sync::{mpsc, oneshot, watch};
 use super::config::{ResolvedAgentManifest, RuntimeManifestError};
 use super::events::CanonicalEvent;
 use super::interactions::{
-    InteractionError, InteractionRegistry, PendingElicitationSummary, PendingPermissionSummary,
+    ApprovalPolicy, InteractionError, InteractionRegistry, PendingElicitationSummary,
+    PendingPermissionSummary,
 };
 use super::session::{AcpSession, ReconstructionError, SessionRegistry, SessionRouteError};
 
@@ -113,6 +114,8 @@ pub enum AcpRuntimeError {
     InitializeTimeout,
     #[error("ACP connection closed: {0}")]
     Connection(String),
+    #[error("ACP connection is already unavailable: {0}")]
+    ConnectionUnavailable(String),
     #[error("ACP connection task ended unexpectedly")]
     ConnectionTaskEnded,
     #[error("ACP command queue is closed")]
@@ -172,6 +175,14 @@ pub struct NegotiatedInitialize {
     pub response: InitializeResponse,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum McpTransportPreference {
+    Http,
+    Sse,
+    #[default]
+    Unavailable,
+}
+
 impl NegotiatedInitialize {
     pub fn native_capabilities(&self) -> NativeAcpCapabilities {
         NativeAcpCapabilities {
@@ -227,6 +238,17 @@ impl NegotiatedInitialize {
 
     pub fn supports_session_fork(&self) -> bool {
         self.extension_capability("sessionFork", FORK_METHOD)
+    }
+
+    pub(crate) fn mcp_transport_preference(&self) -> McpTransportPreference {
+        let capabilities = &self.response.agent_capabilities.mcp_capabilities;
+        if capabilities.http {
+            McpTransportPreference::Http
+        } else if capabilities.sse {
+            McpTransportPreference::Sse
+        } else {
+            McpTransportPreference::Unavailable
+        }
     }
 
     fn extension_capability(&self, capability: &str, method: &str) -> bool {
@@ -323,10 +345,16 @@ impl AcpConnection {
         host_environment: &BTreeMap<String, String>,
         initialize_timeout: Duration,
         extra_argv: &[String],
+        extra_environment: &BTreeMap<String, String>,
     ) -> Result<(Self, NegotiatedInitialize), AcpRuntimeError> {
         Self::start_transport(
             manifest.agent_id.clone(),
-            manifest.acp_agent_with_args(approved_roots, host_environment, extra_argv)?,
+            manifest.acp_agent_with_args(
+                approved_roots,
+                host_environment,
+                extra_argv,
+                extra_environment,
+            )?,
             initialize_timeout,
         )
         .await
@@ -493,26 +521,78 @@ impl AcpConnection {
             .await
     }
 
+    #[cfg(test)]
     pub async fn load_session(
         &self,
         request: LoadSessionRequest,
     ) -> Result<LoadSessionResponse, AcpRuntimeError> {
-        if !self.negotiated.supports_session_load() {
-            return Err(AcpRuntimeError::Unsupported("session/load"));
-        }
-        self.call(|response| Command::LoadSession { request, response })
+        self.load_session_with_policy(request, ApprovalPolicy::Untrusted)
             .await
     }
 
+    pub async fn load_session_with_policy(
+        &self,
+        request: LoadSessionRequest,
+        approval_policy: ApprovalPolicy,
+    ) -> Result<LoadSessionResponse, AcpRuntimeError> {
+        let policy_session_ids = vec![request.session_id.clone()];
+        self.load_session_with_policy_for_sessions(request, approval_policy, policy_session_ids)
+            .await
+    }
+
+    pub async fn load_session_with_policy_for_sessions(
+        &self,
+        request: LoadSessionRequest,
+        approval_policy: ApprovalPolicy,
+        policy_session_ids: Vec<SessionId>,
+    ) -> Result<LoadSessionResponse, AcpRuntimeError> {
+        if !self.negotiated.supports_session_load() {
+            return Err(AcpRuntimeError::Unsupported("session/load"));
+        }
+        self.call(|response| Command::LoadSession {
+            request,
+            approval_policy,
+            policy_session_ids,
+            response,
+        })
+        .await
+    }
+
+    #[cfg(test)]
     pub async fn resume_session(
         &self,
         request: ResumeSessionRequest,
     ) -> Result<ResumeSessionResponse, AcpRuntimeError> {
+        self.resume_session_with_policy(request, ApprovalPolicy::Untrusted)
+            .await
+    }
+
+    pub async fn resume_session_with_policy(
+        &self,
+        request: ResumeSessionRequest,
+        approval_policy: ApprovalPolicy,
+    ) -> Result<ResumeSessionResponse, AcpRuntimeError> {
+        let policy_session_ids = vec![request.session_id.clone()];
+        self.resume_session_with_policy_for_sessions(request, approval_policy, policy_session_ids)
+            .await
+    }
+
+    pub async fn resume_session_with_policy_for_sessions(
+        &self,
+        request: ResumeSessionRequest,
+        approval_policy: ApprovalPolicy,
+        policy_session_ids: Vec<SessionId>,
+    ) -> Result<ResumeSessionResponse, AcpRuntimeError> {
         if !self.negotiated.supports_session_resume() {
             return Err(AcpRuntimeError::Unsupported("session/resume"));
         }
-        self.call(|response| Command::ResumeSession { request, response })
-            .await
+        self.call(|response| Command::ResumeSession {
+            request,
+            approval_policy,
+            policy_session_ids,
+            response,
+        })
+        .await
     }
 
     pub async fn delete_session(
@@ -537,11 +617,43 @@ impl AcpConnection {
             .await
     }
 
+    #[cfg(test)]
     pub async fn prompt(
         &self,
         request: PromptRequest,
         run_id: String,
         source_turn_id: String,
+    ) -> Result<PromptAdmission, AcpRuntimeError> {
+        self.prompt_with_policy(request, run_id, source_turn_id, ApprovalPolicy::Untrusted)
+            .await
+    }
+
+    #[cfg(test)]
+    pub async fn prompt_with_policy(
+        &self,
+        request: PromptRequest,
+        run_id: String,
+        source_turn_id: String,
+        approval_policy: ApprovalPolicy,
+    ) -> Result<PromptAdmission, AcpRuntimeError> {
+        let policy_session_ids = vec![request.session_id.clone()];
+        self.prompt_with_policy_for_sessions(
+            request,
+            run_id,
+            source_turn_id,
+            approval_policy,
+            policy_session_ids,
+        )
+        .await
+    }
+
+    pub async fn prompt_with_policy_for_sessions(
+        &self,
+        request: PromptRequest,
+        run_id: String,
+        source_turn_id: String,
+        approval_policy: ApprovalPolicy,
+        policy_session_ids: Vec<SessionId>,
     ) -> Result<PromptAdmission, AcpRuntimeError> {
         if self.sessions.get(&request.session_id).await.is_none() {
             return Err(AcpRuntimeError::UnknownSession(
@@ -552,6 +664,8 @@ impl AcpConnection {
             request,
             run_id,
             source_turn_id,
+            approval_policy,
+            policy_session_ids,
             response,
         })
         .await
@@ -614,6 +728,31 @@ impl AcpConnection {
 
     pub async fn pending_permissions(&self) -> Vec<PendingPermissionSummary> {
         self.interactions.pending_permissions().await
+    }
+
+    pub async fn set_approval_policy(
+        &self,
+        session_id: &SessionId,
+        policy: ApprovalPolicy,
+    ) -> Result<(), AcpRuntimeError> {
+        self.set_approval_policies(std::slice::from_ref(session_id), policy)
+            .await
+    }
+
+    pub async fn set_approval_policies(
+        &self,
+        session_ids: &[SessionId],
+        policy: ApprovalPolicy,
+    ) -> Result<(), AcpRuntimeError> {
+        self.interactions
+            .set_approval_policies(session_ids, policy)
+            .await?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub async fn approval_policy(&self, session_id: &SessionId) -> ApprovalPolicy {
+        self.interactions.approval_policy(session_id).await
     }
 
     pub async fn resolve_permission(
@@ -685,6 +824,16 @@ impl AcpConnection {
             return Err(AcpRuntimeError::UnknownSession(session_id.to_string()));
         }
         Ok(self.interactions.prepare_steer(session_id).await?)
+    }
+
+    pub async fn current_steer_epoch(
+        &self,
+        session_id: &agent_client_protocol::schema::v1::SessionId,
+    ) -> Result<u64, AcpRuntimeError> {
+        if self.sessions.get(session_id).await.is_none() {
+            return Err(AcpRuntimeError::UnknownSession(session_id.to_string()));
+        }
+        Ok(self.interactions.current_steer_epoch(session_id).await)
     }
 
     pub async fn verify_steer_epoch(
@@ -791,7 +940,7 @@ impl AcpConnection {
         make: impl FnOnce(oneshot::Sender<Result<T, AcpRuntimeError>>) -> Command,
     ) -> Result<T, AcpRuntimeError> {
         if let Some(message) = self.failure.borrow().clone() {
-            return Err(AcpRuntimeError::Connection(message));
+            return Err(AcpRuntimeError::ConnectionUnavailable(message));
         }
         let (response_tx, mut response_rx) = oneshot::channel();
         self.commands
@@ -835,10 +984,14 @@ enum Command {
     },
     LoadSession {
         request: LoadSessionRequest,
+        approval_policy: ApprovalPolicy,
+        policy_session_ids: Vec<SessionId>,
         response: oneshot::Sender<Result<LoadSessionResponse, AcpRuntimeError>>,
     },
     ResumeSession {
         request: ResumeSessionRequest,
+        approval_policy: ApprovalPolicy,
+        policy_session_ids: Vec<SessionId>,
         response: oneshot::Sender<Result<ResumeSessionResponse, AcpRuntimeError>>,
     },
     DeleteSession {
@@ -853,6 +1006,8 @@ enum Command {
         request: PromptRequest,
         run_id: String,
         source_turn_id: String,
+        approval_policy: ApprovalPolicy,
+        policy_session_ids: Vec<SessionId>,
         response: oneshot::Sender<Result<PromptAdmission, AcpRuntimeError>>,
     },
     SetSessionConfigOption {
@@ -970,7 +1125,12 @@ impl Command {
                     }
                 );
             }
-            Self::LoadSession { request, response } => {
+            Self::LoadSession {
+                request,
+                approval_policy,
+                policy_session_ids,
+                response,
+            } => {
                 let session_id = request.session_id.clone();
                 let session = sessions
                     .register_with_freshness(agent_id, request.session_id.clone())
@@ -984,6 +1144,7 @@ impl Command {
                     let _ = response.send(Err(AcpRuntimeError::SessionBusy));
                     return;
                 };
+                let policy_locks = interactions.lock_policy_sessions(&policy_session_ids).await;
                 let reconstruction = if fresh {
                     Ok(session.begin_initial_reconstruction().await)
                 } else {
@@ -996,6 +1157,18 @@ impl Command {
                         return;
                     }
                 };
+                if let Err(error) = interactions
+                    .set_approval_policies_locked(policy_locks, approval_policy)
+                    .await
+                {
+                    reconstruction.finish(false).await;
+                    drop(session_lease);
+                    if fresh {
+                        sessions.remove(&session_id).await;
+                    }
+                    let _ = response.send(Err(error.into()));
+                    return;
+                }
                 dispatch_ordinary!(
                     request,
                     RequestCancellation::default(),
@@ -1013,7 +1186,12 @@ impl Command {
                     }
                 );
             }
-            Self::ResumeSession { request, response } => {
+            Self::ResumeSession {
+                request,
+                approval_policy,
+                policy_session_ids,
+                response,
+            } => {
                 let session_id = request.session_id.clone();
                 let session = sessions
                     .register_with_freshness(agent_id, request.session_id.clone())
@@ -1027,6 +1205,7 @@ impl Command {
                     let _ = response.send(Err(AcpRuntimeError::SessionBusy));
                     return;
                 };
+                let policy_locks = interactions.lock_policy_sessions(&policy_session_ids).await;
                 let reconstruction = if fresh {
                     Ok(session.begin_initial_reconstruction().await)
                 } else {
@@ -1039,6 +1218,18 @@ impl Command {
                         return;
                     }
                 };
+                if let Err(error) = interactions
+                    .set_approval_policies_locked(policy_locks, approval_policy)
+                    .await
+                {
+                    reconstruction.finish(false).await;
+                    drop(session_lease);
+                    if fresh {
+                        sessions.remove(&session_id).await;
+                    }
+                    let _ = response.send(Err(error.into()));
+                    return;
+                }
                 dispatch_ordinary!(
                     request,
                     RequestCancellation::default(),
@@ -1060,6 +1251,8 @@ impl Command {
                 request,
                 run_id,
                 source_turn_id,
+                approval_policy,
+                policy_session_ids,
                 response,
             } => {
                 let Some(session_lease) = sessions.lease(&request.session_id).await else {
@@ -1067,6 +1260,7 @@ impl Command {
                     return;
                 };
                 let session = session_lease.session().clone();
+                let policy_locks = interactions.lock_policy_sessions(&policy_session_ids).await;
                 let admission = match session
                     .admit_prompt(run_id.clone(), source_turn_id.clone())
                     .await
@@ -1081,43 +1275,58 @@ impl Command {
                         return;
                     }
                 };
+                if let Err(error) = interactions
+                    .set_approval_policies_locked(policy_locks, approval_policy)
+                    .await
+                {
+                    drop(session_lease);
+                    session.fail_active(error.to_string()).await;
+                    let _ = response.send(Err(error.into()));
+                    return;
+                }
                 drop(session_lease);
                 let snapshot = session.snapshot().await;
                 let message_id =
                     format!("{}::user::{}", snapshot.thread_id, admission.source_turn_id);
-                for block in &request.prompt {
-                    let (content, content_block) = match block {
-                        ContentBlock::Text(text) => (text.text.clone(), None),
-                        block => (String::new(), serde_json::to_value(block).ok()),
-                    };
-                    session
-                        .emit(CanonicalEvent::MessageChunk {
-                            agent_id: snapshot.agent_id.clone(),
-                            thread_id: snapshot.thread_id.clone(),
-                            run_id: Some(admission.run_id.clone()),
-                            source_turn_id: Some(admission.source_turn_id.clone()),
-                            generation: Some(admission.generation),
-                            role: super::events::MessageRole::User,
-                            message_id: message_id.clone(),
-                            content,
-                            content_block,
-                        })
-                        .await;
-                }
+                session
+                    .emit_prompt_transcript(
+                        &request.prompt,
+                        Some(admission.run_id.clone()),
+                        Some(admission.source_turn_id.clone()),
+                        Some(admission.generation),
+                        message_id,
+                    )
+                    .await;
                 let callback_session = session.clone();
                 let callback_admission = admission.clone();
                 let registration = connection.send_request(request).on_receiving_result(
                     move |result| async move {
                         let snapshot = callback_session.snapshot().await;
                         let event = match result {
-                            Ok(prompt) => CanonicalEvent::RunFinished {
-                                agent_id: snapshot.agent_id,
-                                thread_id: snapshot.thread_id,
-                                run_id: callback_admission.run_id,
-                                source_turn_id: callback_admission.source_turn_id,
-                                generation: callback_admission.generation,
-                                stop_reason: prompt.stop_reason,
-                            },
+                            Ok(prompt) => {
+                                if let Some(usage) = prompt.usage.as_ref() {
+                                    callback_session
+                                        .emit(CanonicalEvent::TurnTokenUsage {
+                                            agent_id: snapshot.agent_id.clone(),
+                                            thread_id: snapshot.thread_id.clone(),
+                                            input_tokens: usage.input_tokens,
+                                            output_tokens: usage.output_tokens,
+                                            reasoning_tokens: usage.thought_tokens,
+                                            cached_read_tokens: usage.cached_read_tokens,
+                                            cached_write_tokens: usage.cached_write_tokens,
+                                            total_tokens: usage.total_tokens,
+                                        })
+                                        .await;
+                                }
+                                CanonicalEvent::RunFinished {
+                                    agent_id: snapshot.agent_id,
+                                    thread_id: snapshot.thread_id,
+                                    run_id: callback_admission.run_id,
+                                    source_turn_id: callback_admission.source_turn_id,
+                                    generation: callback_admission.generation,
+                                    stop_reason: prompt.stop_reason,
+                                }
+                            }
                             Err(error) => CanonicalEvent::RunFailed {
                                 agent_id: snapshot.agent_id,
                                 thread_id: snapshot.thread_id,
@@ -1348,6 +1557,19 @@ mod tests {
         agent_id: &str,
         interaction: TestInteraction,
     ) -> PendingInteractionFixture {
+        start_pending_interaction_for_agent_with_policy(
+            agent_id,
+            interaction,
+            ApprovalPolicy::Untrusted,
+        )
+        .await
+    }
+
+    async fn start_pending_interaction_for_agent_with_policy(
+        agent_id: &str,
+        interaction: TestInteraction,
+        approval_policy: ApprovalPolicy,
+    ) -> PendingInteractionFixture {
         let (observed_tx, observed) = mpsc::unbounded_channel();
         let prompt_responder = Arc::new(StdMutex::new(None));
         let agent = interaction_agent(interaction, observed_tx, prompt_responder.clone());
@@ -1365,10 +1587,11 @@ mod tests {
             .expect("session registered");
         let events = session.take_events().await.expect("session event receiver");
         connection
-            .prompt(
+            .prompt_with_policy(
                 PromptRequest::new(created.session_id.clone(), vec!["interact".into()]),
                 "interaction-run".to_string(),
                 "interaction-turn".to_string(),
+                approval_policy,
             )
             .await
             .expect("prompt admitted");
@@ -1386,13 +1609,20 @@ mod tests {
     }
 
     fn permission_request(options: Vec<PermissionOption>) -> RequestPermissionRequest {
+        permission_request_with_kind(options, ToolKind::Edit)
+    }
+
+    fn permission_request_with_kind(
+        options: Vec<PermissionOption>,
+        kind: ToolKind,
+    ) -> RequestPermissionRequest {
         RequestPermissionRequest::new(
             "interaction-session",
             ToolCallUpdate::new(
                 "tool-1",
                 ToolCallUpdateFields::new()
                     .title("Write file")
-                    .kind(ToolKind::Edit)
+                    .kind(kind)
                     .status(ToolCallStatus::Pending),
             ),
             options,
@@ -1582,6 +1812,104 @@ mod tests {
         InitializeResponse::new(ProtocolVersion::V1).agent_capabilities(capabilities)
     }
 
+    #[tokio::test]
+    async fn prompt_response_usage_emits_before_finish_and_updates_snapshot() {
+        let agent = Agent
+            .builder()
+            .on_receive_request(
+                async |_request: InitializeRequest, responder, _| {
+                    responder.respond(initialized(AgentCapabilities::new()))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |_request: NewSessionRequest, responder, _| {
+                    responder.respond(NewSessionResponse::new("usage-session"))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |_request: PromptRequest, responder, _| {
+                    let response: PromptResponse = serde_json::from_value(serde_json::json!({
+                        "stopReason": "end_turn",
+                        "usage": {
+                            "totalTokens": 42,
+                            "inputTokens": 20,
+                            "outputTokens": 10,
+                            "thoughtTokens": 5,
+                            "cachedReadTokens": 6,
+                            "cachedWriteTokens": 1
+                        }
+                    }))
+                    .expect("prompt usage fixture");
+                    responder.respond(response)
+                },
+                agent_client_protocol::on_receive_request!(),
+            );
+        let (connection, _) =
+            AcpConnection::start_transport("usage-agent".into(), agent, Duration::from_secs(1))
+                .await
+                .expect("agent starts");
+        let created = connection
+            .new_session(NewSessionRequest::new("/workspace"))
+            .await
+            .expect("session created");
+        let session = connection.session(&created.session_id).await.unwrap();
+        let mut events = session.take_events().await.expect("session event receiver");
+
+        connection
+            .prompt(
+                PromptRequest::new(created.session_id, vec!["count tokens".into()]),
+                "usage-run".into(),
+                "usage-turn".into(),
+            )
+            .await
+            .expect("prompt admitted");
+
+        let mut usage_seen = false;
+        loop {
+            match events.recv().await.expect("prompt event") {
+                CanonicalEvent::TurnTokenUsage {
+                    input_tokens,
+                    output_tokens,
+                    reasoning_tokens,
+                    cached_read_tokens,
+                    cached_write_tokens,
+                    total_tokens,
+                    ..
+                } => {
+                    assert!(!usage_seen);
+                    usage_seen = true;
+                    assert_eq!(input_tokens, 20);
+                    assert_eq!(output_tokens, 10);
+                    assert_eq!(reasoning_tokens, Some(5));
+                    assert_eq!(cached_read_tokens, Some(6));
+                    assert_eq!(cached_write_tokens, Some(1));
+                    assert_eq!(total_tokens, 42);
+                }
+                CanonicalEvent::RunFinished { .. } => {
+                    assert!(usage_seen, "usage must settle before the run finishes");
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        assert_eq!(
+            session.snapshot().await.token_totals,
+            Some(crate::acp::snapshot::BridgeTokenTotalsSnapshot {
+                turns: 1,
+                input_tokens: 20,
+                output_tokens: 10,
+                reasoning_tokens: Some(5),
+                cached_read_tokens: Some(6),
+                cached_write_tokens: Some(1),
+                total_tokens: 42,
+            })
+        );
+        connection.shutdown().await.expect("shutdown");
+    }
+
     fn steer_meta() -> agent_client_protocol::schema::v1::Meta {
         serde_json::from_value(serde_json::json!({
             "dappercode.dev": {
@@ -1617,7 +1945,10 @@ mod tests {
     }
 
     fn assert_connection_failure<T>(result: Result<T, AcpRuntimeError>) {
-        assert!(matches!(result, Err(AcpRuntimeError::Connection(_))));
+        assert!(matches!(
+            result,
+            Err(AcpRuntimeError::Connection(_)) | Err(AcpRuntimeError::ConnectionUnavailable(_))
+        ));
     }
 
     #[test]
@@ -1643,6 +1974,7 @@ mod tests {
             response.meta = serde_json::from_value(value).ok();
             assert!(!NegotiatedInitialize { response }.supports_session_steer());
         }
+
         let mut response = initialized(AgentCapabilities::new());
         response.meta = Some(steer_meta());
         assert!(NegotiatedInitialize { response }.supports_session_steer());
@@ -1668,6 +2000,28 @@ mod tests {
         }))
         .ok();
         assert!(!NegotiatedInitialize { response }.supports_session_steer());
+    }
+
+    #[test]
+    fn mcp_transport_prefers_http_then_sse_without_stdio_fallback() {
+        use agent_client_protocol::schema::v1::McpCapabilities;
+
+        for (capabilities, expected) in [
+            (
+                McpCapabilities::new().http(true).sse(true),
+                McpTransportPreference::Http,
+            ),
+            (
+                McpCapabilities::new().sse(true),
+                McpTransportPreference::Sse,
+            ),
+            (McpCapabilities::new(), McpTransportPreference::Unavailable),
+        ] {
+            let negotiated = NegotiatedInitialize {
+                response: initialized(AgentCapabilities::new().mcp_capabilities(capabilities)),
+            };
+            assert_eq!(negotiated.mcp_transport_preference(), expected);
+        }
     }
 
     #[test]
@@ -1739,6 +2093,10 @@ mod tests {
             plain
                 .verify_steer_epoch(&SessionId::new("missing"), 1)
                 .await,
+            Err(AcpRuntimeError::UnknownSession(_))
+        ));
+        assert!(matches!(
+            plain.current_steer_epoch(&SessionId::new("missing")).await,
             Err(AcpRuntimeError::UnknownSession(_))
         ));
         assert!(matches!(
@@ -2111,6 +2469,593 @@ mod tests {
             .await;
         assert_eq!(generation, None);
         assert!(errors.is_empty());
+        finish_fixture(&fixture).await;
+    }
+
+    #[tokio::test]
+    async fn no_approval_policy_allows_permission_requests_without_queueing_them() {
+        let mut fixture = start_pending_interaction_for_agent_with_policy(
+            "test-agent",
+            TestInteraction::Permission(
+                permission_request(vec![
+                    PermissionOption::new(
+                        "allow-once",
+                        "Allow once",
+                        PermissionOptionKind::AllowOnce,
+                    ),
+                    PermissionOption::new(
+                        "allow-always",
+                        "Always allow",
+                        PermissionOptionKind::AllowAlways,
+                    ),
+                ]),
+                false,
+            ),
+            ApprovalPolicy::Never,
+        )
+        .await;
+
+        let observed = tokio::time::timeout(Duration::from_secs(1), fixture.observed.recv())
+            .await
+            .expect("permission response arrived")
+            .expect("permission response channel stayed open");
+        let ObservedInteraction::Permission(result) = observed else {
+            panic!("permission response expected");
+        };
+        assert_eq!(
+            result.expect("typed permission response").outcome,
+            RequestPermissionOutcome::Selected(
+                agent_client_protocol::schema::v1::SelectedPermissionOutcome::new("allow-once")
+            )
+        );
+        assert!(fixture.connection.pending_permissions().await.is_empty());
+        while let Ok(event) = fixture.events.try_recv() {
+            assert!(!matches!(event, CanonicalEvent::PermissionRequested { .. }));
+        }
+        finish_fixture(&fixture).await;
+    }
+
+    #[tokio::test]
+    async fn selective_approval_policy_allows_reads_but_queues_edits_and_mode_switches() {
+        let mut read = start_pending_interaction_for_agent_with_policy(
+            "test-agent",
+            TestInteraction::Permission(
+                permission_request_with_kind(permission_options(), ToolKind::Read),
+                false,
+            ),
+            ApprovalPolicy::OnRequest,
+        )
+        .await;
+        let observed = tokio::time::timeout(Duration::from_secs(1), read.observed.recv())
+            .await
+            .expect("read permission response arrived")
+            .expect("read permission response channel stayed open");
+        let ObservedInteraction::Permission(result) = observed else {
+            panic!("permission response expected");
+        };
+        assert_eq!(
+            result.expect("typed permission response").outcome,
+            RequestPermissionOutcome::Selected(
+                agent_client_protocol::schema::v1::SelectedPermissionOutcome::new("allow-once")
+            )
+        );
+        assert!(read.connection.pending_permissions().await.is_empty());
+        while let Ok(event) = read.events.try_recv() {
+            assert!(!matches!(event, CanonicalEvent::PermissionRequested { .. }));
+        }
+        finish_fixture(&read).await;
+
+        let mut edit = start_pending_interaction_for_agent_with_policy(
+            "test-agent",
+            TestInteraction::Permission(permission_request(permission_options()), false),
+            ApprovalPolicy::OnRequest,
+        )
+        .await;
+        requested_event(&mut edit.events, true).await;
+        let pending = edit.connection.pending_permissions().await;
+        assert_eq!(pending.len(), 1);
+        edit.connection
+            .cancel_permission(&pending[0].thread_id, &pending[0].request_id)
+            .await
+            .expect("edit permission cancelled");
+        finish_fixture(&edit).await;
+
+        let mut mode_switch = start_pending_interaction_for_agent_with_policy(
+            "test-agent",
+            TestInteraction::Permission(
+                permission_request_with_kind(permission_options(), ToolKind::SwitchMode),
+                false,
+            ),
+            ApprovalPolicy::OnRequest,
+        )
+        .await;
+        requested_event(&mut mode_switch.events, true).await;
+        let pending = mode_switch.connection.pending_permissions().await;
+        assert_eq!(pending.len(), 1);
+        mode_switch
+            .connection
+            .cancel_permission(&pending[0].thread_id, &pending[0].request_id)
+            .await
+            .expect("mode switch permission cancelled");
+        finish_fixture(&mode_switch).await;
+    }
+
+    #[tokio::test]
+    async fn enabling_no_approval_policy_resolves_an_already_pending_request() {
+        let mut fixture = start_pending_interaction(TestInteraction::Permission(
+            permission_request(permission_options()),
+            false,
+        ))
+        .await;
+        requested_event(&mut fixture.events, true).await;
+        assert_eq!(fixture.connection.pending_permissions().await.len(), 1);
+
+        fixture
+            .connection
+            .set_approval_policy(&fixture.session_id, ApprovalPolicy::Never)
+            .await
+            .expect("permission policy applied");
+
+        let observed = tokio::time::timeout(Duration::from_secs(1), fixture.observed.recv())
+            .await
+            .expect("permission response arrived")
+            .expect("permission response channel stayed open");
+        let ObservedInteraction::Permission(result) = observed else {
+            panic!("permission response expected");
+        };
+        assert_eq!(
+            result.expect("typed permission response").outcome,
+            RequestPermissionOutcome::Selected(
+                agent_client_protocol::schema::v1::SelectedPermissionOutcome::new("allow-once")
+            )
+        );
+        assert!(fixture.connection.pending_permissions().await.is_empty());
+        assert!(matches!(
+            resolved_event(&mut fixture.events, true).await,
+            CanonicalEvent::PermissionResolved { outcome, .. } if outcome == "allow-once"
+        ));
+        finish_fixture(&fixture).await;
+    }
+
+    #[tokio::test]
+    async fn policy_drain_cannot_publish_resolution_before_the_request() {
+        let (observed_tx, observed) = mpsc::unbounded_channel();
+        let prompt_responder = Arc::new(StdMutex::new(None));
+        let agent = interaction_agent(
+            TestInteraction::Permission(permission_request(permission_options()), false),
+            observed_tx,
+            prompt_responder.clone(),
+        );
+        let (connection, _) =
+            AcpConnection::start_transport("test-agent".to_string(), agent, Duration::from_secs(1))
+                .await
+                .expect("interaction agent starts");
+        let created = connection
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .expect("session created");
+        let session = connection
+            .session(&created.session_id)
+            .await
+            .expect("session registered");
+        let events = session.take_events().await.expect("session event receiver");
+        let barrier = connection
+            .interactions
+            .pause_next_permission_publication()
+            .await;
+        connection
+            .prompt_with_policy(
+                PromptRequest::new(created.session_id.clone(), vec!["interact".into()]),
+                "interaction-run".to_string(),
+                "interaction-turn".to_string(),
+                ApprovalPolicy::Untrusted,
+            )
+            .await
+            .expect("prompt admitted");
+        barrier.wait_until_reached().await;
+        let interaction_guard =
+            tokio::time::timeout(Duration::from_millis(100), session.lock_interactions())
+                .await
+                .expect("request publication must not hold the session interaction lock");
+        drop(interaction_guard);
+
+        let update = {
+            let connection = connection.clone();
+            let session_id = created.session_id.clone();
+            tokio::spawn(async move {
+                connection
+                    .set_approval_policy(&session_id, ApprovalPolicy::Never)
+                    .await
+            })
+        };
+        tokio::task::yield_now().await;
+        barrier.release();
+        update
+            .await
+            .expect("policy update task")
+            .expect("policy update succeeds");
+
+        let mut fixture = PendingInteractionFixture {
+            connection,
+            events,
+            session_id: created.session_id,
+            observed,
+            prompt_responder,
+        };
+        requested_event(&mut fixture.events, true).await;
+        assert!(matches!(
+            resolved_event(&mut fixture.events, true).await,
+            CanonicalEvent::PermissionResolved { .. }
+        ));
+        while let Ok(event) = fixture.events.try_recv() {
+            assert!(!matches!(event, CanonicalEvent::PermissionRequested { .. }));
+        }
+        finish_fixture(&fixture).await;
+    }
+
+    #[tokio::test]
+    async fn manual_permission_cancellation_waits_for_request_publication() {
+        let (observed_tx, mut observed) = mpsc::unbounded_channel();
+        let prompt_responder = Arc::new(StdMutex::new(None));
+        let agent = interaction_agent(
+            TestInteraction::Permission(permission_request(permission_options()), false),
+            observed_tx,
+            prompt_responder.clone(),
+        );
+        let (connection, _) =
+            AcpConnection::start_transport("test-agent".to_string(), agent, Duration::from_secs(1))
+                .await
+                .expect("interaction agent starts");
+        let created = connection
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .expect("session created");
+        let session = connection
+            .session(&created.session_id)
+            .await
+            .expect("session registered");
+        let mut events = session.take_events().await.expect("session event receiver");
+        let barrier = connection
+            .interactions
+            .pause_next_permission_publication()
+            .await;
+        connection
+            .prompt_with_policy(
+                PromptRequest::new(created.session_id.clone(), vec!["interact".into()]),
+                "interaction-run".to_string(),
+                "interaction-turn".to_string(),
+                ApprovalPolicy::Untrusted,
+            )
+            .await
+            .expect("prompt admitted");
+        barrier.wait_until_reached().await;
+        let pending = connection.pending_permissions().await;
+        let request = pending.first().expect("permission is listable").clone();
+        let cancellation = {
+            let connection = connection.clone();
+            let thread_id = request.thread_id.clone();
+            let request_id = request.request_id.clone();
+            tokio::spawn(async move { connection.cancel_permission(&thread_id, &request_id).await })
+        };
+        tokio::task::yield_now().await;
+        assert!(!cancellation.is_finished());
+        assert!(observed.try_recv().is_err());
+
+        barrier.release();
+        cancellation
+            .await
+            .expect("cancellation task")
+            .expect("cancellation succeeds");
+        requested_event(&mut events, true).await;
+        assert!(matches!(
+            resolved_event(&mut events, true).await,
+            CanonicalEvent::PermissionResolved { request_id, .. }
+                if request_id == request.request_id
+        ));
+        assert!(matches!(
+            observed.recv().await,
+            Some(ObservedInteraction::Permission(Ok(response)))
+                if response.outcome == RequestPermissionOutcome::Cancelled
+        ));
+
+        let fixture = PendingInteractionFixture {
+            connection,
+            events,
+            session_id: created.session_id,
+            observed,
+            prompt_responder,
+        };
+        finish_fixture(&fixture).await;
+    }
+
+    #[tokio::test]
+    async fn family_policy_update_commits_after_one_stale_responder_failure() {
+        let next_session = Arc::new(AtomicUsize::new(0));
+        let prompt_responders = Arc::new(StdMutex::new(Vec::new()));
+        let (observed_tx, mut observed_rx) = mpsc::unbounded_channel();
+        let agent = Agent
+            .builder()
+            .on_receive_request(
+                async |_request: InitializeRequest, responder, _| {
+                    responder.respond(initialized(AgentCapabilities::new()))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let next_session = next_session.clone();
+                    async move |_request: NewSessionRequest, responder, _| {
+                        let index = next_session.fetch_add(1, AtomicOrdering::Relaxed);
+                        responder.respond(NewSessionResponse::new(format!("family-{index}")))
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let prompt_responders = prompt_responders.clone();
+                    async move |request: PromptRequest, responder, connection| {
+                        prompt_responders
+                            .lock()
+                            .expect("prompt responders")
+                            .push(responder);
+                        let session_id = request.session_id.clone();
+                        connection
+                            .send_request(RequestPermissionRequest::new(
+                                session_id.clone(),
+                                ToolCallUpdate::new(
+                                    format!("tool-{session_id}"),
+                                    ToolCallUpdateFields::new()
+                                        .title("Write file")
+                                        .kind(ToolKind::Edit)
+                                        .status(ToolCallStatus::Pending),
+                                ),
+                                permission_options(),
+                            ))
+                            .on_receiving_result({
+                                let observed_tx = observed_tx.clone();
+                                async move |result| {
+                                    let _ = observed_tx.send((
+                                        session_id.to_string(),
+                                        result.map_err(|error| error.to_string()),
+                                    ));
+                                    Ok(())
+                                }
+                            })?;
+                        Ok(())
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            );
+        let (connection, _) =
+            AcpConnection::start_transport("test-agent".to_string(), agent, Duration::from_secs(1))
+                .await
+                .expect("family agent starts");
+        let first = connection
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap()
+            .session_id;
+        let second = connection
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .unwrap()
+            .session_id;
+        let mut first_events = connection
+            .session(&first)
+            .await
+            .unwrap()
+            .take_events()
+            .await
+            .unwrap();
+        let mut second_events = connection
+            .session(&second)
+            .await
+            .unwrap()
+            .take_events()
+            .await
+            .unwrap();
+        connection
+            .prompt_with_policy(
+                PromptRequest::new(first.clone(), vec!["first".into()]),
+                "first-run".to_string(),
+                "first-turn".to_string(),
+                ApprovalPolicy::Untrusted,
+            )
+            .await
+            .unwrap();
+        connection
+            .prompt_with_policy(
+                PromptRequest::new(second.clone(), vec!["second".into()]),
+                "second-run".to_string(),
+                "second-turn".to_string(),
+                ApprovalPolicy::Untrusted,
+            )
+            .await
+            .unwrap();
+        requested_event(&mut first_events, true).await;
+        requested_event(&mut second_events, true).await;
+        connection
+            .interactions
+            .inject_cancel_response_failures(&first, true, false)
+            .await;
+
+        connection
+            .set_approval_policies(&[first.clone(), second.clone()], ApprovalPolicy::Never)
+            .await
+            .expect("stale responder does not reject the committed policy update");
+        assert!(connection.pending_permissions().await.is_empty());
+        assert_eq!(
+            connection.approval_policy(&first).await,
+            ApprovalPolicy::Never
+        );
+        assert_eq!(
+            connection.approval_policy(&second).await,
+            ApprovalPolicy::Never
+        );
+        let mut second_allowed = false;
+        for _ in 0..2 {
+            let Ok(Some((session_id, result))) =
+                tokio::time::timeout(Duration::from_secs(1), observed_rx.recv()).await
+            else {
+                break;
+            };
+            if session_id == second.to_string() {
+                second_allowed = matches!(
+                    result.map(|response| response.outcome),
+                    Ok(RequestPermissionOutcome::Selected(_))
+                );
+                break;
+            }
+        }
+        assert!(second_allowed);
+        for responder in prompt_responders
+            .lock()
+            .expect("prompt responders")
+            .drain(..)
+        {
+            responder
+                .respond(PromptResponse::new(StopReason::EndTurn))
+                .unwrap();
+        }
+        connection.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn rejected_busy_turn_does_not_apply_or_drain_its_approval_policy() {
+        let mut fixture = start_pending_interaction(TestInteraction::Permission(
+            permission_request(permission_options()),
+            false,
+        ))
+        .await;
+        requested_event(&mut fixture.events, true).await;
+        let pending = fixture.connection.pending_permissions().await;
+        assert_eq!(pending.len(), 1);
+
+        assert!(matches!(
+            fixture
+                .connection
+                .prompt_with_policy(
+                    PromptRequest::new(fixture.session_id.clone(), vec!["second".into()]),
+                    "second-run".to_string(),
+                    "second-turn".to_string(),
+                    ApprovalPolicy::Never,
+                )
+                .await,
+            Err(AcpRuntimeError::SessionBusy)
+        ));
+        assert_eq!(fixture.connection.pending_permissions().await.len(), 1);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), fixture.observed.recv())
+                .await
+                .is_err()
+        );
+
+        fixture
+            .connection
+            .cancel_permission(&pending[0].thread_id, &pending[0].request_id)
+            .await
+            .expect("original permission cancelled");
+        finish_fixture(&fixture).await;
+    }
+
+    #[tokio::test]
+    async fn no_approval_policy_cancels_a_request_without_an_allow_option() {
+        let mut fixture = start_pending_interaction_for_agent_with_policy(
+            "test-agent",
+            TestInteraction::Permission(
+                permission_request(vec![PermissionOption::new(
+                    "reject-once",
+                    "Reject",
+                    PermissionOptionKind::RejectOnce,
+                )]),
+                false,
+            ),
+            ApprovalPolicy::Never,
+        )
+        .await;
+
+        let observed = tokio::time::timeout(Duration::from_secs(1), fixture.observed.recv())
+            .await
+            .expect("permission response arrived")
+            .expect("permission response channel stayed open");
+        let ObservedInteraction::Permission(result) = observed else {
+            panic!("permission response expected");
+        };
+        assert_eq!(
+            result.expect("typed permission response").outcome,
+            RequestPermissionOutcome::Cancelled
+        );
+        assert!(fixture.connection.pending_permissions().await.is_empty());
+        while let Ok(event) = fixture.events.try_recv() {
+            assert!(!matches!(event, CanonicalEvent::PermissionRequested { .. }));
+        }
+        finish_fixture(&fixture).await;
+    }
+
+    #[tokio::test]
+    async fn permission_response_does_not_wait_for_resolved_event_backpressure() {
+        let mut fixture = start_pending_interaction(TestInteraction::Permission(
+            permission_request(permission_options()),
+            false,
+        ))
+        .await;
+        requested_event(&mut fixture.events, true).await;
+        let pending = fixture.connection.pending_permissions().await;
+        let request = pending.first().expect("pending permission");
+        let session = fixture
+            .connection
+            .session(&fixture.session_id)
+            .await
+            .expect("interaction session");
+
+        for index in 0..256 {
+            session
+                .emit(CanonicalEvent::Ignored {
+                    agent_id: "test-agent".to_string(),
+                    thread_id: Some(request.thread_id.clone()),
+                    kind: format!("approval-backpressure-{index}"),
+                })
+                .await;
+        }
+
+        let mut resolution = {
+            let connection = fixture.connection.clone();
+            let thread_id = request.thread_id.clone();
+            let request_id = request.request_id.clone();
+            tokio::spawn(async move {
+                connection
+                    .resolve_permission(&thread_id, &request_id, "allow-once")
+                    .await
+            })
+        };
+
+        let ObservedInteraction::Permission(response) =
+            tokio::time::timeout(Duration::from_secs(1), fixture.observed.recv())
+                .await
+                .expect("ACP permission response should not wait for event delivery")
+                .expect("permission response")
+        else {
+            panic!("permission response expected");
+        };
+        assert_eq!(
+            response.expect("typed permission response").outcome,
+            RequestPermissionOutcome::Selected(
+                agent_client_protocol::schema::v1::SelectedPermissionOutcome::new("allow-once")
+            )
+        );
+        tokio::time::timeout(Duration::from_millis(100), &mut resolution)
+            .await
+            .expect("approval resolution should finish while its event is backpressured")
+            .expect("resolution task")
+            .expect("approval resolves");
+        assert!(fixture.connection.pending_permissions().await.is_empty());
+
+        assert!(matches!(
+            resolved_event(&mut fixture.events, true).await,
+            CanonicalEvent::PermissionResolved { request_id, .. }
+                if request_id == request.request_id
+        ));
         finish_fixture(&fixture).await;
     }
 
@@ -4243,7 +5188,9 @@ mod tests {
                 break;
             }
         }
-        assert!(session.snapshot().await.active_generation.is_none());
+        let settled = session.snapshot().await;
+        assert!(settled.active_generation.is_none());
+        assert_eq!(settled.token_totals, None);
         connection.shutdown().await.expect("connection shuts down");
     }
 

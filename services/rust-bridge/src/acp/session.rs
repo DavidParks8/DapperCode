@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    Arc,
+    Arc, Mutex as StdMutex,
 };
 
-use agent_client_protocol::schema::v1::{SessionId, SessionNotification};
-use tokio::sync::{Mutex, OwnedMutexGuard};
+use agent_client_protocol::schema::v1::{ContentBlock, SessionId, SessionNotification};
+use tokio::sync::{mpsc, oneshot, Mutex, OwnedMutexGuard};
 use uuid::Uuid;
 
 use super::events::{
@@ -36,6 +36,7 @@ pub struct AcpSession {
     instance_id: Uuid,
     inner: Arc<Mutex<SessionState>>,
     operation_lock: Arc<Mutex<()>>,
+    interaction_lock: Arc<Mutex<()>>,
     events: CanonicalEventSender,
     event_receiver: Arc<Mutex<Option<CanonicalEventReceiver>>>,
     #[cfg(test)]
@@ -52,11 +53,19 @@ struct SessionState {
     /// Only one message per generation is ever open, so anything that interrupts the
     /// stream -- the speaker changing or a tool call landing -- starts a new one.
     open_messages: HashMap<u64, (MessageRole, String)>,
+    pending_agent_message_envelopes: HashMap<String, PendingAgentMessageEnvelope>,
+    pending_agent_message_serial: u64,
     live_serial: u64,
     history_role: Option<MessageRole>,
     history_serial: u64,
     notification_receipts: VecDeque<RoutedSessionNotification>,
     notification_draining: bool,
+}
+
+struct PendingAgentMessageEnvelope {
+    content: String,
+    after_timeline_id: Option<String>,
+    serial: u64,
 }
 
 struct RoutedSessionNotification {
@@ -70,6 +79,34 @@ enum GenerationState {
     Active(u64),
     Cancelling(u64),
     Handoff { generation: u64, settled: bool },
+}
+
+impl SessionState {
+    fn flush_pending_agent_message_envelopes(&mut self) {
+        let mut pending = std::mem::take(&mut self.pending_agent_message_envelopes)
+            .into_iter()
+            .collect::<Vec<_>>();
+        let (mut anchored, mut unanchored): (Vec<_>, Vec<_>) = pending
+            .drain(..)
+            .partition(|(_, pending)| pending.after_timeline_id.is_some());
+        unanchored.sort_by_key(|(_, pending)| std::cmp::Reverse(pending.serial));
+        anchored.sort_by_key(|(_, pending)| std::cmp::Reverse(pending.serial));
+        for (message_id, pending) in unanchored.into_iter().chain(anchored) {
+            self.snapshot.append_message_after(
+                message_id,
+                MessageRole::User,
+                pending.content,
+                None,
+                pending.after_timeline_id.as_deref(),
+            );
+        }
+    }
+}
+
+pub(crate) enum AgentMessageChunkMatch {
+    Ordinary(String),
+    Pending,
+    Complete(crate::agent_messaging::AgentMessageEnvelope),
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -96,6 +133,8 @@ impl AcpSession {
                 next_generation: 0,
                 generation_state: GenerationState::Terminal,
                 open_messages: HashMap::new(),
+                pending_agent_message_envelopes: HashMap::new(),
+                pending_agent_message_serial: 0,
                 live_serial: 0,
                 history_role: None,
                 history_serial: 0,
@@ -103,6 +142,7 @@ impl AcpSession {
                 notification_draining: false,
             })),
             operation_lock: Arc::new(Mutex::new(())),
+            interaction_lock: Arc::new(Mutex::new(())),
             events,
             event_receiver: Arc::new(Mutex::new(Some(event_receiver))),
             #[cfg(test)]
@@ -113,6 +153,11 @@ impl AcpSession {
     pub fn instance_id(&self) -> Uuid {
         self.instance_id
     }
+
+    pub(crate) async fn lock_interactions(&self) -> OwnedMutexGuard<()> {
+        self.interaction_lock.clone().lock_owned().await
+    }
+
     pub async fn begin_reconstruction(
         &self,
     ) -> Result<ReconstructionTransaction, ReconstructionError> {
@@ -132,6 +177,8 @@ impl AcpSession {
         fresh.history_reconstruction = true;
         state.reconstruction_backup = Some(std::mem::replace(&mut state.snapshot, fresh));
         state.open_messages.clear();
+        state.pending_agent_message_envelopes.clear();
+        state.pending_agent_message_serial = 0;
         state.reconstruction_history_cursor = Some((state.history_role, state.history_serial));
         state.history_role = None;
         state.history_serial = 0;
@@ -150,6 +197,8 @@ impl AcpSession {
         );
         state.snapshot.history_reconstruction = true;
         state.reconstruction_backup = Some(previous);
+        state.pending_agent_message_envelopes.clear();
+        state.pending_agent_message_serial = 0;
         ReconstructionTransaction {
             session: self.clone(),
             _guard: guard,
@@ -164,16 +213,23 @@ impl AcpSession {
         let restored = if !commit {
             state.snapshot = previous;
             true
-        } else if state.snapshot.timeline.is_empty() && !previous.timeline.is_empty() {
+        } else if !state.snapshot.has_ordinary_transcript()
+            && (previous.has_ordinary_transcript() || !previous.timeline.is_empty())
+        {
             // Agents are expected to replay the conversation while `session/load` is
-            // in flight. When nothing was replayed, keep the transcript we already had
-            // while retaining the metadata (mode, commands, config, plan) the reload
-            // reported.
+            // in flight. Agent-message envelopes are auxiliary activity, not proof that
+            // the ordinary conversation was replayed, so keep the transcript we already
+            // had while retaining both the new activity and the metadata the reload reported.
             state.snapshot.restore_transcript_from(previous);
             true
         } else {
             false
         };
+        if commit && !restored {
+            state.flush_pending_agent_message_envelopes();
+        } else {
+            state.pending_agent_message_envelopes.clear();
+        }
         // Restoring a transcript also has to restore the history id cursor, otherwise
         // the next replayed chunk reuses `history-1` and is appended to the oldest
         // message instead of starting a new one.
@@ -188,6 +244,57 @@ impl AcpSession {
             state.snapshot.settle_unresolved_subagents_without_run();
         }
     }
+
+    pub(crate) async fn classify_agent_message_chunk(
+        &self,
+        message_id: &str,
+        content: String,
+        recipient_thread_id: &str,
+    ) -> AgentMessageChunkMatch {
+        const MAX_ENVELOPE_BYTES: usize = 64 * 1024;
+
+        let mut state = self.inner.lock().await;
+        let (combined, after_timeline_id, serial) =
+            if let Some(mut pending) = state.pending_agent_message_envelopes.remove(message_id) {
+                pending.content.push_str(&content);
+                (pending.content, pending.after_timeline_id, pending.serial)
+            } else {
+                state.pending_agent_message_serial =
+                    state.pending_agent_message_serial.saturating_add(1);
+                (
+                    content,
+                    state
+                        .snapshot
+                        .latest_timeline_canonical_id()
+                        .map(str::to_string),
+                    state.pending_agent_message_serial,
+                )
+            };
+        if let Some(envelope) = crate::agent_messaging::AgentMessageEnvelope::decode_echo(&combined)
+        {
+            return if envelope.recipient_thread_id == recipient_thread_id {
+                AgentMessageChunkMatch::Complete(envelope)
+            } else {
+                AgentMessageChunkMatch::Ordinary(combined)
+            };
+        }
+        if combined.len() > MAX_ENVELOPE_BYTES
+            || !crate::agent_messaging::AgentMessageEnvelope::may_be_partial(&combined)
+            || crate::agent_messaging::AgentMessageEnvelope::has_complete_suffix(&combined)
+        {
+            return AgentMessageChunkMatch::Ordinary(combined);
+        }
+        state.pending_agent_message_envelopes.insert(
+            message_id.to_string(),
+            PendingAgentMessageEnvelope {
+                content: combined,
+                after_timeline_id,
+                serial,
+            },
+        );
+        AgentMessageChunkMatch::Pending
+    }
+
     pub async fn admit_prompt(
         &self,
         run_id: String,
@@ -345,6 +452,77 @@ impl AcpSession {
         state.open_messages.insert(generation, (role, id.clone()));
         id
     }
+    pub(crate) async fn agent_message_disposition(
+        &self,
+        message_id: &str,
+    ) -> Option<crate::agent_messaging::AgentMessageDisposition> {
+        let activity_id = format!("agent-message:{message_id}");
+        self.inner
+            .lock()
+            .await
+            .snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == activity_id)
+            .and_then(|message| message.agent_message.as_ref())
+            .map(|message| message.disposition)
+    }
+
+    pub async fn emit_prompt_transcript(
+        &self,
+        prompt: &[ContentBlock],
+        run_id: Option<String>,
+        source_turn_id: Option<String>,
+        generation: Option<u64>,
+        message_id: String,
+    ) {
+        let snapshot = self.snapshot().await;
+        for block in prompt {
+            if let ContentBlock::Text(text) = block {
+                if let Some(envelope) =
+                    crate::agent_messaging::AgentMessageEnvelope::decode(&text.text)
+                        .filter(|envelope| envelope.recipient_thread_id == snapshot.thread_id)
+                {
+                    let disposition = self
+                        .agent_message_disposition(&envelope.message_id)
+                        .await
+                        .unwrap_or(crate::agent_messaging::AgentMessageDisposition::Queued);
+                    self.emit(CanonicalEvent::AgentMessage {
+                        agent_id: snapshot.agent_id.clone(),
+                        thread_id: snapshot.thread_id.clone(),
+                        message: crate::agent_messaging::AgentMessageOrigin {
+                            message_id: envelope.message_id,
+                            direction: crate::agent_messaging::AgentMessageDirection::Received,
+                            related_thread_id: envelope.sender_thread_id,
+                            related_title: envelope.sender_title,
+                            relation: envelope.recipient_relation.inverse(),
+                            disposition,
+                            body: envelope.body,
+                        },
+                    })
+                    .await;
+                    continue;
+                }
+            }
+            let (content, content_block) = match block {
+                ContentBlock::Text(text) => (text.text.clone(), None),
+                block => (String::new(), serde_json::to_value(block).ok()),
+            };
+            self.emit(CanonicalEvent::MessageChunk {
+                agent_id: snapshot.agent_id.clone(),
+                thread_id: snapshot.thread_id.clone(),
+                run_id: run_id.clone(),
+                source_turn_id: source_turn_id.clone(),
+                generation,
+                role: MessageRole::User,
+                message_id: message_id.clone(),
+                content,
+                content_block,
+            })
+            .await;
+        }
+    }
+
     pub async fn emit(&self, event: CanonicalEvent) {
         let mut state = self.inner.lock().await;
         match &event {
@@ -358,6 +536,7 @@ impl AcpSession {
                     } if active == *generation
                 ) =>
             {
+                state.flush_pending_agent_message_envelopes();
                 state.generation_state = GenerationState::Handoff {
                     generation: *generation,
                     settled: true,
@@ -372,6 +551,7 @@ impl AcpSession {
                         if active == *generation
                 ) =>
             {
+                state.flush_pending_agent_message_envelopes();
                 state.generation_state = GenerationState::Terminal;
                 state.open_messages.remove(generation);
             }
@@ -406,12 +586,20 @@ impl AcpSession {
     /// session is loaded cold, which is strictly better than a duplicated, out-of-order one.
     pub async fn seed_history(&self, events: Vec<CanonicalEvent>) -> bool {
         let mut state = self.inner.lock().await;
-        if !state.snapshot.timeline.is_empty() {
+        if state.snapshot.has_ordinary_transcript() {
             return false;
         }
+        let mut seeded = SessionSnapshot::new(
+            state.snapshot.agent_id.clone(),
+            state.snapshot.thread_id.clone(),
+        );
         for event in &events {
-            state.snapshot.apply(event);
+            seeded.apply(event);
         }
+        if !seeded.has_ordinary_transcript() {
+            return false;
+        }
+        state.snapshot.restore_transcript_from(seeded);
         let live = !state.snapshot.history_reconstruction;
         drop(state);
         if live {
@@ -622,6 +810,8 @@ impl ReconstructionTransaction {
 
 const PENDING_NOTIFICATION_CAPACITY: usize = 4096;
 const LIVE_SESSION_CAPACITY: usize = 256;
+type SessionRemovalNotice = (SessionId, oneshot::Sender<()>);
+type SessionRemovalSender = mpsc::UnboundedSender<SessionRemovalNotice>;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum SessionRouteError {
@@ -641,6 +831,19 @@ struct RegistryState {
     next_reservation: u64,
 }
 
+impl RegistryState {
+    fn discard_pending_notifications(&mut self, session_id: &SessionId) {
+        let discarded = self
+            .pending_notifications
+            .remove(session_id)
+            .map_or(0, |notifications| notifications.len());
+        self.pending_notification_count = self
+            .pending_notification_count
+            .checked_sub(discarded)
+            .expect("pending notification count tracks every journal entry");
+    }
+}
+
 enum RegistryEntry {
     Registering {
         session: AcpSession,
@@ -656,6 +859,10 @@ enum RegistryEntry {
         session: AcpSession,
         last_access: u64,
         leases: Arc<AtomicUsize>,
+    },
+    Removing {
+        token: Uuid,
+        ready: tokio::sync::watch::Receiver<bool>,
     },
 }
 
@@ -678,15 +885,27 @@ impl Drop for SessionLease {
 
 #[cfg(test)]
 #[derive(Clone)]
-struct RegistrationBarrier {
+pub(crate) struct RegistrationBarrier {
     reached: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(test)]
+impl RegistrationBarrier {
+    pub(crate) async fn wait_until_reached(&self) {
+        self.reached.notified().await;
+    }
+
+    pub(crate) fn release(&self) {
+        self.release.notify_one();
+    }
 }
 
 #[derive(Clone)]
 pub struct SessionRegistry {
     inner: Arc<Mutex<RegistryState>>,
     capacity: usize,
+    removal_listener: Arc<StdMutex<Option<SessionRemovalSender>>>,
     #[cfg(test)]
     registration_barrier: Arc<Mutex<Option<RegistrationBarrier>>>,
     #[cfg(test)]
@@ -771,7 +990,18 @@ impl SessionRegistry {
                 && !state.pending_notifications.contains_key(&session_id)
                 && session.is_evictable().await
             {
-                state.sessions.remove(&session_id);
+                let token = Uuid::new_v4();
+                let (ready_tx, mut ready_rx) = tokio::sync::watch::channel(false);
+                state.sessions.insert(
+                    session_id.clone(),
+                    RegistryEntry::Removing {
+                        token,
+                        ready: ready_rx.clone(),
+                    },
+                );
+                drop(state);
+                self.spawn_removal(session_id.clone(), token, ready_tx);
+                Self::wait_for_removal(&mut ready_rx).await;
                 continue;
             }
             drop(state);
@@ -838,14 +1068,93 @@ impl SessionRegistry {
             .await;
     }
 
-    fn with_capacity(capacity: usize) -> Self {
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
             inner: Arc::new(Mutex::new(RegistryState::default())),
             capacity,
+            removal_listener: Arc::new(StdMutex::new(None)),
             #[cfg(test)]
             registration_barrier: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             eviction_barrier: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub(crate) fn subscribe_removals(&self) -> mpsc::UnboundedReceiver<SessionRemovalNotice> {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        *self
+            .removal_listener
+            .lock()
+            .expect("session removal listener lock") = Some(sender);
+        receiver
+    }
+
+    async fn notify_removed(&self, session_id: SessionId) {
+        let listener = self
+            .removal_listener
+            .lock()
+            .expect("session removal listener lock")
+            .clone();
+        let Some(listener) = listener else {
+            return;
+        };
+        let (acknowledge, acknowledged) = oneshot::channel();
+        if listener.send((session_id, acknowledge)).is_ok() {
+            let _ = acknowledged.await;
+        }
+    }
+
+    async fn complete_removal(
+        &self,
+        session_id: SessionId,
+        token: Uuid,
+        ready: tokio::sync::watch::Sender<bool>,
+    ) {
+        self.notify_removed(session_id.clone()).await;
+        let mut state = self.inner.lock().await;
+        if matches!(
+            state.sessions.get(&session_id),
+            Some(RegistryEntry::Removing {
+                token: current, ..
+            }) if *current == token
+        ) {
+            state.sessions.remove(&session_id);
+            state.discard_pending_notifications(&session_id);
+        }
+        let _ = ready.send(true);
+    }
+
+    fn spawn_removal(
+        &self,
+        session_id: SessionId,
+        token: Uuid,
+        ready: tokio::sync::watch::Sender<bool>,
+    ) {
+        let registry = self.clone();
+        tokio::spawn(async move {
+            registry.complete_removal(session_id, token, ready).await;
+        });
+    }
+
+    async fn wait_for_removal(ready: &mut tokio::sync::watch::Receiver<bool>) -> bool {
+        while !*ready.borrow_and_update() {
+            if ready.changed().await.is_err() {
+                return false;
+            }
+        }
+        true
+    }
+
+    async fn clear_abandoned_removal(&self, session_id: &SessionId, token: Uuid) {
+        let mut state = self.inner.lock().await;
+        if matches!(
+            state.sessions.get(session_id),
+            Some(RegistryEntry::Removing {
+                token: current, ..
+            }) if *current == token
+        ) {
+            state.sessions.remove(session_id);
+            state.discard_pending_notifications(session_id);
         }
     }
 
@@ -871,8 +1180,14 @@ impl SessionRegistry {
                 return Err(SessionRouteError::Capacity(self.capacity));
             }
             if state.sessions.contains_key(&session_id) {
-                if let Some(reservation) = reservation {
-                    state.reservations.remove(&reservation);
+                let is_removing = matches!(
+                    state.sessions.get(&session_id),
+                    Some(RegistryEntry::Removing { .. })
+                );
+                if !is_removing {
+                    if let Some(reservation) = reservation {
+                        state.reservations.remove(&reservation);
+                    }
                 }
                 let entry = state
                     .sessions
@@ -904,6 +1219,15 @@ impl SessionRegistry {
                         self.restore_eviction(&session_id, session.clone(), last_access, leases)
                             .await;
                         return Ok((session, false));
+                    }
+                    RegistryEntry::Removing { token, ready } => {
+                        let token = *token;
+                        let mut ready = ready.clone();
+                        drop(state);
+                        if !Self::wait_for_removal(&mut ready).await {
+                            self.clear_abandoned_removal(&session_id, token).await;
+                        }
+                        continue;
                     }
                 }
             }
@@ -976,8 +1300,18 @@ impl SessionRegistry {
                 && !state.pending_notifications.contains_key(&evicted_id)
                 && evicted_session.is_evictable().await
             {
-                state.sessions.remove(&evicted_id);
-                state.pending_notifications.remove(&evicted_id);
+                let token = Uuid::new_v4();
+                let (ready_tx, mut ready_rx) = tokio::sync::watch::channel(false);
+                state.sessions.insert(
+                    evicted_id.clone(),
+                    RegistryEntry::Removing {
+                        token,
+                        ready: ready_rx.clone(),
+                    },
+                );
+                drop(state);
+                self.spawn_removal(evicted_id.clone(), token, ready_tx);
+                Self::wait_for_removal(&mut ready_rx).await;
                 continue;
             }
             if still_evicting {
@@ -1092,6 +1426,42 @@ impl SessionRegistry {
             leases: leases.clone(),
         })
     }
+
+    pub(crate) async fn stable_lease(&self, session_id: &SessionId) -> Option<SessionLease> {
+        loop {
+            let mut state = self.inner.lock().await;
+            let last_access = state.next_access;
+            state.next_access = state.next_access.saturating_add(1);
+            match state.sessions.get_mut(session_id)? {
+                RegistryEntry::Live {
+                    session,
+                    last_access: seen,
+                    leases,
+                } => {
+                    *seen = last_access;
+                    leases.fetch_add(1, Ordering::AcqRel);
+                    return Some(SessionLease {
+                        session: session.clone(),
+                        leases: leases.clone(),
+                    });
+                }
+                RegistryEntry::Evicting {
+                    session,
+                    last_access,
+                    leases,
+                } => {
+                    let session = session.clone();
+                    let last_access = *last_access;
+                    let leases = leases.clone();
+                    drop(state);
+                    self.restore_eviction(session_id, session, last_access, leases)
+                        .await;
+                }
+                RegistryEntry::Registering { .. } | RegistryEntry::Removing { .. } => return None,
+            }
+        }
+    }
+
     pub async fn all(&self) -> Vec<AcpSession> {
         self.inner
             .lock()
@@ -1100,12 +1470,51 @@ impl SessionRegistry {
             .values()
             .filter_map(|entry| match entry {
                 RegistryEntry::Live { session, .. } => Some(session.clone()),
-                RegistryEntry::Registering { .. } | RegistryEntry::Evicting { .. } => None,
+                RegistryEntry::Registering { .. }
+                | RegistryEntry::Evicting { .. }
+                | RegistryEntry::Removing { .. } => None,
             })
             .collect()
     }
     pub async fn remove(&self, session_id: &SessionId) {
-        self.inner.lock().await.sessions.remove(session_id);
+        let removal = {
+            let mut state = self.inner.lock().await;
+            let registering_notification_count = match state.sessions.get(session_id) {
+                None => {
+                    state.discard_pending_notifications(session_id);
+                    return;
+                }
+                Some(RegistryEntry::Removing { token, ready }) => {
+                    let token = *token;
+                    let mut ready = ready.clone();
+                    drop(state);
+                    if !Self::wait_for_removal(&mut ready).await {
+                        self.clear_abandoned_removal(session_id, token).await;
+                    }
+                    return;
+                }
+                Some(RegistryEntry::Registering { journal, .. }) => journal.len(),
+                Some(_) => 0,
+            };
+            state.discard_pending_notifications(session_id);
+            state.pending_notification_count = state
+                .pending_notification_count
+                .checked_sub(registering_notification_count)
+                .expect("pending notification count tracks every journal entry");
+            let token = Uuid::new_v4();
+            let (ready_tx, ready_rx) = tokio::sync::watch::channel(false);
+            state.sessions.insert(
+                session_id.clone(),
+                RegistryEntry::Removing {
+                    token,
+                    ready: ready_rx.clone(),
+                },
+            );
+            (token, ready_tx, ready_rx)
+        };
+        let (token, ready_tx, mut ready_rx) = removal;
+        self.spawn_removal(session_id.clone(), token, ready_tx);
+        Self::wait_for_removal(&mut ready_rx).await;
     }
     pub async fn route(
         &self,
@@ -1125,6 +1534,12 @@ impl SessionRegistry {
             leases.fetch_sub(1, Ordering::AcqRel);
             return Ok(());
         }
+        if matches!(
+            state.sessions.get(&notification.session_id),
+            Some(RegistryEntry::Removing { .. })
+        ) {
+            return Ok(());
+        }
         if let Some(RegistryEntry::Evicting { session, .. }) =
             state.sessions.get(&notification.session_id)
         {
@@ -1142,6 +1557,12 @@ impl SessionRegistry {
                 session
                     .route_received_notifications(agent_id, std::iter::once(received))
                     .await;
+                return Ok(());
+            }
+            if matches!(
+                state.sessions.get(&session_id),
+                Some(RegistryEntry::Removing { .. })
+            ) {
                 return Ok(());
             }
             if state.pending_notification_count >= PENDING_NOTIFICATION_CAPACITY {
@@ -1188,7 +1609,7 @@ impl SessionRegistry {
     }
 
     #[cfg(test)]
-    async fn pause_next_registration(&self) -> RegistrationBarrier {
+    pub(crate) async fn pause_next_registration(&self) -> RegistrationBarrier {
         let barrier = RegistrationBarrier {
             reached: Arc::new(tokio::sync::Notify::new()),
             release: Arc::new(tokio::sync::Notify::new()),
@@ -1198,7 +1619,7 @@ impl SessionRegistry {
     }
 
     #[cfg(test)]
-    async fn pause_next_eviction(&self) -> RegistrationBarrier {
+    pub(crate) async fn pause_next_eviction(&self) -> RegistrationBarrier {
         let barrier = RegistrationBarrier {
             reached: Arc::new(tokio::sync::Notify::new()),
             release: Arc::new(tokio::sync::Notify::new()),
@@ -1223,6 +1644,207 @@ mod tests {
             }))
             .expect("valid notification"),
         )
+    }
+
+    #[tokio::test]
+    async fn prompt_transcript_preserves_an_existing_agent_message_disposition() {
+        let session = AcpSession::new("agent".to_string(), "thread".to_string());
+        let envelope = crate::agent_messaging::AgentMessageEnvelope::new(
+            "message".to_string(),
+            "parent".to_string(),
+            "thread".to_string(),
+            crate::agent_messaging::AgentRelationKind::SubAgent,
+            Some("Parent".to_string()),
+            "Please inspect the lifecycle.".to_string(),
+        );
+        session
+            .emit(CanonicalEvent::AgentMessage {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                message: crate::agent_messaging::AgentMessageOrigin {
+                    message_id: "message".to_string(),
+                    direction: crate::agent_messaging::AgentMessageDirection::Received,
+                    related_thread_id: "parent".to_string(),
+                    related_title: Some("Parent".to_string()),
+                    relation: crate::agent_messaging::AgentRelationKind::Parent,
+                    disposition: crate::agent_messaging::AgentMessageDisposition::Steering,
+                    body: "Please inspect the lifecycle.".to_string(),
+                },
+            })
+            .await;
+        let prompt = vec![serde_json::from_value(serde_json::json!({
+            "type": "text",
+            "text": envelope.encode().expect("agent message envelope"),
+        }))
+        .expect("text content block")];
+
+        session
+            .emit_prompt_transcript(
+                &prompt,
+                Some("run".to_string()),
+                Some("turn".to_string()),
+                Some(1),
+                "prompt-message".to_string(),
+            )
+            .await;
+
+        let snapshot = session.snapshot().await;
+        let activity = snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == "agent-message:message")
+            .and_then(|message| message.agent_message.as_ref())
+            .expect("agent message activity");
+        assert_eq!(
+            activity.disposition,
+            crate::agent_messaging::AgentMessageDisposition::Steering
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_transcript_does_not_project_an_envelope_for_another_thread() {
+        let session = AcpSession::new("agent".to_string(), "fork".to_string());
+        let envelope = crate::agent_messaging::AgentMessageEnvelope::new(
+            "message".to_string(),
+            "parent".to_string(),
+            "original-child".to_string(),
+            crate::agent_messaging::AgentRelationKind::SubAgent,
+            Some("Parent".to_string()),
+            "Keep this bound to the original recipient.".to_string(),
+        );
+        let prompt = vec![serde_json::from_value(serde_json::json!({
+            "type": "text",
+            "text": envelope.encode().expect("agent message envelope"),
+        }))
+        .expect("text content block")];
+
+        session
+            .emit_prompt_transcript(
+                &prompt,
+                Some("run".to_string()),
+                Some("turn".to_string()),
+                Some(1),
+                "prompt-message".to_string(),
+            )
+            .await;
+
+        let snapshot = session.snapshot().await;
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(snapshot.messages[0].id, "prompt-message");
+        assert!(snapshot.messages[0].agent_message.is_none());
+        assert!(snapshot.messages[0].parts[0]["text"]
+            .as_str()
+            .expect("ordinary prompt text")
+            .contains("original-child"));
+    }
+
+    #[tokio::test]
+    async fn incomplete_reconstructed_envelope_prefix_keeps_its_original_message_order() {
+        let session = AcpSession::new("agent".to_string(), "thread".to_string());
+        let reconstruction = session.begin_reconstruction().await.unwrap();
+        {
+            let mut state = session.inner.lock().await;
+            state.snapshot.append_message(
+                "before".to_string(),
+                MessageRole::User,
+                "Before".to_string(),
+                None,
+            );
+        }
+        assert!(matches!(
+            session
+                .classify_agent_message_chunk("partial-prefix", "<<<".to_string(), "thread")
+                .await,
+            AgentMessageChunkMatch::Pending
+        ));
+        assert!(matches!(
+            session
+                .classify_agent_message_chunk("second-prefix", "<<".to_string(), "thread")
+                .await,
+            AgentMessageChunkMatch::Pending
+        ));
+        {
+            let mut state = session.inner.lock().await;
+            state.snapshot.append_message(
+                "after".to_string(),
+                MessageRole::Agent,
+                "After".to_string(),
+                None,
+            );
+        }
+        reconstruction.finish(true).await;
+
+        assert_eq!(
+            session
+                .snapshot()
+                .await
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            ["before", "partial-prefix", "second-prefix", "after"]
+        );
+    }
+
+    #[tokio::test]
+    async fn incomplete_reconstructed_prefixes_precede_later_content_on_an_empty_timeline() {
+        let session = AcpSession::new("agent".to_string(), "thread".to_string());
+        let reconstruction = session.begin_reconstruction().await.unwrap();
+        for (message_id, content) in [("first-prefix", "<"), ("second-prefix", "<<")] {
+            assert!(matches!(
+                session
+                    .classify_agent_message_chunk(message_id, content.to_string(), "thread")
+                    .await,
+                AgentMessageChunkMatch::Pending
+            ));
+        }
+        {
+            let mut state = session.inner.lock().await;
+            state.snapshot.append_message(
+                "after".to_string(),
+                MessageRole::Agent,
+                "After".to_string(),
+                None,
+            );
+        }
+        reconstruction.finish(true).await;
+
+        assert_eq!(
+            session
+                .snapshot()
+                .await
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            ["first-prefix", "second-prefix", "after"]
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_reconstruction_discards_pending_fragments_when_restoring_the_transcript() {
+        let session = AcpSession::new("agent".to_string(), "thread".to_string());
+        {
+            let mut state = session.inner.lock().await;
+            state.snapshot.append_message(
+                "existing".to_string(),
+                MessageRole::Agent,
+                "Existing".to_string(),
+                None,
+            );
+        }
+        let reconstruction = session.begin_reconstruction().await.unwrap();
+        assert!(matches!(
+            session
+                .classify_agent_message_chunk("partial-prefix", "<<<".to_string(), "thread")
+                .await,
+            AgentMessageChunkMatch::Pending
+        ));
+        reconstruction.finish(true).await;
+
+        let snapshot = session.snapshot().await;
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(snapshot.messages[0].id, "existing");
     }
 
     #[tokio::test]
@@ -1518,6 +2140,7 @@ mod tests {
                 .await
                 .unwrap();
         }
+
         assert_eq!(
             registry
                 .route("agent", notification("pressure", "overflow"))
@@ -1549,6 +2172,86 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[tokio::test]
+    async fn cancelled_removal_still_blocks_same_id_replacement_until_cleanup_finishes() {
+        let registry = SessionRegistry::default();
+        let mut removals = registry.subscribe_removals();
+        let session_id = SessionId::new("replacement-safe");
+        let original = registry
+            .register("agent", session_id.clone())
+            .await
+            .expect("original session");
+
+        let removal = {
+            let registry = registry.clone();
+            let session_id = session_id.clone();
+            tokio::spawn(async move { registry.remove(&session_id).await })
+        };
+        let (removed_id, acknowledge) = removals.recv().await.expect("removal notice");
+        assert_eq!(removed_id, session_id);
+        removal.abort();
+        assert!(removal
+            .await
+            .expect_err("outer removal is cancelled")
+            .is_cancelled());
+
+        let replacement = {
+            let registry = registry.clone();
+            let session_id = session_id.clone();
+            tokio::spawn(async move { registry.register_with_freshness("agent", session_id).await })
+        };
+        tokio::task::yield_now().await;
+        assert!(!replacement.is_finished());
+        acknowledge.send(()).expect("cleanup acknowledged");
+        let (replacement, fresh) = replacement
+            .await
+            .expect("replacement task")
+            .expect("replacement registered");
+        assert!(fresh);
+        assert!(!Arc::ptr_eq(&original.inner, &replacement.inner));
+    }
+
+    #[tokio::test]
+    async fn notifications_during_removal_are_discarded_before_same_id_replacement() {
+        let registry = SessionRegistry::default();
+        let mut removals = registry.subscribe_removals();
+        let session_id = SessionId::new("removal-notifications");
+        registry
+            .register("agent", session_id.clone())
+            .await
+            .expect("original session");
+
+        let removal = {
+            let registry = registry.clone();
+            let session_id = session_id.clone();
+            tokio::spawn(async move { registry.remove(&session_id).await })
+        };
+        let (removed_id, acknowledge) = removals.recv().await.expect("removal notice");
+        assert_eq!(removed_id, session_id);
+
+        registry
+            .route(
+                "agent",
+                notification("removal-notifications", "late-message"),
+            )
+            .await
+            .expect("late notification is discarded");
+        {
+            let state = registry.inner.lock().await;
+            assert_eq!(state.pending_notification_count, 0);
+            assert!(!state.pending_notifications.contains_key(&session_id));
+        }
+
+        acknowledge.send(()).expect("cleanup acknowledged");
+        removal.await.expect("removal task");
+        let (replacement, fresh) = registry
+            .register_with_freshness("agent", session_id)
+            .await
+            .expect("replacement registered");
+        assert!(fresh);
+        assert!(replacement.snapshot().await.messages.is_empty());
     }
 
     #[tokio::test]
@@ -2284,6 +2987,151 @@ mod tests {
         assert_eq!(snapshot.messages[0].id, "kept");
         assert_eq!(snapshot.mode_id.as_deref(), Some("plan"));
         assert!(!snapshot.history_reconstruction);
+    }
+
+    #[tokio::test]
+    async fn activity_only_reconstruction_keeps_history_and_new_agent_messages() {
+        let session = AcpSession::new("agent".into(), "thread".into());
+        for (message_id, role, content) in [
+            ("user", MessageRole::User, "Original question"),
+            ("assistant", MessageRole::Agent, "Original answer"),
+        ] {
+            session
+                .emit(CanonicalEvent::MessageChunk {
+                    agent_id: "agent".into(),
+                    thread_id: "thread".into(),
+                    run_id: None,
+                    source_turn_id: None,
+                    generation: None,
+                    role,
+                    message_id: message_id.into(),
+                    content: content.into(),
+                    content_block: None,
+                })
+                .await;
+        }
+
+        let reconstruction = session.begin_reconstruction().await.unwrap();
+        session
+            .emit(CanonicalEvent::AgentMessage {
+                agent_id: "agent".into(),
+                thread_id: "thread".into(),
+                message: crate::agent_messaging::AgentMessageOrigin {
+                    message_id: "message-from-child".into(),
+                    direction: crate::agent_messaging::AgentMessageDirection::Received,
+                    related_thread_id: "child".into(),
+                    related_title: Some("Worker".into()),
+                    relation: crate::agent_messaging::AgentRelationKind::SubAgent,
+                    disposition: crate::agent_messaging::AgentMessageDisposition::Sent,
+                    body: "Child update".into(),
+                },
+            })
+            .await;
+        reconstruction.finish(true).await;
+
+        let snapshot = session.snapshot().await;
+        assert_eq!(
+            snapshot
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            ["user", "assistant", "agent-message:message-from-child"]
+        );
+        assert!(!snapshot.history_reconstruction);
+    }
+
+    #[tokio::test]
+    async fn empty_reconstruction_preserves_an_activity_only_transcript() {
+        let session = AcpSession::new("agent".into(), "thread".into());
+        session
+            .emit(CanonicalEvent::AgentMessage {
+                agent_id: "agent".into(),
+                thread_id: "thread".into(),
+                message: crate::agent_messaging::AgentMessageOrigin {
+                    message_id: "message-from-child".into(),
+                    direction: crate::agent_messaging::AgentMessageDirection::Received,
+                    related_thread_id: "child".into(),
+                    related_title: Some("Worker".into()),
+                    relation: crate::agent_messaging::AgentRelationKind::SubAgent,
+                    disposition: crate::agent_messaging::AgentMessageDisposition::Sent,
+                    body: "Child update".into(),
+                },
+            })
+            .await;
+
+        let reconstruction = session.begin_reconstruction().await.unwrap();
+        reconstruction.finish(true).await;
+
+        let snapshot = session.snapshot().await;
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(
+            snapshot.messages[0]
+                .agent_message
+                .as_ref()
+                .map(|message| message.message_id.as_str()),
+            Some("message-from-child")
+        );
+        assert!(!snapshot.history_reconstruction);
+    }
+
+    #[tokio::test]
+    async fn history_seeding_hydrates_an_activity_only_snapshot() {
+        let session = AcpSession::new("agent".into(), "thread".into());
+        session
+            .emit(CanonicalEvent::AgentMessage {
+                agent_id: "agent".into(),
+                thread_id: "thread".into(),
+                message: crate::agent_messaging::AgentMessageOrigin {
+                    message_id: "message-from-child".into(),
+                    direction: crate::agent_messaging::AgentMessageDirection::Received,
+                    related_thread_id: "child".into(),
+                    related_title: Some("Worker".into()),
+                    relation: crate::agent_messaging::AgentRelationKind::SubAgent,
+                    disposition: crate::agent_messaging::AgentMessageDisposition::Sent,
+                    body: "Child update".into(),
+                },
+            })
+            .await;
+
+        let seeded = session
+            .seed_history(vec![
+                CanonicalEvent::MessageChunk {
+                    agent_id: "agent".into(),
+                    thread_id: "thread".into(),
+                    run_id: None,
+                    source_turn_id: None,
+                    generation: None,
+                    role: MessageRole::User,
+                    message_id: "user".into(),
+                    content: "Original question".into(),
+                    content_block: None,
+                },
+                CanonicalEvent::MessageChunk {
+                    agent_id: "agent".into(),
+                    thread_id: "thread".into(),
+                    run_id: None,
+                    source_turn_id: None,
+                    generation: None,
+                    role: MessageRole::Agent,
+                    message_id: "assistant".into(),
+                    content: "Original answer".into(),
+                    content_block: None,
+                },
+            ])
+            .await;
+
+        assert!(seeded);
+        assert_eq!(
+            session
+                .snapshot()
+                .await
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            ["user", "assistant", "agent-message:message-from-child"]
+        );
     }
 
     #[tokio::test]

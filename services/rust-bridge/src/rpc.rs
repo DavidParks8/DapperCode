@@ -4,8 +4,13 @@ use serde_json::Value;
 pub(crate) enum RpcRequestParseError {
     InvalidJson(String),
     InvalidPayload,
-    MissingMethod { id: Value },
-    Notification,
+    MissingMethod {
+        id: Value,
+    },
+    Notification {
+        method: String,
+        params: Option<Value>,
+    },
 }
 
 #[derive(Debug)]
@@ -29,7 +34,10 @@ pub(crate) fn parse_request(text: &str) -> Result<RpcRequest, RpcRequestParseErr
             id: id.clone().unwrap_or(Value::Null),
         })?;
     let Some(id) = id else {
-        return Err(RpcRequestParseError::Notification);
+        return Err(RpcRequestParseError::Notification {
+            method: method.to_string(),
+            params: object.get("params").cloned(),
+        });
     };
     Ok(RpcRequest {
         id,
@@ -59,6 +67,7 @@ pub(crate) fn is_forwarded_method(method: &str) -> bool {
             | "review/start"
             | "thread/list"
             | "thread/delete"
+            | "thread/approvalPolicy/set"
             | "thread/name/update"
             | "thread/snapshot/page"
             | "thread/loaded/list"
@@ -108,10 +117,13 @@ mod tests {
             RpcRequestParseError::MissingMethod { id } => assert_eq!(id, Value::Null),
             _ => panic!("expected missing method"),
         }
-        assert!(matches!(
-            parse_request(r#"{"method":"event"}"#),
-            Err(RpcRequestParseError::Notification)
-        ));
+        match parse_request(r#"{"method":"event","params":{"foreground":false}}"#).unwrap_err() {
+            RpcRequestParseError::Notification { method, params } => {
+                assert_eq!(method, "event");
+                assert_eq!(params, Some(json!({ "foreground": false })));
+            }
+            _ => panic!("expected notification"),
+        }
     }
 
     #[test]
@@ -121,6 +133,7 @@ mod tests {
         assert_eq!(parse_client_request_id("not json"), Value::Null);
         assert!(is_forwarded_method("thread/read"));
         assert!(is_forwarded_method("thread/delete"));
+        assert!(is_forwarded_method("thread/approvalPolicy/set"));
         assert!(is_forwarded_method("turn/start"));
         assert!(!is_forwarded_method("bridge/capabilities/read"));
         assert!(!is_forwarded_method("thread/read/extra"));
@@ -176,5 +189,14 @@ mod tests {
                 case["agentCapabilities"]["sessionDelete"]
             );
         }
+        assert_eq!(manifest["fixtures"]["runtimeActivity"]["canRetire"], false);
+        assert_eq!(
+            manifest["fixtures"]["brokerPairing"]["type"],
+            "dappercode-bridge-pair"
+        );
+        assert_eq!(
+            manifest["fixtures"]["brokerPairing"]["brokerProtocolVersion"],
+            1
+        );
     }
 }

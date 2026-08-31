@@ -2,6 +2,7 @@
 node_modules/
 *.tgz
 npm-debug.log*
+pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .yarn-integrity
@@ -9,6 +10,8 @@ yarn-error.log*
 
 # TypeScript build artifacts
 **/dist/
+**/bin/
+**/obj/
 *.tsbuildinfo
 **/target/
 **/.build/
@@ -16,6 +19,7 @@ yarn-error.log*
 # Expo / React Native
 .expo/
 .expo-shared/
+/apps/mobile/assets/generated/mermaid-renderer.html
 *.jks
 *.p8
 *.p12
@@ -54,6 +58,7 @@ local.properties
 .env
 .env.*
 !.env.example
+*.pfx
 google-services.json
 GoogleService-Info.plist
 
@@ -82,7 +87,7 @@ coverage/
 *.log
 *.pid
 *.seed
-# The desktop app no longer writes these; they remain ignored for the `npm run bridge` development
+# The desktop app no longer writes these; they remain ignored for the `pnpm run bridge` development
 # flow and for checkouts upgraded from an older release.
 .dappercode/
 .dappercode-push-registry.json

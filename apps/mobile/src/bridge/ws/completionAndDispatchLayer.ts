@@ -46,11 +46,27 @@ export abstract class HostBridgeWsClientCompletionAndDispatchLayer extends HostB
       ? this.baseUrl.replace('https://', 'wss://')
       : this.baseUrl.replace('http://', 'ws://');
     const base = `${wsBase}/rpc`;
-    if (!this.authToken || !this.shouldUseQueryTokenAuth()) {
+    const query: string[] = [];
+    if (this.authToken && this.shouldUseQueryTokenAuth()) {
+      query.push(`token=${encodeURIComponent(this.authToken)}`);
+    }
+    if (this.workspaceId) {
+      query.push(`workspace=${encodeURIComponent(this.workspaceId)}`);
+    }
+    if (this.clientType) {
+      query.push(`clientType=${encodeURIComponent(this.clientType)}`);
+    }
+    if (this.clientName) {
+      query.push(`clientName=${encodeURIComponent(this.clientName)}`);
+    }
+    if (this.getClientForeground) {
+      query.push(`clientForeground=${String(this.getClientForeground())}`);
+    }
+    const suffix = query.join('&');
+    if (!suffix) {
       return base;
     }
-    const separator = base.includes('?') ? '&' : '?';
-    return `${base}${separator}token=${encodeURIComponent(this.authToken)}`;
+    return `${base}?${suffix}`;
   }
   protected shouldUseQueryTokenAuth(): boolean {
     return (

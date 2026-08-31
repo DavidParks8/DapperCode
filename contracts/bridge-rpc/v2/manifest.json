@@ -2,24 +2,48 @@
   "fixtureFormatVersion": 1,
   "protocolVersion": 2,
   "bridgeMethods": [
-    "bridge/approvals/list", "bridge/approvals/resolve",
-    "bridge/browser/session/close", "bridge/browser/session/create",
-    "bridge/browser/targets/discover", "bridge/capabilities/read", "bridge/events/replay",
-    "bridge/fs/list", "bridge/git/branches", "bridge/git/clone", "bridge/git/commit",
-    "bridge/git/diff", "bridge/git/history", "bridge/git/push", "bridge/git/stage",
-    "bridge/git/stageAll", "bridge/git/status", "bridge/git/switch", "bridge/git/unstage",
-    "bridge/git/unstageAll", "bridge/health/read",
-    "bridge/push/register", "bridge/push/unregister",
+    "bridge/approvals/list",
+    "bridge/approvals/resolve",
+    "bridge/browser/session/close",
+    "bridge/browser/session/create",
+    "bridge/browser/targets/discover",
+    "bridge/capabilities/read",
+    "bridge/events/replay",
+    "bridge/fs/list",
+    "bridge/git/branches",
+    "bridge/git/clone",
+    "bridge/git/commit",
+    "bridge/git/diff",
+    "bridge/git/history",
+    "bridge/git/push",
+    "bridge/git/stage",
+    "bridge/git/stageAll",
+    "bridge/git/status",
+    "bridge/git/switch",
+    "bridge/git/unstage",
+    "bridge/git/unstageAll",
+    "bridge/health/read",
+    "bridge/push/observed",
+    "bridge/push/presence",
+    "bridge/push/register",
+    "bridge/push/unregister",
     "bridge/thread/create",
     "bridge/thread/fork",
-    "bridge/thread/list/stream/cancel", "bridge/thread/list/stream/start",
+    "bridge/thread/list/stream/cancel",
+    "bridge/thread/list/stream/start",
     "bridge/thread/queue/cancel",
     "bridge/thread/queue/edit/cancel",
     "bridge/thread/queue/edit/commit",
     "bridge/thread/queue/edit/start",
-    "bridge/thread/queue/read", "bridge/thread/queue/send",
-    "bridge/thread/queue/steer", "bridge/ui/dismiss", "bridge/ui/present",
-    "bridge/ui/resolve", "bridge/ui/update", "bridge/userInput/list",
+    "bridge/thread/queue/read",
+    "bridge/thread/queue/send",
+    "bridge/thread/queue/steer",
+    "bridge/thread/schedules/read",
+    "bridge/ui/dismiss",
+    "bridge/ui/present",
+    "bridge/ui/resolve",
+    "bridge/ui/update",
+    "bridge/userInput/list",
     "bridge/userInput/resolve",
     "bridge/workspaces/list"
   ],
@@ -33,15 +57,40 @@
     }
   ],
   "mobileForwardedMethods": [
-    "model/list", "thread/config/set", "thread/delete", "thread/list", "thread/loaded/list", "thread/name/update", "thread/read", "thread/resume",
-    "thread/snapshot/page", "thread/start", "turn/interrupt", "turn/start"
+    "model/list",
+    "thread/approvalPolicy/set",
+    "thread/config/set",
+    "thread/delete",
+    "thread/list",
+    "thread/loaded/list",
+    "thread/name/update",
+    "thread/read",
+    "thread/resume",
+    "thread/snapshot/page",
+    "thread/start",
+    "turn/interrupt",
+    "turn/start"
   ],
   "notifications": [
-    "bridge/agui.event", "bridge/approval.requested", "bridge/approval.resolved", "bridge/connection/state",
-    "bridge/git/updated", "bridge/notification.truncated", "bridge/thread/list/stream/batch",
-    "bridge/thread/list/stream/error", "bridge/thread/queue/updated", "bridge/ui.dismiss",
-    "bridge/ui.present", "bridge/ui.resolved", "bridge/ui.update", "bridge/userInput.requested",
-    "bridge/userInput.resolved", "thread/deleted", "thread/subagent/adopted"
+    "bridge/agui.event",
+    "bridge/approval.requested",
+    "bridge/approval.resolved",
+    "bridge/connection/state",
+    "bridge/git/updated",
+    "bridge/notification.truncated",
+    "bridge/push/candidate",
+    "bridge/thread/list/stream/batch",
+    "bridge/thread/list/stream/error",
+    "bridge/thread/queue/updated",
+    "bridge/thread/schedules/updated",
+    "bridge/ui.dismiss",
+    "bridge/ui.present",
+    "bridge/ui.resolved",
+    "bridge/ui.update",
+    "bridge/userInput.requested",
+    "bridge/userInput.resolved",
+    "thread/deleted",
+    "thread/subagent/adopted"
   ],
   "errors": [
     { "code": -32700, "name": "parseError" },
@@ -77,9 +126,17 @@
         }
       ],
       "agUiEvents": true,
-      "supports": { "turnSteer": true, "threadFork": true, "threadDelete": true },
+      "supports": {
+        "turnSteer": true,
+        "threadFork": true,
+        "threadDelete": true
+      },
       "supportsByAgent": {
-        "local-primary": { "turnSteer": true, "threadFork": true, "threadDelete": true }
+        "local-primary": {
+          "turnSteer": true,
+          "threadFork": true,
+          "threadDelete": true
+        }
       }
     },
     "capabilityCases": [
@@ -87,27 +144,70 @@
         "name": "partialSupport",
         "agentId": "agent-partial",
         "agentCapabilities": { "sessionSteer": true, "sessionFork": true, "sessionDelete": false },
-        "supportsByAgent": { "turnSteer": true, "threadFork": true, "threadDelete": false }
+        "supportsByAgent": {
+          "turnSteer": true,
+          "threadFork": true,
+          "threadDelete": false
+        }
       },
       {
         "name": "fullSupport",
         "agentId": "agent-full",
         "agentCapabilities": { "sessionSteer": true, "sessionFork": true, "sessionDelete": true },
-        "supportsByAgent": { "turnSteer": true, "threadFork": true, "threadDelete": true }
+        "supportsByAgent": {
+          "turnSteer": true,
+          "threadFork": true,
+          "threadDelete": true
+        }
       },
       {
         "name": "unsupportedOperations",
         "agentId": "agent-unsupported",
-        "agentCapabilities": { "sessionSteer": false, "sessionFork": false, "sessionDelete": false },
-        "supportsByAgent": { "turnSteer": false, "threadFork": false, "threadDelete": false }
+        "agentCapabilities": {
+          "sessionSteer": false,
+          "sessionFork": false,
+          "sessionDelete": false
+        },
+        "supportsByAgent": {
+          "turnSteer": false,
+          "threadFork": false,
+          "threadDelete": false
+        }
       }
     ],
     "operationalStatus": {
       "requests": { "total": 12, "completed": 10, "failed": 2, "timedOut": 1, "pending": 0 },
       "replay": { "entries": 42, "capacity": 2000, "evicted": 0, "clientQueueDrops": 0 },
-      "queue": { "trackedThreads": 2, "depth": 1, "busyThreads": 1 },
+      "queue": {
+        "trackedThreads": 2,
+        "depth": 1,
+        "busyThreads": 1,
+        "activeRuns": 1,
+        "pendingSteers": 0,
+        "pendingApprovals": 0,
+        "pendingUserInputs": 0,
+        "otherLiveWork": 0
+      },
       "push": { "attempted": 4, "accepted": 3, "failed": 1 },
       "recentErrors": [{ "method": "thread/read", "backend": "acp", "kind": "request_timeout" }]
+    },
+    "runtimeActivity": {
+      "activeRuns": 1,
+      "queuedMessages": 1,
+      "pendingSteers": 0,
+      "pendingApprovals": 0,
+      "pendingUserInputs": 0,
+      "activePreviewSessions": 0,
+      "inFlightRequests": 0,
+      "otherLiveWork": 0,
+      "canRetire": false
+    },
+    "brokerPairing": {
+      "type": "dappercode-bridge-pair",
+      "brokerProtocolVersion": 1,
+      "workspaceId": "workspace-alpha-000000000001",
+      "bridgeUrl": "http://100.64.0.10:8787",
+      "bridgeToken": "workspace-scoped-token"
     },
     "notification": {
       "method": "bridge/approval.requested",
@@ -232,16 +332,35 @@
         "timestamp": 1784371200008
       },
       {
+        "type": "ACTIVITY_SNAPSHOT",
+        "messageId": "agent-message:message-1",
+        "activityType": "dappercode.agent_message",
+        "replace": true,
+        "content": {
+          "text": "Please inspect the queue lifecycle.",
+          "agentMessage": {
+            "messageId": "message-1",
+            "direction": "received",
+            "relatedThreadId": "agent-alpha:parent",
+            "relatedTitle": "Lead agent",
+            "relation": "parent",
+            "disposition": "steering",
+            "body": "Please inspect the queue lifecycle."
+          }
+        },
+        "timestamp": 1784371200009
+      },
+      {
         "type": "RUN_FINISHED",
         "threadId": "thread-1",
         "runId": "run-1",
-        "timestamp": 1784371200009
+        "timestamp": 1784371200010
       },
       {
         "type": "RUN_ERROR",
         "message": "failed",
         "code": "acp_run_failed",
-        "timestamp": 1784371200010
+        "timestamp": 1784371200011
       }
     ],
     "toolRevisionEvents": [
@@ -333,13 +452,23 @@
               },
               { "type": "audio", "data": "YXVkaW8=", "mimeType": "audio/wav" }
             ],
-            "truncated": false
+            "truncated": false,
+            "usage": {
+              "inputTokens": 4100,
+              "outputTokens": 860,
+              "reasoningTokens": 240,
+              "cachedReadTokens": 31200,
+              "cachedWriteTokens": 1900,
+              "totalTokens": 38300,
+              "model": "Example Model"
+            }
           },
           {
             "id": "reasoning-1",
             "role": "thought",
             "parts": [{ "type": "text", "text": "Snapshot reasoning" }],
-            "truncated": false
+            "truncated": false,
+            "usage": null
           }
         ],
         "tools": [
@@ -349,6 +478,8 @@
             "kind": "read",
             "status": "completed",
             "title": "Read file",
+            "startedAtMs": 1000,
+            "completedAtMs": 2000,
             "content": "done",
             "structuredContent": [
               { "type": "content", "content": { "type": "text", "text": "structured" } },
@@ -395,6 +526,15 @@
         },
         "plan": [{ "content": "Inspect state", "priority": "high", "status": "completed" }],
         "usage": { "used": 120, "size": 4096, "cost": "$0.01" },
+        "tokenTotals": {
+          "turns": 14,
+          "inputTokens": 48200,
+          "outputTokens": 12400,
+          "reasoningTokens": 8900,
+          "cachedReadTokens": 386000,
+          "cachedWriteTokens": 52300,
+          "totalTokens": 507800
+        },
         "mode": "plan",
         "config": [
           {
@@ -479,6 +619,55 @@
       "submissionId": "submission-00000000-0000-4000-8000-000000000001",
       "threadId": "thread-1",
       "disposition": "queued"
+    },
+    "threadSchedules": {
+      "threadId": "thread-1",
+      "schedules": [
+        {
+          "scheduleId": "00000000-0000-4000-8000-000000000002",
+          "threadId": "thread-1",
+          "promptPreview": "Review the deployment checklist.",
+          "promptBytes": 32,
+          "scheduledFor": "2026-09-01T16:00:00Z",
+          "createdAt": "2026-08-29T21:00:00Z",
+          "status": "scheduled",
+          "retryAttempt": 0
+        }
+      ]
+    },
+    "agentMessageQueue": {
+      "threadId": "agent-alpha:child",
+      "items": [
+        {
+          "id": "queued-message-1",
+          "createdAt": "2026-07-20T00:00:02+00:00",
+          "content": "Please inspect the queue lifecycle.",
+          "agentMessage": {
+            "messageId": "message-1",
+            "direction": "received",
+            "relatedThreadId": "agent-alpha:parent",
+            "relatedTitle": "Lead agent",
+            "relation": "parent",
+            "disposition": "queued",
+            "body": "Please inspect the queue lifecycle."
+          }
+        }
+      ],
+      "pendingSteers": [],
+      "pendingSteerCount": 0,
+      "editingItemId": null,
+      "waitingForToolCalls": false,
+      "steeringInFlight": false,
+      "lastError": null
+    },
+    "cancelledAgentMessage": {
+      "messageId": "message-cancelled",
+      "direction": "sent",
+      "relatedThreadId": "agent-alpha:child",
+      "relatedTitle": "Worker agent",
+      "relation": "sub_agent",
+      "disposition": "cancelled",
+      "body": "This queued message was cancelled."
     },
     "pushRegistration": {
       "profileId": "bridge-profile-1",

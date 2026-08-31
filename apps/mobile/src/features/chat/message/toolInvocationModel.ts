@@ -32,6 +32,8 @@ export interface ToolInvocation {
   kind: ChatToolKind;
   status: ChatToolStatus;
   title: string;
+  startedAtMs: number | null;
+  completedAtMs: number | null;
   /** Metadata-backed rows can safely synthesize status language. */
   statusLanguage?: boolean;
   monospaceTitle: boolean;
@@ -76,6 +78,8 @@ export function buildToolInvocations(messages: ChatMessage[]): ToolInvocation[] 
       id,
       meta: null,
       textLines: [],
+      firstObservedAtMs: null,
+      terminalObservedAtMs: null,
     };
     drafts.set(id, created);
     order.push(id);
@@ -90,6 +94,7 @@ export function buildToolInvocations(messages: ChatMessage[]): ToolInvocation[] 
       if (meta) {
         draft.meta = meta;
       }
+      collectMessageTiming(draft, message);
       appendLines(draft.textLines, readToolMessage(message, Boolean(meta ?? draft.meta)));
     }
   }
@@ -103,6 +108,8 @@ interface ToolInvocationDraft {
   id: string;
   meta: ChatToolMeta | null;
   textLines: string[];
+  firstObservedAtMs: number | null;
+  terminalObservedAtMs: number | null;
 }
 
 function resolveInvocationTitleInfo(
@@ -164,8 +171,15 @@ function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocat
   const { title, rawLines } = titleInfo;
   const meta = draft.meta;
   const metaFields = resolveInvocationMetaFields(meta);
+  const startedAtMs = meta?.startedAtMs ?? draft.firstObservedAtMs;
+  const completedAtMs =
+    meta?.completedAtMs ??
+    (metaFields.status === 'completed' || metaFields.status === 'failed'
+      ? draft.terminalObservedAtMs
+      : null);
   const parsed = parseStructuredContent(meta?.content);
   const locations = parseLocations(meta?.locations);
+  suppressRenderedLocationLines(parsed.suppressedLines, meta?.locations);
   // A `read` result is the file it echoed back, and the same text is already in
   // the diff or console block, so it is not repeated as loose lines.
   const textLines = rawLines.filter(
@@ -176,6 +190,8 @@ function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocat
     kind: metaFields.kind,
     status: metaFields.status,
     title: stripBullet(title),
+    startedAtMs,
+    completedAtMs,
     statusLanguage: meta !== null,
     monospaceTitle: metaFields.monospaceTitle,
     isError: metaFields.isError,
@@ -187,6 +203,37 @@ function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocat
     truncated: metaFields.truncated || parsed.truncated,
     empty: computeInvocationEmpty(textLines, parsed, locations),
   };
+}
+
+function collectMessageTiming(draft: ToolInvocationDraft, message: ChatMessage): void {
+  const createdAtMs = parseTimestamp(message.createdAt);
+  if (createdAtMs !== null) {
+    draft.firstObservedAtMs =
+      draft.firstObservedAtMs === null
+        ? createdAtMs
+        : Math.min(draft.firstObservedAtMs, createdAtMs);
+    if (message.role === 'tool') {
+      draft.terminalObservedAtMs =
+        draft.terminalObservedAtMs === null
+          ? createdAtMs
+          : Math.max(draft.terminalObservedAtMs, createdAtMs);
+    }
+  }
+  const completedAtMs = parseTimestamp(message.completedAt);
+  if (completedAtMs !== null) {
+    draft.terminalObservedAtMs =
+      draft.terminalObservedAtMs === null
+        ? completedAtMs
+        : Math.max(draft.terminalObservedAtMs, completedAtMs);
+  }
+}
+
+function parseTimestamp(value: string | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 function toolCallIdOf(message: ChatMessage): string | null {
@@ -373,6 +420,21 @@ function parseLocations(value: unknown): ToolInvocationLocation[] {
     seen.add(key);
     return true;
   });
+}
+
+function suppressRenderedLocationLines(suppressedLines: Set<string>, value: unknown): void {
+  if (!Array.isArray(value)) {
+    return;
+  }
+  for (const entry of value) {
+    const location = asRecord(entry);
+    const path = asString(location?.['path'])?.trim();
+    if (!path) {
+      continue;
+    }
+    const line = typeof location?.['line'] === 'number' ? location['line'] : null;
+    suppressedLines.add(`[location: ${path}${line ? `:${String(line)}` : ''}]`);
+  }
 }
 
 function normalizeLocationPath(path: string): string {

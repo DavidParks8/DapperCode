@@ -7,6 +7,7 @@ import { BridgeProtocolVersionError, HostBridgeWsClient, RpcRequestError } from 
 
 interface ContractManifest {
   protocolVersion: number;
+  bridgeMethods: string[];
   notifications: string[];
   fixtures: {
     capabilities: {
@@ -23,6 +24,16 @@ interface ContractManifest {
       protocolVersion: number;
       eventId: number;
       params: { event: { type: string; delta: string } };
+    };
+    runtimeActivity: {
+      activeRuns: number;
+      queuedMessages: number;
+      canRetire: boolean;
+    };
+    brokerPairing: {
+      type: string;
+      brokerProtocolVersion: number;
+      workspaceId: string;
     };
   };
 }
@@ -85,6 +96,7 @@ describe('HostBridgeWsClient', () => {
     ) as ContractManifest;
 
     expect(manifest.protocolVersion).toBe(HostBridgeWsClient.PROTOCOL_VERSION);
+    expect(manifest.bridgeMethods).toContain('bridge/push/presence');
     expect(manifest.fixtures.capabilities.protocolVersion).toBe(manifest.protocolVersion);
     expect(manifest.fixtures.capabilities.agUiEvents).toBe(true);
     expect(manifest.fixtures.notification).toMatchObject({
@@ -99,6 +111,16 @@ describe('HostBridgeWsClient', () => {
       params: { event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'Hello' } },
     });
     expect(manifest.notifications).toContain(manifest.fixtures.agUiNotification.method);
+    expect(manifest.fixtures.runtimeActivity).toMatchObject({
+      activeRuns: 1,
+      queuedMessages: 1,
+      canRetire: false,
+    });
+    expect(manifest.fixtures.brokerPairing).toMatchObject({
+      type: 'dappercode-bridge-pair',
+      brokerProtocolVersion: 1,
+      workspaceId: 'workspace-alpha-000000000001',
+    });
   });
 
   it('connect() builds /rpc websocket URL', () => {
@@ -106,6 +128,34 @@ describe('HostBridgeWsClient', () => {
     client.connect();
 
     expect(global.WebSocket).toHaveBeenCalledWith('ws://localhost:8787/rpc');
+  });
+
+  it('identifies encoded client metadata alongside workspace routing', () => {
+    const client = new HostBridgeWsClient('http://localhost:8787', {
+      workspaceId: 'workspace alpha',
+      clientType: ' mobile ',
+      clientName: ' DapperCode Mobile ',
+      getClientForeground: () => true,
+    });
+    client.connect();
+
+    expect(global.WebSocket).toHaveBeenCalledWith(
+      'ws://localhost:8787/rpc?workspace=workspace%20alpha&clientType=mobile&clientName=DapperCode%20Mobile&clientForeground=true',
+    );
+  });
+
+  it('routes a workspace-scoped credential through the stable broker socket', () => {
+    const client = new HostBridgeWsClient('http://localhost:8787', {
+      authToken: 'token-abc',
+      workspaceId: 'workspace-alpha-000000000001',
+    });
+    client.connect();
+
+    expect(global.WebSocket).toHaveBeenCalledWith(
+      'ws://localhost:8787/rpc?workspace=workspace-alpha-000000000001',
+      undefined,
+      expect.objectContaining({ headers: expect.any(Object) }),
+    );
   });
 
   it('sends Authorization header on native when auth token is provided', () => {
@@ -183,6 +233,84 @@ describe('HostBridgeWsClient', () => {
     );
 
     await expect(requestPromise).resolves.toEqual({ ok: true });
+  });
+
+  it('sends fire-and-forget notifications synchronously without an id', () => {
+    const client = new HostBridgeWsClient('http://localhost:8787');
+    expect(client.notify('bridge/push/presence', { foreground: true })).toBe(false);
+    client.connect();
+    const socket = latestMockSocket();
+    socket.simulateOpen();
+
+    expect(client.notify('bridge/push/presence', { foreground: false })).toBe(true);
+    expect(JSON.parse(String(socket.send.mock.calls.at(-1)?.[0]))).toEqual({
+      method: 'bridge/push/presence',
+      params: { foreground: false },
+    });
+
+    socket.send.mockImplementationOnce(() => {
+      throw new Error('closed');
+    });
+    expect(client.notify('bridge/push/presence', { foreground: true })).toBe(false);
+  });
+
+  it('orders foreground presence reports monotonically', () => {
+    const client = new HostBridgeWsClient('http://localhost:8787');
+    client.connect();
+    const socket = latestMockSocket();
+    socket.simulateOpen();
+
+    expect(client.reportPushPresence(true)).toBe(true);
+    expect(client.reportPushPresence(false)).toBe(true);
+    expect(socket.send.mock.calls.map(([payload]) => JSON.parse(String(payload)))).toEqual([
+      {
+        method: 'bridge/push/presence',
+        params: { foreground: true, sequence: 1 },
+      },
+      {
+        method: 'bridge/push/presence',
+        params: { foreground: false, sequence: 2 },
+      },
+    ]);
+  });
+
+  it('ties push observations to the latest presence sequence', () => {
+    const client = new HostBridgeWsClient('http://localhost:8787');
+    client.connect();
+    const socket = latestMockSocket();
+    socket.simulateOpen();
+    client.reportPushPresence(true);
+
+    expect(client.reportPushObservation('candidate-7')).toBe(true);
+    expect(JSON.parse(String(socket.send.mock.calls.at(-1)?.[0]))).toEqual({
+      method: 'bridge/push/observed',
+      params: {
+        candidateId: 'candidate-7',
+        presenceSequence: 1,
+      },
+    });
+  });
+
+  it('publishes synchronous teardown work before closing the socket', () => {
+    const client = new HostBridgeWsClient('http://localhost:8787');
+    client.connect();
+    const socket = latestMockSocket();
+    socket.simulateOpen();
+    client.onBeforeDisconnect(() => {
+      client.notify('bridge/push/presence', { foreground: false });
+    });
+
+    client.disconnect();
+
+    expect(socket.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        method: 'bridge/push/presence',
+        params: { foreground: false },
+      }),
+    );
+    expect(socket.send.mock.invocationCallOrder[0]).toBeLessThan(
+      socket.close.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    );
   });
 
   it('request() preserves structured JSON-RPC errors', async () => {
@@ -348,6 +476,86 @@ describe('HostBridgeWsClient', () => {
     }
   });
 
+  it('backs off when the bridge accepts a socket and immediately closes it', async () => {
+    jest.useFakeTimers();
+    jest.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const client = new HostBridgeWsClient('http://localhost:8787');
+      const status = jest.fn();
+      client.onStatus(status);
+      client.connect();
+
+      // A workspace runtime that cannot start accepts the upgrade, then closes the socket. The
+      // connection was never usable, so the backoff must keep growing instead of pinning at its
+      // minimum and hot-looping the connection indicator.
+      const openThenClose = async () => {
+        const socket = latestMockSocket();
+        socket.simulateOpen();
+        socket.simulateClose();
+        await Promise.resolve();
+        await Promise.resolve();
+      };
+
+      await openThenClose();
+      expect(jest.getTimerCount()).toBe(1);
+      await jest.advanceTimersByTimeAsync(500);
+      expect(mockInstances).toHaveLength(2);
+
+      await openThenClose();
+      await jest.advanceTimersByTimeAsync(999);
+      expect(mockInstances).toHaveLength(2);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(mockInstances).toHaveLength(3);
+
+      await openThenClose();
+      await jest.advanceTimersByTimeAsync(1999);
+      expect(mockInstances).toHaveLength(3);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(mockInstances).toHaveLength(4);
+
+      expect(status.mock.calls.map(([connected]) => connected)).toEqual([
+        true,
+        false,
+        true,
+        false,
+        true,
+        false,
+      ]);
+    } finally {
+      jest.restoreAllMocks();
+      jest.useRealTimers();
+    }
+  });
+
+  it('resets backoff once a connection stays open long enough to be usable', async () => {
+    jest.useFakeTimers();
+    jest.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const client = new HostBridgeWsClient('http://localhost:8787');
+      client.connect();
+
+      latestMockSocket().simulateOpen();
+      latestMockSocket().simulateClose();
+      await Promise.resolve();
+      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(500);
+      expect(mockInstances).toHaveLength(2);
+
+      const stable = latestMockSocket();
+      stable.simulateOpen();
+      await jest.advanceTimersByTimeAsync(10_000);
+      stable.simulateClose();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      await jest.advanceTimersByTimeAsync(500);
+      expect(mockInstances).toHaveLength(3);
+    } finally {
+      jest.restoreAllMocks();
+      jest.useRealTimers();
+    }
+  });
+
   it('disconnect() cancels a scheduled reconnect', async () => {
     jest.useFakeTimers();
     jest.spyOn(Math, 'random').mockReturnValue(0);
@@ -364,6 +572,55 @@ describe('HostBridgeWsClient', () => {
       await jest.advanceTimersByTimeAsync(5_000);
       expect(mockInstances).toHaveLength(1);
     } finally {
+      jest.restoreAllMocks();
+      jest.useRealTimers();
+    }
+  });
+
+  it('request() wakes a disconnected bridge connection without waiting for backoff', async () => {
+    jest.useFakeTimers();
+    jest.spyOn(Math, 'random').mockReturnValue(0);
+    const client = new HostBridgeWsClient('http://localhost:8787');
+    let request: Promise<{ disposition: string }> | null = null;
+    try {
+      client.connect();
+      const firstSocket = latestMockSocket();
+      firstSocket.simulateOpen();
+      firstSocket.simulateClose();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(jest.getTimerCount()).toBe(1);
+
+      request = client.request<{ disposition: string }>('bridge/thread/queue/send', {
+        threadId: 'thread',
+        content: 'wake up',
+      });
+      await Promise.resolve();
+
+      expect(jest.getTimerCount()).toBe(0);
+      expect(mockInstances).toHaveLength(2);
+      const wakeSocket = latestMockSocket();
+      wakeSocket.simulateOpen();
+      for (let index = 0; index < 6 && wakeSocket.send.mock.calls.length === 0; index += 1) {
+        await Promise.resolve();
+      }
+
+      const sentPayload = JSON.parse(String(wakeSocket.send.mock.calls[0][0])) as {
+        id: string;
+        method: string;
+      };
+      expect(sentPayload.method).toBe('bridge/thread/queue/send');
+      wakeSocket.simulateMessage(
+        JSON.stringify({
+          id: sentPayload.id,
+          result: { disposition: 'sent' },
+        }),
+      );
+
+      await expect(request).resolves.toEqual({ disposition: 'sent' });
+    } finally {
+      client.disconnect();
+      await request?.catch(() => undefined);
       jest.restoreAllMocks();
       jest.useRealTimers();
     }
@@ -784,6 +1041,39 @@ describe('HostBridgeWsClient', () => {
     expect(readDeliveredEventIds(listener)).toEqual([11, 12]);
   });
 
+  it('delivers unnumbered push candidates while a numbered event gap is recovering', () => {
+    const client = new HostBridgeWsClient('http://localhost:8787');
+    const listener = jest.fn();
+    client.onEvent(listener);
+    client.connect();
+    const socket = latestMockSocket();
+    socket.simulateOpen();
+    simulateConnectionIdentity(socket, 'stream-candidate-gap');
+    socket.simulateMessage(
+      JSON.stringify({ method: 'turn/started', eventId: 10, params: { threadId: 'thread' } }),
+    );
+    socket.simulateMessage(
+      JSON.stringify({ method: 'turn/completed', eventId: 12, params: { threadId: 'thread' } }),
+    );
+
+    socket.simulateMessage(
+      JSON.stringify({
+        method: 'bridge/push/candidate',
+        protocolVersion: HostBridgeWsClient.PROTOCOL_VERSION,
+        streamId: 'stream-candidate-gap',
+        params: { candidateId: '7', event: 'turn_completed', afterEventId: 12 },
+      }),
+    );
+
+    expect(listener).toHaveBeenCalledWith({
+      method: 'bridge/push/candidate',
+      protocolVersion: HostBridgeWsClient.PROTOCOL_VERSION,
+      streamId: 'stream-candidate-gap',
+      params: { candidateId: '7', event: 'turn_completed', afterEventId: 12 },
+    });
+    client.disconnect();
+  });
+
   it('emits a snapshot boundary when replay history is truncated', async () => {
     const client = new HostBridgeWsClient('http://localhost:8787');
     const listener = jest.fn();
@@ -1150,10 +1440,16 @@ describe('HostBridgeWsClient', () => {
     expect(status).not.toHaveBeenCalled();
   });
 
-  it('rejects requests when disconnected and times out unanswered requests', async () => {
-    const disconnected = new HostBridgeWsClient('http://localhost:8787');
-    await expect(disconnected.request('no/connect')).rejects.toThrow('Unable to connect');
+  it('does not reconnect requests after an explicit disconnect', async () => {
+    const client = new HostBridgeWsClient('http://localhost:8787');
+    client.connect();
+    client.disconnect();
 
+    await expect(client.request('no/connect')).rejects.toThrow('Unable to connect');
+    expect(mockInstances).toHaveLength(1);
+  });
+
+  it('times out unanswered requests', async () => {
     jest.useFakeTimers();
     try {
       const client = new HostBridgeWsClient('http://localhost:8787', { requestTimeoutMs: 25 });

@@ -10,7 +10,7 @@ import {
 } from '../state/models';
 import { activityAtom } from '../state/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { CollaborationMode } from '@bridge/types/types';
 import { selectAgentId } from '@shared/agents';
 import { toSelectedServiceTier } from '../helpers/helpers';
@@ -57,6 +57,9 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
   const effortPickerModelId = useAtomValue(effortPickerModelIdAtom);
   const selectionChatIdRef = useRef(selectedChatId);
   const selectionBelongsToCurrentChat = selectionChatIdRef.current === selectedChatId;
+  const preserveModelSelectionForChat = useCallback((chatId: string | null) => {
+    selectionChatIdRef.current = chatId;
+  }, []);
   useEffect(() => {
     if (selectedChatId) {
       return;
@@ -81,9 +84,11 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
       return;
     }
     selectionChatIdRef.current = selectedChatId;
-    setSelectedModelId(null);
-    setSelectedEffort(null);
-  }, [selectedChatId, setSelectedEffort, setSelectedModelId]);
+    const chatId = selectedChatId?.trim();
+    const preference = chatId ? chatModelPreferencesRef.current[chatId] : null;
+    setSelectedModelId(preference?.modelId ?? null);
+    setSelectedEffort(preference?.effort ?? null);
+  }, [chatModelPreferencesRef, selectedChatId, setSelectedEffort, setSelectedModelId]);
   useEffect(() => {
     if (selectedChatId) {
       return;
@@ -194,6 +199,7 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     collaborationModeLabel,
     hasPendingServiceTierChange,
     fastModeLabel,
+    preserveModelSelectionForChat,
   };
 }
 export type MainScreenModelCatalogStateResult = ReturnType<typeof useMainScreenModelCatalogState>;

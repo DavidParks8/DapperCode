@@ -1,6 +1,7 @@
 import { AppState, type AppStateStatus } from 'react-native';
 
 import type { HostBridgeWsClient } from '@bridge/ws/ws';
+import { isUserPresentAppState } from '@shell/session/appVisibility';
 
 interface AppStateSource {
   currentState: AppStateStatus;
@@ -15,7 +16,7 @@ export function bindAppWebSocketLifecycle(
   appState: AppStateSource = AppState,
 ): () => void {
   const syncConnection = (state: AppStateStatus) => {
-    if (state === 'active') {
+    if (isUserPresentAppState(state)) {
       ws.connect();
       return;
     }

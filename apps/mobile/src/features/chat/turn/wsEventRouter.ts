@@ -32,6 +32,7 @@ const THREAD_STATE_EVENT_METHODS = new Set([
   'thread/name/updated',
   'thread/deleted',
   'thread/tokenUsage/updated',
+  'thread/tokenTotals/updated',
   'item/started',
 ]);
 

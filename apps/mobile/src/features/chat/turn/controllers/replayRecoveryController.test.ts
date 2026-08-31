@@ -22,6 +22,9 @@ function createApi() {
     readBridgeCapabilities: jest.fn().mockResolvedValue(capabilities),
     getChat: jest.fn((threadId: string) => Promise.resolve(chat(threadId))),
     readThreadQueue: jest.fn((threadId: string) => Promise.resolve({ threadId })),
+    readThreadSchedules: jest.fn((threadId: string) =>
+      Promise.resolve({ threadId, schedules: [] }),
+    ),
   } as unknown as jest.Mocked<HostBridgeApiClient>;
 }
 
@@ -48,8 +51,28 @@ describe('replay recovery controller', () => {
     expect(result.approvals).toHaveLength(1);
     expect(result.userInputs).toHaveLength(1);
     expect(result.capabilities).toBe(capabilities);
+    expect(result.threads[0]?.schedules).toEqual({ threadId: 'selected', schedules: [] });
     expect(api.getChat).toHaveBeenCalledTimes(4);
     expect(api.readThreadQueue).toHaveBeenCalledTimes(4);
+    expect(api.readThreadSchedules).toHaveBeenCalledTimes(4);
+  });
+
+  it('excludes deleted threads from tracked, loaded, and pending recovery sources', async () => {
+    const api = createApi();
+    const result = await fetchReplayRecoverySnapshot(
+      api,
+      ['selected', 'deleted'],
+      undefined,
+      new Set(['deleted', 'loaded-new', 'background-a', 'background-b']),
+    );
+
+    expect(result.threads.map(({ chat: value }) => value.id)).toEqual(['selected']);
+    expect(api.getChat).toHaveBeenCalledWith('selected', { forceRefresh: true });
+    expect(api.readThreadQueue).toHaveBeenCalledWith('selected');
+    expect(api.readThreadSchedules).toHaveBeenCalledWith('selected');
+    expect(api.getChat).toHaveBeenCalledTimes(1);
+    expect(api.readThreadQueue).toHaveBeenCalledTimes(1);
+    expect(api.readThreadSchedules).toHaveBeenCalledTimes(1);
   });
 
   it('rejects the entire snapshot when one late thread fails and refetches all threads on retry', async () => {
@@ -77,6 +100,7 @@ describe('replay recovery controller', () => {
     });
     expect(api.getChat.mock.calls.length - failedAttemptCalls).toBe(5);
     expect(api.readThreadQueue.mock.calls.length - failedAttemptCalls).toBe(5);
+    expect(api.readThreadSchedules.mock.calls.length - failedAttemptCalls).toBe(5);
   });
 
   it.each([201, REPLAY_RECOVERY_MAX_LOADED_THREADS])(
@@ -101,6 +125,7 @@ describe('replay recovery controller', () => {
       expect(recovery.threads).toHaveLength(threadCount);
       expect(api.getChat).toHaveBeenCalledTimes(threadCount);
       expect(api.readThreadQueue).toHaveBeenCalledTimes(threadCount);
+      expect(api.readThreadSchedules).toHaveBeenCalledTimes(threadCount);
       expect(maximumActive).toBeLessThanOrEqual(REPLAY_RECOVERY_CONCURRENCY);
     },
   );
@@ -134,5 +159,6 @@ describe('replay recovery controller', () => {
     await expect(recovery).rejects.toThrow('stale watermark');
     expect(api.getChat).toHaveBeenCalledTimes(REPLAY_RECOVERY_CONCURRENCY);
     expect(api.readThreadQueue).toHaveBeenCalledTimes(REPLAY_RECOVERY_CONCURRENCY);
+    expect(api.readThreadSchedules).toHaveBeenCalledTimes(REPLAY_RECOVERY_CONCURRENCY);
   });
 });

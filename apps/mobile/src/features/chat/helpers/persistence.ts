@@ -1,11 +1,14 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import type {
+  BridgeScheduledPrompt,
+  BridgeThreadSchedulesState,
   BridgeQueuedMessage,
   BridgeThreadQueueError,
   BridgeThreadQueueState,
   BridgeUiSurface,
   TurnPlanStep,
 } from '@bridge/types/types';
+import { parseAgentMessageMeta } from '@bridge/messages';
 import { normalizeWorkspacePath } from './attachments';
 import { toBridgeUiSurface } from './bridgeUi';
 import {
@@ -209,7 +212,14 @@ function parseBridgeQueuedMessage(value: unknown): BridgeQueuedMessage | null {
   const id = readString(entry?.['id'])?.trim();
   const createdAt = readString(entry?.['createdAt'])?.trim();
   const content = readString(entry?.['content'])?.replace(/\r\n/g, '\n');
-  return id && createdAt && content ? { id, createdAt, content } : null;
+  return id && createdAt && content
+    ? {
+        id,
+        createdAt,
+        content,
+        agentMessage: parseAgentMessageMeta(entry?.['agentMessage']),
+      }
+    : null;
 }
 
 function parseBridgeQueuedMessages(value: unknown): BridgeQueuedMessage[] {
@@ -240,6 +250,95 @@ function parseBridgeThreadQueueError(value: unknown): BridgeThreadQueueError | n
 
 function parsePendingSteerCount(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isSafeInteger(value) ? Math.max(0, value) : fallback;
+}
+
+function parseNonNegativeInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function parseRequiredString(value: unknown): string | null {
+  const parsed = readString(value);
+  if (!parsed) {
+    return null;
+  }
+  return parsed.trim() || null;
+}
+
+function parsePromptPreview(value: unknown): string | null {
+  const parsed = readString(value);
+  if (!parsed) {
+    return null;
+  }
+  const normalized = parsed.replace(/\r\n/g, '\n');
+  return normalized.trim() ? normalized : null;
+}
+
+function parseTimestamp(value: unknown): string | null {
+  const parsed = parseRequiredString(value);
+  return parsed && Number.isFinite(Date.parse(parsed)) ? parsed : null;
+}
+
+function parseScheduledPromptStatus(value: unknown): BridgeScheduledPrompt['status'] | null {
+  return value === 'scheduled' || value === 'queued' || value === 'retrying' ? value : null;
+}
+
+function parseBridgeScheduledPrompt(value: unknown): BridgeScheduledPrompt | null {
+  const entry = toRecord(value);
+  if (!entry) {
+    return null;
+  }
+  const scheduleId = parseRequiredString(entry['scheduleId']);
+  const threadId = parseRequiredString(entry['threadId']);
+  const promptPreview = parsePromptPreview(entry['promptPreview']);
+  const scheduledFor = parseTimestamp(entry['scheduledFor']);
+  const createdAt = parseTimestamp(entry['createdAt']);
+  const status = parseScheduledPromptStatus(entry['status']);
+  const promptBytes = parseNonNegativeInteger(entry['promptBytes']);
+  const retryAttempt = parseNonNegativeInteger(entry['retryAttempt']);
+  if (
+    !scheduleId ||
+    !threadId ||
+    !promptPreview ||
+    !scheduledFor ||
+    !createdAt ||
+    !status ||
+    promptBytes === null ||
+    retryAttempt === null
+  ) {
+    return null;
+  }
+  return {
+    scheduleId,
+    threadId,
+    promptPreview,
+    promptBytes,
+    scheduledFor,
+    createdAt,
+    status,
+    retryAttempt,
+  };
+}
+
+export function parseBridgeThreadSchedulesState(value: unknown): BridgeThreadSchedulesState | null {
+  const record = toRecord(value);
+  const threadId = readString(record?.['threadId'])?.trim();
+  if (!record || !threadId) {
+    return null;
+  }
+  const schedules = Array.isArray(record['schedules'])
+    ? record['schedules']
+        .map(parseBridgeScheduledPrompt)
+        .filter(
+          (schedule): schedule is BridgeScheduledPrompt =>
+            schedule !== null && schedule.threadId === threadId,
+        )
+        .sort(
+          (left, right) =>
+            Date.parse(left.scheduledFor) - Date.parse(right.scheduledFor) ||
+            left.scheduleId.localeCompare(right.scheduleId),
+        )
+    : [];
+  return { threadId, schedules };
 }
 
 export function parseBridgeThreadQueueState(value: unknown): BridgeThreadQueueState | null {

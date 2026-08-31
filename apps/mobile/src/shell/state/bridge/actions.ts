@@ -53,6 +53,7 @@ function resolveSaveBridgeProfileDraft(
     id: mode === 'edit' ? (profileId ?? get(activeBridgeProfileAtom)?.id ?? null) : null,
     bridgeUrl: normalized,
     bridgeToken: normalizedToken,
+    workspaceId: input.draft.workspaceId ?? null,
     activate: true,
   };
   const editedProfile = nextDraft.id
@@ -60,7 +61,9 @@ function resolveSaveBridgeProfileDraft(
     : null;
   const bridgeIdentityChanged = Boolean(
     editedProfile &&
-    (editedProfile.bridgeUrl !== normalized || editedProfile.bridgeToken !== normalizedToken),
+    (editedProfile.bridgeUrl !== normalized ||
+      editedProfile.bridgeToken !== normalizedToken ||
+      editedProfile.workspaceId !== (input.draft.workspaceId ?? null)),
   );
   return { nextDraft, bridgeIdentityChanged };
 }

@@ -1,9 +1,16 @@
-import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
+import { AppState } from 'react-native';
 import type { HostBridgeWsClient } from '@bridge/ws/ws';
 import {
   DRAWER_EVENT_REFRESH_DEBOUNCE_MS,
   DRAWER_REFRESH_CONNECTED_MS,
-  DRAWER_REFRESH_DISCONNECTED_MS,
   drawerEventRequiresRefresh,
   readDeletedThreadId,
 } from '@shell/navigation/drawerChatLoadingConfig';
@@ -15,6 +22,7 @@ import {
 
 interface DrawerChatLiveSyncOptions {
   active: boolean;
+  cancelMaintenanceWork: () => void;
   onThreadDeleted: (threadId: string) => void;
   scheduleLoadChats: (delay?: number, forceRefresh?: boolean) => void;
   setRunIndicators: Dispatch<SetStateAction<DrawerRunIndicatorMap>>;
@@ -36,6 +44,7 @@ export interface DrawerChatLiveSyncControls {
 
 export function useDrawerChatLiveSync({
   active,
+  cancelMaintenanceWork,
   onThreadDeleted,
   scheduleLoadChats,
   setRunIndicators,
@@ -43,11 +52,37 @@ export function useDrawerChatLiveSync({
   ws,
   wsConnected,
 }: DrawerChatLiveSyncOptions): DrawerChatLiveSyncControls {
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+  const activeRef = useRef(active);
+  const appActiveRef = useRef(appActive);
+  const wsConnectedRef = useRef(wsConnected);
+  activeRef.current = active;
+  wsConnectedRef.current = wsConnected;
+  const maintenanceActive = active && appActive && wsConnected;
+  const isMaintenanceActive = useCallback(
+    () => activeRef.current && appActiveRef.current && wsConnectedRef.current,
+    [],
+  );
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      const nextActive = state === 'active';
+      appActiveRef.current = nextActive;
+      if (!nextActive) {
+        cancelMaintenanceWork();
+      }
+      setAppActive(nextActive);
+    });
+    return () => subscription.remove();
+  }, [cancelMaintenanceWork]);
+
   useEffect(() => {
     return ws.onEvent((event) => {
       if (event.method === 'bridge/events/snapshotRequired') {
         setRunIndicators({});
-        scheduleLoadChats(0, true);
+        if (isMaintenanceActive()) {
+          scheduleLoadChats(0, true);
+        }
         return;
       }
 
@@ -57,32 +92,36 @@ export function useDrawerChatLiveSync({
       }
 
       setRunIndicators((previous) => updateDrawerRunIndicatorsForEvent(previous, event));
-      if (drawerEventRequiresRefresh(event)) {
+      if (isMaintenanceActive() && drawerEventRequiresRefresh(event)) {
         scheduleLoadChats(DRAWER_EVENT_REFRESH_DEBOUNCE_MS, true);
       }
     });
-  }, [onThreadDeleted, scheduleLoadChats, setRunIndicators, ws]);
+  }, [isMaintenanceActive, onThreadDeleted, scheduleLoadChats, setRunIndicators, ws]);
 
   useEffect(() => {
     return ws.onStatus((connected) => {
+      wsConnectedRef.current = connected;
       setWsConnected(connected);
-      if (connected) {
+      if (!connected) {
+        cancelMaintenanceWork();
+      } else if (activeRef.current && appActiveRef.current) {
         scheduleLoadChats(DRAWER_EVENT_REFRESH_DEBOUNCE_MS, true);
       }
     });
-  }, [scheduleLoadChats, setWsConnected, ws]);
+  }, [cancelMaintenanceWork, scheduleLoadChats, setWsConnected, ws]);
 
   useEffect(() => {
+    if (!maintenanceActive) {
+      return;
+    }
     const timer = setInterval(() => {
+      if (!isMaintenanceActive()) {
+        return;
+      }
       setRunIndicators((previous) => pruneStaleDrawerRunIndicators(previous));
     }, 5000);
     return () => clearInterval(timer);
-  }, [setRunIndicators]);
-
-  const wsConnectedRef = useRef(wsConnected);
-  useEffect(() => {
-    wsConnectedRef.current = wsConnected;
-  }, [wsConnected]);
+  }, [isMaintenanceActive, maintenanceActive, setRunIndicators]);
 
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPollTimer = useCallback(() => {
@@ -99,35 +138,34 @@ export function useDrawerChatLiveSync({
       clearPollTimer();
       pollTimerRef.current = setTimeout(() => {
         pollTimerRef.current = null;
+        if (!isMaintenanceActive()) {
+          return;
+        }
         scheduleLoadChats();
-        schedulePoll(
-          wsConnectedRef.current ? DRAWER_REFRESH_CONNECTED_MS : DRAWER_REFRESH_DISCONNECTED_MS,
-        );
+        schedulePoll(DRAWER_REFRESH_CONNECTED_MS);
       }, delay);
     },
-    [clearPollTimer, scheduleLoadChats],
+    [clearPollTimer, isMaintenanceActive, scheduleLoadChats],
   );
 
   useEffect(() => {
-    if (!active) {
+    if (!maintenanceActive) {
       clearPollTimer();
       return;
     }
-    schedulePoll(wsConnected ? DRAWER_REFRESH_CONNECTED_MS : DRAWER_REFRESH_DISCONNECTED_MS);
+    schedulePoll(DRAWER_REFRESH_CONNECTED_MS);
     return clearPollTimer;
-  }, [active, clearPollTimer, schedulePoll, wsConnected]);
+  }, [clearPollTimer, maintenanceActive, schedulePoll]);
 
   const resetPollTimer = useCallback(
     (delay: number = DRAWER_EVENT_REFRESH_DEBOUNCE_MS, forceRefresh = true) => {
-      if (!active) {
+      if (!isMaintenanceActive()) {
         return;
       }
       scheduleLoadChats(delay, forceRefresh);
-      schedulePoll(
-        wsConnectedRef.current ? DRAWER_REFRESH_CONNECTED_MS : DRAWER_REFRESH_DISCONNECTED_MS,
-      );
+      schedulePoll(DRAWER_REFRESH_CONNECTED_MS);
     },
-    [active, scheduleLoadChats, schedulePoll],
+    [isMaintenanceActive, scheduleLoadChats, schedulePoll],
   );
 
   return { resetPollTimer };

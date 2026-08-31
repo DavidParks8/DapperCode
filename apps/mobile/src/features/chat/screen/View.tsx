@@ -4,7 +4,8 @@ import { MainScreenRenameSheet } from './RenameSheet';
 import { MainScreenAttachmentModals } from '../composer/AttachmentModals';
 import { MainScreenApprovalAndBridgePrompts } from '../approvals/BridgePrompts';
 import { MainScreenModelAndEffortSheets } from '../models/ModelAndEffortSheets';
-import { useCallback } from 'react';
+import { ResponseUsageOverlay } from '../message/ResponseUsageOverlay';
+import { memo, useCallback, type ComponentType } from 'react';
 import { View, type LayoutChangeEvent } from 'react-native';
 import { useSetAtom } from 'jotai';
 import { useMainScreenStyles } from '../styles/useStyles';
@@ -16,6 +17,145 @@ import type {
 
 type MainScreenViewContext = MainScreenPanelCollapseCoordinatorContext &
   MainScreenPanelCollapseCoordinatorResult;
+
+type MainScreenSurfaceProps = { context: MainScreenViewContext };
+type MainScreenContextKey = keyof MainScreenViewContext;
+
+function memoizeContextSurface(
+  Component: ComponentType<MainScreenSurfaceProps>,
+  contextKeys: readonly MainScreenContextKey[],
+) {
+  return memo(Component, (previous, next) =>
+    contextKeys.every((key) => Object.is(previous.context[key], next.context[key])),
+  );
+}
+
+const headerContextKeys = [
+  'onOpenDrawer',
+  'headerTitle',
+  'activeAgent',
+  'openTitleEditor',
+  'handleOpenGit',
+  'isOpeningChat',
+  'showTopCardsRow',
+  'readyAgents',
+  'activeAgentLabel',
+  'openAgentModal',
+  'modelOptions',
+  'openModelModal',
+  'activeModelLabel',
+  'activeModelEffortOptions',
+  'openEffortModal',
+  'activeEffortLabel',
+  'openCollaborationModeMenu',
+  'collaborationModeLabel',
+  'showAgentThreadChip',
+  'openAgentThreadSelector',
+  'agentThreadChipLabel',
+  'supportsFastMode',
+  'fastModeEnabled',
+  'fastModeControlDisabled',
+  'toggleFastMode',
+  'workflowBridgeUiSurfaces',
+  'windowHeight',
+  'handleBridgeUiAction',
+  'dismissBridgeUiSurface',
+  'workflowCardMode',
+  'selectedThreadPlan',
+  'planPanelCollapsed',
+  'toggleSelectedPlanPanel',
+  'implementPlan',
+  'stayInPlanMode',
+] as const satisfies readonly MainScreenContextKey[];
+
+const StableHeaderAndWorkflow = memo(
+  MainScreenHeaderAndWorkflow,
+  (previous, next) =>
+    headerContextKeys.every((key) => Object.is(previous.context[key], next.context[key])) &&
+    Boolean(previous.context.selectedChat) === Boolean(next.context.selectedChat) &&
+    Object.is(
+      previous.context.selectedThreadRuntimeSnapshot?.tokenTotals ??
+        previous.context.selectedChat?.tokenTotals,
+      next.context.selectedThreadRuntimeSnapshot?.tokenTotals ??
+        next.context.selectedChat?.tokenTotals,
+    ) &&
+    Object.is(
+      previous.context.selectedChat?.acpUsage?.cost,
+      next.context.selectedChat?.acpUsage?.cost,
+    ),
+);
+
+const StableTranscriptAndSheets = memoizeContextSurface(MainScreenTranscriptAndSheets, [
+  'selectedChat',
+  'isOpeningChat',
+  'selectedParentChat',
+  'bridgeUrl',
+  'bridgeToken',
+  'onOpenLocalPreview',
+  'openAgentDetail',
+  'showToolCalls',
+  'agentThreadStatusById',
+  'scrollRef',
+  'isLoading',
+  'handleInlineOptionSelect',
+  'scrollToBottomIfPinned',
+  'handleJumpToLatest',
+  'clearPendingScrollRetries',
+  'autoScrollStateRef',
+  'composerReservedInset',
+  'transcriptContinuationState',
+  'handleLoadEarlier',
+  'defaultStartWorkspaceLabel',
+  'activeAgentLabel',
+  'activeAgentSupports',
+  'setDraft',
+  'openWorkspaceModal',
+  'forkConversation',
+  'shouldShowComposer',
+  'renderComposer',
+  'showTranscriptActivity',
+  'displayedActivity',
+  'attachmentMenuVisible',
+  'attachmentMenuOptions',
+  'attachmentController',
+  'agentThreadMenuOptions',
+  'collaborationModeOptions',
+  'agentPickerOptions',
+  'closeAgentModal',
+]);
+
+const StableModelAndEffortSheets = memoizeContextSurface(MainScreenModelAndEffortSheets, [
+  'activeModelLabel',
+  'closeEffortModal',
+  'closeModelModal',
+  'effortPickerSheetOptions',
+  'modelPickerOptions',
+]);
+
+const StableRenameSheet = memoizeContextSurface(MainScreenRenameSheet, [
+  'closeTitleEditor',
+  'saveTitle',
+]);
+
+const StableAttachmentModals = memoizeContextSurface(MainScreenAttachmentModals, [
+  'attachmentModalVisible',
+  'closeAttachmentModal',
+  'attachmentPathDraft',
+  'setAttachmentPathDraft',
+  'isLoading',
+  'submitAttachmentPath',
+  'pendingMentionPaths',
+  'removePendingMentionPath',
+]);
+
+const StableApprovalAndBridgePrompts = memoizeContextSurface(MainScreenApprovalAndBridgePrompts, [
+  'setUserInputDraft',
+  'dismissUserInputRequest',
+  'submitUserInputRequest',
+  'modalBridgeUiSurface',
+  'handleBridgeUiAction',
+  'dismissBridgeUiSurface',
+]);
 
 export function MainScreenView({ context }: { context: MainScreenViewContext }) {
   const { styles } = useMainScreenStyles();
@@ -35,13 +175,15 @@ export function MainScreenView({ context }: { context: MainScreenViewContext }) 
         style={styles.topChromeOverlay}
         testID="main-screen-top-chrome"
       >
-        <MainScreenHeaderAndWorkflow context={context} />
+        <StableHeaderAndWorkflow context={context} />
       </View>
-      <MainScreenTranscriptAndSheets context={context} />
-      <MainScreenModelAndEffortSheets context={context} />
-      <MainScreenRenameSheet context={context} />
-      <MainScreenAttachmentModals context={context} />
-      <MainScreenApprovalAndBridgePrompts context={context} />
+      <StableTranscriptAndSheets context={context} />
+      <StableModelAndEffortSheets context={context} />
+      <StableRenameSheet context={context} />
+      <StableAttachmentModals context={context} />
+      <StableApprovalAndBridgePrompts context={context} />
+      {/* Last so the panel a transcript row anchors covers the header and composer too. */}
+      <ResponseUsageOverlay />
     </View>
   );
 }

@@ -39,7 +39,7 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
         settled = true;
         this.pendingSocket = null;
         this.socket = socket;
-        this.reconnectAttempts = 0;
+        this.markConnectionStableWhenSettled(socket);
         this.emitStatus(true);
         resolve();
       };
@@ -49,6 +49,7 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
         }
         if (this.socket === socket) {
           this.socket = null;
+          this.clearConnectionStableTimer();
           this.emitStatus(false);
           this.rejectAllPending(new Error('Bridge websocket closed'));
         }
@@ -74,6 +75,7 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
         if (this.socket === socket) {
           this.socket = null;
           socket.close();
+          this.clearConnectionStableTimer();
           this.emitStatus(false);
           this.rejectAllPending(new Error('Bridge websocket error'));
           if (this.shouldReconnect && generation === this.connectGeneration) {
@@ -88,6 +90,26 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
         this.handleIncoming(String(message.data));
       };
     });
+  }
+  /**
+   * Counts the connection as usable only after it survives a stability window.
+   *
+   * Resetting on `open` alone lets a bridge that accepts and then immediately closes the socket
+   * pin the backoff at its minimum, which turns a failing workspace runtime into a hot reconnect
+   * loop that visibly flaps the connection indicator.
+   */
+  protected markConnectionStableWhenSettled(socket: WebSocket): void {
+    this.clearConnectionStableTimer();
+    const timer = setTimeout(() => {
+      if (this.connectionStableTimer !== timer) {
+        return;
+      }
+      this.connectionStableTimer = null;
+      if (this.socket === socket) {
+        this.reconnectAttempts = 0;
+      }
+    }, HostBridgeWsClientCore.CONNECTION_STABLE_MS);
+    this.connectionStableTimer = timer;
   }
   protected scheduleReconnect(): void {
     if (

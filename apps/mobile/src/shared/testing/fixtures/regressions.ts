@@ -180,8 +180,8 @@ export function multiTurnReplayedHistory(threadId = 'thread'): {
 }
 
 /**
- * A sub-agent reported only through the parent's task tool — no child session is
- * ever streamed, which is how most ACP agents behave.
+ * A linked sub-agent reported only through the parent's task tool. The child
+ * session is navigable even when its own events are not streamed.
  */
 export function parentOnlySubAgent(
   parentThreadId = 'parent',
@@ -189,6 +189,7 @@ export function parentOnlySubAgent(
 ): { start: EventSequenceEntry[]; progress: EventSequenceEntry[]; finish: EventSequenceEntry[] } {
   const runId = `${parentThreadId}::run-1`;
   const toolCallId = `${parentThreadId}::task-1`;
+  const childThreadId = `${parentThreadId}::child-1`;
   const [first, ...rest] = progress;
 
   return {
@@ -199,6 +200,7 @@ export function parentOnlySubAgent(
         .build(),
       subAgentCard(parentThreadId, runId, {
         toolCallId,
+        childThreadId,
         status: 'running',
         heading: '• Sub-agent working',
         latest: first,
@@ -207,6 +209,7 @@ export function parentOnlySubAgent(
     progress: rest.map((latest) =>
       subAgentCard(parentThreadId, runId, {
         toolCallId,
+        childThreadId,
         status: 'running',
         heading: '• Sub-agent working',
         latest,
@@ -215,6 +218,7 @@ export function parentOnlySubAgent(
     finish: [
       subAgentCard(parentThreadId, runId, {
         toolCallId,
+        childThreadId,
         status: 'completed',
         heading: '• Sub-agent completed',
         latest: 'No TODOs left in the repository.',

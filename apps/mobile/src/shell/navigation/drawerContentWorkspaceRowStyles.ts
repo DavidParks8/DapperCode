@@ -67,6 +67,20 @@ export function createDrawerContentWorkspaceRowStyles(theme: AppTheme) {
       flex: 1,
       minWidth: 0,
     },
+    chatSelectionIndicator: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      borderWidth: 1.5,
+      borderColor: theme.colors.borderHighlight,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    chatSelectionIndicatorChecked: {
+      backgroundColor: theme.colors.userBubble,
+      borderColor: theme.colors.userBubble,
+    },
     chatTitle: {
       ...theme.typography.subheadline,
       color: theme.colors.textSecondary,

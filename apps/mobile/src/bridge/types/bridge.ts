@@ -133,6 +133,26 @@ export interface BridgeCapabilities {
   supports: BridgeCapabilitySupport;
 }
 
+export interface BridgeRuntimeActivity {
+  activeRuns: number;
+  queuedMessages: number;
+  pendingSteers: number;
+  pendingApprovals: number;
+  pendingUserInputs: number;
+  activePreviewSessions: number;
+  inFlightRequests: number;
+  otherLiveWork: number;
+  canRetire: boolean;
+}
+
+export interface BrokerPairingPayload {
+  type: 'dappercode-bridge-pair' | 'dappercode-broker-pair';
+  brokerProtocolVersion: 1;
+  workspaceId: string;
+  bridgeUrl: string;
+  bridgeToken: string;
+}
+
 export interface AgentDescriptor {
   agentId: AgentId;
   displayName: string;

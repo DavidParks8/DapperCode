@@ -2,7 +2,6 @@ use std::path::Path;
 
 #[cfg(test)]
 use tokio::{fs, io::AsyncWriteExt};
-use uuid::Uuid;
 
 #[cfg(test)]
 fn private_open_options(create_new: bool) -> fs::OpenOptions {
@@ -57,7 +56,7 @@ where
         .to_os_string();
     let bytes = bytes.to_vec();
     tokio::task::spawn_blocking(move || {
-        atomic_write_private_blocking(
+        crate::platform::atomic_write_private_blocking(
             &parent,
             &file_name,
             &bytes,
@@ -67,89 +66,6 @@ where
     })
     .await
     .map_err(std::io::Error::other)?
-}
-
-#[cfg(unix)]
-fn atomic_write_private_blocking<BeforePublish, BeforeParentSync>(
-    parent: &Path,
-    file_name: &std::ffi::OsStr,
-    bytes: &[u8],
-    before_publish: BeforePublish,
-    before_parent_sync: BeforeParentSync,
-) -> std::io::Result<()>
-where
-    BeforePublish: FnOnce(&Path) -> std::io::Result<()>,
-    BeforeParentSync: FnOnce(&Path) -> std::io::Result<()>,
-{
-    use rustix::fs::{open, openat, renameat, unlinkat, AtFlags, Mode, OFlags};
-    use std::io::Write;
-    use std::os::unix::fs::PermissionsExt;
-
-    let parent_fd = open(
-        parent,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
-        Mode::empty(),
-    )?;
-    let parent_file = std::fs::File::from(parent_fd);
-    let temporary_name = format!(".{}.{}.tmp", file_name.to_string_lossy(), Uuid::new_v4());
-    let temporary_path = parent.join(&temporary_name);
-    let result = (|| {
-        let temporary_fd = openat(
-            &parent_file,
-            &temporary_name,
-            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC | OFlags::NOFOLLOW,
-            Mode::from_raw_mode(0o600),
-        )?;
-        let mut temporary_file = std::fs::File::from(temporary_fd);
-        temporary_file.write_all(bytes)?;
-        temporary_file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-        before_publish(&temporary_path)?;
-        temporary_file.sync_all()?;
-        renameat(&parent_file, &temporary_name, &parent_file, file_name)?;
-        before_parent_sync(parent)?;
-        parent_file.sync_all()
-    })();
-    if result.is_err() {
-        let _ = unlinkat(&parent_file, &temporary_name, AtFlags::empty());
-    }
-    result
-}
-
-#[cfg(not(unix))]
-fn atomic_write_private_blocking<BeforePublish, BeforeParentSync>(
-    parent: &Path,
-    file_name: &std::ffi::OsStr,
-    bytes: &[u8],
-    before_publish: BeforePublish,
-    before_parent_sync: BeforeParentSync,
-) -> std::io::Result<()>
-where
-    BeforePublish: FnOnce(&Path) -> std::io::Result<()>,
-    BeforeParentSync: FnOnce(&Path) -> std::io::Result<()>,
-{
-    use std::io::Write;
-
-    let temporary = parent.join(format!(
-        ".{}.{}.tmp",
-        file_name.to_string_lossy(),
-        Uuid::new_v4()
-    ));
-    let result = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)?;
-        file.write_all(bytes)?;
-        before_publish(&temporary)?;
-        file.sync_all()?;
-        std::fs::rename(&temporary, parent.join(file_name))?;
-        before_parent_sync(parent)?;
-        std::fs::File::open(parent)?.sync_all()
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-    }
-    result
 }
 
 #[cfg(test)]
@@ -204,13 +120,22 @@ mod tests {
         assert!(atomic_write_private(&missing_parent, b"value")
             .await
             .is_err());
+        atomic_write_private_with(
+            &path,
+            b"unpublished",
+            |_| Err(std::io::Error::other("injected pre-publish failure")),
+            |_| Ok(()),
+        )
+        .await
+        .expect_err("pre-publish failure is definitive");
+        assert_eq!(fs::read(&path).unwrap(), b"x");
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
         let _ = fs::remove_dir_all(dir);
     }
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn atomic_write_secures_before_publish_and_propagates_parent_sync_failure() {
+    async fn atomic_write_secures_before_publish_and_treats_rename_as_commit() {
         use std::os::unix::fs::PermissionsExt;
 
         let dir =
@@ -228,7 +153,7 @@ mod tests {
             |_| Err(std::io::Error::other("injected parent sync failure")),
         )
         .await
-        .expect_err("parent sync failure must propagate");
+        .expect("post-rename parent sync failure does not roll back the committed write");
         assert_eq!(fs::read(&path).expect("reopen replacement"), b"new");
         assert_eq!(
             fs::read_dir(&dir)

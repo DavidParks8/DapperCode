@@ -29,6 +29,7 @@ type ThreadStateEventMethod =
   | 'thread/name/updated'
   | 'thread/deleted'
   | 'thread/tokenUsage/updated'
+  | 'thread/tokenTotals/updated'
   | 'item/started';
 
 const THREAD_STATE_RUNNING_ITEM_TYPES = new Set([
@@ -68,6 +69,7 @@ const THREAD_STATE_EVENT_HANDLERS: Record<ThreadStateEventMethod, ThreadStateEve
   'thread/name/updated': handleThreadNameUpdatedEvent,
   'thread/deleted': handleThreadDeletedEvent,
   'thread/tokenUsage/updated': handleThreadTokenUsageUpdatedEvent,
+  'thread/tokenTotals/updated': handleThreadTokenTotalsUpdatedEvent,
   'item/started': handleItemStartedEvent,
 };
 
@@ -147,12 +149,18 @@ function handleThreadDeletedEvent(
 ): void {
   const params = toRecord(event.params);
   const threadId = extractNotificationThreadId(params);
-  if (!threadId || threadId !== currentId) {
+  if (!threadId) {
+    return;
+  }
+
+  context.api.forgetChat(threadId);
+  context.forgetThreadRuntimeState(threadId);
+  if (threadId !== currentId) {
     return;
   }
 
   // The thread is gone on the agent, so keeping it open would only surface stale history.
-  context.store.set(startNewChatAtom);
+  context.store.set(startNewChatAtom, { keepDrawerOpen: true });
 }
 
 function handleThreadTokenUsageUpdatedEvent(
@@ -167,6 +175,20 @@ function handleThreadTokenUsageUpdatedEvent(
   }
 
   context.cacheThreadContextUsage(threadId, contextUsage);
+}
+
+function handleThreadTokenTotalsUpdatedEvent(
+  context: ThreadStateEventContext,
+  event: RpcNotification,
+): void {
+  const params = toRecord(event.params);
+  const threadId = readString(params?.['threadId']) ?? readString(params?.['thread_id']);
+  const tokenTotals = context.readThreadSessionTokenTotals(params);
+  if (!threadId || !tokenTotals) {
+    return;
+  }
+
+  context.cacheThreadSessionTokenTotals(threadId, tokenTotals);
 }
 
 function handleItemStartedEvent(

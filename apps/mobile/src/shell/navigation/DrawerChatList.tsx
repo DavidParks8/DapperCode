@@ -1,4 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { memo, type RefObject } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -9,33 +11,49 @@ import {
   View,
 } from 'react-native';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
+import type { AppTheme } from '@shared/theme';
 import { SwipeToDeleteRow } from '@shared/ui/SwipeToDeleteRow';
 import type { DrawerAttentionLane, DrawerAttentionRow } from '@shell/navigation/drawerAttention';
+import type { DrawerContentStyles } from '@shell/navigation/drawerContentStyles';
 import { relativeTime } from '@shell/navigation/drawerContentHelpers';
-import { useDrawerContentViewModel } from '@shell/navigation/drawerContentViewContext';
+import { useDrawerContentAtoms } from '@shell/navigation/drawerContentViewContext';
 
-export function DrawerChatList() {
+export interface DrawerChatListProps {
+  handleDeleteChat: (chatId: string) => Promise<boolean>;
+  handleSelectChat: (chatId: string) => void;
+  refreshDrawer: () => Promise<void>;
+  retryDeepChatListRef: RefObject<() => Promise<void>>;
+  styles: DrawerContentStyles;
+  theme: AppTheme;
+}
+
+export const DrawerChatList = memo(function DrawerChatList({
+  handleDeleteChat,
+  handleSelectChat,
+  refreshDrawer,
+  retryDeepChatListRef,
+  styles,
+  theme,
+}: DrawerChatListProps) {
+  const atoms = useDrawerContentAtoms();
   const {
     collapsedLaneKeys,
-    handleDeleteChat,
-    handleSelectChat,
     isSearching,
     loading,
     loadingOlderChats,
     noticeMessages,
     refreshing,
-    refreshDrawer,
     resolvedEmptyHint,
     resolvedEmptyTitle,
-    retryDeepChatListRef,
     searchQuery,
     selectedChatId,
-    styles,
-    theme,
-    toggleAttentionSection,
+    selectedChatIds,
+    selectionMode,
     visibleAttentionSections,
     wsConnected,
-  } = useDrawerContentViewModel();
+  } = useAtomValue(atoms.listStateAtom);
+  const toggleAttentionSection = useSetAtom(atoms.toggleAttentionSectionAtom);
+  const toggleChatSelection = useSetAtom(atoms.toggleChatSelectionAtom);
   const retryDrawerData = () => {
     void Promise.all([retryDeepChatListRef.current(), refreshDrawer()]);
   };
@@ -153,6 +171,23 @@ export function DrawerChatList() {
         // too — otherwise the chevron/accessibilityState would claim collapsed while rows are
         // visibly rendered underneath it.
         const collapsed = !isSearching && collapsedLaneKeys.has(section.key);
+        // Collapsing during selection would hide rows the delete count still includes, so lanes
+        // stay expanded and inert until selection ends.
+        if (selectionMode) {
+          return (
+            <View
+              accessibilityLabel={`${section.title}, ${String(section.itemCount)} ${section.itemCount === 1 ? 'session' : 'sessions'}`}
+              style={styles.laneHeader}
+            >
+              <View
+                {...decorativeAccessibilityProps}
+                style={[styles.laneDot, laneDotStyle(section.key, styles)]}
+              />
+              <Text style={styles.laneTitle}>{section.title}</Text>
+              <Text style={styles.laneCount}>{String(section.itemCount)}</Text>
+            </View>
+          );
+        }
         return (
           <Pressable
             accessibilityLabel={`${section.title}, ${String(section.itemCount)} ${section.itemCount === 1 ? 'session' : 'sessions'}`}
@@ -180,6 +215,7 @@ export function DrawerChatList() {
       renderSectionFooter={() => <View style={styles.laneFooter} />}
       renderItem={({ item, index, section }) => {
         const isSelected = item.chat.id === selectedChatId;
+        const isChecked = selectedChatIds.has(item.chat.id);
         const isLast = index === section.data.length - 1;
         const chatIndent = Math.min(item.indentLevel, 4) * 12;
         const chatTitle = item.chat.title || 'Untitled session';
@@ -187,6 +223,7 @@ export function DrawerChatList() {
           <SwipeToDeleteRow
             contentBackgroundColor={theme.colors.transparent}
             deleteAccessibilityLabel={`Delete ${chatTitle}`}
+            enabled={!selectionMode}
             onDelete={() => handleDeleteChat(item.chat.id)}
             style={[
               styles.chatItemFrame,
@@ -198,23 +235,52 @@ export function DrawerChatList() {
           >
             <Pressable
               accessibilityLabel={`${chatTitle}, ${item.workspaceLabel}, ${item.agentLabel}, ${item.stateLabel}`}
-              accessibilityHint="Opens this session."
-              accessibilityRole="button"
-              accessibilityState={controlAccessibilityState({ selected: isSelected })}
-              onPress={() => handleSelectChat(item.chat.id)}
+              accessibilityHint={
+                selectionMode ? 'Toggles this session for deletion.' : 'Opens this session.'
+              }
+              accessibilityRole={selectionMode ? 'checkbox' : 'button'}
+              accessibilityState={
+                selectionMode
+                  ? controlAccessibilityState({ checked: isChecked })
+                  : controlAccessibilityState({ selected: isSelected })
+              }
+              onPress={() =>
+                selectionMode ? toggleChatSelection(item.chat.id) : handleSelectChat(item.chat.id)
+              }
               testID={`drawer-chat-row-${item.chat.id}`}
             >
               {({ pressed }) => (
                 <View
                   style={[
                     styles.chatItem,
-                    isSelected && styles.chatItemSelected,
+                    (selectionMode ? isChecked : isSelected) && styles.chatItemSelected,
                     pressed && styles.chatItemPressed,
                   ]}
                 >
+                  {selectionMode ? (
+                    <View
+                      {...decorativeAccessibilityProps}
+                      style={[
+                        styles.chatSelectionIndicator,
+                        isChecked && styles.chatSelectionIndicatorChecked,
+                      ]}
+                    >
+                      {isChecked ? (
+                        <Ionicons
+                          {...decorativeAccessibilityProps}
+                          name="checkmark"
+                          size={14}
+                          color={theme.colors.userBubbleText}
+                        />
+                      ) : null}
+                    </View>
+                  ) : null}
                   <View style={styles.chatItemTextBlock}>
                     <Text
-                      style={[styles.chatTitle, isSelected && styles.chatTitleSelected]}
+                      style={[
+                        styles.chatTitle,
+                        (selectionMode ? isChecked : isSelected) && styles.chatTitleSelected,
+                      ]}
                       numberOfLines={1}
                     >
                       {item.chat.title || 'Untitled'}
@@ -251,12 +317,9 @@ export function DrawerChatList() {
       }}
     />
   );
-}
+});
 
-function laneDotStyle(
-  lane: DrawerAttentionLane,
-  styles: ReturnType<typeof useDrawerContentViewModel>['styles'],
-) {
+function laneDotStyle(lane: DrawerAttentionLane, styles: DrawerContentStyles) {
   if (lane === 'attention') {
     return styles.laneDotAttention;
   }
@@ -266,10 +329,7 @@ function laneDotStyle(
   return styles.laneDotRecent;
 }
 
-function rowStateDotStyle(
-  row: DrawerAttentionRow,
-  styles: ReturnType<typeof useDrawerContentViewModel>['styles'],
-) {
+function rowStateDotStyle(row: DrawerAttentionRow, styles: DrawerContentStyles) {
   if (row.attentionReason === 'error') {
     return styles.chatStateDotError;
   }

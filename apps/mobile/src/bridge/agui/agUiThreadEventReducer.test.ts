@@ -56,6 +56,49 @@ describe('agUiThreadEventReducer.reduceThreadState', () => {
     expect(withReplacement.replacesMessageIdByMessageId).toEqual({ m1: 'draft-1' });
   });
 
+  it('records when an assistant response finishes printing', () => {
+    let state = reduceThreadState(
+      createAgUiThreadMessageState(),
+      envelope({
+        type: EventType.TEXT_MESSAGE_START,
+        messageId: 'response',
+        role: 'assistant',
+        timestamp: 1_753_040_920_000,
+      }),
+    );
+    state = reduceThreadState(
+      state,
+      envelope({
+        type: EventType.TEXT_MESSAGE_CONTENT,
+        messageId: 'response',
+        delta: 'Done',
+        timestamp: 1_753_040_925_000,
+      }),
+    );
+    expect(state.messages[0]?.pending).toBe(true);
+    expect(state.messages[0]?.completedAt).toBeUndefined();
+
+    state = reduceThreadState(
+      state,
+      envelope({
+        type: EventType.TEXT_MESSAGE_END,
+        messageId: 'response',
+        timestamp: 1_753_040_932_000,
+      }),
+    );
+
+    expect(state.messages[0]).toMatchObject({
+      pending: false,
+      completedAt: '2025-07-20T19:48:52.000Z',
+    });
+
+    state = reduceThreadState(
+      state,
+      envelope({ type: EventType.RUN_FINISHED, timestamp: 1_753_040_940_000 }),
+    );
+    expect(state.messages[0]?.completedAt).toBe('2025-07-20T19:48:52.000Z');
+  });
+
   it('handles text chunk fallback id and empty delta path', () => {
     const withFallback = reduceThreadState(
       createAgUiThreadMessageState(),
@@ -493,10 +536,21 @@ describe('agUiThreadEventReducer.reduceThreadState', () => {
       ),
     );
 
-    state = reduceThreadState(state, envelope({ type: EventType.RUN_FINISHED }, 'run-finished'));
-    state = reduceThreadState(state, envelope({ type: EventType.RUN_ERROR }, 'run-error'));
+    state = reduceThreadState(
+      state,
+      envelope({ type: EventType.RUN_FINISHED, timestamp: 1_753_040_932_000 }, 'run-finished'),
+    );
+    state = reduceThreadState(
+      state,
+      envelope({ type: EventType.RUN_ERROR, timestamp: 1_753_040_933_000 }, 'run-error'),
+    );
 
     expect(state.terminalMessageIds).toEqual(expect.arrayContaining(['m1', 'm2']));
+    expect(state.messages.map((message) => message.pending)).toEqual([false, false]);
+    expect(state.messages.map((message) => message.completedAt)).toEqual([
+      '2025-07-20T19:48:52.000Z',
+      '2025-07-20T19:48:53.000Z',
+    ]);
   });
 
   it('returns current state for unknown event types', () => {

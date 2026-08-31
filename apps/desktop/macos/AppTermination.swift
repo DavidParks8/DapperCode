@@ -52,6 +52,23 @@ final class OperatorProcessRegistry: @unchecked Sendable {
     }
 }
 
+enum OperatorProcessOutput {
+    static func collect(
+        from process: Process,
+        stdout: Pipe,
+        stderr: Pipe
+    ) async -> (stdout: Data, stderr: Data) {
+        let outputReader = Task.detached(priority: .utility) {
+            stdout.fileHandleForReading.readDataToEndOfFile()
+        }
+        let errorReader = Task.detached(priority: .utility) {
+            stderr.fileHandleForReading.readDataToEndOfFile()
+        }
+        process.waitUntilExit()
+        return await (outputReader.value, errorReader.value)
+    }
+}
+
 enum ApplicationTermination {
     @discardableResult
     static func begin(
@@ -85,7 +102,10 @@ enum ApplicationTermination {
 }
 
 enum BridgeLaunchPolicy {
-    static func shouldStart(autoStart: Bool, isRunning: Bool, state: String) -> Bool {
-        autoStart && !isRunning && state != "needsSetup"
+    static func shouldStart(
+        isRunning: Bool,
+        state: String
+    ) -> Bool {
+        !isRunning && state == "stopped"
     }
 }

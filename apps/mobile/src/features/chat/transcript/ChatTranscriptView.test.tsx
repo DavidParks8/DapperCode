@@ -1,5 +1,6 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import * as Haptics from 'expo-haptics';
+import { isValidElement } from 'react';
 import { FlatList, Keyboard, Platform, Pressable, StyleSheet } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -19,7 +20,15 @@ import {
   setMockLiquidGlassAvailable,
 } from '@shared/testing/glassEffectMock';
 import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscriptView';
-import { ReduceMotion, ZoomIn, ZoomOut } from '@shared/testing/reanimatedMock';
+import { ActivityEvent } from './ActivityEvent';
+import { ACTIVITY_COLLAPSE_DURATION_MS } from './TranscriptActivitySlot';
+import {
+  mockSharedValues,
+  ReduceMotion,
+  resetMockSharedValues,
+  ZoomIn,
+  ZoomOut,
+} from '@shared/testing/reanimatedMock';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
@@ -125,6 +134,37 @@ function getList(tree: ReactTestRenderer): Queryable {
   return tree.root.findByType(FlatList) as Queryable;
 }
 
+function getActivitySlot(tree: ReactTestRenderer): React.ReactElement<{
+  chat: Chat;
+  presentation: {
+    activity: { detail?: string; title: string; tone: string };
+    collapsing: boolean;
+  };
+}> | null {
+  return getList(tree).props['ListHeaderComponent'] as React.ReactElement<{
+    chat: Chat;
+    presentation: {
+      activity: { detail?: string; title: string; tone: string };
+      collapsing: boolean;
+    };
+  }> | null;
+}
+
+function getActivityPresentation(tree: ReactTestRenderer): {
+  activity: { detail?: string; title: string; tone: string };
+  collapsing: boolean;
+} {
+  const slot = getActivitySlot(tree);
+  if (!slot) {
+    throw new Error('Expected an activity row');
+  }
+  return slot.props.presentation;
+}
+
+function getActivityElapsedMs(tree: ReactTestRenderer): number | null {
+  return tree.root.findByType(ActivityEvent).props['elapsedMs'] as number | null;
+}
+
 function scroll(list: Queryable, y: number, contentHeight = 1000, viewportHeight = 200): void {
   act(() =>
     list.props.onScroll({
@@ -135,6 +175,12 @@ function scroll(list: Queryable, y: number, contentHeight = 1000, viewportHeight
       },
     }),
   );
+}
+
+function drag(list: Queryable, y: number, contentHeight = 1000, viewportHeight = 200): void {
+  act(() => list.props.onScrollBeginDrag());
+  scroll(list, y, contentHeight, viewportHeight);
+  act(() => list.props.onScrollEndDrag());
 }
 
 function update(tree: ReactTestRenderer, overrides: Partial<ChatTranscriptViewProps>): void {
@@ -148,33 +194,167 @@ function update(tree: ReactTestRenderer, overrides: Partial<ChatTranscriptViewPr
 }
 
 describe('ChatTranscriptView activity event', () => {
-  it('renders the live status at the newest transcript edge and updates through settlement', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-08-05T12:00:05.000Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('advances the live duration without resetting on status copy and freezes on settlement', () => {
+    const runningChat = makeChat({
+      status: 'running',
+      statusUpdatedAt: '2026-08-05T12:00:00.000Z',
+      messages: [
+        { id: 'user', role: 'user', content: 'work', createdAt: '2026-08-05T12:00:00.000Z' },
+      ],
+    });
     const tree = render({
+      chat: runningChat,
       activity: { tone: 'running', title: 'Editing file', detail: 'src/main.ts' },
     });
 
-    let header = getList(tree).props['ListHeaderComponent'] as React.ReactElement<{
-      detail?: string;
-      title: string;
-      tone: string;
-    }>;
-    expect(header.props).toMatchObject({
-      detail: 'src/main.ts',
-      title: 'Editing file',
-      tone: 'running',
+    const activityHeader = getActivitySlot(tree);
+    expect(getActivityPresentation(tree)).toMatchObject({
+      activity: { detail: 'src/main.ts', title: 'Editing file', tone: 'running' },
     });
+    expect(getActivityElapsedMs(tree)).toBe(0);
 
-    update(tree, { activity: { tone: 'complete', title: 'Turn completed' } });
-    header = getList(tree).props['ListHeaderComponent'] as typeof header;
-    expect(header.props).toMatchObject({ title: 'Turn completed', tone: 'complete' });
+    act(() => jest.advanceTimersByTime(5_000));
+    expect(getActivitySlot(tree)).toBe(activityHeader);
+    expect(getActivityElapsedMs(tree)).toBe(5_000);
+    update(tree, {
+      chat: runningChat,
+      activity: { tone: 'running', title: 'Running tests' },
+    });
+    expect(getActivityPresentation(tree)).toMatchObject({
+      activity: { title: 'Running tests' },
+    });
+    expect(getActivityElapsedMs(tree)).toBe(5_000);
+
+    update(tree, {
+      chat: {
+        ...runningChat,
+        status: 'complete',
+        statusUpdatedAt: '2026-08-05T12:00:12.000Z',
+      },
+      activity: { tone: 'complete', title: 'Turn completed' },
+    });
+    expect(getActivityPresentation(tree)).toMatchObject({
+      activity: { title: 'Turn completed', tone: 'complete' },
+    });
+    expect(getActivityElapsedMs(tree)).toBe(5_000);
+
+    act(() => jest.advanceTimersByTime(5_000));
+    expect(getActivityElapsedMs(tree)).toBe(5_000);
 
     update(tree, { activity: null });
-    expect(getList(tree).props['ListHeaderComponent']).toBeNull();
+    expect(getActivityPresentation(tree)).toMatchObject({
+      activity: { title: 'Turn completed' },
+      collapsing: true,
+    });
+    expect(getActivityElapsedMs(tree)).toBe(5_000);
+    act(() => jest.advanceTimersByTime(ACTIVITY_COLLAPSE_DURATION_MS));
+    expect(getActivitySlot(tree)).toBeNull();
+    act(() => tree.unmount());
+  });
+
+  it('keeps the settled duration when the thread status lands after the activity settles', () => {
+    // The bridge reports no run timings, so the duration is measured on device. The status update
+    // that promotes the row to "Turn completed" arrives a beat after the activity stops running,
+    // and wiping the local timer in that gap used to leave the finished turn with no duration.
+    const runningChat = makeChat({
+      status: 'running',
+      statusUpdatedAt: '2026-08-05T12:00:00.000Z',
+      messages: [
+        { id: 'user', role: 'user', content: 'work', createdAt: '2026-08-05T12:00:00.000Z' },
+      ],
+    });
+    const tree = render({
+      chat: runningChat,
+      activity: { tone: 'running', title: 'Editing file' },
+    });
+
+    act(() => jest.advanceTimersByTime(7_000));
+    update(tree, { chat: runningChat, activity: { tone: 'idle', title: 'Ready' } });
+    update(tree, {
+      chat: { ...runningChat, status: 'complete', statusUpdatedAt: '2026-08-05T12:00:12.000Z' },
+      activity: { tone: 'complete', title: 'Turn completed' },
+    });
+
+    expect(getActivityElapsedMs(tree)).toBe(7_000);
+    act(() => tree.unmount());
+  });
+});
+
+describe('ChatTranscriptView activity collapse', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('collapses the settled row instead of dropping it in a single frame', () => {
+    const settledChat = makeChat({ status: 'complete' });
+    const tree = render({
+      chat: settledChat,
+      activity: { tone: 'complete', title: 'Turn completed' },
+    });
+    expect(tree.root.findAllByProps({ testID: 'transcript-activity-event' })).not.toHaveLength(0);
+
+    update(tree, { chat: settledChat, activity: null });
+
+    // The row has to stay mounted while it shrinks, otherwise the transcript snaps up by a whole
+    // line on the frame the activity clears.
+    const collapsingRows = tree.root.findAllByProps({ testID: 'transcript-activity-event' });
+    expect(collapsingRows).not.toHaveLength(0);
+    const slotStyle = StyleSheet.flatten(
+      requireTestValue(
+        tree.root.findAllByProps({ testID: 'transcript-activity-slot' })[0],
+        'activity slot',
+      ).props['style'] as never,
+    ) as Record<string, unknown>;
+    expect(slotStyle['height']).toBe(0);
+    expect(slotStyle['opacity']).toBe(0);
+    expect(slotStyle['overflow']).toBe('hidden');
+
+    act(() => jest.advanceTimersByTime(ACTIVITY_COLLAPSE_DURATION_MS));
+    expect(tree.root.findAllByProps({ testID: 'transcript-activity-event' })).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it('drops a superseded live row at once rather than holding a stale status', () => {
+    const runningChat = makeChat({ status: 'running' });
+    const tree = render({
+      chat: runningChat,
+      activity: { tone: 'running', title: 'Working' },
+    });
+    expect(tree.root.findAllByProps({ testID: 'transcript-activity-event' })).not.toHaveLength(0);
+
+    update(tree, { chat: runningChat, activity: null });
+
+    expect(getActivitySlot(tree)).toBeNull();
+    expect(tree.root.findAllByProps({ testID: 'transcript-activity-event' })).toHaveLength(0);
     act(() => tree.unmount());
   });
 });
 
 describe('ChatTranscriptView edge scrims', () => {
+  it('leaves the latest row unfaded when a long transcript has no bottom chrome', () => {
+    const tree = render({
+      chat: makeChat({ messages: makeMessages(60) }),
+      bottomInset: 0,
+    });
+
+    expect(getList(tree).props['inverted']).toBe(true);
+    expect(tree.root.findAllByProps({ testID: 'transcript-bottom-scrim' })).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
   it('fades transcript content only into the bottom chrome without blocking touches', () => {
     const tree = render({ topInset: 96, bottomInset: 88 });
     const bottomScrim = requireTestValue(
@@ -235,9 +415,17 @@ describe('ChatTranscriptView conversation fork action', () => {
       index: 0,
       separators: {},
     }) as React.ReactElement<{
-      children: React.ReactElement<{ onForkConversation?: () => void; forkBusy: boolean }>[];
+      children: React.ReactNode[];
     }>;
-    const response = rendered.props.children[0];
+    const reveal = rendered.props.children[0];
+    if (
+      !isValidElement<{
+        children: React.ReactElement<{ onForkConversation?: () => void; forkBusy: boolean }>;
+      }>(reveal)
+    ) {
+      throw new Error('Expected timestamp reveal around the response');
+    }
+    const response = reveal.props.children;
     if (!response?.props.onForkConversation) {
       throw new Error('Expected fork action beside the response actions');
     }
@@ -248,12 +436,58 @@ describe('ChatTranscriptView conversation fork action', () => {
       response.props.onForkConversation?.();
     });
     expect(onForkConversation).toHaveBeenCalledTimes(1);
-    expect(onForkConversation).toHaveBeenCalledWith('user-2');
+    expect(onForkConversation).toHaveBeenCalledWith('assistant-1');
 
     await act(async () => {
       resolveFork?.();
       await Promise.resolve();
     });
+    act(() => tree.unmount());
+  });
+
+  it('offers the newest response its own boundary when the bridge resolves responses', async () => {
+    const onForkConversation = jest.fn().mockResolvedValue(undefined);
+    const messages: Chat['messages'] = [
+      { id: 'user-1', role: 'user', content: 'First', createdAt: '2026-08-01T00:00:00Z' },
+      { id: 'assistant-1', role: 'assistant', content: 'Done', createdAt: '2026-08-01T00:00:01Z' },
+    ];
+    const tree = render({
+      chat: makeChat({ messages }),
+      supportsConversationFork: true,
+      onForkConversation,
+    });
+    const list = getList(tree);
+    const actionMessage = list.props.data.find(
+      (item) =>
+        item['kind'] === 'message' &&
+        (item['message'] as { id?: string } | undefined)?.id === 'assistant-1',
+    );
+    if (!actionMessage) {
+      throw new Error('Expected the newest response to carry the fork action');
+    }
+    const rendered = list.props.renderItem({
+      item: actionMessage,
+      index: 0,
+      separators: {},
+    }) as React.ReactElement<{ children: React.ReactNode[] }>;
+    const reveal = rendered.props.children[0];
+    if (
+      !isValidElement<{
+        children: React.ReactElement<{ onForkConversation?: () => void }>;
+      }>(reveal)
+    ) {
+      throw new Error('Expected timestamp reveal around the response');
+    }
+    const response = reveal.props.children;
+    if (!response?.props.onForkConversation) {
+      throw new Error('Expected the newest response to expose the fork action');
+    }
+
+    await act(async () => {
+      response.props.onForkConversation?.();
+      await Promise.resolve();
+    });
+    expect(onForkConversation).toHaveBeenCalledWith('assistant-1');
     act(() => tree.unmount());
   });
 
@@ -347,6 +581,79 @@ describe('ChatTranscriptView conversation fork action', () => {
   });
 });
 
+describe('ChatTranscriptView message timestamp reveal', () => {
+  beforeEach(() => {
+    resetMockGestures();
+    resetMockSharedValues();
+  });
+
+  it('reveals timestamps only for user messages and settled assistant responses', () => {
+    const tree = render({
+      chat: makeChat({
+        messages: [
+          {
+            id: 'user',
+            role: 'user',
+            content: 'Question',
+            createdAt: '2026-07-20T19:42:00.000Z',
+          },
+          {
+            id: 'assistant',
+            role: 'assistant',
+            content: 'Answer',
+            createdAt: '2026-07-20T19:42:01.000Z',
+            completedAt: '2026-07-20T19:42:08.000Z',
+          },
+          {
+            id: 'pending',
+            role: 'assistant',
+            content: 'Still printing',
+            createdAt: '2026-07-20T19:42:09.000Z',
+            pending: true,
+          },
+          {
+            id: 'reasoning',
+            role: 'reasoning',
+            content: 'Thinking',
+            createdAt: '2026-07-20T19:42:10.000Z',
+          },
+          {
+            id: 'tool',
+            role: 'tool',
+            toolCallId: 'tool',
+            content: 'Tool output',
+            createdAt: '2026-07-20T19:42:11.000Z',
+          },
+        ],
+      }),
+    });
+
+    expect(
+      tree.root.findAllByProps({ testID: 'message-timestamp-reveal-user' }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      tree.root.findAllByProps({ testID: 'message-timestamp-reveal-assistant' }).length,
+    ).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ testID: 'message-timestamp-reveal-pending' })).toHaveLength(
+      0,
+    );
+    expect(tree.root.findAllByProps({ testID: 'message-timestamp-reveal-reasoning' })).toHaveLength(
+      0,
+    );
+    expect(tree.root.findAllByProps({ testID: 'message-timestamp-reveal-tool' })).toHaveLength(0);
+
+    const gesture = mockGestureByTestId('message-timestamp-reveal-pan');
+    expect(gesture.config['activeOffsetX']).toBe(-10);
+    expect(gesture.config['failOffsetY']).toEqual([-12, 12]);
+    act(() => gesture.onUpdate?.({ translationX: -200 }));
+    expect(mockSharedValues.some((value) => value.value === -72)).toBe(true);
+    act(() => gesture.onFinalize?.({ translationX: -200 }));
+    expect(mockSharedValues.every((value) => value.value !== -72)).toBe(true);
+
+    act(() => tree.unmount());
+  });
+});
+
 describe('ChatTranscriptView magical scroll rail', () => {
   beforeEach(() => {
     resetMockGestures();
@@ -430,7 +737,7 @@ describe('ChatTranscriptView magical scroll rail', () => {
     expect(Haptics.selectionAsync).toHaveBeenCalledTimes(1);
     expect(autoScrollStateRef.current.shouldStickToBottom).toBe(false);
     expect(autoScrollStateRef.current.isUserInteracting).toBe(true);
-    expect(onPinnedAutoScroll).toHaveBeenCalledWith(false);
+    expect(onPinnedAutoScroll).not.toHaveBeenCalled();
 
     act(() => {
       gesture.onFinalize?.({ y: 164 });
@@ -663,7 +970,7 @@ describe('ChatTranscriptView continuation', () => {
     });
     const list = tree.root.findByType(FlatList);
     expect(list.props['inverted']).toBe(true);
-    expect(list.props['maintainVisibleContentPosition']).toEqual({ minIndexForVisible: 0 });
+    expect(list.props['maintainVisibleContentPosition']).toBeUndefined();
     const loadBoundary = list.props['ListFooterComponent'] as React.ReactElement<{
       onPress: () => void;
     }>;
@@ -801,6 +1108,125 @@ describe('ChatTranscriptView continuation', () => {
     act(() => tree.unmount());
   });
 
+  it('keeps streaming activity above the composer until the user browses history', () => {
+    const autoScrollStateRef = {
+      current: { shouldStickToBottom: true, isUserInteracting: false, isMomentumScrolling: false },
+    };
+    const scrollToLatest = jest.fn();
+    const onPinnedAutoScroll: ChatTranscriptViewProps['onPinnedAutoScroll'] = (animated = true) => {
+      const autoScrollState = autoScrollStateRef.current;
+      if (
+        autoScrollState.isUserInteracting ||
+        autoScrollState.isMomentumScrolling ||
+        !autoScrollState.shouldStickToBottom
+      ) {
+        return;
+      }
+      scrollToLatest(animated);
+    };
+    const runningChat = makeChat({
+      status: 'running',
+      messages: [
+        {
+          id: 'user',
+          role: 'user',
+          content: 'Explain the result',
+          createdAt: '2026-08-01T00:00:00.000Z',
+        },
+      ],
+    });
+    const liveState = (
+      content: string,
+    ): NonNullable<ChatTranscriptViewProps['liveMessageState']> => ({
+      ...createAgUiThreadMessageState(),
+      messages: [
+        {
+          id: 'live-response',
+          role: 'assistant',
+          content,
+          createdAt: '2026-08-01T00:00:01.000Z',
+          pending: true,
+        },
+      ],
+      messageIndexById: { 'live-response': 0 },
+    });
+    const sharedProps = {
+      chat: runningChat,
+      autoScrollStateRef,
+      onPinnedAutoScroll,
+      activity: { tone: 'running', title: 'Working' } as const,
+    };
+    const tree = render({
+      ...sharedProps,
+      liveMessageState: liveState('The response starts in view.'),
+      bottomInset: 88,
+    });
+    let list = getList(tree);
+    expect(list.props['ListHeaderComponent']).not.toBeNull();
+    expect(list.props['maintainVisibleContentPosition']).toBeUndefined();
+    act(() => list.props.onLayout({ nativeEvent: { layout: { height: 500 } } }));
+    scroll(list, 0, 420, 500);
+
+    update(tree, {
+      ...sharedProps,
+      liveMessageState: liveState('The response now spans the viewport. '.repeat(30)),
+      bottomInset: 88,
+    });
+    list = getList(tree);
+    expect(list.props['ListHeaderComponent']).not.toBeNull();
+    expect(list.props['maintainVisibleContentPosition']).toBeUndefined();
+    // Native inset changes can still report a transient offset while the sticky state remains set.
+    scroll(list, 96, 760, 500);
+    expect(autoScrollStateRef.current.shouldStickToBottom).toBe(true);
+    expect(tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' })).toHaveLength(
+      0,
+    );
+    act(() => list.props.onContentSizeChange(320, 760));
+    expect(scrollToLatest).toHaveBeenLastCalledWith(false);
+
+    scrollToLatest.mockClear();
+    update(tree, {
+      ...sharedProps,
+      liveMessageState: liveState('The keyboard stays open while more output streams. '.repeat(35)),
+      bottomInset: 380,
+    });
+    list = getList(tree);
+    expect(list.props.contentContainerStyle[1]).toEqual({
+      paddingTop: 380,
+      paddingBottom: theme.spacing.lg,
+    });
+    scroll(list, 320, 1100, 500);
+    expect(autoScrollStateRef.current.shouldStickToBottom).toBe(true);
+    act(() => list.props.onContentSizeChange(320, 1100));
+    expect(scrollToLatest).toHaveBeenLastCalledWith(false);
+
+    scrollToLatest.mockClear();
+    act(() => list.props.onScrollBeginDrag());
+    scroll(list, 420, 1180, 500);
+    act(() => list.props.onScrollEndDrag());
+    expect(autoScrollStateRef.current.shouldStickToBottom).toBe(false);
+    expect(getList(tree).props['maintainVisibleContentPosition']).toEqual({
+      minIndexForVisible: 0,
+    });
+    expect(
+      tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' }).length,
+    ).toBeGreaterThan(0);
+    act(() => list.props.onContentSizeChange(320, 1180));
+    expect(scrollToLatest).not.toHaveBeenCalled();
+
+    act(() => list.props.onScrollBeginDrag());
+    scroll(list, 10, 1180, 500);
+    act(() => list.props.onScrollEndDrag());
+    expect(autoScrollStateRef.current.shouldStickToBottom).toBe(true);
+    expect(getList(tree).props['maintainVisibleContentPosition']).toBeUndefined();
+    expect(tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' })).toHaveLength(
+      0,
+    );
+    act(() => list.props.onContentSizeChange(320, 1240));
+    expect(scrollToLatest).toHaveBeenLastCalledWith(false);
+    act(() => tree.unmount());
+  });
+
   it('keeps the jump-to-latest control hidden when the transcript is not scrollable', () => {
     const tree = render({});
     const list = getList(tree);
@@ -816,7 +1242,7 @@ describe('ChatTranscriptView continuation', () => {
     const tree = render({});
     let list = getList(tree);
 
-    scroll(list, 120, 1000, 200);
+    drag(list, 120, 1000, 200);
     expect(
       tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' }).length,
     ).toBeGreaterThan(0);
@@ -832,7 +1258,7 @@ describe('ChatTranscriptView continuation', () => {
   it('renders the jump-to-latest button as a 48pt circular toolbar target', () => {
     const tree = render({});
     const list = getList(tree);
-    scroll(list, 100);
+    drag(list, 100);
 
     const jump = tree.root.findByProps({
       accessibilityLabel: 'Jump to latest message',
@@ -860,7 +1286,7 @@ describe('ChatTranscriptView continuation', () => {
     setMockLiquidGlassAvailable(true);
     setMockGlassEffectAPIAvailable(true);
     const tree = render({});
-    scroll(getList(tree), 100);
+    drag(getList(tree), 100);
 
     const glassProps = getRenderedGlassViewProps().find(
       (props) => props.testID === 'jump-to-latest-glass-surface',
@@ -876,7 +1302,7 @@ describe('ChatTranscriptView continuation', () => {
     const exitSpy = jest.spyOn(ZoomOut, 'reduceMotion');
     const tree = render({});
     const list = getList(tree);
-    scroll(list, 100);
+    drag(list, 100);
 
     expect(enterSpy).toHaveBeenCalledWith(ReduceMotion.System);
     expect(exitSpy).toHaveBeenCalledWith(ReduceMotion.System);
@@ -901,6 +1327,7 @@ describe('ChatTranscriptView continuation', () => {
     list = getList(tree);
     expect(list.props.data).toHaveLength(140);
 
+    scroll(list, 10, 1000, 200);
     act(() => list.props.onContentSizeChange(320, 1000));
     expect(onPinnedAutoScroll).toHaveBeenCalledWith(false);
     scroll(list, 100, 1000, 200);
@@ -1035,7 +1462,7 @@ describe('ChatTranscriptView continuation', () => {
     };
     const first = makeChat({ id: 'first', messages: makeMessages(180) });
     const tree = render({ chat: first, autoScrollStateRef });
-    scroll(getList(tree), 100);
+    drag(getList(tree), 100);
     expect(
       tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' }).length,
     ).toBeGreaterThan(0);

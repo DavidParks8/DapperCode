@@ -5,13 +5,17 @@ import Markdown from 'react-native-markdown-display';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import {
+  AGENT_MESSAGE_ACTIVITY_TYPE,
   COMPACTION_ACTIVITY_TYPE,
+  getAgentMessageMeta,
   getSubAgentMeta,
+  getSubAgentThreadId,
   SUBAGENT_ACTIVITY_TYPE,
 } from '@bridge/messages';
 import { useAppTheme, type AppTheme } from '@shared/theme';
 import { ComputerUseTimeline } from './ComputerUse';
 import { MessageActions } from './MessageActions';
+import { AgentMessageRow } from './AgentMessageRow';
 import { SelectableTextSheet } from './SelectTextSheet';
 import { toTimelineDetailPreview, isViewedImageEntry } from './contentHelpers';
 import type { createMarkdownRules } from './markdownRules';
@@ -113,7 +117,14 @@ export interface ChatMessageRenderContext {
 }
 
 type ChatMessageKind =
-  'user' | 'assistantLike' | 'compaction' | 'reasoning' | 'subAgent' | 'timeline' | 'plainFallback';
+  | 'user'
+  | 'assistantLike'
+  | 'compaction'
+  | 'reasoning'
+  | 'subAgent'
+  | 'agentMessage'
+  | 'timeline'
+  | 'plainFallback';
 
 export function classifyChatMessageKind(
   message: ChatMessageRecord,
@@ -133,6 +144,9 @@ export function classifyChatMessageKind(
   }
   if (message.role === 'activity' && message.activityType === SUBAGENT_ACTIVITY_TYPE) {
     return 'subAgent';
+  }
+  if (message.role === 'activity' && message.activityType === AGENT_MESSAGE_ACTIVITY_TYPE) {
+    return 'agentMessage';
   }
   if (hasTimelineEntries) {
     return 'timeline';
@@ -201,6 +215,7 @@ function renderAssistantLikeChatMessage(ctx: ChatMessageRenderContext) {
       />
       <MessageActions
         text={ctx.copyText}
+        usage={ctx.message.usage ?? null}
         onSelectText={ctx.openSelectText}
         onForkConversation={ctx.onForkConversation}
         forkBusy={ctx.forkBusy}
@@ -263,7 +278,11 @@ function renderSubAgentChatMessage(ctx: ChatMessageRenderContext) {
   const { message, styles, timelineEntries, messageText, onOpenSubAgentThread } = ctx;
   const entries = timelineEntries?.length ? timelineEntries : [{ title: messageText, details: [] }];
   const meta = getSubAgentMeta(message);
-  const threadId = meta?.receiverThreadIds?.[0]?.trim() ?? '';
+  const threadId = getSubAgentThreadId(message);
+  if (!threadId) {
+    return <></>;
+  }
+
   const running = Boolean(meta?.agentStatus) && !isTerminalSubAgentStatus(meta?.agentStatus);
   return (
     <View style={[styles.messageWrapper, styles.messageWrapperAssistant]}>
@@ -277,6 +296,11 @@ function renderSubAgentChatMessage(ctx: ChatMessageRenderContext) {
       />
     </View>
   );
+}
+
+function renderAgentMessageChatMessage(ctx: ChatMessageRenderContext) {
+  const meta = getAgentMessageMeta(ctx.message);
+  return meta ? <AgentMessageRow messageId={ctx.message.id} meta={meta} /> : <></>;
 }
 
 function resolveTimelineToggleLabel(
@@ -472,6 +496,7 @@ export const CHAT_MESSAGE_RENDERERS: Record<
   compaction: renderCompactionChatMessage,
   reasoning: renderReasoningChatMessage,
   subAgent: renderSubAgentChatMessage,
+  agentMessage: renderAgentMessageChatMessage,
   timeline: renderTimelineChatMessage,
   plainFallback: renderPlainFallbackChatMessage,
 };

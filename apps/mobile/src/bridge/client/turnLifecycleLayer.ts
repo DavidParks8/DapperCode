@@ -27,6 +27,7 @@ import {
 } from '@bridge/client/clientContractsAndSnapshotInternals';
 import type {
   ApprovalPolicy,
+  BridgeThreadSchedulesState,
   BridgeThreadQueueSendResponse,
   BridgeThreadQueueState,
   Chat,
@@ -68,17 +69,30 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
     await Promise.all(workers);
     return results.filter((summary): summary is ChatSummary => summary !== null);
   }
-  async setChatWorkspace(id: string, cwd: string): Promise<Chat> {
+  async setChatWorkspace(
+    id: string,
+    cwd: string,
+    approvalPolicy?: ApprovalPolicy | null,
+  ): Promise<Chat> {
     const normalizedCwd = normalizeCwd(cwd);
     if (!normalizedCwd) {
       throw new Error('Workspace path cannot be empty');
     }
-    await this.resumeThread(id, { cwd: normalizedCwd });
+    await this.resumeThread(id, { cwd: normalizedCwd, approvalPolicy });
     const updated = await this.getChat(id);
     if (updated.cwd === normalizedCwd) {
       return updated;
     }
     return { ...updated, cwd: normalizedCwd };
+  }
+  async setApprovalPolicy(approvalPolicy: ApprovalPolicy): Promise<void> {
+    const normalizedPolicy = normalizeApprovalPolicy(approvalPolicy);
+    if (!normalizedPolicy) {
+      throw new Error('A valid approval policy is required');
+    }
+    await this.ws.request('thread/approvalPolicy/set', {
+      approvalPolicy: normalizedPolicy,
+    });
   }
   async resumeThread(
     id: string,
@@ -274,6 +288,15 @@ export abstract class HostBridgeApiClientTurnLifecycleLayer extends HostBridgeAp
       });
     }
     return this.ws.request<BridgeThreadQueueState>('bridge/thread/queue/read', {
+      threadId: normalizedThreadId,
+    });
+  }
+  readThreadSchedules(threadId: string): Promise<BridgeThreadSchedulesState> {
+    const normalizedThreadId = threadId.trim();
+    if (!normalizedThreadId) {
+      return Promise.resolve({ threadId: '', schedules: [] });
+    }
+    return this.ws.request<BridgeThreadSchedulesState>('bridge/thread/schedules/read', {
       threadId: normalizedThreadId,
     });
   }

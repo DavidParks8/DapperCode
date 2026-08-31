@@ -92,8 +92,8 @@ async function buildInto(destination: string): Promise<void> {
 function runExpoExport(outputDir: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(
-      'npx',
-      ['expo', 'export', '--platform', 'web', '--output-dir', outputDir, '--clear'],
+      'pnpm',
+      ['exec', 'expo', 'export', '--platform', 'web', '--output-dir', outputDir, '--clear'],
       {
         cwd: path.join(repoRoot, 'apps', 'mobile'),
         env: { ...process.env, ...E2E_BUILD_ENV, CI: '1' },
@@ -188,7 +188,7 @@ async function computeFingerprint(): Promise<string> {
   const mobileRoot = path.join(repoRoot, 'apps', 'mobile');
   const files = [
     path.join(repoRoot, 'package.json'),
-    path.join(repoRoot, 'package-lock.json'),
+    path.join(repoRoot, 'pnpm-lock.yaml'),
     path.join(mobileRoot, 'package.json'),
     path.join(mobileRoot, 'app.json'),
     path.join(mobileRoot, 'babel.config.js'),

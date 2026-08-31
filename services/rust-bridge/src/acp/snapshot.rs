@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use agent_client_protocol::schema::v1::{ToolCallStatus, ToolKind};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use super::events::{
@@ -57,6 +58,7 @@ pub struct SessionSnapshot {
     pub usage_used: Option<u64>,
     pub usage_size: Option<u64>,
     pub usage_cost: Option<String>,
+    pub token_totals: Option<BridgeTokenTotalsSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -66,11 +68,48 @@ pub struct SnapshotMessage {
     pub role: MessageRole,
     pub parts: Vec<serde_json::Value>,
     pub truncated: bool,
+    /// What the turn that produced this response cost, attached to the agent message the turn
+    /// ended on so a reloaded transcript can report per-response usage instead of only the
+    /// session-wide totals.
+    pub usage: Option<BridgeTurnUsageSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_message: Option<crate::agent_messaging::AgentMessageOrigin>,
+}
+
+/// The token cost of a single prompt turn, plus the model that was configured while it ran.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTurnUsageSnapshot {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_tokens: Option<u64>,
+    pub cached_read_tokens: Option<u64>,
+    pub cached_write_tokens: Option<u64>,
+    pub total_tokens: u64,
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UserMessageBoundary {
+pub struct ForkBoundary {
+    /// Number of complete user turns the fork keeps.
     pub ordinal: usize,
+    pub kind: ForkBoundaryKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ForkBoundaryKind {
+    /// The fork must stop before this user request.
+    BeforeRequest(ForkBoundaryMessage),
+    /// The boundary is the end of the conversation, so the fork keeps every recorded turn. The
+    /// newest request travels with it so a harness can confirm the source has not gained a turn
+    /// since the snapshot was read by identity rather than by counting messages, which a harness
+    /// is free to split differently from the canonical transcript.
+    EndOfHistory { newest_request: ForkBoundaryMessage },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkBoundaryMessage {
+    pub message_id: String,
     pub first_text: String,
     pub first_text_truncated: bool,
     pub raw_message_id_hint: Option<String>,
@@ -84,6 +123,8 @@ pub struct SnapshotTool {
     pub kind: ToolKind,
     pub status: ToolCallStatus,
     pub title: String,
+    pub started_at_ms: i64,
+    pub completed_at_ms: Option<i64>,
     pub content: String,
     pub structured_content: Vec<serde_json::Value>,
     pub locations: Vec<serde_json::Value>,
@@ -183,6 +224,7 @@ pub struct BridgeThreadSnapshot {
     pub continuation: SnapshotContinuation,
     pub plan: Vec<PlanEntry>,
     pub usage: BridgeUsageSnapshot,
+    pub token_totals: Option<BridgeTokenTotalsSnapshot>,
     pub mode: Option<String>,
     pub config: Vec<ConfigEntry>,
     pub commands: Vec<CommandEntry>,
@@ -196,6 +238,44 @@ pub struct BridgeUsageSnapshot {
     pub used: Option<u64>,
     pub size: Option<u64>,
     pub cost: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTokenTotalsSnapshot {
+    pub turns: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_tokens: Option<u64>,
+    pub cached_read_tokens: Option<u64>,
+    pub cached_write_tokens: Option<u64>,
+    pub total_tokens: u64,
+}
+
+impl BridgeTokenTotalsSnapshot {
+    pub(crate) fn add_turn(
+        &mut self,
+        input_tokens: u64,
+        output_tokens: u64,
+        reasoning_tokens: Option<u64>,
+        cached_read_tokens: Option<u64>,
+        cached_write_tokens: Option<u64>,
+        total_tokens: u64,
+    ) {
+        self.turns = self.turns.saturating_add(1);
+        self.input_tokens = self.input_tokens.saturating_add(input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(output_tokens);
+        add_reported_tokens(&mut self.reasoning_tokens, reasoning_tokens);
+        add_reported_tokens(&mut self.cached_read_tokens, cached_read_tokens);
+        add_reported_tokens(&mut self.cached_write_tokens, cached_write_tokens);
+        self.total_tokens = self.total_tokens.saturating_add(total_tokens);
+    }
+}
+
+fn add_reported_tokens(total: &mut Option<u64>, reported: Option<u64>) {
+    if let Some(reported) = reported {
+        *total = Some(total.unwrap_or_default().saturating_add(reported));
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -245,6 +325,7 @@ impl From<SessionSnapshot> for BridgeThreadSnapshot {
                 size: snapshot.usage_size,
                 cost: snapshot.usage_cost,
             },
+            token_totals: snapshot.token_totals,
             mode: snapshot.mode_id,
             config: snapshot.config,
             commands: snapshot.commands,
@@ -287,8 +368,42 @@ fn raw_opencode_message_id(message_id: &str) -> Option<&str> {
     candidate.starts_with("msg_").then_some(candidate)
 }
 
+fn message_matches_id(message: &SnapshotMessage, message_id: &str) -> bool {
+    let target_raw_id = raw_opencode_message_id(message_id);
+    let message_raw_id = raw_opencode_message_id(&message.id);
+    message.id == message_id || target_raw_id.is_some_and(|target| Some(target) == message_raw_id)
+}
+
+fn describe_user_message(message: &SnapshotMessage) -> ForkBoundaryMessage {
+    let first_text = message
+        .parts
+        .iter()
+        .find_map(|part| {
+            (part.get("type").and_then(serde_json::Value::as_str) == Some("text"))
+                .then(|| part.get("text").and_then(serde_json::Value::as_str))
+                .flatten()
+        })
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    ForkBoundaryMessage {
+        message_id: message.id.clone(),
+        first_text,
+        first_text_truncated: message.truncated,
+        raw_message_id_hint: raw_opencode_message_id(&message.id).map(str::to_string),
+    }
+}
+
 impl SessionSnapshot {
-    pub fn complete_user_message_boundary(&self, message_id: &str) -> Option<UserMessageBoundary> {
+    /// Resolves the exclusive fork boundary named by `message_id`.
+    ///
+    /// The identifier may name either the user request that the fork must stop before, or a
+    /// response that the fork must keep along with the rest of its turn. Naming a response is what
+    /// lets the newest response in a conversation be forked: it resolves to the end of history,
+    /// where no later user request exists to act as the exclusive boundary. This is
+    /// transport-neutral - every harness receives the same "keep this many complete user turns"
+    /// instruction plus the identity of the request that bounds them.
+    pub fn complete_fork_boundary(&self, message_id: &str) -> Option<ForkBoundary> {
         if self.unavailable_count != 0
             || self
                 .history
@@ -297,50 +412,49 @@ impl SessionSnapshot {
         {
             return None;
         }
-        let mut ordinal = 0;
-        for entry in &self.history {
-            if entry.kind != SnapshotTimelineKind::Message {
-                continue;
+        let messages = self
+            .history
+            .iter()
+            .filter(|entry| entry.kind == SnapshotTimelineKind::Message)
+            .filter_map(|entry| entry.message.as_ref())
+            .filter(|message| message.agent_message.is_none())
+            .collect::<Vec<_>>();
+        let target = messages
+            .iter()
+            .position(|message| message_matches_id(message, message_id))?;
+        // Complete user turns kept by the fork. The target itself is excluded when it is the
+        // request, and included when it is a response, which is exactly this count either way.
+        let ordinal = messages[..target]
+            .iter()
+            .filter(|message| message.role == MessageRole::User)
+            .count();
+        let kind = if messages[target].role == MessageRole::User {
+            ForkBoundaryKind::BeforeRequest(describe_user_message(messages[target]))
+        } else if let Some(next_request) = messages[target + 1..]
+            .iter()
+            .find(|message| message.role == MessageRole::User)
+        {
+            ForkBoundaryKind::BeforeRequest(describe_user_message(next_request))
+        } else {
+            // A response with no request before it belongs to no turn, so there is nothing to fork.
+            let newest_request = messages[..target]
+                .iter()
+                .rfind(|message| message.role == MessageRole::User)?;
+            ForkBoundaryKind::EndOfHistory {
+                newest_request: describe_user_message(newest_request),
             }
-            let Some(message) = entry.message.as_ref() else {
-                continue;
-            };
-            if message.role != MessageRole::User {
-                continue;
-            }
-            let target_raw_id = raw_opencode_message_id(message_id);
-            let message_raw_id = raw_opencode_message_id(&message.id);
-            if message.id == message_id
-                || target_raw_id.is_some_and(|target| Some(target) == message_raw_id)
-            {
-                let first_text = message
-                    .parts
-                    .iter()
-                    .find_map(|part| {
-                        (part.get("type").and_then(serde_json::Value::as_str) == Some("text"))
-                            .then(|| part.get("text").and_then(serde_json::Value::as_str))
-                            .flatten()
-                    })
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string();
-                let raw_message_id_hint = message_raw_id.map(str::to_string);
-                return Some(UserMessageBoundary {
-                    ordinal,
-                    first_text,
-                    first_text_truncated: message.truncated,
-                    raw_message_id_hint,
-                });
-            }
-            ordinal += 1;
-        }
-        None
+        };
+        Some(ForkBoundary { ordinal, kind })
     }
 
-    /// Restores the transcript recorded before a reload while keeping the session
-    /// metadata (mode, commands, config, plan, usage, title) that the agent just
-    /// reported. Used when a reload replays no history at all.
+    /// Restores ordinary transcript history while keeping the current metadata and any
+    /// agent-message activity that arrived during reconstruction.
     pub fn restore_transcript_from(&mut self, previous: SessionSnapshot) {
+        let replayed_agent_messages = self
+            .messages
+            .iter()
+            .filter_map(|message| message.agent_message.clone())
+            .collect::<Vec<_>>();
         self.messages = previous.messages;
         self.tools = previous.tools;
         self.subagent_headers = previous.subagent_headers;
@@ -352,6 +466,17 @@ impl SessionSnapshot {
         self.history = previous.history;
         self.history_bytes = previous.history_bytes;
         self.unavailable_count = previous.unavailable_count;
+        for message in replayed_agent_messages {
+            self.append_agent_message(message);
+        }
+    }
+
+    pub(crate) fn has_ordinary_transcript(&self) -> bool {
+        !self.tools.is_empty()
+            || self
+                .messages
+                .iter()
+                .any(|message| message.agent_message.is_none())
     }
 
     pub fn new(agent_id: String, thread_id: String) -> Self {
@@ -364,6 +489,15 @@ impl SessionSnapshot {
 
     pub(crate) fn subagent_header(&self, tool_call_id: &str) -> Option<&str> {
         self.subagent_headers.get(tool_call_id).map(String::as_str)
+    }
+
+    pub(crate) fn has_active_subagent_tool(&self) -> bool {
+        self.active_tool_ids.iter().any(|tool_call_id| {
+            self.tools
+                .get(tool_call_id)
+                .is_some_and(|tool| tool.subagent)
+                || self.subagent_headers.contains_key(tool_call_id)
+        })
     }
 
     pub(crate) fn mark_subagent_terminal(&mut self, child_session_id: &str, status: &str) -> bool {
@@ -408,6 +542,10 @@ impl SessionSnapshot {
     }
 
     pub fn apply(&mut self, event: &CanonicalEvent) {
+        self.apply_at(event, Utc::now().timestamp_millis());
+    }
+
+    fn apply_at(&mut self, event: &CanonicalEvent, observed_at_ms: i64) {
         match event {
             CanonicalEvent::RunStarted {
                 run_id,
@@ -416,7 +554,7 @@ impl SessionSnapshot {
                 ..
             } => {
                 if let Some(active_generation) = self.active_generation {
-                    self.terminalize_active_tools(ToolCallStatus::Failed);
+                    self.terminalize_active_tools(ToolCallStatus::Failed, observed_at_ms);
                     self.terminalize_unresolved_subagents("failed", active_generation);
                 }
                 self.active_run_id = Some(run_id.clone());
@@ -433,10 +571,10 @@ impl SessionSnapshot {
                     stop_reason,
                     agent_client_protocol::schema::v1::StopReason::Cancelled
                 ) {
-                    self.terminalize_active_tools(ToolCallStatus::Failed);
+                    self.terminalize_active_tools(ToolCallStatus::Failed, observed_at_ms);
                     self.terminalize_unresolved_subagents("cancelled", *generation);
                 } else {
-                    self.terminalize_active_tools(ToolCallStatus::Completed);
+                    self.terminalize_active_tools(ToolCallStatus::Completed, observed_at_ms);
                 }
                 self.active_run_id = None;
                 self.active_source_turn_id = None;
@@ -446,7 +584,7 @@ impl SessionSnapshot {
             CanonicalEvent::RunFailed { generation, .. }
                 if self.active_generation == Some(*generation) =>
             {
-                self.terminalize_active_tools(ToolCallStatus::Failed);
+                self.terminalize_active_tools(ToolCallStatus::Failed, observed_at_ms);
                 self.terminalize_unresolved_subagents("failed", *generation);
                 self.active_run_id = None;
                 self.active_source_turn_id = None;
@@ -465,6 +603,9 @@ impl SessionSnapshot {
                 content.clone(),
                 content_block.clone(),
             ),
+            CanonicalEvent::AgentMessage { message, .. } => {
+                self.append_agent_message(message.clone())
+            }
             CanonicalEvent::Tool {
                 tool_call_id,
                 generation,
@@ -478,6 +619,7 @@ impl SessionSnapshot {
             } => self.apply_tool(
                 tool_call_id,
                 *generation,
+                observed_at_ms,
                 ToolProjection {
                     kind,
                     status,
@@ -527,6 +669,33 @@ impl SessionSnapshot {
                 self.usage_size = Some(*size);
                 self.usage_cost = cost.clone().map(|value| bound(value, MAX_TEXT_BYTES));
             }
+            CanonicalEvent::TurnTokenUsage {
+                input_tokens,
+                output_tokens,
+                reasoning_tokens,
+                cached_read_tokens,
+                cached_write_tokens,
+                total_tokens,
+                ..
+            } => {
+                self.token_totals.get_or_insert_default().add_turn(
+                    *input_tokens,
+                    *output_tokens,
+                    *reasoning_tokens,
+                    *cached_read_tokens,
+                    *cached_write_tokens,
+                    *total_tokens,
+                );
+                self.attach_turn_usage(BridgeTurnUsageSnapshot {
+                    input_tokens: *input_tokens,
+                    output_tokens: *output_tokens,
+                    reasoning_tokens: *reasoning_tokens,
+                    cached_read_tokens: *cached_read_tokens,
+                    cached_write_tokens: *cached_write_tokens,
+                    total_tokens: *total_tokens,
+                    model: self.configured_model_label(),
+                });
+            }
             CanonicalEvent::RunFinished { .. }
             | CanonicalEvent::RunFailed { .. }
             | CanonicalEvent::PermissionRequested { .. }
@@ -537,7 +706,7 @@ impl SessionSnapshot {
         }
     }
 
-    fn append_message(
+    pub(crate) fn append_message(
         &mut self,
         id: String,
         role: MessageRole,
@@ -584,12 +753,273 @@ impl SessionSnapshot {
             role,
             parts,
             truncated,
+            usage: None,
+            agent_message: None,
         });
         let message = self.messages.back().expect("message was inserted").clone();
         self.attach_history_message(message);
     }
 
-    fn apply_tool(&mut self, id: &str, generation: Option<u64>, projection: ToolProjection<'_>) {
+    pub(crate) fn append_message_after(
+        &mut self,
+        id: String,
+        role: MessageRole,
+        content: String,
+        content_block: Option<serde_json::Value>,
+        after_timeline_id: Option<&str>,
+    ) {
+        let already_present = self.messages.iter().any(|message| message.id == id);
+        self.append_message(id.clone(), role, content, content_block);
+        if already_present {
+            return;
+        }
+        match after_timeline_id {
+            Some(after_timeline_id) if after_timeline_id != id => {
+                self.reposition_message_after(&id, after_timeline_id);
+            }
+            Some(_) => {}
+            None => self.reposition_message_at_start(&id),
+        }
+    }
+
+    pub(crate) fn append_agent_message(
+        &mut self,
+        origin: crate::agent_messaging::AgentMessageOrigin,
+    ) {
+        let id = format!("agent-message:{}", origin.message_id);
+        if let Some(message) = self.messages.iter_mut().find(|message| message.id == id) {
+            if message.agent_message.is_some() {
+                message.agent_message = Some(origin);
+                let message = message.clone();
+                self.update_history_message(&message);
+                return;
+            }
+        }
+        self.append_message(id.clone(), MessageRole::User, origin.body.clone(), None);
+        if let Some(message) = self.messages.iter_mut().find(|message| message.id == id) {
+            message.agent_message = Some(origin);
+            let message = message.clone();
+            self.update_history_message(&message);
+        }
+    }
+
+    pub(crate) fn latest_timeline_canonical_id(&self) -> Option<&str> {
+        self.timeline
+            .back()
+            .map(|entry| entry.canonical_id.as_str())
+    }
+
+    pub(crate) fn append_agent_message_after(
+        &mut self,
+        origin: crate::agent_messaging::AgentMessageOrigin,
+        after_timeline_id: Option<&str>,
+    ) {
+        let id = format!("agent-message:{}", origin.message_id);
+        let already_present = self.messages.iter().any(|message| message.id == id);
+        self.append_agent_message(origin);
+        if already_present {
+            return;
+        }
+        let Some(after_timeline_id) = after_timeline_id.filter(|anchor| *anchor != id) else {
+            return;
+        };
+        self.reposition_message_after(&id, after_timeline_id);
+    }
+
+    fn reposition_message_after(&mut self, message_id: &str, after_timeline_id: &str) {
+        let Some((anchor_index, anchor_sequence)) = self
+            .timeline
+            .iter()
+            .enumerate()
+            .find(|(_, entry)| entry.canonical_id == after_timeline_id)
+            .map(|(index, entry)| (index, entry.sequence))
+        else {
+            return;
+        };
+        if !self
+            .history
+            .iter()
+            .any(|entry| entry.canonical_id == after_timeline_id)
+        {
+            return;
+        }
+        let Some(timeline_index) = self
+            .timeline
+            .iter()
+            .position(|entry| entry.canonical_id == message_id)
+        else {
+            return;
+        };
+        let Some(history_index) = self
+            .history
+            .iter()
+            .rposition(|entry| entry.canonical_id == message_id && entry.message.is_some())
+        else {
+            return;
+        };
+        let insertion_after_sequence = self
+            .timeline
+            .iter()
+            .skip(anchor_index + 1)
+            .take_while(|entry| {
+                entry.canonical_id != message_id
+                    && self.messages.iter().any(|message| {
+                        message.id == entry.canonical_id && message.agent_message.is_some()
+                    })
+            })
+            .map(|entry| entry.sequence)
+            .last()
+            .unwrap_or(anchor_sequence);
+        let Some(mut timeline_entry) = self.timeline.remove(timeline_index) else {
+            return;
+        };
+        let Some(mut history_entry) = self.history.remove(history_index) else {
+            return;
+        };
+
+        for entry in &mut self.timeline {
+            if entry.sequence > insertion_after_sequence {
+                entry.sequence = entry.sequence.saturating_add(1);
+            }
+        }
+        for entry in &mut self.history {
+            if entry.sequence > insertion_after_sequence {
+                entry.sequence = entry.sequence.saturating_add(1);
+            }
+        }
+        timeline_entry.sequence = insertion_after_sequence.saturating_add(1);
+        history_entry.sequence = timeline_entry.sequence;
+        let timeline_insert = self
+            .timeline
+            .iter()
+            .position(|entry| entry.sequence > timeline_entry.sequence)
+            .unwrap_or(self.timeline.len());
+        self.timeline.insert(timeline_insert, timeline_entry);
+        let history_insert = self
+            .history
+            .iter()
+            .position(|entry| entry.sequence > history_entry.sequence)
+            .unwrap_or(self.history.len());
+        self.history.insert(history_insert, history_entry);
+
+        if let Some(message_index) = self
+            .messages
+            .iter()
+            .position(|message| message.id == message_id)
+        {
+            let message = self
+                .messages
+                .remove(message_index)
+                .expect("message index came from the snapshot");
+            let next_message_id = self
+                .timeline
+                .iter()
+                .skip(timeline_insert + 1)
+                .find(|entry| entry.kind == SnapshotTimelineKind::Message)
+                .map(|entry| entry.canonical_id.as_str());
+            if let Some(next_index) = next_message_id.and_then(|next_id| {
+                self.messages
+                    .iter()
+                    .position(|candidate| candidate.id == next_id)
+            }) {
+                self.messages.insert(next_index, message);
+            } else {
+                self.messages.push_back(message);
+            }
+        }
+        self.history_bytes = self.history.iter().map(history_entry_bytes).sum();
+        self.enforce_history_bounds();
+    }
+
+    fn reposition_message_at_start(&mut self, message_id: &str) {
+        let Some(timeline_index) = self
+            .timeline
+            .iter()
+            .position(|entry| entry.canonical_id == message_id)
+        else {
+            return;
+        };
+        let Some(history_index) = self
+            .history
+            .iter()
+            .rposition(|entry| entry.canonical_id == message_id && entry.message.is_some())
+        else {
+            return;
+        };
+        let Some(mut timeline_entry) = self.timeline.remove(timeline_index) else {
+            return;
+        };
+        let Some(mut history_entry) = self.history.remove(history_index) else {
+            return;
+        };
+        for entry in &mut self.timeline {
+            entry.sequence = entry.sequence.saturating_add(1);
+        }
+        for entry in &mut self.history {
+            entry.sequence = entry.sequence.saturating_add(1);
+        }
+        timeline_entry.sequence = 0;
+        history_entry.sequence = 0;
+        self.timeline.push_front(timeline_entry);
+        self.history.push_front(history_entry);
+
+        if let Some(message_index) = self
+            .messages
+            .iter()
+            .position(|message| message.id == message_id)
+        {
+            let message = self
+                .messages
+                .remove(message_index)
+                .expect("message index came from the snapshot");
+            self.messages.push_front(message);
+        }
+        self.history_bytes = self.history.iter().map(history_entry_bytes).sum();
+        self.enforce_history_bounds();
+    }
+
+    /// Records what a finished turn cost on the agent message the turn ended on. The transcript
+    /// renders the affordance under a response, so an assistant message is the only anchor that
+    /// survives a reload; a turn that produced no agent message simply reports nothing.
+    fn attach_turn_usage(&mut self, usage: BridgeTurnUsageSnapshot) {
+        let Some(message) = self
+            .messages
+            .iter_mut()
+            .rev()
+            .find(|message| message.role == MessageRole::Agent)
+        else {
+            return;
+        };
+        message.usage = Some(usage);
+        let message = message.clone();
+        self.update_history_message(&message);
+    }
+
+    /// The display name of the model the session is configured with, preferring the option label
+    /// the agent advertises over the raw identifier it stores.
+    fn configured_model_label(&self) -> Option<String> {
+        let entry = self
+            .config
+            .iter()
+            .find(|entry| entry.category.as_deref() == Some("model"))
+            .or_else(|| self.config.iter().find(|entry| entry.id == "model"))?;
+        let label = entry
+            .options
+            .iter()
+            .find(|option| option.value == entry.value)
+            .map(|option| option.name.clone())
+            .unwrap_or_else(|| entry.value.clone());
+        let label = label.trim();
+        (!label.is_empty()).then(|| bound(label.to_string(), MAX_TEXT_BYTES))
+    }
+
+    fn apply_tool(
+        &mut self,
+        id: &str,
+        generation: Option<u64>,
+        observed_at_ms: i64,
+        projection: ToolProjection<'_>,
+    ) {
         if self.tools.len() >= MAX_TOOLS && !self.tools.contains_key(id) {
             let oldest = self
                 .timeline
@@ -662,12 +1092,28 @@ impl SessionSnapshot {
             }
         }
         let existing = self.tools.get(id).cloned().or(retained_tool);
+        let started_at_ms = existing
+            .as_ref()
+            .map(|tool| tool.started_at_ms)
+            .unwrap_or(observed_at_ms);
+        let completed_at_ms = if terminal {
+            Some(
+                existing
+                    .as_ref()
+                    .and_then(|tool| tool.completed_at_ms)
+                    .unwrap_or(observed_at_ms.max(started_at_ms)),
+            )
+        } else {
+            existing.as_ref().and_then(|tool| tool.completed_at_ms)
+        };
         let mut tool = SnapshotTool {
             id: id.to_string(),
             generation,
             kind: *projection.kind,
             status: *projection.status,
             title: bound(projection.title.to_string(), MAX_TEXT_BYTES),
+            started_at_ms,
+            completed_at_ms,
             content: existing
                 .as_ref()
                 .map(|tool| tool.content.clone())
@@ -848,13 +1294,17 @@ impl SessionSnapshot {
         )
     }
 
-    fn terminalize_active_tools(&mut self, status: ToolCallStatus) {
+    fn terminalize_active_tools(&mut self, status: ToolCallStatus, completed_at_ms: i64) {
         let active_tool_ids = self.active_tool_ids.iter().cloned().collect::<Vec<_>>();
         let updates = active_tool_ids
             .iter()
             .filter_map(|tool_call_id| {
                 let tool = self.tools.get_mut(tool_call_id)?;
                 tool.status = status;
+                tool.completed_at_ms = Some(
+                    tool.completed_at_ms
+                        .unwrap_or(completed_at_ms.max(tool.started_at_ms)),
+                );
                 Some(tool.clone())
             })
             .collect::<Vec<_>>();
@@ -881,6 +1331,10 @@ impl SessionSnapshot {
                     return;
                 };
                 tool.status = status;
+                tool.completed_at_ms = Some(
+                    tool.completed_at_ms
+                        .unwrap_or(completed_at_ms.max(tool.started_at_ms)),
+                );
                 if let Some(header) = header {
                     Self::ensure_durable_subagent_header(tool, &header);
                 }
@@ -1626,6 +2080,48 @@ mod tests {
         }
     }
 
+    #[test]
+    fn tool_timing_keeps_first_observation_and_freezes_terminal_time() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply_at(&tool("tool", None, ToolCallStatus::InProgress), 1_000);
+        snapshot.apply_at(&tool("tool", None, ToolCallStatus::InProgress), 1_500);
+        let running = &snapshot.tools["tool"];
+        assert_eq!(running.started_at_ms, 1_000);
+        assert_eq!(running.completed_at_ms, None);
+
+        snapshot.apply_at(&tool("tool", None, ToolCallStatus::Completed), 2_500);
+        snapshot.apply_at(&tool("tool", None, ToolCallStatus::Completed), 3_000);
+        let completed = &snapshot.tools["tool"];
+        assert_eq!(completed.started_at_ms, 1_000);
+        assert_eq!(completed.completed_at_ms, Some(2_500));
+        let value = serde_json::to_value(completed).unwrap();
+        assert_eq!(value["startedAtMs"], 1_000);
+        assert_eq!(value["completedAtMs"], 2_500);
+    }
+
+    #[test]
+    fn run_completion_stamps_dangling_tool_completion_time() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply_at(&run_started(1), 500);
+        snapshot.apply_at(&tool("tool", Some(1), ToolCallStatus::InProgress), 1_000);
+        snapshot.apply_at(
+            &CanonicalEvent::RunFinished {
+                agent_id: "agent".to_string(),
+                thread_id: "thread".to_string(),
+                run_id: "run-1".to_string(),
+                source_turn_id: "turn-1".to_string(),
+                generation: 1,
+                stop_reason: StopReason::EndTurn,
+            },
+            4_000,
+        );
+
+        let tool = &snapshot.tools["tool"];
+        assert_eq!(tool.status, ToolCallStatus::Completed);
+        assert_eq!(tool.started_at_ms, 1_000);
+        assert_eq!(tool.completed_at_ms, Some(4_000));
+    }
+
     /// Reproduces "a long complete session showed as in progress".
     ///
     /// Restarting the bridge replays a thread from history. Replayed tool events carry no
@@ -1702,6 +2198,24 @@ mod tests {
         let tool = snapshot.tools.get("call-task-1").expect("tool");
         assert!(tool.subagent, "renaming un-classified the sub-agent");
         assert_eq!(tool.title, "Inspect workspace");
+    }
+
+    #[test]
+    fn active_subagent_detection_survives_tool_snapshot_eviction() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&run_started(1));
+        snapshot.apply(&subagent_tool_update(
+            "call-task-1",
+            "Inspect workspace",
+            ToolCallStatus::InProgress,
+            "<task id=\"child\" state=\"running\">\nWorking\n</task>",
+        ));
+        assert!(snapshot.has_active_subagent_tool());
+
+        snapshot.tools.remove("call-task-1");
+        assert!(snapshot.active_tool_ids.contains("call-task-1"));
+        assert!(snapshot.subagent_headers.contains_key("call-task-1"));
+        assert!(snapshot.has_active_subagent_tool());
     }
 
     /// Agents that never name the tool `task` are still classified once a task header lands.
@@ -2791,12 +3305,24 @@ mod tests {
                 serde_json::json!({"type":"audio","data":"YXVkaW8=","mimeType":"audio/wav"}),
             ],
             truncated: false,
+            usage: Some(BridgeTurnUsageSnapshot {
+                input_tokens: 4_100,
+                output_tokens: 860,
+                reasoning_tokens: Some(240),
+                cached_read_tokens: Some(31_200),
+                cached_write_tokens: Some(1_900),
+                total_tokens: 38_300,
+                model: Some("Example Model".to_string()),
+            }),
+            agent_message: None,
         });
         snapshot.messages.push_back(SnapshotMessage {
             id: "reasoning-1".to_string(),
             role: MessageRole::Thought,
             parts: vec![serde_json::json!({"type":"text","text":"Snapshot reasoning"})],
             truncated: false,
+            usage: None,
+            agent_message: None,
         });
         snapshot.timeline = VecDeque::from([
             SnapshotTimelineEntry {
@@ -2827,6 +3353,8 @@ mod tests {
                 kind: ToolKind::Read,
                 status: ToolCallStatus::Completed,
                 title: "Read file".to_string(),
+                started_at_ms: 1_000,
+                completed_at_ms: Some(2_000),
                 content: "done".to_string(),
                 structured_content: vec![
                     serde_json::json!({"type":"content","content":{"type":"text","text":"structured"}}),
@@ -2846,6 +3374,15 @@ mod tests {
         snapshot.usage_used = Some(120);
         snapshot.usage_size = Some(4096);
         snapshot.usage_cost = Some("$0.01".to_string());
+        snapshot.token_totals = Some(BridgeTokenTotalsSnapshot {
+            turns: 14,
+            input_tokens: 48_200,
+            output_tokens: 12_400,
+            reasoning_tokens: Some(8_900),
+            cached_read_tokens: Some(386_000),
+            cached_write_tokens: Some(52_300),
+            total_tokens: 507_800,
+        });
         snapshot.mode_id = Some("plan".to_string());
         snapshot.config = vec![ConfigEntry {
             id: "model".to_string(),
@@ -3048,6 +3585,8 @@ mod tests {
                 role,
                 parts: vec![serde_json::json!({"type":"text","text":"x"})],
                 truncated: false,
+                usage: None,
+                agent_message: None,
             });
             snapshot.history_bytes = MAX_HISTORY_BYTES + 1;
             snapshot.enforce_history_bounds();
@@ -3062,6 +3601,8 @@ mod tests {
             kind: ToolKind::Read,
             status: ToolCallStatus::Completed,
             title: "Read".into(),
+            started_at_ms: 1_000,
+            completed_at_ms: Some(2_000),
             content: String::new(),
             structured_content: Vec::new(),
             locations: Vec::new(),
@@ -3078,6 +3619,8 @@ mod tests {
             role: MessageRole::Agent,
             parts: Vec::new(),
             truncated: false,
+            usage: None,
+            agent_message: None,
         });
         absent.attach_or_update_history_tool(SnapshotTool {
             id: "missing-tool".into(),
@@ -3085,6 +3628,8 @@ mod tests {
             kind: ToolKind::Read,
             status: ToolCallStatus::Completed,
             title: "Read".into(),
+            started_at_ms: 1_000,
+            completed_at_ms: Some(2_000),
             content: String::new(),
             structured_content: Vec::new(),
             locations: Vec::new(),
@@ -3297,6 +3842,7 @@ mod tests {
             snapshot.apply_tool(
                 "tool",
                 None,
+                index,
                 ToolProjection {
                     kind: &ToolKind::Execute,
                     status: if index == 999 {
@@ -3461,6 +4007,291 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_without_turn_usage_exposes_null_token_totals() {
+        let snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+
+        assert_eq!(
+            serde_json::to_value(BridgeThreadSnapshot::from(snapshot)).unwrap()["tokenTotals"],
+            serde_json::Value::Null
+        );
+    }
+
+    #[test]
+    fn snapshot_accumulates_turn_usage_and_preserves_unreported_optional_fields() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        let usage = |input_tokens,
+                     output_tokens,
+                     reasoning_tokens,
+                     cached_read_tokens,
+                     cached_write_tokens,
+                     total_tokens| CanonicalEvent::TurnTokenUsage {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            input_tokens,
+            output_tokens,
+            reasoning_tokens,
+            cached_read_tokens,
+            cached_write_tokens,
+            total_tokens,
+        };
+
+        snapshot.apply(&usage(10, 5, None, None, None, 15));
+        let first = snapshot.token_totals.as_ref().unwrap();
+        assert_eq!(first.reasoning_tokens, None);
+        assert_eq!(first.cached_read_tokens, None);
+        assert_eq!(first.cached_write_tokens, None);
+
+        snapshot.apply(&usage(20, 7, Some(3), Some(11), Some(2), 43));
+        snapshot.apply(&usage(4, 1, None, None, None, 5));
+
+        let totals = snapshot.token_totals.as_ref().unwrap();
+        assert_eq!(
+            totals,
+            &BridgeTokenTotalsSnapshot {
+                turns: 3,
+                input_tokens: 34,
+                output_tokens: 13,
+                reasoning_tokens: Some(3),
+                cached_read_tokens: Some(11),
+                cached_write_tokens: Some(2),
+                total_tokens: 63,
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(BridgeThreadSnapshot::from(snapshot)).unwrap()["tokenTotals"],
+            serde_json::json!({
+                "turns": 3,
+                "inputTokens": 34,
+                "outputTokens": 13,
+                "reasoningTokens": 3,
+                "cachedReadTokens": 11,
+                "cachedWriteTokens": 2,
+                "totalTokens": 63,
+            })
+        );
+    }
+
+    #[test]
+    fn turn_usage_attaches_to_the_agent_message_the_turn_ended_on() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        let chunk = |role, message_id: &str, content: &str| CanonicalEvent::MessageChunk {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role,
+            message_id: message_id.to_string(),
+            content: content.to_string(),
+            content_block: None,
+        };
+        snapshot.apply(&CanonicalEvent::Config {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            entries: vec![ConfigEntry {
+                id: "model".to_string(),
+                value: "gpt-5.6-sol".to_string(),
+                name: "Model".to_string(),
+                description: None,
+                category: Some("model".to_string()),
+                options: vec![ConfigOptionValue {
+                    value: "gpt-5.6-sol".to_string(),
+                    name: "GPT-5.6 Sol".to_string(),
+                    description: None,
+                }],
+            }],
+        });
+        snapshot.apply(&chunk(MessageRole::User, "user-1", "hi"));
+        snapshot.apply(&chunk(MessageRole::Agent, "agent-1", "first"));
+        snapshot.apply(&CanonicalEvent::TurnTokenUsage {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            input_tokens: 120,
+            output_tokens: 40,
+            reasoning_tokens: Some(12),
+            cached_read_tokens: Some(880),
+            cached_write_tokens: None,
+            total_tokens: 1_040,
+        });
+
+        let first = snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == "agent-1")
+            .unwrap();
+        assert_eq!(
+            first.usage,
+            Some(BridgeTurnUsageSnapshot {
+                input_tokens: 120,
+                output_tokens: 40,
+                reasoning_tokens: Some(12),
+                cached_read_tokens: Some(880),
+                cached_write_tokens: None,
+                total_tokens: 1_040,
+                model: Some("GPT-5.6 Sol".to_string()),
+            })
+        );
+        // A user message never anchors the affordance, and the second turn must not overwrite the
+        // first response's cost.
+        assert!(snapshot
+            .messages
+            .iter()
+            .find(|message| message.id == "user-1")
+            .unwrap()
+            .usage
+            .is_none());
+
+        snapshot.apply(&chunk(MessageRole::Agent, "agent-2", "second"));
+        snapshot.apply(&CanonicalEvent::TurnTokenUsage {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            input_tokens: 7,
+            output_tokens: 3,
+            reasoning_tokens: None,
+            cached_read_tokens: None,
+            cached_write_tokens: None,
+            total_tokens: 10,
+        });
+
+        let messages = &snapshot.messages;
+        assert_eq!(
+            messages
+                .iter()
+                .find(|message| message.id == "agent-1")
+                .unwrap()
+                .usage
+                .as_ref()
+                .unwrap()
+                .input_tokens,
+            120
+        );
+        assert_eq!(
+            messages
+                .iter()
+                .find(|message| message.id == "agent-2")
+                .unwrap()
+                .usage
+                .as_ref()
+                .unwrap()
+                .input_tokens,
+            7
+        );
+        assert_eq!(
+            serde_json::to_value(BridgeThreadSnapshot::from(snapshot)).unwrap()["messages"][2]
+                ["usage"],
+            serde_json::json!({
+                "inputTokens": 7,
+                "outputTokens": 3,
+                "reasoningTokens": null,
+                "cachedReadTokens": null,
+                "cachedWriteTokens": null,
+                "totalTokens": 10,
+                "model": "GPT-5.6 Sol",
+            })
+        );
+    }
+
+    #[test]
+    fn turn_usage_falls_back_to_the_model_identifier_and_tolerates_a_response_less_turn() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&CanonicalEvent::Config {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            entries: vec![ConfigEntry {
+                id: "model".to_string(),
+                value: "opaque-model".to_string(),
+                name: "Model".to_string(),
+                description: None,
+                category: None,
+                options: Vec::new(),
+            }],
+        });
+        let usage = CanonicalEvent::TurnTokenUsage {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            input_tokens: 5,
+            output_tokens: 2,
+            reasoning_tokens: None,
+            cached_read_tokens: None,
+            cached_write_tokens: None,
+            total_tokens: 7,
+        };
+
+        // No agent message has landed yet, so there is nothing to anchor the report to.
+        snapshot.apply(&usage);
+        assert!(snapshot.messages.is_empty());
+
+        snapshot.apply(&CanonicalEvent::MessageChunk {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role: MessageRole::Agent,
+            message_id: "agent-1".to_string(),
+            content: "answer".to_string(),
+            content_block: None,
+        });
+        snapshot.apply(&usage);
+
+        assert_eq!(
+            snapshot
+                .messages
+                .back()
+                .unwrap()
+                .usage
+                .as_ref()
+                .unwrap()
+                .model,
+            Some("opaque-model".to_string())
+        );
+    }
+
+    #[test]
+    fn turn_usage_reaches_the_paged_history_copy_of_the_response() {
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&CanonicalEvent::MessageChunk {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role: MessageRole::Agent,
+            message_id: "agent-1".to_string(),
+            content: "answer".to_string(),
+            content_block: None,
+        });
+        snapshot.apply(&CanonicalEvent::TurnTokenUsage {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            input_tokens: 9,
+            output_tokens: 4,
+            reasoning_tokens: None,
+            cached_read_tokens: Some(1),
+            cached_write_tokens: None,
+            total_tokens: 14,
+        });
+
+        let page = snapshot.page(None, None, MAX_SNAPSHOT_PAGE_SIZE).unwrap();
+        let entry = page
+            .entries
+            .iter()
+            .find(|entry| entry.canonical_id == "agent-1")
+            .unwrap();
+        assert_eq!(
+            entry
+                .message
+                .as_ref()
+                .unwrap()
+                .usage
+                .as_ref()
+                .unwrap()
+                .total_tokens,
+            14
+        );
+    }
+
+    #[test]
     fn fork_boundary_uses_complete_history_after_live_messages_roll_over() {
         let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
         for index in 0..=MAX_MESSAGES {
@@ -3486,14 +4317,130 @@ mod tests {
             .iter()
             .all(|message| message.id != "message-0"));
         assert_eq!(
-            snapshot.complete_user_message_boundary("message-126"),
-            Some(UserMessageBoundary {
+            snapshot.complete_fork_boundary("message-126"),
+            Some(ForkBoundary {
                 ordinal: 63,
-                first_text: "content-126".to_string(),
-                first_text_truncated: false,
-                raw_message_id_hint: None,
+                kind: ForkBoundaryKind::BeforeRequest(ForkBoundaryMessage {
+                    message_id: "message-126".to_string(),
+                    first_text: "content-126".to_string(),
+                    first_text_truncated: false,
+                    raw_message_id_hint: None,
+                }),
             })
         );
+    }
+
+    #[test]
+    fn replayed_agent_messages_keep_timeline_order_without_becoming_fork_turns() {
+        let message = |id: &str, role| CanonicalEvent::MessageChunk {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role,
+            message_id: id.to_string(),
+            content: id.to_string(),
+            content_block: None,
+        };
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&message("user-1", MessageRole::User));
+        snapshot.apply(&message("agent-1", MessageRole::Agent));
+        snapshot.apply(&tool("tool-1", None, ToolCallStatus::Completed));
+        let anchor = snapshot
+            .latest_timeline_canonical_id()
+            .expect("timeline anchor")
+            .to_string();
+        snapshot.apply(&message("user-2", MessageRole::User));
+        snapshot.apply(&message("agent-2", MessageRole::Agent));
+        let agent_message =
+            |message_id: &str, body: &str| crate::agent_messaging::AgentMessageOrigin {
+                message_id: message_id.to_string(),
+                direction: crate::agent_messaging::AgentMessageDirection::Sent,
+                related_thread_id: "child".to_string(),
+                related_title: Some("Worker".to_string()),
+                relation: crate::agent_messaging::AgentRelationKind::SubAgent,
+                disposition: crate::agent_messaging::AgentMessageDisposition::Sent,
+                body: body.to_string(),
+            };
+        snapshot.append_agent_message_after(
+            agent_message("message-1", "Inspect the queue."),
+            Some(&anchor),
+        );
+        snapshot.append_agent_message_after(
+            agent_message("message-2", "Report the result."),
+            Some(&anchor),
+        );
+        snapshot.append_agent_message_after(
+            agent_message("message-3", "Confirm completion."),
+            Some(&anchor),
+        );
+
+        assert_eq!(
+            snapshot
+                .timeline
+                .iter()
+                .map(|entry| entry.canonical_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "user-1",
+                "agent-1",
+                "tool-1",
+                "agent-message:message-1",
+                "agent-message:message-2",
+                "agent-message:message-3",
+                "user-2",
+                "agent-2"
+            ]
+        );
+
+        let mut live_snapshot =
+            SessionSnapshot::new("agent".to_string(), "live-thread".to_string());
+        live_snapshot.apply(&message("live-user", MessageRole::User));
+        live_snapshot.append_agent_message(agent_message("live-message", "Continue."));
+        assert_eq!(
+            live_snapshot.latest_timeline_canonical_id(),
+            Some("agent-message:live-message")
+        );
+        assert_eq!(
+            snapshot
+                .timeline
+                .iter()
+                .map(|entry| entry.sequence)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2, 3, 4, 5, 6, 7]
+        );
+        assert_eq!(
+            snapshot
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "user-1",
+                "agent-1",
+                "agent-message:message-1",
+                "agent-message:message-2",
+                "agent-message:message-3",
+                "user-2",
+                "agent-2"
+            ]
+        );
+        assert_eq!(
+            snapshot.complete_fork_boundary("user-2"),
+            Some(ForkBoundary {
+                ordinal: 1,
+                kind: ForkBoundaryKind::BeforeRequest(ForkBoundaryMessage {
+                    message_id: "user-2".to_string(),
+                    first_text: "user-2".to_string(),
+                    first_text_truncated: false,
+                    raw_message_id_hint: None,
+                }),
+            })
+        );
+        assert!(snapshot
+            .complete_fork_boundary("agent-message:message-1")
+            .is_none());
     }
 
     #[test]
@@ -3513,12 +4460,12 @@ mod tests {
         let mut unavailable = SessionSnapshot::new("agent".to_string(), "thread".to_string());
         unavailable.apply(&message("user", MessageRole::User));
         unavailable.unavailable_count = 1;
-        assert!(unavailable.complete_user_message_boundary("user").is_none());
+        assert!(unavailable.complete_fork_boundary("user").is_none());
 
         let mut shifted = SessionSnapshot::new("agent".to_string(), "thread".to_string());
         shifted.apply(&message("user", MessageRole::User));
         shifted.history.front_mut().expect("history entry").sequence = 1;
-        assert!(shifted.complete_user_message_boundary("user").is_none());
+        assert!(shifted.complete_fork_boundary("user").is_none());
 
         let mut mixed = SessionSnapshot::new("agent".to_string(), "thread".to_string());
         mixed.apply(&tool("tool", None, ToolCallStatus::Completed));
@@ -3531,12 +4478,100 @@ mod tests {
             .expect("agent history")
             .message = None;
         assert_eq!(
-            mixed.complete_user_message_boundary("user-message"),
-            Some(UserMessageBoundary {
+            mixed.complete_fork_boundary("user-message"),
+            Some(ForkBoundary {
                 ordinal: 0,
-                first_text: "user-message".to_string(),
-                first_text_truncated: false,
-                raw_message_id_hint: None,
+                kind: ForkBoundaryKind::BeforeRequest(ForkBoundaryMessage {
+                    message_id: "user-message".to_string(),
+                    first_text: "user-message".to_string(),
+                    first_text_truncated: false,
+                    raw_message_id_hint: None,
+                }),
+            })
+        );
+        assert!(mixed.complete_fork_boundary("missing-message").is_none());
+    }
+
+    #[test]
+    fn fork_boundary_named_by_a_response_keeps_that_turn() {
+        let message = |id: &str, role| CanonicalEvent::MessageChunk {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role,
+            message_id: id.to_string(),
+            content: id.to_string(),
+            content_block: None,
+        };
+
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&message("user-1", MessageRole::User));
+        snapshot.apply(&message("agent-1", MessageRole::Agent));
+        snapshot.apply(&message("user-2", MessageRole::User));
+        snapshot.apply(&message("agent-2", MessageRole::Agent));
+
+        // An earlier response resolves to the request that follows it, which is the same boundary
+        // the older "name the next request" clients send.
+        assert_eq!(
+            snapshot.complete_fork_boundary("agent-1"),
+            Some(ForkBoundary {
+                ordinal: 1,
+                kind: ForkBoundaryKind::BeforeRequest(ForkBoundaryMessage {
+                    message_id: "user-2".to_string(),
+                    first_text: "user-2".to_string(),
+                    first_text_truncated: false,
+                    raw_message_id_hint: None,
+                }),
+            })
+        );
+        // The newest response has no later request, so the boundary is the end of the conversation
+        // and every recorded turn is kept.
+        assert_eq!(
+            snapshot.complete_fork_boundary("agent-2"),
+            Some(ForkBoundary {
+                ordinal: 2,
+                kind: ForkBoundaryKind::EndOfHistory {
+                    newest_request: ForkBoundaryMessage {
+                        message_id: "user-2".to_string(),
+                        first_text: "user-2".to_string(),
+                        first_text_truncated: false,
+                        raw_message_id_hint: None,
+                    },
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn fork_boundary_rejects_a_response_that_precedes_every_request() {
+        let message = |id: &str, role| CanonicalEvent::MessageChunk {
+            agent_id: "agent".to_string(),
+            thread_id: "thread".to_string(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role,
+            message_id: id.to_string(),
+            content: id.to_string(),
+            content_block: None,
+        };
+
+        let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
+        snapshot.apply(&message("agent-greeting", MessageRole::Agent));
+        snapshot.apply(&message("user-1", MessageRole::User));
+
+        assert_eq!(
+            snapshot.complete_fork_boundary("agent-greeting"),
+            Some(ForkBoundary {
+                ordinal: 0,
+                kind: ForkBoundaryKind::BeforeRequest(ForkBoundaryMessage {
+                    message_id: "user-1".to_string(),
+                    first_text: "user-1".to_string(),
+                    first_text_truncated: false,
+                    raw_message_id_hint: None,
+                }),
             })
         );
     }
@@ -3559,12 +4594,15 @@ mod tests {
         }
 
         assert_eq!(
-            snapshot.complete_user_message_boundary("thread::item::msg_boundary"),
-            Some(UserMessageBoundary {
+            snapshot.complete_fork_boundary("thread::item::msg_boundary"),
+            Some(ForkBoundary {
                 ordinal: 1,
-                first_text: "second".to_string(),
-                first_text_truncated: false,
-                raw_message_id_hint: Some("msg_boundary".to_string()),
+                kind: ForkBoundaryKind::BeforeRequest(ForkBoundaryMessage {
+                    message_id: "msg_boundary".to_string(),
+                    first_text: "second".to_string(),
+                    first_text_truncated: false,
+                    raw_message_id_hint: Some("msg_boundary".to_string()),
+                }),
             })
         );
     }

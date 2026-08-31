@@ -64,7 +64,7 @@ describe('AG-UI bridge notifications', () => {
       ),
     ) as ContractManifest;
 
-    expect(manifest.fixtures.agUiEvents).toHaveLength(14);
+    expect(manifest.fixtures.agUiEvents).toHaveLength(15);
     for (const event of manifest.fixtures.agUiEvents) {
       expect(EventSchemas.safeParse(event).success).toBe(true);
     }
@@ -639,10 +639,17 @@ describe('AG-UI bridge notifications', () => {
   });
 
   it('projects tool metadata into a row before any output exists', () => {
-    const metaEvent = (status: string, title: string): AGUIEvent => ({
+    const metaEvent = (status: string, title: string, completedAtMs?: number): AGUIEvent => ({
       type: EventType.CUSTOM,
       name: 'dappercode.dev/tool-meta',
-      value: { toolCallId: 'tool', kind: 'execute', status, title },
+      value: {
+        toolCallId: 'tool',
+        kind: 'execute',
+        status,
+        title,
+        startedAtMs: 1_000,
+        ...(completedAtMs === undefined ? {} : { completedAtMs }),
+      },
     });
     let state = updateAgUiLiveAssistantMessages(
       {},
@@ -654,6 +661,7 @@ describe('AG-UI bridge notifications', () => {
       kind: 'execute',
       status: 'in_progress',
       title: 'npm test',
+      startedAtMs: 1_000,
     });
     expect(requireTestValue(messages(state)[0], 'indexed test value').toolMeta?.status).toBe(
       'in_progress',
@@ -662,7 +670,7 @@ describe('AG-UI bridge notifications', () => {
     state = updateAgUiLiveAssistantMessages(state, {
       threadId: 'thread',
       runId: 'run',
-      event: metaEvent('completed', 'npm test'),
+      event: metaEvent('completed', 'npm test', 2_500),
     });
     expect(requireTestValue(messages(state)[0], 'indexed test value').toolMeta?.status).toBe(
       'completed',
@@ -687,6 +695,8 @@ describe('AG-UI bridge notifications', () => {
     expect(result?.toolMeta).toMatchObject({
       kind: 'execute',
       status: 'completed',
+      startedAtMs: 1_000,
+      completedAtMs: 2_500,
       content: [{ type: 'terminal', terminalId: 'term-1' }],
       locations: [{ path: 'a.ts' }],
     });
@@ -717,6 +727,8 @@ describe('AG-UI bridge notifications', () => {
               kind: 'edit',
               status: 'failed',
               title: 'Edit a.ts',
+              startedAtMs: 1_000,
+              completedAtMs: 2_500,
               truncated: true,
             },
           },
@@ -741,6 +753,8 @@ describe('AG-UI bridge notifications', () => {
       kind: 'edit',
       status: 'failed',
       title: 'Edit a.ts',
+      startedAtMs: 1_000,
+      completedAtMs: 2_500,
       truncated: true,
     });
   });
@@ -948,6 +962,119 @@ describe('AG-UI bridge notifications', () => {
     }
     expect(messages(state, 'parent')).toHaveLength(1);
     expect(messages(state, 'parent')[0]).toMatchObject({ id: 'subagent:task-1' });
+  });
+
+  it('keeps a running subagent openable across later unlinked activity snapshots', () => {
+    const activity = (
+      text: string,
+      receiverThreadIds: string[],
+    ): Extract<AGUIEvent, { type: EventType.ACTIVITY_SNAPSHOT }> => ({
+      type: EventType.ACTIVITY_SNAPSHOT,
+      messageId: 'subagent:task-1',
+      activityType: 'dappercode.subagent',
+      replace: true,
+      content: {
+        text,
+        subAgent: {
+          toolCallId: 'task-1',
+          senderThreadId: 'parent',
+          receiverThreadIds,
+          agentStatus: 'running',
+        },
+      },
+    });
+    let state = updateAgUiLiveAssistantMessages(
+      {},
+      {
+        threadId: 'parent',
+        runId: 'run',
+        event: activity('• Sub-agent working\n  Status: running', ['child']),
+      },
+    );
+    state = updateAgUiLiveAssistantMessages(state, {
+      threadId: 'parent',
+      runId: 'run',
+      event: activity('• Sub-agent working\n  Status: running\n  Latest: Reading files', []),
+    });
+
+    const afterActivity = requireTestValue(
+      messages(state, 'parent')[0],
+      'subagent after activity snapshot',
+    );
+    expect(afterActivity.role).toBe('activity');
+    if (afterActivity.role !== 'activity') {
+      throw new Error('Expected activity message');
+    }
+    expect(afterActivity.content.text).toContain('Latest: Reading files');
+    expect(afterActivity.content.subAgent?.receiverThreadIds).toEqual(['child']);
+
+    state = updateAgUiLiveAssistantMessages(state, {
+      threadId: 'parent',
+      runId: 'run',
+      event: {
+        type: EventType.MESSAGES_SNAPSHOT,
+        messages: [
+          {
+            id: 'subagent:task-1',
+            role: 'activity',
+            activityType: 'dappercode.subagent',
+            content: activity('• Sub-agent working\n  Status: running\n  Latest: Running tests', [])
+              .content,
+          },
+        ],
+      },
+    });
+
+    const afterMessagesSnapshot = requireTestValue(
+      messages(state, 'parent')[0],
+      'subagent after messages snapshot',
+    );
+    expect(afterMessagesSnapshot.role).toBe('activity');
+    if (afterMessagesSnapshot.role !== 'activity') {
+      throw new Error('Expected activity message');
+    }
+    expect(afterMessagesSnapshot.content.text).toContain('Latest: Running tests');
+    expect(afterMessagesSnapshot.content.subAgent?.receiverThreadIds).toEqual(['child']);
+  });
+
+  it('preserves agent-message origin metadata from live activity snapshots', () => {
+    const agentMessage = {
+      messageId: 'agent-message-1',
+      direction: 'received',
+      relatedThreadId: 'parent',
+      relatedTitle: 'Lead agent',
+      relation: 'parent',
+      disposition: 'steering',
+      body: 'Please inspect the queue lifecycle.',
+    };
+    const state = updateAgUiLiveAssistantMessages(
+      {},
+      {
+        threadId: 'child',
+        runId: 'run',
+        event: {
+          type: EventType.ACTIVITY_SNAPSHOT,
+          messageId: 'agent-message:agent-message-1',
+          activityType: 'dappercode.agent_message',
+          replace: true,
+          content: {
+            text: agentMessage.body,
+            agentMessage,
+          },
+        },
+      },
+    );
+
+    const message = requireTestValue(messages(state, 'child')[0], 'agent message activity');
+    expect(message).toMatchObject({
+      id: 'agent-message:agent-message-1',
+      role: 'activity',
+      activityType: 'dappercode.agent_message',
+      content: {
+        text: agentMessage.body,
+        agentMessage,
+      },
+    });
   });
 
   describe('AG-UI validation and fallback behavior', () => {

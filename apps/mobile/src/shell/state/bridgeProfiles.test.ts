@@ -37,6 +37,38 @@ describe('bridgeProfiles', () => {
     expect(updated.profiles[0]?.bridgeToken).toBe('secret-two');
   });
 
+  it('migrates legacy entries without a workspace id and preserves routed broker entries', () => {
+    const parsed = parseBridgeProfileStore(
+      JSON.stringify({
+        activeProfileId: 'legacy',
+        profiles: [
+          {
+            id: 'legacy',
+            bridgeUrl: 'http://bridge:8787',
+            bridgeToken: 'legacy-token',
+          },
+          {
+            id: 'broker',
+            bridgeUrl: 'http://bridge:8787',
+            bridgeToken: 'broker-token',
+            workspaceId: 'workspace-alpha-000000000001',
+          },
+        ],
+      }),
+    );
+
+    expect(parsed.profiles[0]?.workspaceId).toBeNull();
+    expect(parsed.profiles[1]?.workspaceId).toBe('workspace-alpha-000000000001');
+
+    const cleared = upsertBridgeProfile(parsed, {
+      id: 'broker',
+      bridgeUrl: 'http://bridge:8787',
+      bridgeToken: 'broker-token',
+      workspaceId: null,
+    }).store;
+    expect(cleared.profiles.find((profile) => profile.id === 'broker')?.workspaceId).toBeNull();
+  });
+
   it('parses stores and drops invalid active ids', () => {
     const parsed = parseBridgeProfileStore(
       JSON.stringify({

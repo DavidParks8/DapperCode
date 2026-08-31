@@ -1,11 +1,16 @@
 import { toBridgeHealthUrl } from '@shell/state/bridgeUrl';
 import { HostBridgeWsClient } from '@bridge/ws/ws';
+import { MOBILE_BRIDGE_CLIENT_NAME, MOBILE_BRIDGE_CLIENT_TYPE } from '@bridge/ws/types';
+import { isUserPresentAppState, supportsNativePushPresence } from '@shell/session/appVisibility';
+import { AppState, Platform } from 'react-native';
 import { CONNECTION_CHECK_TIMEOUT_MS } from './constants';
 
 interface ProbeOptions {
   normalizedUrl: string;
   token: string | null;
+  workspaceId?: string | null;
   allowQueryTokenAuth: boolean;
+  abortController?: AbortController | null;
 }
 
 export interface ProbeResult {
@@ -13,48 +18,70 @@ export interface ProbeResult {
   healthCheckError: string | null;
 }
 
+async function readHealthCheckError(
+  normalizedUrl: string,
+  token: string | null,
+  signal: AbortSignal | undefined,
+  wasCancelled: () => boolean,
+  timeoutMessage: string,
+): Promise<string | null> {
+  try {
+    const response = await fetch(toBridgeHealthUrl(normalizedUrl), {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      signal,
+    });
+    return response.status === 200 ? null : `health returned ${response.status}`;
+  } catch (error) {
+    if (wasCancelled()) {
+      throw new Error(timeoutMessage);
+    }
+    return (error as Error).message || 'network request failed';
+  }
+}
+
 export async function probeBridgeConnection(options: ProbeOptions): Promise<ProbeResult> {
-  const { normalizedUrl, token, allowQueryTokenAuth } = options;
+  const { normalizedUrl, token, workspaceId, allowQueryTokenAuth } = options;
   let probeClient: HostBridgeWsClient | null = null;
   let timeout: ReturnType<typeof setTimeout> | null = null;
   let timedOut = false;
-  const abortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timeoutMessage = 'connection timed out after 7 seconds';
+  const abortController =
+    options.abortController ??
+    (typeof AbortController !== 'undefined' ? new AbortController() : null);
+  const timeoutMessage = 'connection timed out after 70 seconds';
 
   const disconnectProbe = () => {
     probeClient?.disconnect();
   };
+  let rejectAbort: (reason?: unknown) => void = () => {};
+  const onAbort = () => {
+    disconnectProbe();
+    rejectAbort(new Error(timedOut ? timeoutMessage : 'connection check cancelled'));
+  };
 
   try {
     const probe = async (): Promise<string | null> => {
-      let healthCheckError: string | null = null;
-      const headers: Record<string, string> | undefined = token
-        ? { Authorization: `Bearer ${token}` }
-        : undefined;
-      const healthUrl = toBridgeHealthUrl(normalizedUrl);
-
-      try {
-        const response = await fetch(healthUrl, {
-          method: 'GET',
-          headers,
-          signal: abortController?.signal,
-        });
-        if (response.status !== 200) {
-          healthCheckError = `health returned ${response.status}`;
-        }
-      } catch (error) {
-        if (timedOut) {
-          throw new Error(timeoutMessage);
-        }
-        healthCheckError = (error as Error).message || 'network request failed';
-      }
-
-      if (timedOut) {
+      const wasCancelled = () => timedOut || Boolean(abortController?.signal.aborted);
+      const healthCheckError = await readHealthCheckError(
+        normalizedUrl,
+        token,
+        abortController?.signal,
+        wasCancelled,
+        timeoutMessage,
+      );
+      if (wasCancelled()) {
         throw new Error(timeoutMessage);
       }
 
+      const supportsPushPresence = supportsNativePushPresence(Platform.OS);
       probeClient = new HostBridgeWsClient(normalizedUrl, {
         authToken: token,
+        workspaceId,
+        clientType: supportsPushPresence ? MOBILE_BRIDGE_CLIENT_TYPE : Platform.OS,
+        clientName: MOBILE_BRIDGE_CLIENT_NAME,
+        getClientForeground: supportsPushPresence
+          ? () => isUserPresentAppState(AppState.currentState)
+          : undefined,
         allowQueryTokenAuth,
         requestTimeoutMs: CONNECTION_CHECK_TIMEOUT_MS,
       });
@@ -66,8 +93,21 @@ export async function probeBridgeConnection(options: ProbeOptions): Promise<Prob
       return healthCheckError;
     };
 
+    const abortPromise = new Promise<never>((_, reject) => {
+      rejectAbort = reject;
+      const signal = abortController?.signal;
+      if (!signal) {
+        return;
+      }
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
     const healthCheckError = await Promise.race([
       probe(),
+      abortPromise,
       new Promise<never>((_, reject) => {
         timeout = setTimeout(() => {
           timedOut = true;
@@ -85,6 +125,7 @@ export async function probeBridgeConnection(options: ProbeOptions): Promise<Prob
     if (timeout) {
       clearTimeout(timeout);
     }
+    abortController?.signal.removeEventListener('abort', onAbort);
     disconnectProbe();
   }
 }

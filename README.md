@@ -9,14 +9,15 @@ the public internet.
 
 ## Product Layout
 
-- `apps/desktop`: Rust `dappercode` operator plus the native macOS SwiftUI/AppKit shell
+- `apps/desktop`: Rust `dappercode` operator plus native macOS and Windows shells
 - `services/rust-bridge`: Axum bridge and ACP process manager
 - `apps/mobile`: Expo and React Native client
 - `contracts`: versioned bridge RPC fixtures
 - `scripts`: development, contract, version, coverage, and app-bundle automation
 
-There is no npm bridge package and no JavaScript operator CLI. npm is used only for the mobile and
-repository development toolchain. The macOS app bundles both Rust executables:
+There is no published Node bridge package and no JavaScript operator CLI. pnpm is used only for the
+mobile and repository development toolchain. Each desktop package includes the Rust operator and bridge. On
+macOS the layout is:
 
 ```text
 DapperCode.app
@@ -31,86 +32,126 @@ DapperCode.app
 Build and open the self-contained app:
 
 ```bash
-npm ci
-npm run desktop:build:macos
+pnpm install --frozen-lockfile
+pnpm run desktop:build:macos
 open apps/desktop/dist/DapperCode.app
 ```
 
-The app provides native menu-bar lifecycle, first-time setup, bridge start/stop/restart,
-authenticated status, pairing QR, logs, workspace selection, and launch-at-login.
+The app provides native menu-bar lifecycle, first-time setup, authenticated status, pairing QR,
+logs, workspace selection, and launch-at-login. The broker starts with the tray app and stops when
+the app quits; users do not manually start, stop, or restart it from the desktop shell.
 
 The shell uses standard SwiftUI and AppKit controls, menus, forms, materials, panels, and SF
 Symbols. It does not draw or freeze a custom theme. Appearance is inherited from the installed
 macOS version, so changes such as Liquid Glass are supplied by the OS without a DapperCode update.
-The equivalent guarantee on Windows will require a native WinUI shell so Mica and future Windows
-styling come from Windows itself.
 
-First-time setup registers an ACP executable already installed on the Mac, such as OpenCode. The
+## Windows App
+
+The Windows 11 app is a packaged C# WinUI 3 tray-first app with full setup, pairing, workspace,
+status, logs, and automatic bridge lifecycle parity. The broker starts with the tray app and stops
+when it quits, without manual state controls. The release artifact is one MSIX bundle containing
+x64 and ARM64 packages. Its shell uses native WinUI controls, Fluent system resources, and Mica
+where Windows supports it, so accessibility, theme, and future platform styling remain owned by
+Windows rather than a frozen custom theme.
+
+It runs as the signed-in user and does not install a Windows service, request elevation, create a
+scheduled task, or require administrator rights at runtime. Production-signed installation is also
+non-elevated; trusting a local self-signed development certificate is the only one-time
+administrator step. Bridge processes remain children owned by the per-user tray app.
+
+Closing the window keeps DapperCode in the notification area; **Quit** stops the broker and exits.
+The `DapperCodeStartup` package startup task is disabled on install and changes only when the user
+opts in through **Launch at login**. Startup launches quietly into the tray, while an explicit app
+launch presents the window. Development packages use a local test certificate that must be trusted
+before installation. Release packaging has a separate production certificate signing hook; a test
+certificate is not a production trust mechanism.
+
+On Windows with PowerShell 7 (`pwsh`), the pinned .NET 10 SDK (`10.0.302`, including MSBuild 18),
+the Windows SDK, the x64 and ARM64 Rust targets, Node.js, and pnpm:
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm run desktop:build:windows
+```
+
+This creates the bundle, public test certificate, and installation instructions under
+`apps/desktop/dist/windows`. The build does not install its generated test certificate for App
+Installer or leave it trusted. Before installing a local test bundle, import the emitted public
+certificate once into Local Machine **Trusted People** from an elevated terminal.
+
+First-time setup registers an ACP executable already installed on the computer, such as OpenCode. The
 Rust operator hashes that executable and stores the resulting configuration centrally, in
-`~/Library/Application Support/dev.dappercode.desktop`, never inside your repositories. The bridge
-bearer token is kept in the macOS keychain. It does not invoke npm, npx, Node.js, shell setup
-scripts, or floating package resolution.
+the platform application-data directory, never inside your repositories. Distinct workspace bearer
+tokens are protected by the operating-system credential store: one shared macOS Keychain vault and
+bounded per-workspace Windows Credential Manager entries. It does not invoke pnpm, npm, npx, Node.js,
+shell setup scripts, or floating package resolution.
 
-Each workspace gets its own profile, port pair, and token, so bridges for several worktrees run at
-the same time. Quitting DapperCode stops all of them, and each bridge also exits on its own if the
-app is force-quit or crashes.
+Every workspace keeps an isolated profile, vault entry, manifest, state directory, and attachment root.
+One authenticated desktop broker owns the stable mobile RPC endpoint. A workspace bridge and ACP
+child start only after that workspace's credential has authenticated and a request needs the
+runtime. Active browser previews keep per-workspace origins rather than sharing broker cookies.
+Admitted runs survive mobile disconnects; idle workers are retired conservatively after a grace
+period, while queued work, active runs, approvals, user input, steers, previews, and reconnect replay
+keep their worker alive.
 
 ## Rust Operator
 
 For direct terminal operation from a source checkout:
 
 ```bash
-npm run operator -- discover-agent --agent-id opencode
-npm run operator -- setup --workspace "$PWD" --network local --host 192.168.1.20 \
+pnpm run operator discover-agent --agent-id opencode
+pnpm run operator setup --workspace "$PWD" --network local --host 192.168.1.20 \
   --agent-id opencode --agent-args acp
-npm run operator -- start --workspace "$PWD"
-npm run operator -- status --workspace "$PWD" --human
-npm run operator -- restart --workspace "$PWD"
-npm run operator -- stop --workspace "$PWD"
+pnpm run operator start --workspace "$PWD"
+pnpm run operator status --workspace "$PWD" --human
+pnpm run operator restart --workspace "$PWD"
+pnpm run operator stop --workspace "$PWD"
 ```
 
-The installed app's operator is at:
+The installed macOS app's operator is at:
 
 ```text
 DapperCode.app/Contents/Resources/bin/dappercode
 ```
 
-The operator is the only bridge process-control authority. It serializes transitions with a
-workspace lock and verifies PID, process start time, executable, workspace, and config identity
-before signaling a process.
+The operator is the only broker process-control authority. It serializes transitions with a global
+broker lock and verifies PID, process start time, executable, data directory, and config identity
+before signaling the process. The broker owns and reaps isolated workspace workers.
 
 ## Mobile Development
 
-Requirements: Node.js 22.13+, npm 10+, Rust 1.97.1, and Git.
+Requirements: Node.js 22.13+, pnpm 11.1.2, Rust 1.97.1, and Git.
 
 ```bash
-npm ci
-npm run mobile
+pnpm install --frozen-lockfile
+pnpm run mobile
 ```
 
 Use a LAN or Tailscale bridge address on physical devices. `localhost` on a phone refers to the
-phone, not the Mac running the bridge.
+phone, not the computer running the bridge.
 
 ## Quality Gates
 
 ```bash
-npm run lint
-npm run duplicates:check
-npm run typecheck
-npm run test
-npm run contract:check
-npm run coverage:check
-npm run coverage:rust
-npm run desktop:build:macos
+pnpm run lint
+pnpm run duplicates:check
+pnpm run typecheck
+pnpm run test
+pnpm run contract:check
+pnpm run coverage:check
+pnpm run coverage:rust
+pnpm run desktop:build:macos
+# On Windows:
+pnpm run desktop:build:windows
 ```
 
-`npm run duplicates:check` scans authored mobile TypeScript and native Rust/Swift sources with
+`pnpm run duplicates:check` scans authored mobile TypeScript and native Rust/Swift sources with
 separate production-focused thresholds. Generated artifacts and dedicated test files/directories
 are excluded; inline Rust unit tests remain subject to the native high-signal threshold.
 
 GitHub Actions validates repository policy, RPC contracts, mobile quality/coverage, Rust bridge
-quality/coverage, and a signed macOS app bundle. Mobile EAS distribution remains a separate
-protected workflow. There is no npm publication workflow for the bridge.
+quality/coverage, and desktop packages. Mobile EAS distribution remains a separate protected
+workflow. There is no package-registry publication workflow for the bridge.
 
 ## Documentation
 

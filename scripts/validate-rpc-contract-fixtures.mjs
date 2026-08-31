@@ -122,6 +122,19 @@ if (
   )
 )
   fail('operational error fixture');
+if (
+  fixtures.runtimeActivity.canRetire ||
+  fixtures.runtimeActivity.activeRuns < 1 ||
+  fixtures.runtimeActivity.queuedMessages < 1
+)
+  fail('runtime activity fixture');
+if (
+  fixtures.brokerPairing.type !== 'dappercode-bridge-pair' ||
+  fixtures.brokerPairing.brokerProtocolVersion !== 1 ||
+  !fixtures.brokerPairing.workspaceId ||
+  !fixtures.brokerPairing.bridgeToken
+)
+  fail('broker pairing fixture');
 if (fixtures.notification.protocolVersion !== manifest.protocolVersion)
   fail('notification fixture version');
 if (!manifest.notifications.includes(fixtures.notification.method))
@@ -152,6 +165,23 @@ if (
 )
   fail('filesystem truncation fixture');
 if (!fixtures.submission.submissionId || !fixtures.submission.threadId) fail('submission fixture');
+if (
+  fixtures.threadSchedules.threadId !== 'thread-1' ||
+  fixtures.threadSchedules.schedules.length !== 1 ||
+  fixtures.threadSchedules.schedules[0].status !== 'scheduled'
+)
+  fail('thread schedules fixture');
+if (
+  fixtures.agentMessageQueue.items.length !== 1 ||
+  fixtures.agentMessageQueue.items[0].agentMessage?.direction !== 'received' ||
+  fixtures.agentMessageQueue.items[0].agentMessage?.disposition !== 'queued'
+)
+  fail('agent message queue fixture');
+if (
+  fixtures.cancelledAgentMessage.direction !== 'sent' ||
+  fixtures.cancelledAgentMessage.disposition !== 'cancelled'
+)
+  fail('cancelled agent message fixture');
 if (!fixtures.pushRegistration.profileId || !fixtures.pushRegistration.registrationId)
   fail('push registration fixture');
 if (

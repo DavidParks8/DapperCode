@@ -22,6 +22,20 @@ export interface ChatMessageSubAgentMeta {
   agentStatus?: string;
 }
 
+export type AgentMessageDirection = 'sent' | 'received';
+export type AgentMessageDisposition = 'sent' | 'steering' | 'queued' | 'cancelled';
+export type AgentMessageRelation = 'parent' | 'sub_agent';
+
+export interface ChatAgentMessageMeta {
+  messageId: string;
+  direction: AgentMessageDirection;
+  relatedThreadId: string;
+  relatedTitle?: string | null;
+  relation: AgentMessageRelation;
+  disposition: AgentMessageDisposition;
+  body: string;
+}
+
 export type ChatMessagePart =
   | { type: 'text'; text: string }
   | { type: 'image'; data?: string; mimeType?: string; uri?: string; url?: string }
@@ -70,6 +84,8 @@ export interface ChatToolMeta {
   kind: ChatToolKind;
   status: ChatToolStatus;
   title: string;
+  startedAtMs?: number;
+  completedAtMs?: number;
   content?: unknown[];
   locations?: unknown[];
   truncated?: boolean;
@@ -78,13 +94,31 @@ export interface ChatToolMeta {
 interface ChatMessageMetadata {
   parts?: ChatMessagePart[];
   createdAt: string;
+  completedAt?: string;
   pending?: boolean;
   toolMeta?: ChatToolMeta;
+  /** What the turn that produced this response cost, reported by the bridge once it settles. */
+  usage?: MessageTokenUsage | null;
+}
+
+/**
+ * The token cost of the single turn a response came from, as opposed to `SessionTokenTotals`,
+ * which sums every turn in the thread.
+ */
+export interface MessageTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number | null;
+  cachedReadTokens: number | null;
+  cachedWriteTokens: number | null;
+  totalTokens: number;
+  model: string | null;
 }
 
 export interface ChatActivityContent extends Record<string, unknown> {
   text?: string;
   subAgent?: ChatMessageSubAgentMeta;
+  agentMessage?: ChatAgentMessageMeta;
 }
 
 type ChatActivityMessage = Omit<ActivityMessage, 'content'> & {
@@ -127,6 +161,16 @@ export interface ChatPlanSnapshot {
   steps: TurnPlanStep[];
 }
 
+export interface SessionTokenTotals {
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number | null;
+  cachedReadTokens: number | null;
+  cachedWriteTokens: number | null;
+  totalTokens: number;
+}
+
 export interface Chat extends ChatSummary {
   messages: ChatMessage[];
   acpSnapshot?: RawAcpSnapshot;
@@ -135,6 +179,7 @@ export interface Chat extends ChatSummary {
   latestTurnStatus?: string | null;
   activeTurnId?: string | null;
   acpUsage?: { used: number | null; size: number | null; cost: string | null } | null;
+  tokenTotals?: SessionTokenTotals | null;
   acpMode?: string | null;
   acpConfig?: AcpConfigOption[];
   acpCommands?: Array<{ name: string; description: string }>;
@@ -203,6 +248,7 @@ export interface BridgeQueuedMessage {
   id: string;
   createdAt: string;
   content: string;
+  agentMessage?: ChatAgentMessageMeta;
 }
 
 export interface BridgeThreadQueueError {
@@ -221,6 +267,24 @@ export interface BridgeThreadQueueState {
   waitingForToolCalls: boolean;
   steeringInFlight: boolean;
   lastError?: BridgeThreadQueueError | null;
+}
+
+export type BridgeScheduledPromptStatus = 'scheduled' | 'queued' | 'retrying';
+
+export interface BridgeScheduledPrompt {
+  scheduleId: string;
+  threadId: string;
+  promptPreview: string;
+  promptBytes: number;
+  scheduledFor: string;
+  createdAt: string;
+  status: BridgeScheduledPromptStatus;
+  retryAttempt: number;
+}
+
+export interface BridgeThreadSchedulesState {
+  threadId: string;
+  schedules: BridgeScheduledPrompt[];
 }
 
 export type BridgeThreadQueueDisposition = 'queued' | 'sent';
@@ -310,7 +374,7 @@ export type ServiceTier = 'flex' | 'fast';
 
 export type ApprovalPolicy = 'untrusted' | 'on-request' | 'on-failure' | 'never';
 
-export type ApprovalMode = 'normal' | 'yolo';
+export type ApprovalMode = 'all' | 'some' | 'none';
 
 export interface ModelReasoningEffortOption {
   effort: ReasoningEffort;

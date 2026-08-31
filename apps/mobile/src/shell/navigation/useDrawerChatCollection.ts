@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAtom } from 'jotai';
+import { useCallback, useEffect, useRef } from 'react';
 import type { HostBridgeApiClient } from '@bridge/client/client';
 import type { ChatSummary } from '@bridge/types/types';
 import {
@@ -14,10 +15,11 @@ import {
   mergeDrawerChatBatch,
   sortChats,
 } from '@shell/navigation/drawerContentHelpers';
+import { reconcileDrawerRunIndicatorsWithChats } from '@shell/navigation/drawerRuntimeIndicators';
 import {
-  reconcileDrawerRunIndicatorsWithChats,
-  type DrawerRunIndicatorMap,
-} from '@shell/navigation/drawerRuntimeIndicators';
+  createDrawerContentAtoms,
+  type DrawerContentAtoms,
+} from '@shell/state/drawer/contentAtoms';
 
 export const DRAWER_CHAT_SUMMARY_PERSIST_DEBOUNCE_MS = 1000;
 
@@ -25,12 +27,26 @@ export function useDrawerChatCollection(
   api: HostBridgeApiClient,
   profileId: string | null,
   onChatsApplied: () => void,
+  contentAtoms?: DrawerContentAtoms,
 ) {
-  const [chatState, setChatState] = useState<{ profileId: string | null; chats: ChatSummary[] }>({
-    profileId,
-    chats: [],
-  });
-  const [runIndicatorsByThread, setRunIndicatorsByThread] = useState<DrawerRunIndicatorMap>({});
+  const fallbackAtomsRef = useRef<{
+    atoms: DrawerContentAtoms;
+    profileId: string | null;
+  } | null>(null);
+  let atoms = contentAtoms;
+  if (!atoms) {
+    if (!fallbackAtomsRef.current || fallbackAtomsRef.current.profileId !== profileId) {
+      fallbackAtomsRef.current = {
+        atoms: createDrawerContentAtoms({ profileId, wsConnected: false }),
+        profileId,
+      };
+    }
+    atoms = fallbackAtomsRef.current.atoms;
+  }
+  const [chatState, setChatState] = useAtom(atoms.chatStateAtom);
+  const [runIndicatorsByThread, setRunIndicatorsByThread] = useAtom(
+    atoms.runIndicatorsByThreadAtom,
+  );
   const chatsRef = useRef<ChatSummary[]>([]);
   const hasHydratedOnceRef = useRef(false);
   const deletedChatIdsRef = useRef(new Set<string>());
@@ -42,6 +58,8 @@ export function useDrawerChatCollection(
     generation: number;
   } | null>(null);
   const persistenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const apiRef = useRef(api);
+  apiRef.current = api;
   const profileIdRef = useRef(profileId);
   if (profileIdRef.current !== profileId) {
     profileIdRef.current = profileId;
@@ -111,7 +129,7 @@ export function useDrawerChatCollection(
 
   const applyChats = useCallback(
     (rawChats: ChatSummary[], cacheLimit?: number, persist = true, authoritative = false) => {
-      if (profileIdRef.current !== profileId) {
+      if (apiRef.current !== api || profileIdRef.current !== profileId) {
         return;
       }
       const incomingChats = sortChats(
@@ -157,7 +175,7 @@ export function useDrawerChatCollection(
         reconcileDrawerRunIndicatorsWithChats(previous, nextChats),
       );
     },
-    [api, onChatsApplied, profileId, schedulePersistence],
+    [api, onChatsApplied, profileId, schedulePersistence, setChatState, setRunIndicatorsByThread],
   );
 
   const hydratePersistedChats = useCallback(async () => {
@@ -212,7 +230,7 @@ export function useDrawerChatCollection(
         reconcileDrawerRunIndicatorsWithChats(previous, nextChats),
       );
     },
-    [profileId],
+    [profileId, setChatState, setRunIndicatorsByThread],
   );
 
   const restoreChat = useCallback(
@@ -228,7 +246,7 @@ export function useDrawerChatCollection(
         schedulePersistence([chat]);
       }
     },
-    [profileId, schedulePersistence],
+    [profileId, schedulePersistence, setChatState],
   );
 
   useEffect(() => flushPendingPersistence, [flushPendingPersistence, profileId]);

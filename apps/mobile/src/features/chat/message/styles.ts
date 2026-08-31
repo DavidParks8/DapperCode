@@ -54,6 +54,16 @@ export const createStyles = (theme: AppTheme) =>
       paddingHorizontal: 3,
       overflow: 'hidden',
     },
+    userInlineSlashCommandText: {
+      color: theme.colors.userBubbleText,
+      backgroundColor: theme.colors.userBubbleInset,
+      borderColor: theme.colors.userBubbleInset,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderRadius: theme.radius.sm,
+      paddingHorizontal: 4,
+      fontWeight: '600',
+      overflow: 'hidden',
+    },
     userFileChip: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -155,6 +165,59 @@ export const createStyles = (theme: AppTheme) =>
       borderRadius: theme.radius.full,
     },
     messageActionButtonPressed: { opacity: 0.6, backgroundColor: theme.colors.bgItem },
+    // Covers the whole screen so the panel can overlay the header and composer, not just the
+    // transcript row that owns the info button.
+    responseUsageOverlayRoot: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      zIndex: 10,
+      elevation: 10,
+    },
+    // Catches a tap anywhere outside the panel. It also blocks scrolling, which keeps the
+    // transcript from sliding out from under the anchor the panel was placed against.
+    responseUsageBackdrop: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
+    // Positioned against the anchor at runtime; see `resolveResponseUsagePlacement`.
+    responseUsagePopover: {
+      position: 'absolute',
+      boxShadow: theme.isDark
+        ? '0 12px 24px rgba(0, 0, 0, 0.36)'
+        : '0 10px 22px rgba(15, 31, 54, 0.16)',
+    },
+    // Parks the first, unmeasured frame off screen. Fading it instead would be fatal: UIKit stops
+    // rendering the glass material once the view or an ancestor hits zero opacity.
+    responseUsagePopoverMeasuring: { left: -9999 },
+    // GlassSurface owns the fill and border here, so this style carries layout only.
+    responseUsageCard: {
+      paddingVertical: theme.spacing.sm,
+      paddingHorizontal: theme.spacing.md,
+      borderRadius: theme.radius.lg,
+      borderCurve: 'continuous',
+      borderWidth: StyleSheet.hairlineWidth,
+      overflow: 'hidden',
+    },
+    // The readings settle into the formed shape separately from it, so they own their own spacing.
+    responseUsageContent: {
+      gap: theme.spacing.xs,
+    },
+    responseUsageRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: theme.spacing.md,
+    },
+    responseUsageLabel: {
+      ...theme.typography.metadata,
+      color: theme.colors.textMuted,
+      // Keeps the values in one column whatever the label reads.
+      width: 52,
+    },
+    responseUsageValue: {
+      ...theme.typography.metadata,
+      color: theme.colors.textPrimary,
+      flexShrink: 1,
+    },
     selectTextRoot: { flex: 1, backgroundColor: theme.colors.bgElevated },
     selectTextHeader: {
       flexDirection: 'row',

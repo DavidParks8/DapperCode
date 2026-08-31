@@ -11,9 +11,17 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    config::{allocate_port_pair, format_host, validate_workspace},
-    secrets::SecretStore,
-    store::{atomic_private_write, profile_id_for, AppPaths, Profile, ProfileAgent},
+    broker_supervisor::clean_stale_broker_ownership,
+    config::{
+        allocate_broker_replacement_ports, allocate_port_pair, allocate_preview_port, format_host,
+        validate_workspace,
+    },
+    platform,
+    secrets::{BridgeSecret, SecretStore},
+    store::{
+        atomic_private_write, profile_id_for, remove_file_if_exists, AppPaths, BrokerSettings,
+        ConfigSideEffects, FileLease, Profile, ProfileAgent,
+    },
 };
 
 #[derive(Clone, Debug)]
@@ -22,6 +30,7 @@ pub struct SetupRequest {
     pub network_mode: String,
     pub bridge_host: String,
     pub bridge_port: Option<u16>,
+    pub replace_broker_endpoint: bool,
     pub agent_id: String,
     pub display_name: String,
     pub executable: PathBuf,
@@ -69,6 +78,63 @@ struct AgentManifest {
 #[derive(Serialize)]
 struct ExecutableIntegrity {
     kind: &'static str,
+}
+
+struct SetupSideEffects<'a> {
+    paths: &'a AppPaths,
+    secrets: &'a SecretStore,
+    profile_id: &'a str,
+    manifest: Vec<u8>,
+    previous_manifest: Option<Option<Vec<u8>>>,
+    secret_created: Option<bool>,
+}
+
+impl ConfigSideEffects for SetupSideEffects<'_> {
+    type Output = BridgeSecret;
+
+    fn apply(&mut self) -> Result<Self::Output> {
+        let manifest_path = self.paths.manifest_path(self.profile_id);
+        let previous_manifest = match fs::read(&manifest_path) {
+            Ok(contents) => Some(contents),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to read {}", manifest_path.display()))
+            }
+        };
+        self.previous_manifest = Some(previous_manifest);
+
+        let (secret, created) = self
+            .secrets
+            .get_or_create_with_status(self.paths, self.profile_id)?;
+        self.secret_created = Some(created);
+        atomic_private_write(&manifest_path, &self.manifest)?;
+        Ok(secret)
+    }
+
+    fn rollback(&mut self) -> Result<()> {
+        let mut failures = Vec::new();
+        if let Some(previous_manifest) = self.previous_manifest.take() {
+            let path = self.paths.manifest_path(self.profile_id);
+            let result = match previous_manifest {
+                Some(contents) => atomic_private_write(&path, &contents),
+                None => remove_file_if_exists(&path),
+            };
+            if let Err(error) = result {
+                failures.push(format!("manifest: {error:#}"));
+            }
+        }
+        if self.secret_created.take() == Some(true) {
+            if let Err(error) = self.secrets.delete(self.paths, self.profile_id) {
+                failures.push(format!("credential: {error:#}"));
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            bail!("{}", failures.join("; "))
+        }
+    }
 }
 
 /// Registers a workspace with the central store.
@@ -134,31 +200,116 @@ pub fn setup_profile(
             integrity: ExecutableIntegrity { kind: "executable" },
         }],
     };
-    atomic_private_write(
-        &paths.manifest_path(&profile_id),
-        &serde_json::to_vec_pretty(&manifest)?,
-    )?;
-
-    let secret = secrets.get_or_create(paths, &profile_id)?;
-
-    let profile = paths.update_config(|config| {
-        // Reuse the ports this workspace already owns unless the caller asked for a specific port.
-        let requested = request
-            .bridge_port
-            .or_else(|| config.find(&profile_id).map(|profile| profile.bridge_port));
-        let explicit = request.bridge_port.is_some();
-        let (bridge_port, preview_port) =
-            allocate_port_pair(config, &profile_id, &host, requested, explicit)?;
-
-        let authority = format_host(&host);
+    let mut side_effects = SetupSideEffects {
+        paths,
+        secrets,
+        profile_id: &profile_id,
+        manifest: serde_json::to_vec_pretty(&manifest)?,
+        previous_manifest: None,
+        secret_created: None,
+    };
+    let _transition_lease = FileLease::acquire(&paths.broker_transition_lock_path())?;
+    let (profile, secret) = paths.update_config_with_side_effects(
+        |config| {
+        let broker = match config.broker.clone() {
+            Some(mut broker) => {
+                let endpoint_changed = request
+                    .bridge_port
+                    .is_some_and(|port| port != broker.bridge_port)
+                    || host != broker.host
+                    || request.network_mode != broker.network_mode;
+                if endpoint_changed && request.replace_broker_endpoint {
+                    if clean_stale_broker_ownership(paths)? {
+                        bail!("stop the desktop broker before replacing its endpoint");
+                    }
+                    let (bridge_port, preview_port) = allocate_broker_replacement_ports(
+                        config,
+                        &host,
+                        broker.bridge_port,
+                        broker.preview_port,
+                        request.bridge_port,
+                    )?;
+                    let authority = format_host(&host);
+                    let mut replacement = BrokerSettings::new(
+                        request.network_mode.clone(),
+                        host.clone(),
+                        bridge_port,
+                        preview_port,
+                        format!("http://{authority}:{bridge_port}"),
+                        format!("http://{authority}:{preview_port}"),
+                    )?;
+                    replacement.auto_start = broker.auto_start;
+                    replacement.max_workers = broker.max_workers;
+                    replacement.max_idle_workers = broker.max_idle_workers;
+                    replacement.worker_idle_grace_ms = broker.worker_idle_grace_ms;
+                    replacement.worker_start_timeout_ms = broker.worker_start_timeout_ms;
+                    replacement
+                        .legacy_bridge_endpoints
+                        .append(&mut broker.legacy_bridge_endpoints);
+                    replacement.legacy_bridge_endpoints.push(
+                        crate::store::BrokerEndpoint {
+                            host: broker.host,
+                            port: broker.bridge_port,
+                        },
+                    );
+                    replacement.legacy_bridge_endpoints.sort_by(|left, right| {
+                        left.host
+                            .cmp(&right.host)
+                            .then_with(|| left.port.cmp(&right.port))
+                    });
+                    replacement.legacy_bridge_endpoints.dedup();
+                    for existing in &mut config.profiles {
+                        replacement.apply_endpoint(existing);
+                    }
+                    config.broker = Some(replacement.clone());
+                    replacement
+                } else {
+                    if endpoint_changed {
+                        bail!(
+                            "all workspaces use the desktop broker at {}; pass --replace-broker-endpoint while it is stopped to change it",
+                            broker.connect_url
+                        );
+                    }
+                    broker
+                }
+            }
+            None => {
+                let (bridge_port, preview_port) =
+                    allocate_port_pair(
+                        config,
+                        &profile_id,
+                        &host,
+                        request.bridge_port,
+                        request.bridge_port.is_some(),
+                    )?;
+                let authority = format_host(&host);
+                let broker = BrokerSettings::new(
+                    request.network_mode.clone(),
+                    host.clone(),
+                    bridge_port,
+                    preview_port,
+                    format!("http://{authority}:{bridge_port}"),
+                    format!("http://{authority}:{preview_port}"),
+                )?;
+                config.broker = Some(broker.clone());
+                broker
+            }
+        };
+        let preview_port = allocate_preview_port(
+            config,
+            &profile_id,
+            &broker.host,
+            broker.preview_port,
+        )?;
+        let authority = format_host(&broker.host);
         let profile = Profile {
             profile_id: profile_id.clone(),
             workspace: workspace.clone(),
-            network_mode: request.network_mode.clone(),
-            bridge_host: host.clone(),
-            bridge_port,
+            network_mode: broker.network_mode.clone(),
+            bridge_host: broker.host.clone(),
+            bridge_port: broker.bridge_port,
             preview_port,
-            connect_url: format!("http://{authority}:{bridge_port}"),
+            connect_url: broker.connect_url.clone(),
             preview_connect_url: format!("http://{authority}:{preview_port}"),
             auto_start: config
                 .find(&profile_id)
@@ -178,7 +329,9 @@ pub fn setup_profile(
         };
         config.upsert(profile.clone());
         Ok(profile)
-    })?;
+    },
+        &mut side_effects,
+    )?;
 
     Ok(SetupResult {
         workspace,
@@ -195,26 +348,210 @@ pub fn setup_profile(
 }
 
 pub fn discover_agent_executable(agent_id: &str) -> Option<PathBuf> {
-    let executable_name = if cfg!(windows) {
-        format!("{agent_id}.exe")
-    } else {
-        agent_id.to_string()
-    };
+    let executable_name = platform::agent_executable_name(agent_id);
     let mut directories: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|value| std::env::split_paths(&value).collect())
         .unwrap_or_default();
-    if cfg!(target_os = "macos") {
-        directories.extend([
-            PathBuf::from("/opt/homebrew/bin"),
-            PathBuf::from("/usr/local/bin"),
-            PathBuf::from("/usr/bin"),
-        ]);
-    }
+    directories.extend(platform::agent_search_roots());
     directories
         .into_iter()
         .map(|directory| directory.join(&executable_name))
         .find(|candidate| candidate.is_file())
         .and_then(|candidate| candidate.canonicalize().ok())
+}
+
+/// The re-registration performed after an installed agent changed underneath a workspace.
+#[derive(Clone, Debug)]
+pub struct AgentRefresh {
+    pub agent_id: String,
+    pub previous_version: String,
+    pub resolved_version: String,
+    pub executable: PathBuf,
+}
+
+/// Re-registers a workspace's agent when its installed executable changed, such as after a
+/// package-manager upgrade.
+///
+/// Setup pins the canonical executable path and digest, but package managers install each release
+/// under a versioned directory and only keep the launcher directory stable. An upgrade therefore
+/// invalidates both halves of the pin at once and would otherwise brick every workspace runtime
+/// until setup was rerun by hand.
+///
+/// Re-registration stays an operator decision rather than becoming implicit trust: the replacement
+/// must be published by one of the platform's trusted agent directories and must not be writable by
+/// other users. The bridge still recomputes and fails closed on the digest it is handed, so a
+/// tampered binary at an unchanged path is still rejected.
+pub fn refresh_registered_agent(
+    paths: &AppPaths,
+    profile_id: &str,
+) -> Result<Option<AgentRefresh>> {
+    refresh_registered_agent_within(paths, profile_id, &platform::agent_search_roots())
+}
+
+fn refresh_registered_agent_within(
+    paths: &AppPaths,
+    profile_id: &str,
+    search_roots: &[PathBuf],
+) -> Result<Option<AgentRefresh>> {
+    let agent = paths
+        .load_config()?
+        .find(profile_id)
+        .with_context(|| format!("workspace profile {profile_id} is not configured"))?
+        .agent
+        .clone();
+    if registered_agent_is_current(&agent) {
+        return Ok(None);
+    }
+
+    let executable = trusted_agent_executable(&agent.agent_id, search_roots).with_context(|| {
+        format!(
+            "the registered {} executable is no longer installed and no trusted replacement was found; run setup again",
+            agent.agent_id
+        )
+    })?;
+    let verified_digest = file_digest(&executable)?;
+    if executable == agent.executable && verified_digest == agent.verified_digest {
+        return Ok(None);
+    }
+    let resolved_version = executable_version(&executable);
+
+    let mut side_effects = ManifestRefreshSideEffects {
+        paths,
+        profile_id,
+        agent_id: agent.agent_id.clone(),
+        executable: executable.clone(),
+        resolved_version: resolved_version.clone(),
+        verified_digest: verified_digest.clone(),
+        previous_manifest: None,
+    };
+    let owned_profile_id = profile_id.to_string();
+    let recorded_executable = executable.clone();
+    let recorded_version = resolved_version.clone();
+    paths.update_config_with_side_effects(
+        move |config| {
+            let profile = config
+                .profiles
+                .iter_mut()
+                .find(|profile| profile.profile_id == owned_profile_id)
+                .with_context(|| {
+                    format!("workspace profile {owned_profile_id} disappeared during agent refresh")
+                })?;
+            profile.agent.executable = recorded_executable;
+            profile.agent.resolved_version = recorded_version;
+            profile.agent.verified_digest = verified_digest;
+            Ok(())
+        },
+        &mut side_effects,
+    )?;
+
+    Ok(Some(AgentRefresh {
+        agent_id: agent.agent_id,
+        previous_version: agent.resolved_version,
+        resolved_version,
+        executable,
+    }))
+}
+
+/// Rewrites only the refreshed agent's identity fields so unrelated manifest entries survive.
+struct ManifestRefreshSideEffects<'a> {
+    paths: &'a AppPaths,
+    profile_id: &'a str,
+    agent_id: String,
+    executable: PathBuf,
+    resolved_version: String,
+    verified_digest: String,
+    previous_manifest: Option<Vec<u8>>,
+}
+
+impl ConfigSideEffects for ManifestRefreshSideEffects<'_> {
+    type Output = ();
+
+    fn apply(&mut self) -> Result<()> {
+        let manifest_path = self.paths.manifest_path(self.profile_id);
+        let contents = fs::read(&manifest_path)
+            .with_context(|| format!("failed to read {}", manifest_path.display()))?;
+        let mut manifest: serde_json::Value = serde_json::from_slice(&contents)
+            .with_context(|| format!("invalid agent manifest at {}", manifest_path.display()))?;
+        let agents = manifest
+            .get_mut("agents")
+            .and_then(serde_json::Value::as_array_mut)
+            .context("the agent manifest does not list any agents")?;
+        let entry = agents
+            .iter_mut()
+            .filter_map(serde_json::Value::as_object_mut)
+            .find(|entry| {
+                entry.get("agentId").and_then(serde_json::Value::as_str) == Some(&self.agent_id)
+            })
+            .with_context(|| format!("the agent manifest has no {} entry", self.agent_id))?;
+        entry.insert(
+            "executable".to_string(),
+            serde_json::Value::String(path_to_manifest_string(&self.executable)?),
+        );
+        entry.insert(
+            "resolvedVersion".to_string(),
+            serde_json::Value::String(self.resolved_version.clone()),
+        );
+        entry.insert(
+            "verifiedDigest".to_string(),
+            serde_json::Value::String(self.verified_digest.clone()),
+        );
+        self.previous_manifest = Some(contents);
+        atomic_private_write(&manifest_path, &serde_json::to_vec_pretty(&manifest)?)
+    }
+
+    fn rollback(&mut self) -> Result<()> {
+        let Some(previous_manifest) = self.previous_manifest.take() else {
+            return Ok(());
+        };
+        atomic_private_write(
+            &self.paths.manifest_path(self.profile_id),
+            &previous_manifest,
+        )
+    }
+}
+
+fn path_to_manifest_string(path: &Path) -> Result<String> {
+    path.to_str()
+        .map(str::to_string)
+        .context("agent executable path is not valid UTF-8")
+}
+
+fn registered_agent_is_current(agent: &ProfileAgent) -> bool {
+    agent.executable.is_file()
+        && file_digest(&agent.executable)
+            .map(|digest| digest == agent.verified_digest)
+            .unwrap_or(false)
+}
+
+/// Resolves the agent through a platform-trusted launcher directory.
+///
+/// The launcher entry is the part a package manager keeps stable across upgrades, so it is the only
+/// location an automatic re-registration will accept. The resolved target must still be a regular
+/// file that other users cannot rewrite.
+fn trusted_agent_executable(agent_id: &str, search_roots: &[PathBuf]) -> Option<PathBuf> {
+    let executable_name = platform::agent_executable_name(agent_id);
+    search_roots
+        .iter()
+        .map(|directory| directory.join(&executable_name))
+        .filter(|candidate| candidate.is_file())
+        .find_map(|candidate| {
+            let canonical = candidate.canonicalize().ok()?;
+            (canonical.is_file() && !is_writable_by_other_users(&canonical)).then_some(canonical)
+        })
+}
+
+#[cfg(unix)]
+fn is_writable_by_other_users(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::metadata(path)
+        .map(|metadata| metadata.permissions().mode() & 0o022 != 0)
+        .unwrap_or(true)
+}
+
+#[cfg(not(unix))]
+fn is_writable_by_other_users(_path: &Path) -> bool {
+    false
 }
 
 fn normalize_host(host: &str) -> Result<String> {
@@ -322,6 +659,7 @@ mod tests {
             network_mode: "local".to_string(),
             bridge_host: "192.168.1.20".to_string(),
             bridge_port: port,
+            replace_broker_endpoint: false,
             agent_id: "echo-agent".to_string(),
             display_name: "Echo Agent".to_string(),
             executable: PathBuf::from("/bin/echo"),
@@ -384,7 +722,7 @@ mod tests {
     }
 
     #[test]
-    fn gives_parallel_worktrees_distinct_profiles_and_ports() {
+    fn gives_parallel_worktrees_distinct_profiles_on_one_broker_endpoint() {
         let alpha = tempdir().unwrap();
         let beta = tempdir().unwrap();
         let data = tempdir().unwrap();
@@ -395,9 +733,8 @@ mod tests {
         let second = setup_profile(request(beta.path(), None), &paths, &secrets).unwrap();
 
         assert_ne!(first.profile_id, second.profile_id);
-        assert_ne!(first.bridge_port, second.bridge_port);
-        assert_ne!(first.bridge_port, second.preview_port);
-        assert_ne!(first.preview_port, second.bridge_port);
+        assert_eq!(first.bridge_port, second.bridge_port);
+        assert_ne!(first.preview_port, second.preview_port);
         assert_ne!(
             secrets
                 .get(&paths, &first.profile_id)
@@ -540,7 +877,7 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_port_another_workspace_already_owns() {
+    fn refuses_a_second_workspace_that_requests_a_different_broker_port() {
         let alpha = tempdir().unwrap();
         let beta = tempdir().unwrap();
         let data = tempdir().unwrap();
@@ -548,12 +885,150 @@ mod tests {
         let secrets = store();
 
         setup_profile(request(alpha.path(), Some(18847)), &paths, &secrets).unwrap();
-        let error = setup_profile(request(beta.path(), Some(18847)), &paths, &secrets).unwrap_err();
+        let error = setup_profile(request(beta.path(), Some(18849)), &paths, &secrets).unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("already assigned to the workspace"));
+        assert!(error.to_string().contains("pass --replace-broker-endpoint"));
         assert_eq!(paths.load_config().unwrap().profiles.len(), 1);
+        let mut host_change = request(alpha.path(), Some(18847));
+        host_change.bridge_host = "127.0.0.1".to_string();
+        assert!(setup_profile(host_change, &paths, &secrets)
+            .unwrap_err()
+            .to_string()
+            .contains("pass --replace-broker-endpoint"));
+
+        let profile_id = profile_id_for(&alpha.path().canonicalize().unwrap());
+        let manifest_path = paths.manifest_path(&profile_id);
+        let manifest_before = fs::read(&manifest_path).unwrap();
+        let mut rejected = request(alpha.path(), Some(18849));
+        rejected.agent_id = "replacement-agent".to_string();
+        rejected.display_name = "Replacement Agent".to_string();
+        rejected.argv = vec!["replacement".to_string()];
+        assert!(setup_profile(rejected, &paths, &secrets).is_err());
+        assert_eq!(fs::read(manifest_path).unwrap(), manifest_before);
+    }
+
+    #[test]
+    fn setup_side_effect_rollback_restores_manifest_and_removes_new_credential() {
+        let data = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let secrets = store();
+        let profile_id = "rollback-profile";
+        paths.prepare_profile(profile_id).unwrap();
+        let manifest_path = paths.manifest_path(profile_id);
+        fs::write(&manifest_path, b"previous manifest\n").unwrap();
+        let mut side_effects = SetupSideEffects {
+            paths: &paths,
+            secrets: &secrets,
+            profile_id,
+            manifest: b"replacement manifest".to_vec(),
+            previous_manifest: None,
+            secret_created: None,
+        };
+
+        side_effects.apply().unwrap();
+        assert_eq!(fs::read(&manifest_path).unwrap(), b"replacement manifest\n");
+        assert!(secrets.get(&paths, profile_id).unwrap().is_some());
+
+        side_effects.rollback().unwrap();
+        assert_eq!(fs::read(&manifest_path).unwrap(), b"previous manifest\n");
+        assert!(secrets.get(&paths, profile_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn setup_serializes_endpoint_changes_with_broker_transitions() {
+        let workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let transition = FileLease::acquire(&paths.broker_transition_lock_path()).unwrap();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let worker_paths = paths.clone();
+        let workspace_path = workspace.path().to_path_buf();
+        let setup = std::thread::spawn(move || {
+            let result = setup_profile(request(&workspace_path, None), &worker_paths, &store());
+            done_tx.send(result).unwrap();
+        });
+
+        assert!(done_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err());
+        drop(transition);
+        done_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap()
+            .unwrap();
+        setup.join().unwrap();
+    }
+
+    #[test]
+    fn replaces_a_stopped_broker_endpoint_and_preserves_the_old_alias() {
+        let workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let secrets = store();
+        setup_profile(request(workspace.path(), Some(18847)), &paths, &secrets).unwrap();
+
+        let mut replacement = request(workspace.path(), Some(18857));
+        replacement.bridge_host = "127.0.0.1".to_string();
+        replacement.replace_broker_endpoint = true;
+        let ownership_path = paths.broker_ownership_path();
+        fs::create_dir_all(ownership_path.parent().unwrap()).unwrap();
+        fs::write(&ownership_path, b"owned").unwrap();
+        assert!(setup_profile(replacement.clone(), &paths, &secrets)
+            .unwrap_err()
+            .to_string()
+            .contains("invalid broker ownership record"));
+        fs::remove_file(ownership_path).unwrap();
+        let result = setup_profile(replacement, &paths, &secrets).unwrap();
+        let config = paths.load_config().unwrap();
+        let broker = config.broker.unwrap();
+
+        assert_eq!(result.bridge_url, "http://127.0.0.1:18857");
+        assert_eq!(broker.bridge_port, 18857);
+        assert!(broker
+            .legacy_bridge_endpoints
+            .iter()
+            .any(|endpoint| endpoint.host == "192.168.1.20" && endpoint.port == 18847));
+        assert!(config.profiles[0]
+            .preview_connect_url
+            .starts_with("http://127.0.0.1:"));
+    }
+
+    #[test]
+    fn replaces_a_shared_endpoint_without_treating_other_profile_copies_as_conflicts() {
+        let first_workspace = tempdir().unwrap();
+        let second_workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let secrets = store();
+        setup_profile(
+            request(first_workspace.path(), Some(18_867)),
+            &paths,
+            &secrets,
+        )
+        .unwrap();
+        setup_profile(
+            request(second_workspace.path(), Some(18_867)),
+            &paths,
+            &secrets,
+        )
+        .unwrap();
+
+        let mut replacement = request(second_workspace.path(), Some(18_867));
+        replacement.bridge_host = "127.0.0.2".to_string();
+        replacement.replace_broker_endpoint = true;
+        let result = setup_profile(replacement, &paths, &secrets).unwrap();
+
+        assert_eq!(result.bridge_port, 18_867);
+        let config = paths.load_config().unwrap();
+        assert_eq!(config.profiles.len(), 2);
+        assert!(config
+            .profiles
+            .iter()
+            .all(|profile| profile.bridge_port == 18_867));
+        assert!(config
+            .profiles
+            .iter()
+            .all(|profile| profile.bridge_host == "127.0.0.2"));
     }
 
     #[test]
@@ -616,5 +1091,157 @@ mod tests {
         assert!(!valid_agent_id(".."));
         assert!(!valid_agent_id("has/slash"));
         assert!(!valid_agent_id(&"a".repeat(129)));
+    }
+
+    /// Publishes a versioned release the way a package manager does, returning its executable.
+    #[cfg(unix)]
+    fn publish_release(install_root: &Path, version: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let release = install_root.join("pkg").join(version).join("bin");
+        fs::create_dir_all(&release).unwrap();
+        let executable = release.join("agent");
+        fs::write(&executable, format!("#!/bin/sh\necho {version}\n")).unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        executable
+    }
+
+    #[cfg(unix)]
+    fn register_launcher_agent(
+        paths: &AppPaths,
+        workspace: &Path,
+        launcher: &Path,
+        port: u16,
+    ) -> String {
+        let mut setup_request = request(workspace, Some(port));
+        setup_request.agent_id = "agent".to_string();
+        setup_request.display_name = "Agent".to_string();
+        setup_request.executable = launcher.to_path_buf();
+        setup_request.argv = Vec::new();
+        setup_profile(setup_request, paths, &store())
+            .unwrap()
+            .profile_id
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_upgraded_agent_is_re_registered_from_its_trusted_launcher_directory() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let install = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let launcher_dir = install.path().join("bin");
+        fs::create_dir_all(&launcher_dir).unwrap();
+        let launcher = launcher_dir.join("agent");
+        let first = publish_release(install.path(), "1.0");
+        symlink(&first, &launcher).unwrap();
+
+        let profile_id = register_launcher_agent(&paths, workspace.path(), &launcher, 18871);
+        let search_roots = vec![launcher_dir.clone()];
+        assert!(
+            refresh_registered_agent_within(&paths, &profile_id, &search_roots)
+                .unwrap()
+                .is_none(),
+            "an unchanged installation must not be re-registered"
+        );
+
+        // A package-manager upgrade publishes a new versioned release, repoints the stable launcher
+        // entry at it, and removes the release the profile pinned.
+        let second = publish_release(install.path(), "2.0");
+        fs::remove_file(&launcher).unwrap();
+        symlink(&second, &launcher).unwrap();
+        fs::remove_dir_all(install.path().join("pkg").join("1.0")).unwrap();
+
+        let refresh = refresh_registered_agent_within(&paths, &profile_id, &search_roots)
+            .unwrap()
+            .expect("an upgraded agent must be re-registered");
+        let upgraded = second.canonicalize().unwrap();
+        assert_eq!(refresh.agent_id, "agent");
+        assert_eq!(refresh.executable, upgraded);
+        assert_ne!(refresh.previous_version, refresh.resolved_version);
+
+        let profile = paths
+            .load_config()
+            .unwrap()
+            .find(&profile_id)
+            .cloned()
+            .unwrap();
+        let upgraded_digest = file_digest(&upgraded).unwrap();
+        assert_eq!(profile.agent.executable, upgraded);
+        assert_eq!(profile.agent.verified_digest, upgraded_digest);
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(paths.manifest_path(&profile_id)).unwrap()).unwrap();
+        assert_eq!(
+            manifest["agents"][0]["verifiedDigest"].as_str(),
+            Some(upgraded_digest.as_str())
+        );
+        assert_eq!(
+            manifest["agents"][0]["executable"].as_str(),
+            upgraded.to_str()
+        );
+
+        // Building the runtime again is what actually unblocks a waiting device.
+        crate::config::BridgeRuntimeConfig::from_profile(
+            &profile,
+            "token",
+            crate::secrets::SecretBackend::File,
+            &paths,
+        )
+        .unwrap();
+        assert!(
+            refresh_registered_agent_within(&paths, &profile_id, &search_roots)
+                .unwrap()
+                .is_none(),
+            "re-registration must be idempotent"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_uninstalled_agent_without_a_trusted_replacement_still_fails_closed() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let install = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let launcher_dir = install.path().join("bin");
+        fs::create_dir_all(&launcher_dir).unwrap();
+        let launcher = launcher_dir.join("agent");
+        let release = publish_release(install.path(), "1.0");
+        symlink(&release, &launcher).unwrap();
+
+        let profile_id = register_launcher_agent(&paths, workspace.path(), &launcher, 18873);
+        fs::remove_file(&launcher).unwrap();
+        fs::remove_dir_all(install.path().join("pkg").join("1.0")).unwrap();
+
+        let error = refresh_registered_agent_within(&paths, &profile_id, &[launcher_dir])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("run setup again"),
+            "unexpected error: {error}"
+        );
+    }
+
+    /// A replacement other users can rewrite is never trusted automatically.
+    #[cfg(unix)]
+    #[test]
+    fn a_world_writable_replacement_is_not_trusted() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let install = tempdir().unwrap();
+        let launcher_dir = install.path().join("bin");
+        fs::create_dir_all(&launcher_dir).unwrap();
+        let executable = launcher_dir.join("agent");
+        fs::write(&executable, "#!/bin/sh\necho hi\n").unwrap();
+
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(trusted_agent_executable("agent", std::slice::from_ref(&launcher_dir)).is_some());
+
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(trusted_agent_executable("agent", &[launcher_dir]).is_none());
     }
 }

@@ -8,6 +8,15 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      windows_signing_mode:
+        description: Windows package signing mode
+        required: true
+        default: Test
+        type: choice
+        options:
+          - Test
+          - Production
 
 concurrency:
   group: build-and-test-${{ github.ref }}
@@ -19,6 +28,8 @@ permissions:
 env:
   NODE_VERSION: '22.13.1'
   RUST_VERSION: '1.97.1'
+  DOTNET_VERSION: '10.0.302'
+  NUGET_VERSION: '6.14.0'
 
 jobs:
   repository-policy:
@@ -29,25 +40,27 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: package-lock.json
-          package-manager-cache: false
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Validate repository policy
         run: |
-          npm run docs:check
-          npm run payment:check
-          npm run format:check
-          npm run test:scripts
-          npm run security:check
-          npm run duplicates:native
+          pnpm run docs:check
+          pnpm run payment:check
+          pnpm run format:check
+          pnpm run test:scripts
+          pnpm run security:check
+          pnpm run duplicates:native
 
   rpc-contract:
     name: RPC Contract
@@ -57,13 +70,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: package-lock.json
-          package-manager-cache: false
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.97.1
@@ -75,10 +90,10 @@ jobs:
             services/rust-bridge -> target
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Validate RPC contract
-        run: npm run contract:check
+        run: pnpm run contract:check
 
   mobile:
     name: Mobile
@@ -88,31 +103,33 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: package-lock.json
-          package-manager-cache: false
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: npm run lint -w @dappercode/mobile
+        run: pnpm --filter @dappercode/mobile run lint
 
       - name: Check source duplication
-        run: npm run duplicates:mobile
+        run: pnpm run duplicates:mobile
 
       - name: Typecheck
-        run: npm run typecheck -w @dappercode/mobile
+        run: pnpm --filter @dappercode/mobile run typecheck
 
       - name: Test with branch coverage
-        run: npm run test:coverage -w @dappercode/mobile
+        run: pnpm --filter @dappercode/mobile run test:coverage
 
       - name: Build Expo export
-        run: npm run build -w @dappercode/mobile
+        run: pnpm --filter @dappercode/mobile run build
 
       - name: Upload mobile coverage
         if: always()
@@ -136,33 +153,35 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: package-lock.json
-          package-manager-cache: false
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Typecheck e2e suite
-        run: npm run typecheck:e2e
+        run: pnpm run typecheck:e2e
 
-      # npm ci does not fetch browser binaries, and the suite is pinned to a specific Chromium
-      # revision, so this has to install the matching build rather than rely on a system browser.
+      # Dependency installation does not fetch browser binaries, and the suite pins a Chromium
+      # revision, so this installs the matching build rather than relying on a system browser.
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Run layout e2e suite
-        run: npm run e2e
+        run: pnpm run e2e
 
       - name: Upload Playwright report
         if: failure()
@@ -215,13 +234,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: package-lock.json
-          package-manager-cache: false
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.97.1
@@ -236,24 +257,24 @@ jobs:
             services/rust-bridge -> target
 
       - name: Install repository dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Check formatting
         working-directory: apps/desktop
         run: cargo fmt --check
 
       - name: Check desktop
-        run: npm run desktop:check
+        run: pnpm run desktop:check
 
       - name: Lint desktop
         working-directory: apps/desktop
         run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Test desktop
-        run: npm run desktop:test
+        run: pnpm run desktop:test
 
       - name: Build macOS app
-        run: npm run desktop:build:macos
+        run: pnpm run desktop:build:macos
 
       - name: Verify native bundle policy
         run: |
@@ -261,7 +282,7 @@ jobs:
           test -x "$APP/Contents/MacOS/DapperCode"
           test -x "$APP/Contents/Resources/bin/dappercode"
           test -x "$APP/Contents/Resources/bin/dappercode-bridge"
-          ! find "$APP" -type f \( -name '*.js' -o -name package.json -o -name package-lock.json -o -name node -o -name npm -o -name npx \) -print | grep .
+          ! find "$APP" -type f \( -name '*.js' -o -name package.json -o -name package-lock.json -o -name pnpm-lock.yaml -o -name node -o -name npm -o -name npx -o -name pnpm -o -name pnpx \) -print | grep .
           ! find "$APP" -type f -print0 | xargs -0 strings | grep -Ei 'slint|node_modules|DAPPERCODE_BRIDGE_BINARY|DAPPERCODE_PACKAGE_ROOT|vendor/bridge-binaries|services/rust-bridge/target'
           codesign --verify --deep --strict "$APP"
 
@@ -272,10 +293,110 @@ jobs:
           path: apps/desktop/dist/DapperCode-*.zip
           if-no-files-found: error
 
-  rust-coverage:
-    name: Rust Branch Coverage
-    runs-on: macos-26
-    timeout-minutes: 45
+  desktop-windows-validate:
+    name: Desktop Windows Validation
+    if: inputs.windows_signing_mode != 'Production' || github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      DAPPERCODE_WINDOWS_SIGNING_MODE: ${{ inputs.windows_signing_mode || 'Test' }}
+      DAPPERCODE_WINDOWS_PACKAGE_IDENTITY: ${{ vars.WINDOWS_PACKAGE_IDENTITY }}
+      DAPPERCODE_WINDOWS_PUBLISHER: ${{ vars.WINDOWS_SIGNING_PUBLISHER }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Setup pinned .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup pinned NuGet
+        uses: NuGet/setup-nuget@v2
+        with:
+          nuget-version: ${{ env.NUGET_VERSION }}
+
+      - name: Cache WinUI NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: >-
+            nuget-${{ runner.os }}-${{
+              hashFiles('global.json', 'apps/desktop/windows/Directory.Packages.props',
+              'apps/desktop/windows/**/*.csproj')
+            }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Setup Rust with Windows targets
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache desktop Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            apps/desktop -> target
+            services/rust-bridge -> target
+
+      - name: Install repository dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Restore pinned WinUI dependencies
+        shell: pwsh
+        run: ./scripts/restore-desktop-windows.ps1 -ExpectedSdkVersion "${{ env.DOTNET_VERSION }}"
+
+      - name: Test all WinUI suites
+        shell: pwsh
+        run: ./scripts/test-desktop-windows-dotnet.ps1
+
+      - name: Check Windows desktop source policy
+        shell: pwsh
+        run: ./scripts/test-desktop-windows.ps1 -SourceOnly
+
+      - name: Check Rust formatting
+        run: |
+          cargo fmt --check --manifest-path apps/desktop/Cargo.toml
+          cargo fmt --check --manifest-path services/rust-bridge/Cargo.toml
+
+      - name: Check and lint Windows Rust
+        run: |
+          cargo check --locked --all-targets --manifest-path apps/desktop/Cargo.toml
+          cargo clippy --locked --all-targets --manifest-path apps/desktop/Cargo.toml -- -D warnings
+          cargo check --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml
+          cargo clippy --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml -- -D warnings
+
+      - name: Test Windows Rust
+        shell: pwsh
+        run: ./scripts/test-rust-windows.ps1
+
+  desktop-windows-package:
+    name: Desktop Windows Package (${{ matrix.architecture }})
+    if: inputs.windows_signing_mode != 'Production' || github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x64
+            rust-target: x86_64-pc-windows-msvc
+          - architecture: arm64
+            rust-target: aarch64-pc-windows-msvc
+    env:
+      DAPPERCODE_WINDOWS_SIGNING_MODE: ${{ inputs.windows_signing_mode || 'Test' }}
+      DAPPERCODE_WINDOWS_PACKAGE_IDENTITY: ${{ vars.WINDOWS_PACKAGE_IDENTITY }}
+      DAPPERCODE_WINDOWS_PUBLISHER: ${{ vars.WINDOWS_SIGNING_PUBLISHER }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -284,9 +405,175 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: package-lock.json
           package-manager-cache: false
+
+      - name: Setup pinned .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache WinUI NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: >-
+            nuget-${{ runner.os }}-${{
+              hashFiles('global.json', 'apps/desktop/windows/Directory.Packages.props',
+              'apps/desktop/windows/**/*.csproj')
+            }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Setup architecture Rust target
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - name: Cache architecture Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            apps/desktop -> target
+            services/rust-bridge -> target
+          shared-key: windows-${{ matrix.architecture }}-release
+
+      - name: Build unsigned architecture package
+        shell: pwsh
+        run: >-
+          ./scripts/build-desktop-windows.ps1
+          -Architecture ${{ matrix.architecture }}
+          -SkipBundle
+          -SkipInspection
+
+      - name: Upload unsigned architecture package
+        uses: actions/upload-artifact@v4
+        with:
+          name: dappercode-desktop-windows-${{ matrix.architecture }}-package
+          path: apps/desktop/dist/windows/packages/*.msix
+          if-no-files-found: error
+          retention-days: 1
+
+  desktop-windows:
+    name: Desktop Windows
+    if: inputs.windows_signing_mode != 'Production' || github.ref == 'refs/heads/main'
+    needs:
+      - desktop-windows-validate
+      - desktop-windows-package
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      DAPPERCODE_WINDOWS_SIGNING_MODE: ${{ inputs.windows_signing_mode || 'Test' }}
+      DAPPERCODE_WINDOWS_PACKAGE_IDENTITY: ${{ vars.WINDOWS_PACKAGE_IDENTITY }}
+      DAPPERCODE_WINDOWS_PUBLISHER: ${{ vars.WINDOWS_SIGNING_PUBLISHER }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Download unsigned architecture packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dappercode-desktop-windows-*-package
+          path: apps/desktop/dist/windows/packages
+          merge-multiple: true
+
+      - name: Bundle, sign, and inspect architecture packages
+        shell: pwsh
+        run: >-
+          ./scripts/build-desktop-windows.ps1
+          -Operation Bundle
+          -SigningMode ${{ env.DAPPERCODE_WINDOWS_SIGNING_MODE }}
+
+      - name: Upload test-signed Windows bundle and public certificate
+        if: env.DAPPERCODE_WINDOWS_SIGNING_MODE == 'Test'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dappercode-desktop-windows-x64-arm64
+          path: |
+            apps/desktop/dist/windows/*.msixbundle
+            apps/desktop/dist/windows/DapperCode-Signing.cer
+            apps/desktop/dist/windows/INSTALL-WINDOWS.txt
+          if-no-files-found: error
+
+      - name: Upload inspected unsigned production packages
+        if: env.DAPPERCODE_WINDOWS_SIGNING_MODE == 'Production'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dappercode-desktop-windows-unsigned-production
+          path: |
+            apps/desktop/dist/windows/*.msixbundle
+            apps/desktop/dist/windows/packages/*.msix
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload reviewed production signing script
+        if: env.DAPPERCODE_WINDOWS_SIGNING_MODE == 'Production'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dappercode-desktop-windows-production-signing-script
+          path: scripts/sign-desktop-windows-production.ps1
+          if-no-files-found: error
+          retention-days: 1
+
+  desktop-windows-production-sign:
+    name: Desktop Windows Production Signing
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.windows_signing_mode == 'Production' &&
+      github.ref == 'refs/heads/main'
+    needs: desktop-windows
+    runs-on: windows-latest
+    timeout-minutes: 15
+    environment: windows-production-signing
+    permissions:
+      actions: read
+      contents: none
+    steps:
+      - name: Download inspected unsigned production packages
+        uses: actions/download-artifact@v4
+        with:
+          name: dappercode-desktop-windows-unsigned-production
+          path: windows-production
+
+      - name: Download reviewed production signing script
+        uses: actions/download-artifact@v4
+        with:
+          name: dappercode-desktop-windows-production-signing-script
+          path: windows-signing-script
+
+      - name: Sign and verify production packages
+        shell: pwsh
+        env:
+          DAPPERCODE_WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          DAPPERCODE_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          DAPPERCODE_WINDOWS_PUBLISHER: ${{ vars.WINDOWS_SIGNING_PUBLISHER }}
+          DAPPERCODE_WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
+        run: >-
+          ./windows-signing-script/sign-desktop-windows-production.ps1
+          -ArtifactRoot ./windows-production
+
+      - name: Upload signed production bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: dappercode-desktop-windows-x64-arm64
+          path: windows-production
+          if-no-files-found: error
+
+  rust-coverage:
+    name: Rust Branch Coverage
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Setup pinned nightly Rust
         uses: dtolnay/rust-toolchain@stable
@@ -311,7 +598,7 @@ jobs:
           cache-on-failure: true
 
       - name: Enforce Rust branch coverage
-        run: npm run coverage:rust
+        run: pnpm run coverage:rust
 
       - name: Upload Rust coverage
         if: always()

@@ -1,13 +1,19 @@
 import type { ActivityMessage, Message } from '@ag-ui/core';
 
-import type { ChatMessage, ChatMessageSubAgentMeta } from '@bridge/types/types';
+import type {
+  ChatAgentMessageMeta,
+  ChatMessage,
+  ChatMessageSubAgentMeta,
+} from '@bridge/types/types';
 
 export const SUBAGENT_ACTIVITY_TYPE = 'dappercode.subagent';
 export const COMPACTION_ACTIVITY_TYPE = 'dappercode.compaction';
+export const AGENT_MESSAGE_ACTIVITY_TYPE = 'dappercode.agent_message';
 
 export interface DapperCodeActivityContent extends Record<string, unknown> {
   text: string;
   subAgent?: ChatMessageSubAgentMeta;
+  agentMessage?: ChatAgentMessageMeta;
 }
 
 function readActivityText(content: unknown): string {
@@ -88,6 +94,40 @@ function isChatMessageSubAgentMeta(value: unknown): value is ChatMessageSubAgent
   );
 }
 
+function isChatAgentMessageMeta(value: unknown): value is ChatAgentMessageMeta {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value['messageId'] === 'string' &&
+    (value['direction'] === 'sent' || value['direction'] === 'received') &&
+    typeof value['relatedThreadId'] === 'string' &&
+    (value['relatedTitle'] === undefined ||
+      value['relatedTitle'] === null ||
+      typeof value['relatedTitle'] === 'string') &&
+    (value['relation'] === 'parent' || value['relation'] === 'sub_agent') &&
+    (value['disposition'] === 'sent' ||
+      value['disposition'] === 'steering' ||
+      value['disposition'] === 'queued' ||
+      value['disposition'] === 'cancelled') &&
+    typeof value['body'] === 'string'
+  );
+}
+
+export function parseAgentMessageMeta(value: unknown): ChatAgentMessageMeta | undefined {
+  return isChatAgentMessageMeta(value) ? value : undefined;
+}
+
+export function getAgentMessageMeta(
+  message: Message | ChatMessage,
+): ChatAgentMessageMeta | undefined {
+  if (message.role !== 'activity' || message.activityType !== AGENT_MESSAGE_ACTIVITY_TYPE) {
+    return undefined;
+  }
+  const value: unknown = message.content.agentMessage;
+  return parseAgentMessageMeta(value);
+}
+
 export function getSubAgentMeta(
   message: Message | ChatMessage,
 ): ChatMessageSubAgentMeta | undefined {
@@ -96,6 +136,59 @@ export function getSubAgentMeta(
   }
   const value: unknown = message.content.subAgent;
   return isChatMessageSubAgentMeta(value) ? value : undefined;
+}
+
+export function getSubAgentThreadId(message: Message | ChatMessage): string | undefined {
+  return getSubAgentMeta(message)
+    ?.receiverThreadIds?.map((id) => id.trim())
+    .find(Boolean);
+}
+
+export function isUnlinkedSubAgentActivity(message: Message | ChatMessage): boolean {
+  return (
+    message.role === 'activity' &&
+    message.activityType === SUBAGENT_ACTIVITY_TYPE &&
+    getSubAgentThreadId(message) === undefined
+  );
+}
+
+export function preserveKnownSubAgentThreadLink(
+  existing: ChatMessage | undefined,
+  incoming: ChatMessage,
+): ChatMessage {
+  if (incoming.role !== 'activity' || incoming.activityType !== SUBAGENT_ACTIVITY_TYPE) {
+    return incoming;
+  }
+  const existingMeta = existing ? getSubAgentMeta(existing) : undefined;
+  const existingIds = (existingMeta?.receiverThreadIds ?? [])
+    .map((id) => id.trim())
+    .filter(Boolean);
+  if (existingIds.length === 0) {
+    return incoming;
+  }
+  const incomingMeta = getSubAgentMeta(incoming);
+  const incomingIds = (incomingMeta?.receiverThreadIds ?? [])
+    .map((id) => id.trim())
+    .filter(Boolean);
+  if (
+    incomingIds.length > 0 ||
+    (existingMeta?.toolCallId &&
+      incomingMeta?.toolCallId &&
+      existingMeta.toolCallId !== incomingMeta.toolCallId)
+  ) {
+    return incoming;
+  }
+  return {
+    ...incoming,
+    content: {
+      ...incoming.content,
+      subAgent: {
+        ...existingMeta,
+        ...incomingMeta,
+        receiverThreadIds: existingIds,
+      },
+    },
+  };
 }
 
 export function getToolCallDisplayLines(message: Message | ChatMessage): string[] {

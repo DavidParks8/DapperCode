@@ -10,17 +10,17 @@ other test runs.
 ## Running
 
 ```bash
-npm run e2e            # both viewport projects
-npm run e2e:phone      # 390x844
-npm run e2e:tablet     # 834x1112
-npm run typecheck:e2e
+pnpm run e2e            # both viewport projects
+pnpm run e2e:phone      # 390x844
+pnpm run e2e:tablet     # 834x1112
+pnpm run typecheck:e2e
 ```
 
 The first run exports the app for web, which takes a minute or two. Later runs reuse that bundle
 until something it depends on changes.
 
 CI runs the suite in the `Mobile E2E` job of `.github/workflows/build-and-test.yml`. It installs the
-pinned Chromium separately, because `npm ci` does not fetch browser binaries.
+pinned Chromium separately, because dependency installation does not fetch browser binaries.
 
 ## What it is made of
 
@@ -76,7 +76,7 @@ client against.
    source, because a regex silently under-reported — it missed calls the formatter had split across
    lines, which is how two push methods went unnoticed. Method names that are not string literals
    are reported as failures, since a computed name makes coverage unprovable. It runs as part of
-   `npm run contract:check`, so CI catches drift without installing Playwright.
+   `pnpm run contract:check`, so CI catches drift without installing Playwright.
 
 Adding a bridge method therefore surfaces here as a build failure with the method name in it. Either
 teach the harness to answer it, or record why the layout suite does not need it.

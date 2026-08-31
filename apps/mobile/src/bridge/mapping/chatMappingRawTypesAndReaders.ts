@@ -1,3 +1,8 @@
+import type {
+  ChatAgentMessageMeta,
+  MessageTokenUsage,
+  SessionTokenTotals,
+} from '@bridge/types/chat';
 import { readCoercedFiniteNumber, readString, toRecord } from '@shared/runtimeValidation';
 
 export type RawThreadStatus = { type?: string } | string | null | undefined;
@@ -66,6 +71,8 @@ export interface RawAcpSnapshot {
     role: string;
     parts: unknown[];
     truncated: boolean;
+    usage?: MessageTokenUsage | null;
+    agentMessage?: ChatAgentMessageMeta;
   }>;
   timeline?: Array<{
     sequence: number;
@@ -78,6 +85,8 @@ export interface RawAcpSnapshot {
     kind: string;
     status: string;
     title: string;
+    startedAtMs?: number | null;
+    completedAtMs?: number | null;
     content: string;
     structuredContent: unknown[];
     locations: unknown[];
@@ -90,6 +99,7 @@ export interface RawAcpSnapshot {
   continuation?: RawSnapshotContinuation;
   plan: Array<{ content: string; priority: string; status: string }>;
   usage: { used?: number | null; size?: number | null; cost?: string | null };
+  tokenTotals?: SessionTokenTotals | null;
   mode?: string | null;
   config: Array<{
     id: string;

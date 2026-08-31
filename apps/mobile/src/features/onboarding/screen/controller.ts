@@ -22,6 +22,7 @@ interface OnboardingControllerOptions {
   mode: OnboardingMode;
   initialBridgeUrl?: string | null;
   initialBridgeToken?: string | null;
+  initialWorkspaceId?: string | null;
   allowInsecureRemoteBridge: boolean;
   allowQueryTokenAuth: boolean;
   onSave: (draft: OnboardingBridgeProfileDraft) => void | Promise<void>;
@@ -53,6 +54,7 @@ export interface OnboardingController {
   handleConnectionCheck: () => Promise<void>;
   goToConnectStep: () => void;
   goBackToIntro: () => void;
+  cancelPendingProbe: () => void;
   openScanner: () => Promise<void>;
   closeScanner: () => void;
   handleBarcodeScanned: (data: string) => void;
@@ -65,6 +67,7 @@ export function useOnboardingScreenController(
     mode,
     initialBridgeUrl,
     initialBridgeToken,
+    initialWorkspaceId,
     allowInsecureRemoteBridge,
     allowQueryTokenAuth,
     onSave,
@@ -75,6 +78,7 @@ export function useOnboardingScreenController(
   );
   const [urlInput, setUrlInputState] = useState(initialBridgeUrl ?? '');
   const [tokenInput, setTokenInputState] = useState(initialBridgeToken ?? '');
+  const [workspaceId, setWorkspaceId] = useState(initialWorkspaceId ?? null);
   const [tokenHidden, setTokenHidden] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
   const [checkingConnection, setCheckingConnection] = useState(false);
@@ -104,6 +108,25 @@ export function useOnboardingScreenController(
   // probe (pressing Test/Continue again) bumps this ref too, so only the latest probe's `finally`
   // clears busy state; an older, still-resolving probe's `finally` is a no-op once superseded.
   const activeProbeIdRef = useRef(0);
+  const probeAbortRef = useRef<AbortController | null>(null);
+
+  const cancelPendingProbe = useCallback(() => {
+    inputGenerationRef.current += 1;
+    activeProbeIdRef.current += 1;
+    probeAbortRef.current?.abort();
+    probeAbortRef.current = null;
+    setCheckingConnection(false);
+  }, []);
+
+  useEffect(
+    () => () => {
+      inputGenerationRef.current += 1;
+      activeProbeIdRef.current += 1;
+      probeAbortRef.current?.abort();
+      probeAbortRef.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     setUrlInputState(initialBridgeUrl ?? '');
@@ -116,6 +139,12 @@ export function useOnboardingScreenController(
     setConnectionCheck({ kind: 'idle' });
     bumpInputGeneration();
   }, [initialBridgeToken]);
+
+  useEffect(() => {
+    setWorkspaceId(initialWorkspaceId ?? null);
+    setConnectionCheck({ kind: 'idle' });
+    bumpInputGeneration();
+  }, [initialWorkspaceId]);
 
   const showIntroStep = mode === 'initial' && onboardingStep === 'intro';
   const { introHeroAnimatedStyle, introActionsAnimatedStyle } = useOnboardingIntroAnimations(
@@ -177,6 +206,9 @@ export function useOnboardingScreenController(
     async (normalized: string, token: string | null): Promise<boolean> => {
       const generation = inputGenerationRef.current;
       const probeId = ++activeProbeIdRef.current;
+      probeAbortRef.current?.abort();
+      const probeAbort = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      probeAbortRef.current = probeAbort;
       setCheckingConnection(true);
       setConnectionCheck({ kind: 'idle' });
 
@@ -184,12 +216,14 @@ export function useOnboardingScreenController(
         const result = await probeBridgeConnection({
           normalizedUrl: normalized,
           token,
+          workspaceId,
           allowQueryTokenAuth,
+          abortController: probeAbort,
         });
         if (!result.ok) {
           throw new Error('probe failed');
         }
-        if (inputGenerationRef.current !== generation) {
+        if (inputGenerationRef.current !== generation || activeProbeIdRef.current !== probeId) {
           // The URL/token have changed since this probe started; discard the stale result
           // instead of showing a success message for credentials the user has since edited.
           return false;
@@ -206,7 +240,7 @@ export function useOnboardingScreenController(
         void feedback.success();
         return true;
       } catch {
-        if (inputGenerationRef.current !== generation) {
+        if (inputGenerationRef.current !== generation || activeProbeIdRef.current !== probeId) {
           return false;
         }
         setConnectionCheck({
@@ -220,11 +254,12 @@ export function useOnboardingScreenController(
         // (no new probe started) must not block this probe from clearing `checkingConnection`
         // when it settles. Only skip clearing it if a newer probe has since superseded this one.
         if (activeProbeIdRef.current === probeId) {
+          probeAbortRef.current = null;
           setCheckingConnection(false);
         }
       }
     },
-    [allowQueryTokenAuth],
+    [allowQueryTokenAuth, workspaceId],
   );
 
   const handleSave = useCallback(async () => {
@@ -251,7 +286,11 @@ export function useOnboardingScreenController(
     }
 
     try {
-      await onSave({ bridgeUrl: validated.bridgeUrl, bridgeToken: normalizedToken });
+      await onSave({
+        bridgeUrl: validated.bridgeUrl,
+        bridgeToken: normalizedToken,
+        workspaceId,
+      });
     } catch (error) {
       setConnectionCheck({
         kind: 'error',
@@ -259,7 +298,14 @@ export function useOnboardingScreenController(
       });
       void feedback.error();
     }
-  }, [connectionCheck, normalizeTokenInput, onSave, runConnectionCheck, validateInput]);
+  }, [
+    connectionCheck,
+    normalizeTokenInput,
+    onSave,
+    runConnectionCheck,
+    validateInput,
+    workspaceId,
+  ]);
 
   const handleConnectionCheck = useCallback(async () => {
     const validated = validateInput();
@@ -279,11 +325,12 @@ export function useOnboardingScreenController(
   }, []);
 
   const goBackToIntro = useCallback(() => {
+    cancelPendingProbe();
     void feedback.selection();
     setOnboardingStep('intro');
     setFormError(null);
     setConnectionCheck({ kind: 'idle' });
-  }, []);
+  }, [cancelPendingProbe]);
 
   const closeScanner = useCallback(() => {
     void feedback.selection();
@@ -312,11 +359,12 @@ export function useOnboardingScreenController(
   }, [cameraPermission?.granted, requestCameraPermission]);
 
   const applyPairingPayload = useCallback(
-    (pairingData: { bridgeToken: string; bridgeUrl?: string }) => {
+    (pairingData: { bridgeToken: string; bridgeUrl?: string; workspaceId?: string }) => {
       if (pairingData.bridgeUrl) {
         setUrlInputState(pairingData.bridgeUrl);
       }
       setTokenInputState(pairingData.bridgeToken);
+      setWorkspaceId(pairingData.workspaceId ?? null);
       setFormError(null);
       setConnectionCheck({ kind: 'idle' });
       setScannerError(null);
@@ -397,6 +445,7 @@ export function useOnboardingScreenController(
     handleConnectionCheck,
     goToConnectStep,
     goBackToIntro,
+    cancelPendingProbe,
     openScanner,
     closeScanner,
     handleBarcodeScanned,

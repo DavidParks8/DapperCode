@@ -11,11 +11,11 @@ publish = false
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage_nightly)"] }
 
 [dependencies]
-async-process = "2.5"
 axum = { version = "0.8", features = ["ws", "http1", "tokio", "multipart"] }
 base64 = "0.22"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 futures-util = "0.3"
+futures = "0.3"
 getrandom = "0.3"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
@@ -30,4 +30,20 @@ rustix = { version = "1.1", features = ["fs"] }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 uuid = { version = "1", features = ["v4"] }
-agent-client-protocol = { version = "1.2.0", features = ["unstable_elicitation"] }
+agent-client-protocol = { version = "1.2.0", features = ["unstable_elicitation", "unstable_end_turn_token_usage"] }
+rmcp = { version = "3.1.4", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+tokio-util = "0.7"
+tokio-stream = "0.1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Wdk_Foundation",
+    "Wdk_Storage_FileSystem",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+] }

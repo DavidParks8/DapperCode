@@ -6,6 +6,8 @@ import type { AgentDescriptor } from '@bridge/types/types';
 import { AgentIcon } from '@shared/ui/AgentIcon';
 import { useAppTheme, type AppTheme } from '@shared/theme';
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
+import { HorizontalFadeMask } from '@shared/ui/HorizontalFadeMask';
+import { useHorizontalOverflow } from '@shared/ui/useHorizontalOverflow';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import {
   CIRCULAR_TOOLBAR_BUTTON_SIZE,
@@ -120,13 +122,22 @@ function ScrollableTitle({ title }: { title: string }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const scrollRef = useRef<ScrollView>(null);
+  const overflow = useHorizontalOverflow();
+  const { reset } = overflow;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ x: 0, animated: false });
-  }, [title]);
+    reset();
+  }, [title, reset]);
 
   return (
-    <View style={styles.titleViewport}>
+    <HorizontalFadeMask
+      style={styles.titleViewport}
+      active={overflow.overflowing}
+      fadeStart={overflow.showStartFade}
+      fadeEnd={overflow.showEndFade}
+      testID="chat-header-title-overflow"
+    >
       <ScrollView
         ref={scrollRef}
         horizontal
@@ -135,10 +146,14 @@ function ScrollableTitle({ title }: { title: string }) {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.titleScrollContent}
         accessibilityLabel={title}
+        onLayout={overflow.onLayout}
+        onContentSizeChange={overflow.onContentSizeChange}
+        onScroll={overflow.onScroll}
+        scrollEventThrottle={16}
       >
         <Text style={styles.modelName}>{title}</Text>
       </ScrollView>
-    </View>
+    </HorizontalFadeMask>
   );
 }
 

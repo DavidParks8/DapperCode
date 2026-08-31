@@ -1,0 +1,5 @@
+<Project>
+  <ItemGroup>
+    <AppxPackageRegistration Include="$(MSBuildThisFileDirectory)..\tools\MSIX\win10-x64\$(WinAppSDKPackageName).msix" />
+  </ItemGroup>
+</Project>

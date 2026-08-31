@@ -1,9 +1,13 @@
 import React from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
+jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
+
 import type { HostBridgeApiClient } from '@bridge/client/client';
-import type { Chat, GitStatusResponse } from '@bridge/types/types';
+import type { ApprovalMode, Chat, GitStatusResponse } from '@bridge/types/types';
 import {
+  GIT_SCREEN_REFRESH_INTERVAL_MS,
   gitErrorMessage,
   type GitScreenController,
   useGitScreenController,
@@ -78,13 +82,18 @@ function createApi() {
   return methods as unknown as HostBridgeApiClient;
 }
 
-function makeHarness(api: HostBridgeApiClient, initialChat: Chat = chat) {
+function makeHarness(
+  api: HostBridgeApiClient,
+  initialChat: Chat = chat,
+  approvalMode?: ApprovalMode,
+) {
   let current: GitScreenController;
   const onChatUpdated = jest.fn();
   function Probe(props: { chat: Chat }) {
     current = useGitScreenController({
       api,
       chat: props.chat,
+      approvalMode,
       onBack: jest.fn(),
       onChatUpdated,
     });
@@ -119,6 +128,53 @@ describe('useGitScreenController committed cwd handling', () => {
   it('normalizes branch-loading rejection values', () => {
     expect(gitErrorMessage(new Error('offline'), 'Could not load branches.')).toBe('offline');
     expect(gitErrorMessage('offline', 'Could not load branches.')).toBe('Could not load branches.');
+  });
+
+  describe('useGitScreenController maintenance polling', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+      Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('pauses refreshes in the background and resumes one polling loop in the foreground', async () => {
+      let appStateListener: ((state: AppStateStatus) => void) | null = null;
+      const appStateSpy = jest
+        .spyOn(AppState, 'addEventListener')
+        .mockImplementation((_event, listener) => {
+          appStateListener = listener;
+          return { remove: jest.fn() };
+        });
+      const api = createApi();
+      const harness = makeHarness(api);
+
+      await harness.mount();
+      const initialRefreshCount = (api.gitStatus as jest.Mock).mock.calls.length;
+
+      act(() => {
+        appStateListener?.('background');
+        jest.advanceTimersByTime(GIT_SCREEN_REFRESH_INTERVAL_MS * 2);
+      });
+      expect(api.gitStatus).toHaveBeenCalledTimes(initialRefreshCount);
+
+      act(() => {
+        appStateListener?.('active');
+      });
+      await harness.flush();
+      expect(api.gitStatus).toHaveBeenCalledTimes(initialRefreshCount + 1);
+
+      act(() => {
+        jest.advanceTimersByTime(GIT_SCREEN_REFRESH_INTERVAL_MS);
+      });
+      await harness.flush();
+      expect(api.gitStatus).toHaveBeenCalledTimes(initialRefreshCount + 2);
+
+      harness.unmount();
+      appStateSpy.mockRestore();
+    });
   });
 
   it('reads only the committed activeChat.cwd on initial load, ignoring the seeded draft text', async () => {
@@ -198,7 +254,7 @@ describe('useGitScreenController committed cwd handling', () => {
   it('switches reads and mutations to the newly committed cwd once the workspace is saved', async () => {
     const api = createApi();
     (api.setChatWorkspace as jest.Mock).mockResolvedValue({ ...chat, cwd: '/next' });
-    const harness = makeHarness(api);
+    const harness = makeHarness(api, chat, 'none');
     await harness.mount();
 
     act(() => harness.current.setWorkspaceDraft('/next'));
@@ -212,7 +268,7 @@ describe('useGitScreenController committed cwd handling', () => {
       await Promise.resolve();
     });
 
-    expect(api.setChatWorkspace).toHaveBeenCalledWith(chat.id, '/next');
+    expect(api.setChatWorkspace).toHaveBeenCalledWith(chat.id, '/next', 'never');
     expect(harness.current.requestedCwd).toBe('/next');
     expect(api.gitStatus).toHaveBeenCalledWith('/next');
 

@@ -55,12 +55,18 @@ describe('current appState production behavior', () => {
         defaultStartCwd: ' /workspace ',
         showToolCalls: false,
         recentBrowserTargetUrls: ['3000', '3000'],
+        recentModelIdsByAgent: {
+          ' codex ': ['gpt-c', 'gpt-b', 'gpt-c', 'gpt-a', 'gpt-d'],
+        },
       },
     });
     expect(state.settings).toEqual(
       expect.objectContaining({ defaultStartCwd: '/workspace', showToolCalls: false }),
     );
     expect(state.settings.recentBrowserTargetUrls).toEqual(['http://127.0.0.1:3000/']);
+    expect(state.settings.recentModelIdsByAgent).toEqual({
+      codex: ['gpt-c', 'gpt-b', 'gpt-a'],
+    });
     state = appStateReducer(state, {
       type: 'settings/remember-thread',
       agentId: ' codex ',
@@ -224,7 +230,7 @@ describe('appStateReducer', () => {
 
     expect(toolsChanged.settings.defaultStartCwd).toBe('/workspace');
     expect(toolsChanged.settings.showToolCalls).toBe(false);
-    expect(toolsChanged.settings.approvalMode).toBe('normal');
+    expect(toolsChanged.settings.approvalMode).toBe('all');
   });
 
   it('remembers agent collaboration settings without replacing other agents', () => {
@@ -454,6 +460,22 @@ describe('app-state persistence format', () => {
     const raw = serializeAppState(createDefaultAppStateData());
     expect(JSON.parse(raw).version).toBe(APP_STATE_VERSION);
     expect(parsePersistedAppState(raw)).toEqual(createDefaultAppStateData());
+  });
+
+  it('defaults deletion confirmation on for older state and preserves an explicit opt-out', () => {
+    const persisted = JSON.parse(serializeAppState(createDefaultAppStateData())) as {
+      settings: Record<string, unknown>;
+    };
+    delete persisted.settings['confirmSessionDeletion'];
+    expect(parsePersistedAppState(JSON.stringify(persisted)).settings.confirmSessionDeletion).toBe(
+      true,
+    );
+
+    const optedOut = createDefaultAppStateData();
+    optedOut.settings.confirmSessionDeletion = false;
+    expect(
+      parsePersistedAppState(serializeAppState(optedOut)).settings.confirmSessionDeletion,
+    ).toBe(false);
   });
 
   it('rejects unknown versions without falling back and overwriting them', () => {

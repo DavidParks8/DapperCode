@@ -1,6 +1,7 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import type { ChatMessage } from '@bridge/types/types';
 import {
+  AGENT_MESSAGE_ACTIVITY_TYPE,
   COMPACTION_ACTIVITY_TYPE,
   createActivityMessage,
   SUBAGENT_ACTIVITY_TYPE,
@@ -24,11 +25,33 @@ describe('forkBoundariesByActionMessageId', () => {
     message('assistant-3', 'assistant', 'Third response'),
   ];
 
-  it('offers settled authoritative non-first requests', () => {
+  it('names every settled response, including the newest', () => {
     expect([...forkBoundariesByActionMessageId(settledConversation, 'complete')]).toEqual([
-      ['assistant-1', 'user-2'],
-      ['assistant-2', 'user-3'],
+      ['assistant-1', 'assistant-1'],
+      ['assistant-2', 'assistant-2'],
+      ['assistant-3', 'assistant-3'],
     ]);
+  });
+
+  it('names only the last settled response of a multi-response turn', () => {
+    const messages = [
+      message('user-1', 'user', 'First request'),
+      message('assistant-1a', 'assistant', 'Partial response'),
+      message('assistant-1b', 'assistant', 'Final response'),
+    ];
+    expect([...forkBoundariesByActionMessageId(messages, 'complete')]).toEqual([
+      ['assistant-1b', 'assistant-1b'],
+    ]);
+  });
+
+  it('skips pending and locally minted responses the bridge has never seen', () => {
+    const messages = [
+      message('user-1', 'user', 'First request'),
+      message('msg-optimistic', 'assistant', 'Optimistic response'),
+      message('user-2', 'user', 'Second request'),
+      { ...message('assistant-live', 'assistant', 'Streaming response'), pending: true },
+    ];
+    expect([...forkBoundariesByActionMessageId(messages, 'complete')]).toEqual([]);
   });
 
   it('suppresses every boundary while the conversation is running', () => {
@@ -46,7 +69,7 @@ function message(
   role: ChatMessage['role'],
   content: string,
   extras?: {
-    systemKind?: 'tool' | 'reasoning' | 'subAgent' | 'compaction';
+    systemKind?: 'tool' | 'reasoning' | 'subAgent' | 'compaction' | 'agentMessage';
     subAgentMeta?: Parameters<typeof createActivityMessage>[2]['subAgent'];
   } & Record<string, unknown>,
 ): ChatMessage {
@@ -70,6 +93,9 @@ function message(
   }
   if (extras?.systemKind === 'compaction') {
     return createActivityMessage(id, COMPACTION_ACTIVITY_TYPE, { text: content }, createdAt);
+  }
+  if (extras?.systemKind === 'agentMessage') {
+    return createActivityMessage(id, AGENT_MESSAGE_ACTIVITY_TYPE, { text: content }, createdAt);
   }
   return {
     id,
@@ -137,6 +163,22 @@ describe('getVisibleTranscriptMessages', () => {
     expect(getVisibleTranscriptMessages(messages, false).map((entry) => entry.id)).toEqual([
       'u1',
       'c1',
+      'a1',
+    ]);
+  });
+
+  it('keeps agent-message rows visible when tool calls are disabled or their body has a marker', () => {
+    const messages = [
+      message('u1', 'user', 'Delegate this task'),
+      message('m1', 'system', 'Sent to Worker: inspect FINAL_TASK_RESULT_JSON parsing', {
+        systemKind: 'agentMessage',
+      }),
+      message('a1', 'assistant', 'Done.'),
+    ];
+
+    expect(getVisibleTranscriptMessages(messages, false).map((entry) => entry.id)).toEqual([
+      'u1',
+      'm1',
       'a1',
     ]);
   });
@@ -210,10 +252,11 @@ describe('getVisibleTranscriptMessages', () => {
       message('result', 'assistant', 'FINAL_TASK_RESULT_JSON {}'),
       message('cwd', 'user', 'Current working directory is: /repo'),
       message('worktree', 'system', 'You are operating in task worktree /tmp'),
+      message('agent-envelope', 'user', '<<<dappercode.dev/agent-message:v1>>>{}'),
       message('blank', 'assistant', '   '),
       message('visible', 'assistant', 'Visible'),
     ];
-    expect(getVisibleTranscriptMessages(messages, true)).toEqual([messages[4]]);
+    expect(getVisibleTranscriptMessages(messages, true)).toEqual([messages[5]]);
   });
 
   it('returns the original list when no sub-agent status can change', () => {
