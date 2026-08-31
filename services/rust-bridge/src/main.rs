@@ -308,15 +308,19 @@ async fn main() {
     let preview_app = build_preview_router(state.clone());
 
     let preview_bind_addr = format!("{}:{}", config.preview_host, config.preview_port);
-    let preview_listener = match tokio::net::TcpListener::bind(&preview_bind_addr).await {
-        Ok(listener) => {
-            state.preview.set_available(true);
-            Some(listener)
+    let preview_listener = if config.preview_enabled {
+        match tokio::net::TcpListener::bind(&preview_bind_addr).await {
+            Ok(listener) => {
+                state.preview.set_available(true);
+                Some(listener)
+            }
+            Err(error) => {
+                eprintln!("browser preview disabled: failed to bind {preview_bind_addr}: {error}");
+                None
+            }
         }
-        Err(error) => {
-            eprintln!("browser preview disabled: failed to bind {preview_bind_addr}: {error}");
-            None
-        }
+    } else {
+        None
     };
 
     println!("rust-bridge listening on {bind_addr}");

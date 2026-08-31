@@ -247,6 +247,7 @@ export const DrawerChatList = memo(function DrawerChatList({
               onPress={() =>
                 selectionMode ? toggleChatSelection(item.chat.id) : handleSelectChat(item.chat.id)
               }
+              testID={`drawer-chat-row-${item.chat.id}`}
             >
               {({ pressed }) => (
                 <View

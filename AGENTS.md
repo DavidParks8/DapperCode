@@ -68,6 +68,7 @@ pnpm run desktop:build:macos
 pnpm run lint
 pnpm run typecheck
 pnpm run test
+pnpm run e2e
 pnpm run contract:check
 pnpm run coverage:rust
 pnpm run release:testflight --dry-run
@@ -87,6 +88,8 @@ Do not automatically restart a user bridge during debugging unless explicitly re
 - Shell-wide cross-component mobile state lives in `apps/mobile/src/shell/state` as jotai atoms;
   feature-owned state belongs under the owning feature in `apps/mobile/src/features`. Keep state used
   by a single component as `useState`. Never store a thenable value in an atom — jotai suspends on it.
+- `testID` values referenced by `e2e/fixtures/selectors.ts` are test contracts; renaming one means
+  updating that file. Add new handles there instead of inlining raw selector strings in specs.
 - Do not edit generated/vendor paths such as `node_modules`, `.expo`, `target`, Pods, or `dist`.
 - The active iOS project is `apps/mobile/ios`, not the old root `ios` directory.
 - Version changes must keep both Rust lockfiles and mobile metadata synchronized.
@@ -131,6 +134,14 @@ Mobile changes:
 pnpm --filter @dappercode/mobile run lint
 pnpm --filter @dappercode/mobile run typecheck
 pnpm --filter @dappercode/mobile run test
+```
+
+Mobile layout or navigation changes also need the end-to-end layout suite, which measures real
+on-screen geometry through the production Rust bridge and a deterministic ACP fixture:
+
+```bash
+pnpm run e2e
+pnpm run typecheck:e2e
 ```
 
 Use `docs/setup-and-operations.md` for smoke tests and `docs/troubleshooting.md` for recovery.

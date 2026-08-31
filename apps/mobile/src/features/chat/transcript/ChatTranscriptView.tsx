@@ -476,7 +476,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
 
   return (
     <TranscriptRenderRoot gesture={timestampReveal.gesture}>
-      <View style={styles.messageListShell}>
+      <View style={styles.messageListShell} testID="chat-transcript">
         <FlatList
           key={chat.id}
           ref={scrollRef}

@@ -47,7 +47,7 @@ export function renderChatTranscriptItem({
 }: RenderChatTranscriptItemOptions) {
   if (item.kind === 'toolGroup') {
     return (
-      <View style={styles.chatMessageBlock}>
+      <View style={styles.chatMessageBlock} testID={`transcript-item-tool-group-${item.id}`}>
         <ComputerUseTimeline
           entries={item.invocations.map((invocation) => ({
             id: invocation.id,
@@ -63,7 +63,7 @@ export function renderChatTranscriptItem({
 
   if (item.kind === 'toolInvocation') {
     return (
-      <View style={styles.chatMessageBlock}>
+      <View style={styles.chatMessageBlock} testID={`transcript-item-tool-${item.id}`}>
         <ToolInvocationRow
           invocation={item.invocation}
           bridgeUrl={bridgeUrl}
@@ -129,7 +129,10 @@ export function renderChatTranscriptItem({
     </View>
   ) : null;
   return (
-    <View style={styles.chatMessageBlock}>
+    <View
+      style={styles.chatMessageBlock}
+      testID={`transcript-item-message-${message.role}-${message.id}`}
+    >
       {chatMessage}
       {inlineChoices}
     </View>

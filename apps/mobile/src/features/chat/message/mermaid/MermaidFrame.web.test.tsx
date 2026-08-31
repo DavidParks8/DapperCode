@@ -3,7 +3,7 @@
 import { createRef } from 'react';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
-import { MermaidFrame } from './MermaidFrame.web';
+import { MermaidFrame, resolveMermaidWebRuntimeUri } from './MermaidFrame.web';
 import type { MermaidFrameHandle } from './MermaidFrame';
 
 let mockIframeProps: Record<string, unknown> | null = null;
@@ -44,6 +44,18 @@ describe('MermaidFrame web', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  it('uses the URL string emitted by the web asset bundler', () => {
+    expect(resolveMermaidWebRuntimeUri('/assets/mermaid-renderer.hash.html')).toBe(
+      '/assets/mermaid-renderer.hash.html',
+    );
+    expect(resolveMermaidWebRuntimeUri(42, () => 'file:///mermaid-renderer.html')).toBe(
+      'file:///mermaid-renderer.html',
+    );
+    expect(() => resolveMermaidWebRuntimeUri({ uri: 'unexpected' })).toThrow(
+      'The web Mermaid runtime did not resolve to an asset URL.',
+    );
   });
 
   it('sandboxes the runtime and accepts messages only from its own frame', () => {

@@ -113,4 +113,19 @@ mod tests {
             Err(())
         );
     }
+
+    #[tokio::test]
+    async fn messages_are_delivered_and_closed_receivers_reject_sends() {
+        let (outbox, mut receiver) = client_outbox(1);
+        outbox
+            .send(Message::Text("delivered".into()))
+            .await
+            .expect("message sends");
+        assert_eq!(
+            receiver.recv().await,
+            Some(Message::Text("delivered".into()))
+        );
+        drop(receiver);
+        assert_eq!(outbox.send(Message::Text("closed".into())).await, Err(()));
+    }
 }

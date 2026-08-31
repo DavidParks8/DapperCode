@@ -1305,10 +1305,10 @@ fn resolve_clone_directory_name(raw_name: &str) -> Result<String, BridgeError> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{
-        normalize_git_branch_target, parse_git_branches, parse_git_history,
-        parse_porcelain_status_entries, parse_status_branch, parse_status_has_upstream,
-        resolve_clone_directory_name, resolve_repo_relative_path, resolve_switch_target,
-        select_default_remote_name, validate_credential_environment_with,
+        included_config_was_inspected, normalize_git_branch_target, parse_git_branches,
+        parse_git_history, parse_porcelain_status_entries, parse_status_branch,
+        parse_status_has_upstream, resolve_clone_directory_name, resolve_repo_relative_path,
+        resolve_switch_target, select_default_remote_name, validate_credential_environment_with,
         validate_effective_git_config, validate_remote_name, validate_remote_url,
         validate_transport_config_output, GitSwitchTarget,
     };
@@ -1632,6 +1632,11 @@ mod tests {
         ] {
             assert!(validate_remote_url(remote).is_err(), "accepted {remote}");
         }
+        assert!(validate_remote_url("https://:secret@github.com/example/repo.git").is_err());
+        assert_eq!(
+            validate_remote_url(" https://github.com/example/repo.git ").unwrap(),
+            "https://github.com/example/repo.git"
+        );
     }
 
     #[test]
@@ -1738,6 +1743,39 @@ mod tests {
                 "rejected pinned {pinned:?}"
             );
         }
+    }
+
+    #[test]
+    fn included_configuration_requires_a_file_origin_and_an_observed_target() {
+        let directory = TestDir::new("included-config-validation");
+        let source = directory.0.join("config");
+        let included = directory.0.join("included");
+        fs::write(&source, b"").unwrap();
+        fs::write(&included, b"").unwrap();
+        let source_origin = format!("file:{}", source.display());
+        let included_origin = format!("file:{}", included.display());
+        let records = ["local", included_origin.as_str(), "user.name\nDapperCode"];
+
+        assert!(!included_config_was_inspected(
+            "command line:",
+            included.to_str().unwrap(),
+            &records
+        ));
+        assert!(!included_config_was_inspected(
+            &source_origin,
+            "missing",
+            &records
+        ));
+        assert!(included_config_was_inspected(
+            &source_origin,
+            included.to_str().unwrap(),
+            &records
+        ));
+        assert!(included_config_was_inspected(
+            &source_origin,
+            "included",
+            &records
+        ));
     }
 
     #[test]

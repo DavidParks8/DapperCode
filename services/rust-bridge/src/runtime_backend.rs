@@ -1130,6 +1130,18 @@ async fn process_event_side_effects(
     }
 }
 
+#[cfg(test)]
+pub(crate) async fn process_event_side_effects_for_test(
+    manager: &Arc<AgentManager>,
+    hub: &Arc<ClientHub>,
+    events: &[crate::acp::events::CanonicalEvent],
+) {
+    let discoveries = Arc::new(StdMutex::new(SubagentDiscoveryState::default()));
+    for event in events {
+        process_event_side_effects(manager, hub, &discoveries, event).await;
+    }
+}
+
 fn event_has_side_effects(event: &crate::acp::events::CanonicalEvent) -> bool {
     matches!(
         event,

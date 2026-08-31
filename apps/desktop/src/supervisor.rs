@@ -901,6 +901,14 @@ mod tests {
     }
 
     #[test]
+    fn sha256_digest_validation_rejects_each_malformed_component() {
+        assert!(!valid_sha256_digest(""));
+        assert!(!valid_sha256_digest(&format!("sha512:{}", "a".repeat(64))));
+        assert!(!valid_sha256_digest(&format!("sha256:{}", "g".repeat(64))));
+        assert!(valid_sha256_digest(&format!("sha256:{}", "A0".repeat(32))));
+    }
+
+    #[test]
     fn transition_lease_serializes_profile_mutations() {
         let temp = tempdir().unwrap();
         let lock_path = temp.path().join("transition.lock");

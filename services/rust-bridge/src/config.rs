@@ -16,6 +16,7 @@ pub(crate) struct BridgeConfig {
     pub(crate) port: u16,
     pub(crate) preview_host: String,
     pub(crate) preview_port: u16,
+    pub(crate) preview_enabled: bool,
     pub(crate) connect_url: Option<String>,
     pub(crate) preview_connect_url: Option<String>,
     pub(crate) workdir: PathBuf,
@@ -57,7 +58,8 @@ impl BridgeConfig {
             .ok()
             .and_then(|v| v.parse::<u16>().ok())
             .unwrap_or_else(|| port.checked_add(1).unwrap_or(8788));
-        if preview_port == port {
+        let preview_enabled = !parse_bool_env("BRIDGE_DISABLE_BROWSER_PREVIEW");
+        if preview_enabled && preview_port == port {
             return Err("BRIDGE_PREVIEW_PORT must differ from BRIDGE_PORT".to_string());
         }
         let connect_url = parse_connect_url_env("BRIDGE_CONNECT_URL")?;
@@ -111,6 +113,7 @@ impl BridgeConfig {
             port,
             preview_host,
             preview_port,
+            preview_enabled,
             connect_url,
             preview_connect_url,
             workdir,
@@ -511,22 +514,27 @@ mod tests {
         }
     }
 
-    /// Serializes the process-wide environment mutations these tests need.
+    /// Restores process-wide environment values even when a test unwinds.
     struct DirEnvGuard {
-        name: &'static str,
+        name: String,
         previous: Option<std::ffi::OsString>,
     }
 
     impl DirEnvGuard {
-        fn set(name: &'static str, value: &std::path::Path) -> Self {
-            let previous = env::var_os(name);
-            env::set_var(name, value);
-            Self { name, previous }
+        fn set(name: impl Into<String>, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let guard = Self::unset(name);
+            unsafe { env::set_var(&guard.name, value) };
+            guard
         }
 
-        fn set_raw(name: &'static str, value: &str) -> Self {
-            let previous = env::var_os(name);
-            env::set_var(name, value);
+        fn set_raw(name: impl Into<String>, value: &str) -> Self {
+            Self::set(name, value)
+        }
+
+        fn unset(name: impl Into<String>) -> Self {
+            let name = name.into();
+            let previous = env::var_os(&name);
+            unsafe { env::remove_var(&name) };
             Self { name, previous }
         }
     }
@@ -534,8 +542,8 @@ mod tests {
     impl Drop for DirEnvGuard {
         fn drop(&mut self) {
             match self.previous.take() {
-                Some(value) => env::set_var(self.name, value),
-                None => env::remove_var(self.name),
+                Some(value) => unsafe { env::set_var(&self.name, value) },
+                None => unsafe { env::remove_var(&self.name) },
             }
         }
     }
@@ -621,7 +629,7 @@ mod tests {
         let temp = TestDir::new();
         let blocking_file = temp.path().join("blocked");
         std::fs::write(&blocking_file, b"file").expect("write blocking file");
-        let _guard = DirEnvGuard::set("BRIDGE_STATE_DIR", &blocking_file.join("child"));
+        let _guard = DirEnvGuard::set("BRIDGE_STATE_DIR", blocking_file.join("child"));
 
         let error = parse_absolute_dir_env("BRIDGE_STATE_DIR", temp.path().to_path_buf())
             .expect_err("a file cannot host a directory");
@@ -634,6 +642,7 @@ mod tests {
             port: 8787,
             preview_host: "127.0.0.1".to_string(),
             preview_port: 8788,
+            preview_enabled: true,
             connect_url: None,
             preview_connect_url: None,
             workdir: PathBuf::from("/tmp/workdir"),
@@ -795,6 +804,69 @@ mod tests {
             normalize_connect_url(" https://example.com/base///?query=1#fragment "),
             Some("https://example.com/base".into())
         );
+        assert_eq!(normalize_connect_url("https://:secret@example.com"), None);
+    }
+
+    #[test]
+    fn unresolved_directories_and_path_lists_validate_every_input_shape() {
+        let suffix = uuid::Uuid::new_v4();
+        let directory_name = format!("DAPPERCODE_TEST_UNRESOLVED_DIR_{suffix}");
+        let path_list_name = format!("DAPPERCODE_TEST_PATH_LIST_{suffix}");
+        let fallback = env::temp_dir().join(format!("dappercode-unresolved-{suffix}"));
+        let _directory_env = DirEnvGuard::unset(directory_name.clone());
+        let _path_list_env = DirEnvGuard::unset(path_list_name.clone());
+
+        assert_eq!(
+            parse_unresolved_absolute_dir_env(&directory_name, fallback.clone()).unwrap(),
+            fallback
+        );
+        unsafe { env::set_var(&directory_name, "   ") };
+        assert_eq!(
+            parse_unresolved_absolute_dir_env(&directory_name, fallback.clone()).unwrap(),
+            fallback
+        );
+        unsafe { env::set_var(&directory_name, "relative/path") };
+        assert!(parse_unresolved_absolute_dir_env(&directory_name, fallback.clone()).is_err());
+
+        let defaults = [fallback.clone()];
+        assert_eq!(
+            parse_path_list_env(&path_list_name, &defaults).unwrap(),
+            defaults
+        );
+        unsafe { env::set_var(&path_list_name, "") };
+        assert!(parse_path_list_env(&path_list_name, &defaults).is_err());
+        unsafe {
+            env::set_var(
+                &path_list_name,
+                env::join_paths([fallback.as_path(), std::path::Path::new("relative")]).unwrap(),
+            )
+        };
+        assert!(parse_path_list_env(&path_list_name, &defaults).is_err());
+        unsafe {
+            env::set_var(
+                &path_list_name,
+                env::join_paths([fallback.as_path(), env::temp_dir().as_path()]).unwrap(),
+            )
+        };
+        assert_eq!(
+            parse_path_list_env(&path_list_name, &defaults)
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn positive_u64_parser_covers_missing_valid_zero_and_invalid_values() {
+        let name = format!("DAPPERCODE_TEST_U64_{}", uuid::Uuid::new_v4());
+        let _env = DirEnvGuard::unset(name.clone());
+        assert_eq!(parse_positive_u64_env(&name, 11).unwrap(), 11);
+        unsafe { env::set_var(&name, " 17 ") };
+        assert_eq!(parse_positive_u64_env(&name, 11).unwrap(), 17);
+        unsafe { env::set_var(&name, "0") };
+        assert!(parse_positive_u64_env(&name, 11).is_err());
+        unsafe { env::set_var(&name, "invalid") };
+        assert!(parse_positive_u64_env(&name, 11).is_err());
     }
 
     #[test]
@@ -833,6 +905,16 @@ mod tests {
         let usize_name = format!("DAPPERCODE_TEST_USIZE_{suffix}");
         let url_name = format!("DAPPERCODE_TEST_URL_{suffix}");
         let origin_name = format!("DAPPERCODE_TEST_ORIGIN_{suffix}");
+        let _env = [
+            &bool_name,
+            &default_bool_name,
+            &usize_name,
+            &url_name,
+            &origin_name,
+        ]
+        .into_iter()
+        .map(|name| DirEnvGuard::unset(name.clone()))
+        .collect::<Vec<_>>();
 
         assert!(!parse_bool_env(&bool_name));
         unsafe { env::set_var(&bool_name, " TRUE ") };
@@ -872,16 +954,6 @@ mod tests {
         assert_eq!(parse_origin_csv_env(&origin_name).unwrap().len(), 2);
         unsafe { env::set_var(&origin_name, "https://example.com/path") };
         assert!(parse_origin_csv_env(&origin_name).is_err());
-
-        for name in [
-            bool_name,
-            default_bool_name,
-            usize_name,
-            url_name,
-            origin_name,
-        ] {
-            unsafe { env::remove_var(name) };
-        }
     }
 
     #[test]
@@ -891,6 +963,7 @@ mod tests {
             "BRIDGE_PORT",
             "BRIDGE_PREVIEW_HOST",
             "BRIDGE_PREVIEW_PORT",
+            "BRIDGE_DISABLE_BROWSER_PREVIEW",
             "BRIDGE_CONNECT_URL",
             "BRIDGE_PREVIEW_CONNECT_URL",
             "BRIDGE_WORKDIR",
@@ -909,27 +982,11 @@ mod tests {
             "BRIDGE_WS_GLOBAL_IN_FLIGHT",
         ];
 
-        struct RestoreEnv(Vec<(&'static str, Option<std::ffi::OsString>)>);
-        impl Drop for RestoreEnv {
-            fn drop(&mut self) {
-                for (name, value) in self.0.drain(..) {
-                    if let Some(value) = value {
-                        unsafe { env::set_var(name, value) };
-                    } else {
-                        unsafe { env::remove_var(name) };
-                    }
-                }
-            }
-        }
-
-        let _restore = RestoreEnv(
-            NAMES
-                .iter()
-                .map(|name| (*name, env::var_os(name)))
-                .collect(),
-        );
-        let root = std::env::temp_dir().join(format!("dappercode-config-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&root).unwrap();
+        let _environment = NAMES
+            .iter()
+            .map(|name| DirEnvGuard::unset(*name))
+            .collect::<Vec<_>>();
+        let root = TestDir::new();
         let values = [
             ("BRIDGE_HOST", "127.0.0.1"),
             ("BRIDGE_PORT", "9000"),
@@ -937,7 +994,7 @@ mod tests {
             ("BRIDGE_PREVIEW_PORT", "9001"),
             ("BRIDGE_CONNECT_URL", "https://bridge.example/base/"),
             ("BRIDGE_PREVIEW_CONNECT_URL", "https://preview.example/"),
-            ("BRIDGE_WORKDIR", root.to_str().unwrap()),
+            ("BRIDGE_WORKDIR", root.path().to_str().unwrap()),
             ("ACP_AGENT_MANIFEST", "/tmp/agents.json"),
             ("ACP_AGENT_ROOTS", "/bin:/usr/bin"),
             ("ACP_INITIALIZE_TIMEOUT_MS", "2500"),
@@ -974,6 +1031,16 @@ mod tests {
         unsafe { env::set_var("BRIDGE_PREVIEW_PORT", "9000") };
         assert!(BridgeConfig::from_env().is_err());
         unsafe {
+            env::set_var("BRIDGE_DISABLE_BROWSER_PREVIEW", "true");
+            env::set_var("BRIDGE_PORT", "0");
+            env::set_var("BRIDGE_PREVIEW_PORT", "0");
+        }
+        let ephemeral = BridgeConfig::from_env().unwrap();
+        assert_eq!((ephemeral.port, ephemeral.preview_port), (0, 0));
+        assert!(!ephemeral.preview_enabled);
+        unsafe {
+            env::set_var("BRIDGE_DISABLE_BROWSER_PREVIEW", "false");
+            env::set_var("BRIDGE_PORT", "9000");
             env::set_var("BRIDGE_PREVIEW_PORT", "9001");
         }
         assert!(BridgeConfig::from_env().is_ok());
@@ -1002,6 +1069,5 @@ mod tests {
             normalize_browser_origin("https://example.com/#fragment"),
             None
         );
-        std::fs::remove_dir_all(root).unwrap();
     }
 }

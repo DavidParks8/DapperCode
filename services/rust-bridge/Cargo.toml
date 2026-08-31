@@ -7,6 +7,14 @@ license = "MIT"
 repository = "https://github.com/DavidParks8/DapperCode"
 publish = false
 
+[features]
+e2e-agent = []
+
+[[bin]]
+name = "dappercode-e2e-agent"
+path = "src/e2e_agent.rs"
+required-features = ["e2e-agent"]
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage_nightly)"] }
 

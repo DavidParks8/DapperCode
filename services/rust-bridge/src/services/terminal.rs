@@ -214,7 +214,10 @@ fn finalize_output(bytes: Vec<u8>, truncated: bool) -> String {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::{finalize_output, hardened_git_args, pinned_git_config_keys, TerminalService};
+    use super::{
+        finalize_output, hardened_git_args, pinned_git_config_keys, read_stream_limited,
+        TerminalService,
+    };
     use crate::path_policy::PathPolicy;
     use std::sync::Arc;
 
@@ -233,6 +236,24 @@ mod tests {
         assert_eq!(
             finalize_output(b"partial\n".to_vec(), true),
             "partial\n[output truncated]"
+        );
+        assert_eq!(finalize_output(Vec::new(), true), "[output truncated]");
+        assert_eq!(
+            finalize_output(b" complete \n".to_vec(), false),
+            " complete"
+        );
+    }
+
+    #[tokio::test]
+    async fn bounded_stream_reads_report_exact_truncation_state() {
+        assert_eq!(read_stream_limited(&b""[..], 3).await, (vec![], false));
+        assert_eq!(
+            read_stream_limited(&b"abc"[..], 3).await,
+            (b"abc".to_vec(), false)
+        );
+        assert_eq!(
+            read_stream_limited(&b"abcdef"[..], 3).await,
+            (b"abc".to_vec(), true)
         );
     }
 

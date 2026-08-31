@@ -11,7 +11,20 @@ import { Image, StyleSheet, View } from 'react-native';
 import MERMAID_RUNTIME_ASSET from '../../../../../assets/generated/mermaid-renderer.html';
 import type { MermaidFrameHandle, MermaidFrameProps } from './MermaidFrame';
 
-const runtimeUri = Image.resolveAssetSource(MERMAID_RUNTIME_ASSET).uri;
+export function resolveMermaidWebRuntimeUri(
+  asset: unknown,
+  resolveNativeAsset = (source: number) => Image.resolveAssetSource(source).uri,
+): string {
+  if (typeof asset === 'string' && asset.length > 0) {
+    return asset;
+  }
+  if (typeof asset === 'number') {
+    return resolveNativeAsset(asset);
+  }
+  throw new Error('The web Mermaid runtime did not resolve to an asset URL.');
+}
+
+const runtimeUri = resolveMermaidWebRuntimeUri(MERMAID_RUNTIME_ASSET);
 
 export const MermaidFrame = forwardRef<MermaidFrameHandle, MermaidFrameProps>(function MermaidFrame(
   { testID, style, onMessage, onError },

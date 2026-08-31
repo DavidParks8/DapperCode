@@ -10873,4 +10873,841 @@ mod tests {
         server.abort();
         let _ = server.await;
     }
+
+    #[tokio::test]
+    async fn subagent_generation_tracking_covers_relinks_retirement_and_capacity() {
+        let (observed, _) = mpsc::unbounded_channel();
+        let ready = connection("alpha", false, "unused", observed).await;
+        let manager = AgentManager::from_start_results(
+            "alpha".to_string(),
+            vec![(manifest("alpha", "Alpha"), Ok(ready))],
+        )
+        .await
+        .unwrap();
+
+        assert!(!manager.tracks_subagent_generation("child").await);
+        assert!(manager
+            .accepted_subagent_terminal("missing", 1)
+            .await
+            .is_none());
+        manager.note_subagent_started("missing", 1).await;
+        manager
+            .note_subagent_link("parent", "child", "tool-1")
+            .await;
+        assert!(manager.tracks_subagent_generation("child").await);
+        manager
+            .note_subagent_link("parent", "child", "tool-1")
+            .await;
+        manager.retire_subagent_link("child", "wrong-tool").await;
+        assert!(manager
+            .accepted_subagent_terminal("child", 1)
+            .await
+            .is_some());
+        manager.note_subagent_started("child", 1).await;
+        manager
+            .note_subagent_link("parent-2", "child", "tool-2")
+            .await;
+        assert!(manager
+            .accepted_subagent_terminal("child", 1)
+            .await
+            .is_none());
+        manager.note_subagent_started("child", 2).await;
+        assert_eq!(
+            manager
+                .accepted_subagent_terminal("child", 2)
+                .await
+                .unwrap()
+                .parent_thread_id,
+            "parent-2"
+        );
+        manager.retire_subagent_link("child", "tool-2").await;
+        assert!(manager
+            .accepted_subagent_terminal("child", 2)
+            .await
+            .is_none());
+
+        {
+            let mut generations = manager.subagent_generations.lock().await;
+            generations.clear();
+            for index in 0..MAX_TRACKED_SUBAGENT_GENERATIONS {
+                generations.insert(
+                    format!("full-{index}"),
+                    SubagentGenerationState {
+                        parent_thread_id: "parent".to_string(),
+                        tool_call_id: "tool".to_string(),
+                        observed_generation: None,
+                        minimum_generation: None,
+                        armed: true,
+                    },
+                );
+            }
+        }
+        manager
+            .note_subagent_link("parent", "overflow", "tool")
+            .await;
+        let generations = manager.subagent_generations.lock().await;
+        assert_eq!(generations.len(), MAX_TRACKED_SUBAGENT_GENERATIONS);
+        assert!(generations.contains_key("overflow"));
+        drop(generations);
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn opencode_child_discovery_filters_invalid_and_unrelated_sessions() {
+        async fn children(AxumPath(session_id): AxumPath<String>) -> impl IntoResponse {
+            match session_id.as_str() {
+                "parent" => Json(serde_json::json!([
+                    {"id": " child-valid ", "title": " Child task ", "parentID": "parent"},
+                    {"id": "child-no-title", "title": " ", "parentID": "parent"},
+                    {"id": "", "title": "Empty id", "parentID": "parent"},
+                    {"id": "x".repeat(1_025), "title": "Long id", "parentID": "parent"},
+                    {"id": "unrelated", "title": "Other", "parentID": "someone-else"}
+                ]))
+                .into_response(),
+                "failure" => AxumStatusCode::INTERNAL_SERVER_ERROR.into_response(),
+                _ => (AxumStatusCode::OK, "not-json").into_response(),
+            }
+        }
+
+        let app = Router::new().route("/session/{session_id}/children", get(children));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let http_base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let (observed, _) = mpsc::unbounded_channel();
+        let ready = connection("opencode", false, "unused", observed).await;
+        let mut opencode = manifest("opencode", "OpenCode");
+        opencode.resolved.executable = PathBuf::from("/usr/local/bin/opencode");
+        opencode.resolved.argv = vec!["acp".to_string()];
+        let mut manager =
+            AgentManager::from_start_results("opencode".to_string(), vec![(opencode, Ok(ready))])
+                .await
+                .unwrap();
+
+        assert!(!manager.can_discover_subagents("invalid"));
+        let parent = AgentSessionId::new("opencode", "parent").unwrap();
+        assert!(!manager.can_discover_subagents(&parent.encode()));
+        assert!(manager.harness_child_sessions("invalid").await.is_empty());
+        assert!(manager
+            .harness_child_sessions(&AgentSessionId::new("missing", "parent").unwrap().encode())
+            .await
+            .is_empty());
+        assert!(manager
+            .harness_child_sessions(&parent.encode())
+            .await
+            .is_empty());
+
+        manager.agents.get_mut("opencode").unwrap().http_base = Some(http_base);
+        assert!(manager.can_discover_subagents(&parent.encode()));
+        assert!(manager
+            .harness_child_sessions(&parent.encode())
+            .await
+            .is_empty());
+        let cwd = std::env::current_dir().unwrap();
+        let identities = ["parent", "failure", "malformed"]
+            .map(|id| AgentSessionId::new("opencode", id).unwrap());
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all(
+                identities
+                    .iter()
+                    .cloned()
+                    .map(|identity| index_entry(identity, cwd.clone())),
+            )
+            .await
+            .unwrap();
+
+        let children = manager.harness_child_sessions(&parent.encode()).await;
+        assert_eq!(
+            children,
+            vec![
+                HarnessChildSession {
+                    acp_session_id: "child-valid".to_string(),
+                    title: Some("Child task".to_string()),
+                },
+                HarnessChildSession {
+                    acp_session_id: "child-no-title".to_string(),
+                    title: None,
+                },
+            ]
+        );
+        assert!(manager
+            .harness_child_sessions(&identities[1].encode())
+            .await
+            .is_empty());
+        assert!(manager
+            .harness_child_sessions(&identities[2].encode())
+            .await
+            .is_empty());
+
+        manager.shutdown().await;
+        server.abort();
+        let _ = server.await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn opencode_catalog_handles_process_failures_and_sanitizes_rows() {
+        use std::os::unix::fs::PermissionsExt;
+
+        struct ExecutableFixtureDir(PathBuf);
+
+        impl ExecutableFixtureDir {
+            fn new() -> Self {
+                let path = std::env::temp_dir().join(format!(
+                    "dappercode-opencode-catalog-{}",
+                    uuid::Uuid::new_v4()
+                ));
+                std::fs::create_dir(&path).expect("create executable fixture directory");
+                Self(path)
+            }
+
+            fn executable(&self) -> PathBuf {
+                self.0.join("opencode")
+            }
+        }
+
+        impl Drop for ExecutableFixtureDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        let (observed, _) = mpsc::unbounded_channel();
+        let ready = connection("opencode", false, "unused", observed).await;
+        let mut opencode = manifest("opencode", "OpenCode");
+        opencode.resolved.executable = PathBuf::from("/usr/local/bin/opencode");
+        opencode.resolved.argv = vec!["acp".to_string()];
+        let mut manager =
+            AgentManager::from_start_results("opencode".to_string(), vec![(opencode, Ok(ready))])
+                .await
+                .unwrap();
+
+        manager
+            .agents
+            .get_mut("opencode")
+            .unwrap()
+            .manifest
+            .resolved
+            .executable = PathBuf::from("/definitely/missing/opencode");
+        let runtime = manager.agents.get("opencode").unwrap();
+        assert!(manager.opencode_session_summaries(runtime).await.is_empty());
+
+        manager
+            .agents
+            .get_mut("opencode")
+            .unwrap()
+            .manifest
+            .resolved
+            .executable = PathBuf::from("/usr/bin/false");
+        let runtime = manager.agents.get("opencode").unwrap();
+        assert!(manager.opencode_session_summaries(runtime).await.is_empty());
+
+        let fixture_dir = ExecutableFixtureDir::new();
+        let fixture = fixture_dir.executable();
+        let payload = serde_json::json!([
+            {"id": " VALID ", "title": " Useful title ", "updated": 1_750_000_000_000_u64},
+            {"id": "created", "title": null, "created": 1_700_000_000_000_u64},
+            {"id": "blank-title", "title": "   "},
+            {"id": "", "title": "Empty id"},
+            {"id": "x".repeat(1_025), "title": "Long id"}
+        ])
+        .to_string();
+        std::fs::write(&fixture, format!("#!/bin/sh\nprintf '%s' '{payload}'\n")).unwrap();
+        let mut permissions = std::fs::metadata(&fixture).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&fixture, permissions).unwrap();
+        manager
+            .agents
+            .get_mut("opencode")
+            .unwrap()
+            .manifest
+            .resolved
+            .executable = fixture.clone();
+        let runtime = manager.agents.get("opencode").unwrap();
+        let summaries = manager.opencode_session_summaries(runtime).await;
+        assert_eq!(summaries.len(), 3);
+        assert_eq!(summaries["valid"].title.as_deref(), Some("Useful title"));
+        assert!(summaries["valid"].updated_at.is_some());
+        assert!(summaries["created"].updated_at.is_some());
+        assert_eq!(summaries["blank-title"].title, None);
+
+        manager.agents.get_mut("opencode").unwrap().harness = None;
+        let runtime = manager.agents.get("opencode").unwrap();
+        assert!(manager.opencode_session_summaries(runtime).await.is_empty());
+
+        assert!(manager
+            .harness_model_catalog(Some("missing"))
+            .await
+            .is_empty());
+        manager
+            .agents
+            .get_mut("opencode")
+            .unwrap()
+            .manifest
+            .resolved
+            .executable = PathBuf::from("/usr/local/bin/opencode");
+        let harness = harness_for_manifest(&manager.agents["opencode"].manifest.resolved);
+        manager.agents.get_mut("opencode").unwrap().harness = harness;
+        manager
+            .agents
+            .get_mut("opencode")
+            .unwrap()
+            .manifest
+            .resolved
+            .executable = PathBuf::from("/definitely/missing/opencode");
+        assert!(manager
+            .harness_model_catalog(Some("opencode"))
+            .await
+            .is_empty());
+        manager
+            .agents
+            .get_mut("opencode")
+            .unwrap()
+            .manifest
+            .resolved
+            .executable = PathBuf::from("/usr/bin/false");
+        assert!(manager.harness_model_catalog(None).await.is_empty());
+        std::fs::write(
+            &fixture,
+            "#!/bin/sh\nprintf '%s' 'opencode/demo\n{\"id\":\"demo\",\"providerID\":\"opencode\",\"name\":\"Demo\",\"limit\":{\"context\":1000},\"capabilities\":{\"reasoning\":false}}'\n",
+        )
+        .unwrap();
+        manager
+            .agents
+            .get_mut("opencode")
+            .unwrap()
+            .manifest
+            .resolved
+            .executable = fixture.clone();
+        let models = manager.harness_model_catalog(None).await;
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "opencode/demo");
+
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn authoritative_session_listing_rejects_non_progressing_pagination() {
+        async fn listing_connection(mode: u8) -> AcpConnection {
+            let agent = Agent
+                .builder()
+                .on_receive_request(
+                    async move |request: InitializeRequest, responder, _| {
+                        responder.respond(
+                            InitializeResponse::new(request.protocol_version).agent_capabilities(
+                                AgentCapabilities::new().session_capabilities(
+                                    SessionCapabilities::new().list(SessionListCapabilities::new()),
+                                ),
+                            ),
+                        )
+                    },
+                    agent_client_protocol::on_receive_request!(),
+                )
+                .on_receive_request(
+                    async move |request: ListSessionsRequest, responder, _| {
+                        let page = request.cursor.as_deref().unwrap_or("first");
+                        let response = match mode {
+                            0 => ListSessionsResponse::new(Vec::new())
+                                .next_cursor("empty-next".to_string()),
+                            1 if page == "first" => {
+                                ListSessionsResponse::new(vec![SessionInfo::new("same", "/tmp")])
+                                    .next_cursor("next".to_string())
+                            }
+                            1 => ListSessionsResponse::new(vec![SessionInfo::new("same", "/tmp")])
+                                .next_cursor("another".to_string()),
+                            2 if page == "first" => {
+                                ListSessionsResponse::new(vec![SessionInfo::new("one", "/tmp")])
+                                    .next_cursor("repeat".to_string())
+                            }
+                            2 => ListSessionsResponse::new(vec![SessionInfo::new("two", "/tmp")])
+                                .next_cursor("repeat".to_string()),
+                            _ => ListSessionsResponse::new(Vec::new()),
+                        };
+                        responder.respond(response)
+                    },
+                    agent_client_protocol::on_receive_request!(),
+                );
+            AcpConnection::start_transport("listing".to_string(), agent, Duration::from_secs(1))
+                .await
+                .unwrap()
+                .0
+        }
+
+        for mode in 0..3 {
+            let connection = listing_connection(mode).await;
+            assert!(AgentManager::authoritative_session_ids(&connection)
+                .await
+                .is_err());
+            let _ = connection.shutdown().await;
+        }
+    }
+
+    #[test]
+    fn agent_message_journal_sanitization_validates_every_durable_field() {
+        let thread = AgentSessionId::new("alpha", "thread").unwrap().encode();
+        let related = AgentSessionId::new("alpha", "related").unwrap().encode();
+        let valid_origin = || sent_agent_message("message", &related);
+        let valid_entry = || AgentMessageJournalEntry {
+            thread_id: thread.clone(),
+            observed_at_ms: 1,
+            after_timeline_id: Some("anchor".to_string()),
+            message: valid_origin(),
+        };
+        let mut entries = vec![valid_entry()];
+        let mut invalid = valid_entry();
+        invalid.thread_id = "invalid".to_string();
+        entries.push(invalid);
+        let mut invalid = valid_entry();
+        invalid.message.related_thread_id = "invalid".to_string();
+        entries.push(invalid);
+        let mut invalid = valid_entry();
+        invalid.message.message_id.clear();
+        entries.push(invalid);
+        let mut invalid = valid_entry();
+        invalid.message.message_id = "x".repeat(MAX_AGENT_MESSAGE_ID_BYTES + 1);
+        entries.push(invalid);
+        let mut invalid = valid_entry();
+        invalid.after_timeline_id = Some(String::new());
+        entries.push(invalid);
+        let mut invalid = valid_entry();
+        invalid.after_timeline_id = Some("x".repeat(MAX_AGENT_MESSAGE_ANCHOR_BYTES + 1));
+        entries.push(invalid);
+        let mut invalid = valid_entry();
+        invalid.message.body.clear();
+        entries.push(invalid);
+        let mut invalid = valid_entry();
+        invalid.message.body = "x".repeat(MAX_AGENT_MESSAGE_BODY_BYTES + 1);
+        entries.push(invalid);
+        let mut invalid = valid_entry();
+        invalid.message.related_title = Some("\n".to_string());
+        entries.push(invalid);
+        let duplicate = valid_entry();
+        entries.push(duplicate);
+
+        let sanitized = sanitize_agent_message_journal(entries);
+        assert_eq!(sanitized.len(), 1);
+        assert_eq!(sanitized[0].message.message_id, "message");
+    }
+
+    #[tokio::test]
+    async fn runtime_request_validation_and_thread_start_cover_supported_parameter_shapes() {
+        let (observed, _) = mpsc::unbounded_channel();
+        let ready = connection("alpha", false, "unused", observed).await;
+        let manager = Arc::new(
+            AgentManager::from_start_results(
+                "alpha".to_string(),
+                vec![(manifest("alpha", "Alpha"), Ok(ready))],
+            )
+            .await
+            .unwrap(),
+        );
+        let backend = crate::runtime_backend::RuntimeBackend::from_manager_for_test(
+            manager.clone(),
+            Arc::new(crate::client_hub::ClientHub::new()),
+            Arc::new(crate::retirement_journal::ThreadRetirementJournal::inert_for_test()),
+        )
+        .await;
+
+        for params in [
+            serde_json::json!({
+                "agentId": "alpha",
+                "cwd": "/tmp",
+                "model": "",
+                "effort": " ",
+                "mode": "default"
+            }),
+            serde_json::json!({
+                "agentId": "alpha",
+                "cwd": "/tmp",
+                "model": "unadvertised",
+                "effort": "high",
+                "mode": "plan"
+            }),
+        ] {
+            let value = backend
+                .request_internal("thread/start", Some(params))
+                .await
+                .expect("start accepts absent optional catalogs");
+            assert!(value["thread"]["id"].as_str().is_some());
+        }
+
+        for value in [
+            serde_json::json!(null),
+            serde_json::json!(" "),
+            serde_json::json!(17),
+        ] {
+            let error = backend
+                .request_internal(
+                    "thread/config/set",
+                    Some(serde_json::json!({
+                        "threadId": AgentSessionId::new("alpha", "alpha-new").unwrap().encode(),
+                        "configId": "model",
+                        "value": value
+                    })),
+                )
+                .await
+                .unwrap_err();
+            assert!(error.contains("non-empty string or boolean"));
+        }
+        let error = backend
+            .request_internal(
+                "thread/config/set",
+                Some(serde_json::json!({
+                    "threadId": AgentSessionId::new("alpha", "alpha-new").unwrap().encode(),
+                    "configId": "model",
+                    "value": true
+                })),
+            )
+            .await
+            .unwrap_err();
+        assert!(!error.is_empty());
+        assert!(backend
+            .request_internal("unsupported/method", None)
+            .await
+            .unwrap_err()
+            .contains("method not supported"));
+        assert!(backend
+            .request_internal("thread/loaded/list", None)
+            .await
+            .unwrap()["data"]
+            .as_array()
+            .is_some());
+
+        backend.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn runtime_side_effects_adopt_and_settle_a_reported_subagent() {
+        let (observed, _) = mpsc::unbounded_channel();
+        let ready = connection_with_capabilities(
+            "alpha",
+            AgentCapabilities::new().load_session(true),
+            observed,
+        )
+        .await;
+        let manager = Arc::new(
+            AgentManager::from_start_results(
+                "alpha".to_string(),
+                vec![(manifest("alpha", "Alpha"), Ok(ready))],
+            )
+            .await
+            .unwrap(),
+        );
+        let parent = AgentSessionId::new("alpha", "parent").unwrap();
+        let parent_thread_id = parent.encode();
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([index_entry(parent, PathBuf::from("/tmp"))])
+            .await
+            .unwrap();
+        manager
+            .read_session(&parent_thread_id)
+            .await
+            .expect("load parent");
+        let hub = Arc::new(crate::client_hub::ClientHub::new());
+        let tool = CanonicalEvent::Tool {
+            agent_id: "alpha".to_string(),
+            thread_id: parent_thread_id.clone(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "task-1".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "task".to_string(),
+            content: FieldUpdate::Set(
+                "<task id=\"child\" state=\"running\">\nWorking\n</task>".to_string(),
+            ),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        };
+        manager
+            .connection("alpha")
+            .unwrap()
+            .session(&SessionId::new("parent"))
+            .await
+            .unwrap()
+            .emit(tool.clone())
+            .await;
+
+        crate::runtime_backend::process_event_side_effects_for_test(
+            &manager,
+            &hub,
+            &[
+                CanonicalEvent::MessageChunk {
+                    agent_id: "alpha".to_string(),
+                    thread_id: parent_thread_id.clone(),
+                    run_id: Some("run-1".to_string()),
+                    source_turn_id: Some("turn-1".to_string()),
+                    generation: Some(1),
+                    role: MessageRole::Agent,
+                    message_id: "message".to_string(),
+                    content: "ordinary update".to_string(),
+                    content_block: None,
+                },
+                tool,
+            ],
+        )
+        .await;
+        let child_thread_id = AgentSessionId::new("alpha", "child").unwrap().encode();
+        assert!(manager.read_session(&child_thread_id).await.is_ok());
+        assert!(manager.tracks_subagent_generation(&child_thread_id).await);
+
+        crate::runtime_backend::process_event_side_effects_for_test(
+            &manager,
+            &hub,
+            &[
+                CanonicalEvent::RunStarted {
+                    agent_id: "alpha".to_string(),
+                    thread_id: child_thread_id.clone(),
+                    run_id: "child-run".to_string(),
+                    source_turn_id: "child-turn".to_string(),
+                    generation: 2,
+                },
+                CanonicalEvent::RunFinished {
+                    agent_id: "alpha".to_string(),
+                    thread_id: child_thread_id.clone(),
+                    run_id: "child-run".to_string(),
+                    source_turn_id: "child-turn".to_string(),
+                    generation: 2,
+                    stop_reason: StopReason::EndTurn,
+                },
+                CanonicalEvent::RunFailed {
+                    agent_id: "alpha".to_string(),
+                    thread_id: "invalid-thread".to_string(),
+                    run_id: "failed-run".to_string(),
+                    source_turn_id: "failed-turn".to_string(),
+                    generation: 1,
+                    message: "fixture failure".to_string(),
+                },
+            ],
+        )
+        .await;
+        assert!(manager
+            .accepted_subagent_terminal(&child_thread_id, 2)
+            .await
+            .is_none());
+        manager.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn running_task_discovers_a_child_that_appears_after_polling_begins() {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let requests_for_route = requests.clone();
+        let app = Router::new().route(
+            "/session/parent/children",
+            get(move || {
+                let requests = requests_for_route.clone();
+                async move {
+                    if requests.fetch_add(1, Ordering::SeqCst) == 0 {
+                        Json(serde_json::json!([]))
+                    } else {
+                        Json(serde_json::json!([{
+                            "id": "child",
+                            "title": "Investigate child task",
+                            "parentID": "parent"
+                        }]))
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let http_base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let (observed, _) = mpsc::unbounded_channel();
+        let ready = connection_with_capabilities(
+            "opencode",
+            AgentCapabilities::new().load_session(true),
+            observed,
+        )
+        .await;
+        let mut opencode = manifest("opencode", "OpenCode");
+        opencode.resolved.executable = PathBuf::from("/usr/local/bin/opencode");
+        opencode.resolved.argv = vec!["acp".to_string()];
+        let mut manager =
+            AgentManager::from_start_results("opencode".to_string(), vec![(opencode, Ok(ready))])
+                .await
+                .unwrap();
+        manager.agents.get_mut("opencode").unwrap().http_base = Some(http_base);
+        let parent = AgentSessionId::new("opencode", "parent").unwrap();
+        let parent_thread_id = parent.encode();
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([index_entry(parent, PathBuf::from("/tmp"))])
+            .await
+            .unwrap();
+        let parent_session = manager
+            .read_session(&parent_thread_id)
+            .await
+            .expect("load parent");
+        let tool = CanonicalEvent::Tool {
+            agent_id: "opencode".to_string(),
+            thread_id: parent_thread_id.clone(),
+            run_id: Some("run".to_string()),
+            source_turn_id: Some("turn".to_string()),
+            generation: Some(1),
+            tool_call_id: "task".to_string(),
+            kind: ToolKind::Other,
+            status: ToolCallStatus::InProgress,
+            title: "task".to_string(),
+            content: FieldUpdate::Set("Working".to_string()),
+            structured_content: FieldUpdate::Set(Vec::new()),
+            locations: FieldUpdate::Set(Vec::new()),
+        };
+        manager
+            .connection("opencode")
+            .unwrap()
+            .session(&SessionId::new("parent"))
+            .await
+            .unwrap()
+            .emit(tool.clone())
+            .await;
+        let manager = Arc::new(manager);
+        crate::runtime_backend::process_event_side_effects_for_test(
+            &manager,
+            &Arc::new(crate::client_hub::ClientHub::new()),
+            &[tool],
+        )
+        .await;
+        let child_thread_id = AgentSessionId::new("opencode", "child").unwrap().encode();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if manager.read_session(&child_thread_id).await.is_ok() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("child is discovered");
+        assert!(requests.load(Ordering::SeqCst) >= 2);
+        assert_eq!(parent_session.thread_id, parent_thread_id);
+        manager.shutdown().await;
+        server.abort();
+        let _ = server.await;
+    }
+
+    #[test]
+    fn durable_index_sanitization_rejects_each_invalid_relationship_and_path() {
+        let valid = AgentSessionId::new("alpha", "valid").unwrap();
+        let mut entries = vec![index_entry(valid.clone(), PathBuf::from("/tmp"))];
+        let mut relative = index_entry(
+            AgentSessionId::new("alpha", "relative").unwrap(),
+            PathBuf::from("relative"),
+        );
+        entries.push(relative.clone());
+        relative.cwd = PathBuf::from(format!("/{}", "x".repeat(MAX_SESSION_CWD_BYTES + 1)));
+        relative.acp_session_id = "long-path".to_string();
+        entries.push(relative);
+        let mut titled = index_entry(
+            AgentSessionId::new("alpha", "titled").unwrap(),
+            PathBuf::from("/tmp"),
+        );
+        titled.title = Some("\n".to_string());
+        entries.push(titled);
+        let mut same_parent = index_entry(
+            AgentSessionId::new("alpha", "same-parent").unwrap(),
+            PathBuf::from("/tmp"),
+        );
+        same_parent.parent_acp_session_id = Some("same-parent".to_string());
+        entries.push(same_parent);
+        let mut invalid_parent = index_entry(
+            AgentSessionId::new("alpha", "invalid-parent").unwrap(),
+            PathBuf::from("/tmp"),
+        );
+        invalid_parent.parent_acp_session_id = Some("".to_string());
+        entries.push(invalid_parent);
+        let mut same_source = index_entry(
+            AgentSessionId::new("alpha", "same-source").unwrap(),
+            PathBuf::from("/tmp"),
+        );
+        same_source.forked_from_acp_session_id = Some("same-source".to_string());
+        entries.push(same_source);
+        let mut invalid_source = index_entry(
+            AgentSessionId::new("alpha", "invalid-source").unwrap(),
+            PathBuf::from("/tmp"),
+        );
+        invalid_source.forked_from_acp_session_id = Some("".to_string());
+        entries.push(invalid_source);
+        entries.push(index_entry(valid, PathBuf::from("/other")));
+
+        let sanitized = sanitize_index_entries(entries);
+        assert_eq!(sanitized.len(), 1);
+        assert_eq!(sanitized[0].acp_session_id, "valid");
+    }
+
+    #[tokio::test]
+    async fn durable_index_merge_and_policy_updates_preserve_canonical_metadata() {
+        let identity = AgentSessionId::new("alpha", "session").unwrap();
+        let mut index = DurableSessionIndex {
+            path: None,
+            entries: Vec::new(),
+            fail_writes: false,
+        };
+        let mut original = index_entry_with_policy(
+            identity.clone(),
+            PathBuf::from("/tmp"),
+            ApprovalPolicy::Never,
+        );
+        original.title = Some("Original".to_string());
+        original.parent_acp_session_id = Some("parent".to_string());
+        original.forked_from_acp_session_id = Some("source".to_string());
+        index.insert_all([original.clone()]).await.unwrap();
+        index.insert_all([original.clone()]).await.unwrap();
+
+        let mut replacement = index_entry_with_policy(
+            identity.clone(),
+            PathBuf::from("/other"),
+            ApprovalPolicy::OnRequest,
+        );
+        replacement.title = None;
+        replacement.parent_acp_session_id = Some("new-parent".to_string());
+        index.insert_entries(vec![replacement]).await.unwrap();
+        assert_eq!(index.entries[0].title.as_deref(), Some("Original"));
+        assert_eq!(
+            index.entries[0].parent_acp_session_id.as_deref(),
+            Some("parent")
+        );
+        assert_eq!(
+            index.entries[0].forked_from_acp_session_id.as_deref(),
+            Some("source")
+        );
+        assert_eq!(index.entries[0].approval_policy, ApprovalPolicy::Never);
+
+        index
+            .set_existing_approval_policies(&[(
+                AgentSessionId::new("alpha", "missing").unwrap(),
+                ApprovalPolicy::OnRequest,
+            )])
+            .await
+            .unwrap();
+        assert!(index
+            .set_approval_policies(&[(
+                AgentSessionId::new("alpha", "missing").unwrap(),
+                ApprovalPolicy::OnRequest,
+            )])
+            .await
+            .is_err());
+        index
+            .set_approval_policies(&[(identity.clone(), ApprovalPolicy::OnRequest)])
+            .await
+            .unwrap();
+        index
+            .set_approval_policies(&[(identity.clone(), ApprovalPolicy::OnRequest)])
+            .await
+            .unwrap();
+        index.remove_all(&[]).await.unwrap();
+        index.remove_all(&[identity]).await.unwrap();
+        assert!(index.entries.is_empty());
+    }
 }

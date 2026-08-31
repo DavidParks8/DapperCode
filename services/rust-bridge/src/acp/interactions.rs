@@ -2055,6 +2055,7 @@ async fn emit_elicitation(
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use serde_json::json;
+    use std::time::Duration;
 
     use super::*;
 
@@ -2090,6 +2091,68 @@ mod tests {
                 .await,
             None
         );
+    }
+
+    #[tokio::test]
+    async fn publication_and_blocked_session_guards_cover_both_settlement_paths() {
+        let inner = Arc::new(Mutex::new(InteractionState::default()));
+        let session_id = SessionId::new("guarded");
+        inner
+            .lock()
+            .await
+            .blocked_sessions
+            .insert(session_id.clone());
+        BlockedSessionGuard::new(inner.clone(), session_id.clone())
+            .clear()
+            .await;
+        assert!(!inner.lock().await.blocked_sessions.contains(&session_id));
+
+        inner
+            .lock()
+            .await
+            .blocked_sessions
+            .insert(session_id.clone());
+        drop(BlockedSessionGuard::new(inner.clone(), session_id.clone()));
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if !inner.lock().await.blocked_sessions.contains(&session_id) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("dropped guard clears the blocked session");
+        assert!(!inner.lock().await.blocked_sessions.contains(&session_id));
+
+        let cleanup = || AbandonedInteractionCleanup {
+            inner: inner.clone(),
+            request_id: "missing".to_string(),
+            kind: AbandonedInteractionKind::Permission,
+        };
+        let (published, publisher) = InteractionPublication::new(cleanup());
+        let published_wait = tokio::spawn({
+            let published = published.clone();
+            async move { published.wait().await }
+        });
+        publisher.publish();
+        assert!(published_wait.await.unwrap());
+        assert!(published.is_published());
+        assert!(!published.is_abandoned());
+
+        let (abandoned, publisher) = InteractionPublication::new(AbandonedInteractionCleanup {
+            inner: inner.clone(),
+            request_id: "missing".to_string(),
+            kind: AbandonedInteractionKind::Elicitation,
+        });
+        drop(publisher);
+        assert!(!abandoned.wait().await);
+        assert!(abandoned.is_abandoned());
+
+        let (abandoned_without_cleanup, mut no_cleanup) = InteractionPublication::new(cleanup());
+        no_cleanup.cleanup = None;
+        drop(no_cleanup);
+        assert!(!abandoned_without_cleanup.wait().await);
     }
 
     #[tokio::test]

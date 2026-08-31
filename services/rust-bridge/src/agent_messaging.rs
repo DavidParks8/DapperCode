@@ -1418,6 +1418,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn send_agent_message_rejects_invalid_recipient_and_message_before_routing() {
+        let credentials = Arc::new(McpCredentialStore::default());
+        let config = AgentMessagingMcpConfig::new(
+            "http://unused".into(),
+            "http://unused".into(),
+            credentials.clone(),
+        );
+        let pending = config.stage_credential("agent").unwrap();
+        let token = pending.token.clone();
+        config
+            .activate_credential(pending, "agent-thread")
+            .expect("credential activates");
+        let handler = AgentMessagingMcpHandler::new(
+            AuthenticatedMcpCredential {
+                token,
+                agent_id: "agent".to_string(),
+            },
+            Arc::new(AgentMessagingRouterState {
+                backend: Weak::new(),
+                queue: Weak::new(),
+                scheduler: ScheduledPromptService::inert_for_test(),
+                credentials,
+                legacy_sessions: Arc::new(Mutex::new(HashMap::new())),
+                message_url: "http://unused/message".to_string(),
+            }),
+        );
+
+        for arguments in [
+            SendAgentMessageArguments {
+                recipient_thread_id: "  ".to_string(),
+                message: "hello".to_string(),
+            },
+            SendAgentMessageArguments {
+                recipient_thread_id: "recipient".to_string(),
+                message: " \n ".to_string(),
+            },
+            SendAgentMessageArguments {
+                recipient_thread_id: "recipient".to_string(),
+                message: "x".repeat(MAX_AGENT_MESSAGE_BODY_BYTES + 1),
+            },
+        ] {
+            assert!(handler
+                .send_agent_message(Parameters(arguments))
+                .await
+                .is_err());
+        }
+    }
+
+    #[tokio::test]
     async fn authenticated_handler_routes_scheduled_prompt_tools_to_its_active_session() {
         let credentials = Arc::new(McpCredentialStore::default());
         let config = AgentMessagingMcpConfig::new(
@@ -1628,6 +1677,218 @@ mod tests {
         );
         config.revoke_threads(["thread-a"]);
         assert_eq!(store.resolve_authorization(&second_header), None);
+    }
+
+    #[test]
+    fn credential_store_rejects_invalid_transitions_and_cleans_every_session_kind() {
+        let store = Arc::new(McpCredentialStore::default());
+        assert!(McpProtocolSessionEvictions::default().is_empty());
+        assert!(!McpProtocolSessionEvictions {
+            http_sessions: vec!["http".into()],
+            legacy_sessions: vec![],
+        }
+        .is_empty());
+        assert!(!McpProtocolSessionEvictions {
+            http_sessions: vec![],
+            legacy_sessions: vec![CancellationToken::new()],
+        }
+        .is_empty());
+        assert!(store.authenticate("Basic invalid").is_none());
+        assert!(store.authenticate("Bearer missing").is_none());
+        assert!(store
+            .bind_http_session("missing-http", "missing-token")
+            .is_err());
+        assert!(store
+            .bind_legacy_session("missing-legacy", "missing-token", CancellationToken::new())
+            .is_err());
+        assert_eq!(
+            store.activate("missing-token", "thread"),
+            Err(McpCredentialError::UnknownPending)
+        );
+
+        let pending = McpCredentialStore::stage(&store, "agent").unwrap();
+        let token = pending.token.clone();
+        store.activate(&token, "thread").unwrap();
+        assert_eq!(
+            store.activate(&token, "thread"),
+            Err(McpCredentialError::UnknownPending)
+        );
+        assert!(store.bind_http_session("http", &token).unwrap().is_empty());
+        assert!(store.bind_http_session("http", &token).unwrap().is_empty());
+        let cancellation = CancellationToken::new();
+        store
+            .bind_legacy_session("legacy", &token, cancellation.clone())
+            .unwrap();
+        store.unbind_http_session("unknown-http");
+        store.unbind_legacy_session("unknown-legacy");
+        store.revoke_threads(["unknown-thread"]);
+        store.revoke_threads(["thread"]);
+        assert!(cancellation.is_cancelled());
+        assert_eq!(store.resolve_token(&token), None);
+
+        let pending = McpCredentialStore::stage(&store, "agent").unwrap();
+        let token = pending.token.clone();
+        store.activate(&token, "thread-mismatch").unwrap();
+        store
+            .state
+            .lock()
+            .unwrap()
+            .active_by_thread
+            .insert("thread-mismatch".into(), "replacement".into());
+        store.remove_token(&token);
+        store.remove_token("already-removed");
+
+        let pending = McpCredentialStore::stage(&store, "agent").unwrap();
+        let token = pending.token.clone();
+        store.activate(&token, "thread-direct-remove").unwrap();
+        store.remove_token(&token);
+
+        let pending = McpCredentialStore::stage(&store, "agent").unwrap();
+        let token = pending.token.clone();
+        store.activate(&token, "thread-2").unwrap();
+        let cancellation = CancellationToken::new();
+        store
+            .bind_legacy_session("legacy-2", &token, cancellation.clone())
+            .unwrap();
+        store.revoke_all();
+        assert!(cancellation.is_cancelled());
+        assert_eq!(store.resolve_token(&token), None);
+
+        let mut state = McpCredentialState::default();
+        let mut evicted = McpProtocolSessionEvictions::default();
+        McpCredentialStore::evict_protocol_session(
+            &mut state,
+            McpProtocolSession::Http("missing".into()),
+            &mut evicted,
+        );
+        McpCredentialStore::evict_protocol_session(
+            &mut state,
+            McpProtocolSession::Legacy("missing".into()),
+            &mut evicted,
+        );
+        let cancellation = CancellationToken::new();
+        state
+            .legacy_sessions
+            .insert("present".into(), ("token".into(), cancellation.clone()));
+        McpCredentialStore::evict_protocol_session(
+            &mut state,
+            McpProtocolSession::Legacy("present".into()),
+            &mut evicted,
+        );
+        assert_eq!(evicted.legacy_sessions.len(), 1);
+        evicted.legacy_sessions[0].cancel();
+        assert!(cancellation.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn stores_without_http_managers_treat_close_as_a_noop() {
+        let credentials = Arc::new(McpCredentialStore::default());
+        credentials.close_http_session("missing").await;
+        let state = Arc::new(AgentMessagingRouterState {
+            backend: Weak::new(),
+            queue: Weak::new(),
+            scheduler: ScheduledPromptService::inert_for_test(),
+            credentials,
+            legacy_sessions: Arc::new(Mutex::new(HashMap::new())),
+            message_url: "http://unused/message".into(),
+        });
+        assert_eq!(
+            open_legacy_sse(State(state), HeaderMap::new())
+                .await
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[test]
+    fn protocol_cleanup_without_a_runtime_does_not_spawn_tasks() {
+        let store = McpCredentialStore::default();
+        store.install_http_session_manager(Arc::new(LocalSessionManager::default()));
+        store.close_protocol_sessions(vec!["missing".into()], vec![]);
+    }
+
+    #[test]
+    fn credential_store_enforces_pending_limit_and_handles_dropped_store() {
+        let store = Arc::new(McpCredentialStore::default());
+        {
+            let mut state = store.state.lock().unwrap();
+            for index in 0..MAX_MCP_CREDENTIALS {
+                state.by_token.insert(
+                    format!("token-{index}"),
+                    McpCredentialRecord {
+                        agent_id: "agent".into(),
+                        thread_id: None,
+                    },
+                );
+            }
+        }
+        assert!(matches!(
+            McpCredentialStore::stage(&store, "agent"),
+            Err(McpCredentialError::LimitReached)
+        ));
+
+        let orphan = {
+            let temporary = Arc::new(McpCredentialStore::default());
+            McpCredentialStore::stage(&temporary, "agent").unwrap()
+        };
+        drop(orphan);
+    }
+
+    #[tokio::test]
+    async fn handler_accessors_distinguish_pending_revoked_and_mismatched_credentials() {
+        let credentials = Arc::new(McpCredentialStore::default());
+        let pending = McpCredentialStore::stage(&credentials, "agent").unwrap();
+        let token = pending.token.clone();
+        let state = Arc::new(AgentMessagingRouterState {
+            backend: Weak::new(),
+            queue: Weak::new(),
+            scheduler: ScheduledPromptService::inert_for_test(),
+            credentials: credentials.clone(),
+            legacy_sessions: Arc::new(Mutex::new(HashMap::new())),
+            message_url: "http://unused/message".into(),
+        });
+        let handler = AgentMessagingMcpHandler::new(
+            AuthenticatedMcpCredential {
+                token: token.clone(),
+                agent_id: "agent".into(),
+            },
+            state.clone(),
+        );
+        assert!(handler.active_caller().is_err());
+        assert!(handler.backend().is_err());
+        assert!(handler.queue().is_err());
+
+        credentials.activate(&token, "thread").unwrap();
+        assert!(handler
+            .send_agent_message(Parameters(SendAgentMessageArguments {
+                recipient_thread_id: "recipient".into(),
+                message: "valid message".into(),
+            }))
+            .await
+            .is_err());
+        let mismatched = AgentMessagingMcpHandler::new(
+            AuthenticatedMcpCredential {
+                token: token.clone(),
+                agent_id: "other-agent".into(),
+            },
+            state,
+        );
+        assert!(mismatched.active_caller().is_err());
+        credentials.revoke_all();
+        assert!(handler.active_caller().is_err());
+
+        assert_eq!(
+            scheduled_prompt_tool_error(ScheduledPromptError::Invalid("bad".into()))
+                .code
+                .0,
+            -32602
+        );
+        assert_eq!(
+            scheduled_prompt_tool_error(ScheduledPromptError::Internal("bad".into()))
+                .code
+                .0,
+            -32603
+        );
     }
 
     #[test]
