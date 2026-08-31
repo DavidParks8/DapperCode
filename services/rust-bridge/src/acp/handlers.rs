@@ -829,6 +829,41 @@ mod tests {
         assert_eq!(capped.len(), MAX_STRUCTURED_ITEMS);
     }
 
+    #[test]
+    fn text_and_structure_bounds_cover_full_buffers_and_utf8_boundaries() {
+        let content: Vec<ToolCallContent> = serde_json::from_value(serde_json::json!([
+            {"type": "content", "content": {"type": "text", "text": "first"}},
+            {"type": "content", "content": {"type": "text", "text": "second"}}
+        ]))
+        .unwrap();
+        assert_eq!(tool_content(&content), "first\nsecond");
+
+        let full: Vec<ToolCallContent> = serde_json::from_value(serde_json::json!([
+            {
+                "type": "content",
+                "content": {"type": "text", "text": "x".repeat(MAX_TOOL_TEXT_CHUNK_BYTES)}
+            },
+            {"type": "content", "content": {"type": "text", "text": "ignored"}}
+        ]))
+        .unwrap();
+        assert_eq!(tool_content(&full).len(), MAX_TOOL_TEXT_CHUNK_BYTES);
+
+        let crowded = serde_json::Value::Object(
+            (0..=MAX_STRUCTURED_FIELDS)
+                .map(|index| (format!("key-{index}"), serde_json::json!(index)))
+                .collect(),
+        );
+        assert_eq!(
+            bound_json(crowded).as_object().unwrap().len(),
+            MAX_STRUCTURED_FIELDS
+        );
+
+        let mut target = "full".to_string();
+        append_bounded(&mut target, "ignored", 4);
+        assert_eq!(target, "full");
+        assert_eq!(bound_text("é".to_string(), 1), "");
+    }
+
     fn live(update: SessionUpdate, generation: u64) -> ReceivedSessionNotification {
         ReceivedSessionNotification {
             notification: SessionNotification::new("session", update),

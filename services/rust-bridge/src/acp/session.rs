@@ -1647,6 +1647,181 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_lifecycle_rejects_invalid_transitions_and_exercises_idle_edges() {
+        let session = AcpSession::new("agent".to_string(), "thread".to_string());
+        assert_eq!(session.operation().await, None);
+        assert_eq!(session.active_interaction_generation().await, None);
+        assert_eq!(session.mark_cancelling().await, None);
+        assert!(session.is_evictable().await);
+        assert!(session
+            .reserve_handoff("missing", "missing", 1)
+            .await
+            .is_err());
+        assert!(session
+            .admit_handoff("run".into(), "turn".into())
+            .await
+            .is_err());
+        session.release_handoff().await;
+        session.fail_active("nothing active".into()).await;
+
+        let (generation, _) = session
+            .admit_prompt("run".into(), "turn".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            session.operation().await,
+            Some(("run".into(), "turn".into(), generation))
+        );
+        assert_eq!(
+            session.active_interaction_generation().await,
+            Some(generation)
+        );
+        assert!(!session.is_evictable().await);
+        assert_eq!(session.mark_cancelling().await, Some(generation));
+        assert_eq!(session.mark_cancelling().await, None);
+        session.fail_active("cancelled".into()).await;
+        assert_eq!(session.operation().await, None);
+        assert!(session.is_evictable().await);
+
+        assert_eq!(
+            session
+                .message_id_for_generation(MessageRole::User, Some("id".into()), None)
+                .await,
+            "id"
+        );
+        assert_eq!(
+            session
+                .message_id_for_generation(MessageRole::Agent, Some("id".into()), None)
+                .await,
+            "id::agent"
+        );
+        assert_eq!(
+            session
+                .message_id_for_generation(MessageRole::Thought, Some("id".into()), None)
+                .await,
+            "id::thought"
+        );
+        let first = session
+            .message_id_for_generation(MessageRole::User, None, None)
+            .await;
+        assert_eq!(
+            session
+                .message_id_for_generation(MessageRole::User, None, None)
+                .await,
+            first
+        );
+        assert_ne!(
+            session
+                .message_id_for_generation(MessageRole::Agent, None, None)
+                .await,
+            first
+        );
+
+        assert!(matches!(
+            session
+                .classify_agent_message_chunk("ordinary", "ordinary text".into(), "thread")
+                .await,
+            AgentMessageChunkMatch::Ordinary(_)
+        ));
+        assert!(matches!(
+            session
+                .classify_agent_message_chunk("partial", "<".into(), "thread")
+                .await,
+            AgentMessageChunkMatch::Pending
+        ));
+        assert!(matches!(
+            session
+                .classify_agent_message_chunk("partial", "ordinary".into(), "thread")
+                .await,
+            AgentMessageChunkMatch::Ordinary(_)
+        ));
+        assert!(matches!(
+            session
+                .classify_agent_message_chunk("oversized", "x".repeat(64 * 1024 + 1), "thread")
+                .await,
+            AgentMessageChunkMatch::Ordinary(_)
+        ));
+
+        let envelope = crate::agent_messaging::AgentMessageEnvelope::new(
+            "message".into(),
+            "parent".into(),
+            "other-thread".into(),
+            crate::agent_messaging::AgentRelationKind::SubAgent,
+            None,
+            "body".into(),
+        )
+        .encode()
+        .unwrap();
+        assert!(matches!(
+            session
+                .classify_agent_message_chunk("wrong-recipient", envelope, "thread")
+                .await,
+            AgentMessageChunkMatch::Ordinary(_)
+        ));
+
+        let reconstruction = session.begin_reconstruction().await.unwrap();
+        assert!(!session.is_evictable().await);
+        reconstruction.finish(false).await;
+        assert!(session.is_evictable().await);
+    }
+
+    #[tokio::test]
+    async fn reconstruction_and_history_seeding_cover_non_live_and_mailbox_edges() {
+        let session = AcpSession::new("agent".to_string(), "thread".to_string());
+        assert!(!session.seed_history(vec![]).await);
+
+        let message = || CanonicalEvent::MessageChunk {
+            agent_id: "agent".into(),
+            thread_id: "thread".into(),
+            run_id: None,
+            source_turn_id: None,
+            generation: None,
+            role: MessageRole::User,
+            message_id: "history-message".into(),
+            content: "history".into(),
+            content_block: None,
+        };
+        let reconstruction = session.begin_reconstruction().await.unwrap();
+        assert!(session.seed_history(vec![message()]).await);
+        reconstruction.finish(true).await;
+        assert!(!session.seed_history(vec![message()]).await);
+
+        {
+            let mut state = session.inner.lock().await;
+            state.notification_draining = true;
+        }
+        assert!(!session.is_evictable().await);
+        {
+            let mut state = session.inner.lock().await;
+            state.notification_draining = false;
+            state.snapshot.history_reconstruction = true;
+            state.generation_state = GenerationState::Active(7);
+        }
+        assert_eq!(session.active_interaction_generation().await, None);
+        assert!(!session.is_evictable().await);
+        {
+            let mut state = session.inner.lock().await;
+            state.snapshot.history_reconstruction = false;
+            state.generation_state = GenerationState::Terminal;
+        }
+
+        let malformed = format!(
+            "{}{{not-json}}{}",
+            "<<<dappercode.dev/agent-message:v1>>>\n", "\n<<<dappercode.dev/agent-message:end>>>"
+        );
+        assert!(matches!(
+            session
+                .classify_agent_message_chunk("complete-invalid", malformed, "thread")
+                .await,
+            AgentMessageChunkMatch::Ordinary(_)
+        ));
+
+        let session = AcpSession::new("agent".to_string(), "thread".to_string());
+        drop(session.take_events().await);
+        assert!(session.seed_history(vec![message()]).await);
+    }
+
+    #[tokio::test]
     async fn prompt_transcript_preserves_an_existing_agent_message_disposition() {
         let session = AcpSession::new("agent".to_string(), "thread".to_string());
         let envelope = crate::agent_messaging::AgentMessageEnvelope::new(

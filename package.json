@@ -35,7 +35,7 @@
     "zod-to-json-schema": "^3.25.1"
   },
   "scripts": {
-    "postinstall": "pnpm --filter @dappercode/mobile run mermaid:prepare",
+    "postinstall": "pnpm --filter @dappercode/mobile run generated:prepare",
     "mobile": "./scripts/start-expo.sh mobile",
     "ios": "./scripts/start-expo.sh ios",
     "android": "./scripts/start-expo.sh android",

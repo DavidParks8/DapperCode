@@ -149,6 +149,8 @@ pub(super) async fn wait_for_shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt, BufReader};
 
     #[test]
     fn process_stop_rejects_a_stale_start_identity_before_signalling() {
@@ -163,5 +165,40 @@ mod tests {
                 .unwrap_err();
 
         assert!(error.to_string().contains("start identity changed"));
+    }
+
+    #[tokio::test]
+    async fn stop_child_terminates_an_owned_running_process_gracefully() {
+        let mut child = tokio::process::Command::new("/bin/sh")
+            .args([
+                "-c",
+                "trap 'echo TERM_ACK; exit 0' TERM; echo READY; while :; do :; done",
+            ])
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn owned fixture");
+        let mut stdout = BufReader::new(child.stdout.take().expect("fixture stdout")).lines();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), stdout.next_line())
+                .await
+                .expect("fixture announces readiness")
+                .expect("read fixture readiness")
+                .as_deref(),
+            Some("READY")
+        );
+
+        stop_child(&mut child, Duration::from_secs(2))
+            .await
+            .expect("graceful process stop");
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), stdout.next_line())
+                .await
+                .expect("fixture acknowledges SIGTERM")
+                .expect("read fixture acknowledgement")
+                .as_deref(),
+            Some("TERM_ACK")
+        );
+        assert!(child.try_wait().unwrap().expect("fixture exited").success());
     }
 }

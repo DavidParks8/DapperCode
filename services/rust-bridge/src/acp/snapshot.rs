@@ -2081,6 +2081,64 @@ mod tests {
     }
 
     #[test]
+    fn message_repositioning_handles_duplicates_self_anchors_and_stale_indexes() {
+        let mut snapshot = SessionSnapshot::new("agent".into(), "thread".into());
+        assert!(!snapshot.mark_subagent_terminal("missing", "completed"));
+        assert!(!snapshot.mark_subagent_tool_terminal(
+            "missing",
+            "completed",
+            ToolCallStatus::Completed
+        ));
+
+        snapshot.append_message_after("first".into(), MessageRole::User, "one".into(), None, None);
+        snapshot.append_message_after(
+            "first".into(),
+            MessageRole::User,
+            "two".into(),
+            None,
+            Some("first"),
+        );
+        snapshot.append_message_after(
+            "self".into(),
+            MessageRole::User,
+            "self".into(),
+            None,
+            Some("self"),
+        );
+        snapshot.reposition_message_after("first", "missing-anchor");
+
+        snapshot.append_message(
+            "agent-message:message".into(),
+            MessageRole::User,
+            "ordinary".into(),
+            None,
+        );
+        let origin = crate::agent_messaging::AgentMessageOrigin {
+            message_id: "message".into(),
+            direction: crate::agent_messaging::AgentMessageDirection::Received,
+            related_thread_id: "parent".into(),
+            related_title: None,
+            relation: crate::agent_messaging::AgentRelationKind::Parent,
+            disposition: crate::agent_messaging::AgentMessageDisposition::Queued,
+            body: "typed".into(),
+        };
+        snapshot.append_agent_message(origin.clone());
+        snapshot.append_agent_message_after(origin.clone(), Some("first"));
+        snapshot.append_agent_message_after(origin, Some("first"));
+
+        snapshot.append_message(
+            "stale-anchor".into(),
+            MessageRole::User,
+            "anchor".into(),
+            None,
+        );
+        snapshot
+            .history
+            .retain(|entry| entry.canonical_id != "stale-anchor");
+        snapshot.reposition_message_after("first", "stale-anchor");
+    }
+
+    #[test]
     fn tool_timing_keeps_first_observation_and_freezes_terminal_time() {
         let mut snapshot = SessionSnapshot::new("agent".to_string(), "thread".to_string());
         snapshot.apply_at(&tool("tool", None, ToolCallStatus::InProgress), 1_000);
