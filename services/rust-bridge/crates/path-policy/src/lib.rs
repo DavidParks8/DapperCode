@@ -376,6 +376,8 @@ fn validate_child_name(name: &str) -> Result<(), BridgeError> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    #[cfg(windows)]
+    use super::DEFAULT_ATTACHMENTS_DIR_NAME;
     use super::{PathKind, PathPolicy};
     use std::{fs, path::PathBuf};
     use uuid::Uuid;
