@@ -28,7 +28,7 @@ mkdir -p "$BRIDGE_REPORT_DIR"
   cd "$BRIDGE_DIR"
   cargo_run "+${TOOLCHAIN}" llvm-cov test \
     --locked \
-    --bin dappercode-bridge \
+    --workspace \
     --branch \
     --json \
     --summary-only \
@@ -49,7 +49,7 @@ mkdir -p "$DESKTOP_REPORT_DIR"
   cd "$DESKTOP_DIR"
   DAPPERCODE_SECRETS_BACKEND=file cargo_run "+${TOOLCHAIN}" llvm-cov test \
     --locked \
-    --bin dappercode \
+    --workspace \
     --branch \
     --json \
     --summary-only \

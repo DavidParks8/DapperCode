@@ -32,6 +32,20 @@ use axum::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
+use dappercode_bridge_core::{
+    protocol_constants::*,
+    resource_limits::{
+        FILESYSTEM_LIST_MAX_ENTRIES, LOCAL_IMAGE_MAX_BYTES, NOTIFICATION_MAX_BYTES,
+        PREVIEW_BUFFERED_RESPONSE_MAX_BYTES, PREVIEW_REQUEST_MAX_BYTES, PUSH_DEVICE_NAME_MAX_BYTES,
+        PUSH_ID_MAX_BYTES, PUSH_PLATFORM_MAX_BYTES, PUSH_PREVIEW_MAX_BYTES,
+        PUSH_PREVIEW_MAX_THREADS, PUSH_TOKEN_MAX_BYTES, QUEUE_MAX_BYTES_PER_THREAD,
+        QUEUE_MAX_CONTENT_BYTES, QUEUE_MAX_ITEMS_PER_THREAD, QUEUE_MAX_ITEM_BYTES,
+        REPLAY_MAX_BYTES, REPLAY_RESPONSE_MAX_BYTES, UI_SURFACE_MAX_ACTIONS, UI_SURFACE_MAX_BLOCKS,
+        UI_SURFACE_MAX_BYTES, UI_SURFACE_MAX_ITEMS_PER_BLOCK, UI_SURFACE_MAX_TEXT_BYTES,
+    },
+    BridgeError,
+};
+use dappercode_bridge_path_policy::{PathKind, PathPolicy};
 use futures_util::{SinkExt, StreamExt};
 use reqwest::{Method as HttpMethod, Url};
 use serde::{Deserialize, Serialize};
@@ -61,17 +75,15 @@ mod config;
 mod health;
 mod observability;
 mod owner_watchdog;
-mod path_policy;
-mod platform;
 mod preview;
-mod protocol_constants;
 mod push;
 mod replay;
-mod resource_limits;
 mod retirement_journal;
 mod rpc;
 mod scheduled_prompts;
 mod services;
+#[cfg(test)]
+mod source_policy;
 mod storage;
 
 use attachments::{
@@ -83,22 +95,12 @@ use health::{
     QueueStatus,
 };
 use observability::OperationalMetrics;
-use path_policy::{PathKind, PathPolicy};
 use preview::{
     normalize_browser_preview_target_url, BrowserPreviewResolvedSession, BrowserPreviewService,
     BROWSER_PREVIEW_SESSION_TTL,
 };
 use push::{parse_push_event_preferences, truncate_chars, PushEventPreferences, PushRegistryStore};
 use replay::NotificationReplay;
-use resource_limits::{
-    FILESYSTEM_LIST_MAX_ENTRIES, LOCAL_IMAGE_MAX_BYTES, NOTIFICATION_MAX_BYTES,
-    PREVIEW_BUFFERED_RESPONSE_MAX_BYTES, PREVIEW_REQUEST_MAX_BYTES, PUSH_DEVICE_NAME_MAX_BYTES,
-    PUSH_ID_MAX_BYTES, PUSH_PLATFORM_MAX_BYTES, PUSH_PREVIEW_MAX_BYTES, PUSH_PREVIEW_MAX_THREADS,
-    PUSH_TOKEN_MAX_BYTES, QUEUE_MAX_BYTES_PER_THREAD, QUEUE_MAX_CONTENT_BYTES,
-    QUEUE_MAX_ITEMS_PER_THREAD, QUEUE_MAX_ITEM_BYTES, REPLAY_MAX_BYTES, REPLAY_RESPONSE_MAX_BYTES,
-    UI_SURFACE_MAX_ACTIONS, UI_SURFACE_MAX_BLOCKS, UI_SURFACE_MAX_BYTES,
-    UI_SURFACE_MAX_ITEMS_PER_BLOCK, UI_SURFACE_MAX_TEXT_BYTES,
-};
 use rpc::{is_forwarded_method, parse_client_request_id, parse_request, RpcRequestParseError};
 
 mod app_state;
@@ -124,7 +126,6 @@ use http_routes::*;
 use interaction_validation::*;
 use pairing::*;
 use preview_proxy::*;
-use protocol_constants::*;
 use push_delivery::*;
 use runtime_backend::*;
 use websocket_transport::*;

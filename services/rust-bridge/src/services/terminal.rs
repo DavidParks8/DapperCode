@@ -1,5 +1,10 @@
 use std::{collections::HashSet, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 
+use dappercode_bridge_core::{resource_limits::GIT_COMMAND_MAX_OUTPUT_BYTES, BridgeError};
+use dappercode_bridge_path_policy::{PathKind, PathPolicy};
+use dappercode_bridge_platform::{
+    configure_git_command, git_global_config_path, kill_git_process_group,
+};
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
     process::Command,
@@ -7,11 +12,7 @@ use tokio::{
     time::timeout,
 };
 
-use crate::{
-    path_policy::{PathKind, PathPolicy},
-    resource_limits::GIT_COMMAND_MAX_OUTPUT_BYTES,
-    BridgeError, GitCommandOutput,
-};
+use crate::GitCommandOutput;
 
 const MAX_CONCURRENT_GIT_COMMANDS: usize = 4;
 const OUTPUT_READ_CHUNK_SIZE: usize = 8 * 1024;
@@ -20,10 +21,7 @@ fn hardened_git_args(args: &[String]) -> Vec<String> {
     let mut hardened_args = vec![
         "--no-pager".to_string(),
         "-c".to_string(),
-        format!(
-            "core.hooksPath={}",
-            crate::platform::git_global_config_path()
-        ),
+        format!("core.hooksPath={}", git_global_config_path()),
         "-c".to_string(),
         "core.fsmonitor=false".to_string(),
         "-c".to_string(),
@@ -115,14 +113,11 @@ impl TerminalService {
             .env_clear()
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env(
-                "GIT_CONFIG_GLOBAL",
-                crate::platform::git_global_config_path(),
-            )
+            .env("GIT_CONFIG_GLOBAL", git_global_config_path())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        crate::platform::configure_git_command(&mut command);
+        configure_git_command(&mut command);
         for name in ["PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "SystemRoot"] {
             if let Some(value) = std::env::var_os(name) {
                 command.env(name, value);
@@ -158,7 +153,7 @@ impl TerminalService {
                 )));
             }
             Err(_) => {
-                crate::platform::kill_git_process_group(&child);
+                kill_git_process_group(&child);
                 let _ = child.kill().await;
                 let _ = child.wait().await;
                 None
@@ -218,7 +213,7 @@ mod tests {
         finalize_output, hardened_git_args, pinned_git_config_keys, read_stream_limited,
         TerminalService,
     };
-    use crate::path_policy::PathPolicy;
+    use dappercode_bridge_path_policy::PathPolicy;
     use std::sync::Arc;
 
     #[test]

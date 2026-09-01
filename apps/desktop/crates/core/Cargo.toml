@@ -1,0 +1,34 @@
+[package]
+name = "dappercode-desktop-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Stable configuration, storage, platform, and lifecycle services for DapperCode desktop"
+license.workspace = true
+publish.workspace = true
+
+[features]
+test-support = []
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+fs2.workspace = true
+getrandom.workspace = true
+keyring.workspace = true
+libc.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+sysinfo.workspace = true
+tokio = { workspace = true, features = ["full"] }
+ureq.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -10,6 +10,13 @@
 use std::time::Duration;
 
 #[cfg(test)]
+use dappercode_bridge_platform::poll_while_owner_is_alive as poll_platform_owner;
+use dappercode_bridge_platform::{
+    process_is_alive as platform_process_is_alive,
+    wait_for_owner_exit as wait_for_platform_owner_exit,
+};
+
+#[cfg(test)]
 const OWNER_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Reads and validates `BRIDGE_OWNER_PID`.
@@ -41,11 +48,11 @@ pub(crate) async fn wait_for_owner_exit(owner_pid: Option<u32>) {
     if !process_is_alive(owner_pid) {
         return;
     }
-    crate::platform::wait_for_owner_exit(owner_pid).await;
+    wait_for_platform_owner_exit(owner_pid).await;
 }
 
 pub(crate) fn process_is_alive(pid: u32) -> bool {
-    crate::platform::process_is_alive(pid)
+    platform_process_is_alive(pid)
 }
 
 #[cfg(test)]
@@ -55,7 +62,7 @@ async fn poll_until_owner_exits(owner_pid: u32) {
 
 #[cfg(test)]
 async fn poll_while_owner_is_alive(mut owner_is_alive: impl FnMut() -> bool, interval: Duration) {
-    crate::platform::poll_while_owner_is_alive(&mut owner_is_alive, interval).await;
+    poll_platform_owner(&mut owner_is_alive, interval).await;
 }
 
 #[cfg(test)]
@@ -180,33 +187,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn windows_owner_identity_checks_fail_closed() {
-        assert!(crate::platform::owner_identity_matches(Some(42), 42));
-        assert!(!crate::platform::owner_identity_matches(Some(41), 42));
-        assert!(!crate::platform::owner_identity_matches(None, 42));
-    }
-
-    #[test]
-    fn windows_zero_timeout_wait_checks_fail_closed() {
-        const WAIT_OBJECT_0: u32 = 0;
-        const WAIT_TIMEOUT: u32 = 258;
-        const WAIT_FAILED: u32 = u32::MAX;
-
-        assert!(crate::platform::zero_timeout_wait_means_alive(
-            WAIT_TIMEOUT,
-            WAIT_TIMEOUT
-        ));
-        assert!(!crate::platform::zero_timeout_wait_means_alive(
-            WAIT_OBJECT_0,
-            WAIT_TIMEOUT
-        ));
-        assert!(!crate::platform::zero_timeout_wait_means_alive(
-            WAIT_FAILED,
-            WAIT_TIMEOUT
-        ));
-    }
-
     #[tokio::test]
     async fn bounded_polling_waits_for_a_live_owner_then_resolves() {
         use std::sync::{
@@ -288,15 +268,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn windows_watch_policy_forbids_unbounded_blocking() {
-        let source = include_str!("platform/windows/process.rs");
-        assert!(!source.contains("spawn_blocking"));
-        assert!(!source.contains("INFINITE"));
-        assert!(source.contains("WaitForSingleObject"));
-        assert!(source.contains(", 0)"));
-    }
-
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     #[tokio::test]
     async fn falls_back_to_polling_when_the_kqueue_watch_cannot_be_established() {
@@ -349,16 +320,16 @@ mod tests {
         let mut child = spawn_fixture(LONG_LIVED_CHILD);
         let pid = child.id();
         assert!(process_is_alive(pid));
-        let creation_time = crate::platform::test_observed_process_creation_time(pid)
+        let creation_time = dappercode_bridge_platform::test_observed_process_creation_time(pid)
             .expect("captured creation time");
         assert_eq!(
-            crate::platform::test_process_creation_time(pid).unwrap(),
+            dappercode_bridge_platform::test_process_creation_time(pid).unwrap(),
             creation_time
         );
 
         tokio::time::timeout(
             Duration::from_secs(1),
-            crate::platform::test_wait_for_owner_exit_with_identity(
+            dappercode_bridge_platform::test_wait_for_owner_exit_with_identity(
                 pid,
                 Some(creation_time.wrapping_add(1)),
             ),
@@ -377,7 +348,7 @@ mod tests {
         let mut child = spawn_fixture(LONG_LIVED_CHILD);
         let pid = child.id();
         assert!(process_is_alive(pid));
-        let creation_time = crate::platform::test_observed_process_creation_time(pid)
+        let creation_time = dappercode_bridge_platform::test_observed_process_creation_time(pid)
             .expect("captured creation time");
 
         let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel();
@@ -387,11 +358,12 @@ mod tests {
                 .build()
                 .expect("watchdog test runtime");
             runtime.block_on(async move {
-                let watchdog =
-                    tokio::spawn(crate::platform::test_wait_for_owner_exit_with_identity(
+                let watchdog = tokio::spawn(
+                    dappercode_bridge_platform::test_wait_for_owner_exit_with_identity(
                         pid,
                         Some(creation_time),
-                    ));
+                    ),
+                );
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 assert!(
                     !watchdog.is_finished(),

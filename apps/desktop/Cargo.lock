@@ -236,17 +236,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "dappercode-desktop"
+name = "dappercode-broker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "axum",
- "fs2",
+ "dappercode-desktop-core",
  "futures-util",
  "getrandom 0.3.4",
- "keyring",
- "libc",
  "reqwest",
  "serde",
  "serde_json",
@@ -255,6 +253,37 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite",
+]
+
+[[package]]
+name = "dappercode-desktop"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dappercode-broker",
+ "dappercode-desktop-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "dappercode-desktop-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "fs2",
+ "getrandom 0.3.4",
+ "keyring",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sysinfo",
+ "tempfile",
+ "tokio",
  "ureq",
  "windows-sys 0.61.2",
 ]

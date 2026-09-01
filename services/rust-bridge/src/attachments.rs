@@ -1,13 +1,12 @@
 use std::path::{Path, PathBuf};
 
 use axum::extract::Multipart;
+use dappercode_bridge_core::{resource_limits::ATTACHMENT_MAX_BYTES, BridgeError};
+use dappercode_bridge_path_policy::PathPolicy;
 use serde::Serialize;
 use tokio::{fs, io::AsyncWriteExt};
 use uuid::Uuid;
 
-use crate::{path_policy::PathPolicy, resource_limits::ATTACHMENT_MAX_BYTES, BridgeError};
-
-pub(crate) const DEFAULT_ATTACHMENTS_DIR_NAME: &str = ".dappercode-attachments";
 pub(crate) const ATTACHMENT_MULTIPART_MAX_BYTES: usize = ATTACHMENT_MAX_BYTES + 64 * 1024;
 const ATTACHMENT_METADATA_MAX_BYTES: usize = 4 * 1024;
 
@@ -313,20 +312,20 @@ pub(crate) fn infer_image_content_type_from_path(path: &Path) -> Option<&'static
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    #[cfg(any(unix, windows))]
-    use super::DEFAULT_ATTACHMENTS_DIR_NAME;
     use super::{
         append_bounded_chunk, build_attachment_file_name, infer_extension_from_mime,
         infer_image_content_type_from_path, non_empty, normalize_attachment_kind, private_new_file,
         sanitize_filename, sanitize_path_segment, save_multipart_attachment, secure_directory,
     };
-    use crate::path_policy::PathPolicy;
-    use crate::resource_limits::ATTACHMENT_MAX_BYTES;
     use axum::{
         body::Body,
         extract::{FromRequest, Multipart},
         http::{header::CONTENT_TYPE, Request},
     };
+    #[cfg(any(unix, windows))]
+    use dappercode_bridge_core::protocol_constants::DEFAULT_ATTACHMENTS_DIR_NAME;
+    use dappercode_bridge_core::resource_limits::ATTACHMENT_MAX_BYTES;
+    use dappercode_bridge_path_policy::PathPolicy;
     use std::{fs, path::PathBuf};
     use uuid::Uuid;
 

@@ -4,6 +4,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use agent_client_protocol::{Client, ConnectTo, Lines};
+use dappercode_bridge_platform::{file_has_multiple_links, tree_mode};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
@@ -531,7 +532,7 @@ fn collect_tree_entries(
         if metadata.is_dir() {
             entries.push(TreeEntry::Directory {
                 path: relative,
-                mode: crate::platform::tree_mode(&metadata),
+                mode: tree_mode(&metadata),
             });
             collect_tree_entries(root, &path, entries, total_bytes)?;
         } else if metadata.file_type().is_symlink() {
@@ -554,7 +555,7 @@ fn collect_tree_entries(
                 target,
             });
         } else if metadata.is_file() {
-            if crate::platform::file_has_multiple_links(&path, &metadata)
+            if file_has_multiple_links(&path, &metadata)
                 .map_err(|_| RuntimeManifestError::InvalidIntegrityRoot)?
             {
                 return Err(RuntimeManifestError::InvalidIntegrityRoot);
@@ -565,7 +566,7 @@ fn collect_tree_entries(
                 .ok_or(RuntimeManifestError::InvalidIntegrityRoot)?;
             entries.push(TreeEntry::File {
                 path: relative,
-                mode: crate::platform::tree_mode(&metadata),
+                mode: tree_mode(&metadata),
                 size: metadata.len(),
                 sha256: executable_sha256(&path)?[7..].to_string(),
             });

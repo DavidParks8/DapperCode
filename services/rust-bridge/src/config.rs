@@ -1,9 +1,9 @@
 use std::{collections::HashSet, env, net::IpAddr, path::PathBuf, time::Duration};
 
 use axum::http::{header::ORIGIN, HeaderMap};
+use dappercode_bridge_core::protocol_constants::DEFAULT_ATTACHMENTS_DIR_NAME;
+use dappercode_bridge_path_policy::PathPolicy;
 use reqwest::Url;
-
-use crate::path_policy::PathPolicy;
 
 pub(crate) const DEFAULT_WS_MAX_FRAME_BYTES: usize = 32 * 1024 * 1024;
 pub(crate) const DEFAULT_WS_MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
@@ -75,7 +75,7 @@ impl BridgeConfig {
         let state_dir = parse_absolute_dir_env("BRIDGE_STATE_DIR", workdir.join(".dappercode"))?;
         let attachments_dir = parse_unresolved_absolute_dir_env(
             "BRIDGE_ATTACHMENTS_DIR",
-            workdir.join(crate::attachments::DEFAULT_ATTACHMENTS_DIR_NAME),
+            workdir.join(DEFAULT_ATTACHMENTS_DIR_NAME),
         )?;
 
         let acp_manifest_path = env::var("ACP_AGENT_MANIFEST")

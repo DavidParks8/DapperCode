@@ -432,24 +432,51 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
+ "dappercode-bridge-core",
+ "dappercode-bridge-path-policy",
+ "dappercode-bridge-platform",
  "futures",
  "futures-util",
  "getrandom 0.3.4",
- "libc",
  "qr2term",
  "regex",
  "reqwest",
  "rmcp",
- "rustix 1.1.4",
  "serde",
  "serde_json",
  "sha2",
- "shlex",
  "thiserror",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite 0.28.0",
  "tokio-util",
+ "uuid",
+]
+
+[[package]]
+name = "dappercode-bridge-core"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "dappercode-bridge-path-policy"
+version = "0.1.0"
+dependencies = [
+ "dappercode-bridge-core",
+ "dappercode-bridge-platform",
+ "uuid",
+]
+
+[[package]]
+name = "dappercode-bridge-platform"
+version = "0.1.0"
+dependencies = [
+ "dappercode-bridge-core",
+ "libc",
+ "rustix 1.1.4",
+ "tokio",
  "uuid",
  "windows-sys 0.61.2",
 ]

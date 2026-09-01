@@ -19,7 +19,7 @@ use crate::bridge_protocol::{
 };
 use crate::client_hub::ClientHub;
 use crate::queue_service::QueueSubmissionCancelOutcome;
-use crate::resource_limits::{QUEUE_MAX_CONTENT_BYTES, QUEUE_MAX_ITEM_BYTES};
+use dappercode_bridge_core::resource_limits::{QUEUE_MAX_CONTENT_BYTES, QUEUE_MAX_ITEM_BYTES};
 
 const SCHEDULER_STATE_VERSION: u32 = 1;
 const SCHEDULER_STATE_MAX_BYTES: usize = 8 * 1024 * 1024;

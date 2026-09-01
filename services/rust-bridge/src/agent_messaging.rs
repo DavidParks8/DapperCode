@@ -33,9 +33,9 @@ use uuid::Uuid;
 
 use crate::acp::runtime::McpTransportPreference;
 use crate::bridge_protocol::BridgeQueueService;
-use crate::resource_limits::QUEUE_MAX_CONTENT_BYTES;
 use crate::runtime_backend::RuntimeBackend;
 use crate::scheduled_prompts::{ScheduledPromptError, ScheduledPromptService};
+use dappercode_bridge_core::resource_limits::QUEUE_MAX_CONTENT_BYTES;
 
 pub(crate) const AGENT_MESSAGE_ENVELOPE_VERSION: u32 = 1;
 pub(crate) const SEND_AGENT_MESSAGE_TOOL: &str = "send_agent_message";

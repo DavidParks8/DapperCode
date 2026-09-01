@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use dappercode_bridge_platform::atomic_write_private_blocking;
 #[cfg(test)]
 use tokio::{fs, io::AsyncWriteExt};
 
@@ -56,7 +57,7 @@ where
         .to_os_string();
     let bytes = bytes.to_vec();
     tokio::task::spawn_blocking(move || {
-        crate::platform::atomic_write_private_blocking(
+        atomic_write_private_blocking(
             &parent,
             &file_name,
             &bytes,

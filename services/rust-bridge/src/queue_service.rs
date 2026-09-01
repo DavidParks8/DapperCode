@@ -3643,7 +3643,7 @@ mod tests {
                 .push((message_id.to_string(), disposition));
             if self
                 .update_agent_message_failures
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
                     remaining.checked_sub(1)
                 })
                 .is_ok()
