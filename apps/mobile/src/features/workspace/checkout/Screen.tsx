@@ -33,8 +33,7 @@ import {
   openGitCheckoutDestinationPickerAtom,
   submitGitCheckoutAtom,
 } from '../state/workspaceActions';
-import { motionDuration, motionEasing } from '@shared/ui/motion';
-import { useAppTheme } from '@shared/theme';
+import { motion, useAppTheme } from '@shared/theme';
 import { joinWorkspacePath, normalizeCloneDirectoryName } from '../../chat/helpers/helpers';
 import { createGitCheckoutScreenStyles } from './styles';
 
@@ -84,11 +83,11 @@ export function GitCheckoutScreen() {
   // meeting both iOS (44pt) and Android (48dp) minimum touch targets.
   const backButtonHitSlop = { top: 6, bottom: 6, left: 6, right: 6 };
 
-  const routineEnter = FadeIn.duration(motionDuration.routine)
-    .easing(Easing.bezier(...motionEasing.decelerate))
+  const routineEnter = FadeIn.duration(motion.duration.routine)
+    .easing(Easing.bezier(...motion.easing.decelerate))
     .reduceMotion(ReduceMotion.System);
-  const routineExit = FadeOut.duration(motionDuration.routine)
-    .easing(Easing.bezier(...motionEasing.accelerate))
+  const routineExit = FadeOut.duration(motion.duration.routine)
+    .easing(Easing.bezier(...motion.easing.accelerate))
     .reduceMotion(ReduceMotion.System);
 
   return (

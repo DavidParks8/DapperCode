@@ -12,8 +12,7 @@ use std::time::Duration;
 #[cfg(test)]
 use dappercode_bridge_platform::poll_while_owner_is_alive as poll_platform_owner;
 use dappercode_bridge_platform::{
-    process_is_alive as platform_process_is_alive,
-    wait_for_owner_exit as wait_for_platform_owner_exit,
+    process_is_alive, wait_for_owner_exit as wait_for_platform_owner_exit,
 };
 
 #[cfg(test)]
@@ -49,10 +48,6 @@ pub(crate) async fn wait_for_owner_exit(owner_pid: Option<u32>) {
         return;
     }
     wait_for_platform_owner_exit(owner_pid).await;
-}
-
-pub(crate) fn process_is_alive(pid: u32) -> bool {
-    platform_process_is_alive(pid)
 }
 
 #[cfg(test)]

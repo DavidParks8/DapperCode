@@ -16,11 +16,11 @@ const MINIMUMS = {
   desktop: Number(process.env.MIN_DESKTOP_BRANCH_COVERAGE ?? '85'),
 };
 
-/** Parses a `name=path` argument, tolerating a bare path for backwards compatibility. */
-function parseReportArgument(argument, index) {
+/** Parses a `name=path` argument. */
+function parseReportArgument(argument) {
   const separator = argument.indexOf('=');
-  if (separator < 0) {
-    return { name: index === 0 ? 'bridge' : `report-${String(index)}`, reportPath: argument };
+  if (separator <= 0 || separator === argument.length - 1) {
+    throw new Error(`Invalid Rust coverage report argument "${argument}"; expected name=path`);
   }
   return {
     name: argument.slice(0, separator),

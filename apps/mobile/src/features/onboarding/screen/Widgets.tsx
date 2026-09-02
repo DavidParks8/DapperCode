@@ -7,9 +7,8 @@ import Animated, { FadeIn, ReduceMotion } from 'react-native-reanimated';
 
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { computeHitSlop } from '@shared/ui/touchTarget';
-import { motionDuration } from '@shared/ui/motion';
 import { feedback } from '@shared/feedback';
-import { spacing, useAppTheme } from '@shared/theme';
+import { motion, spacing, useAppTheme } from '@shared/theme';
 import { BRIDGE_SETUP_URL, SETUP_STAGES } from './constants';
 import { createOnboardingStyles } from './styles';
 
@@ -180,7 +179,7 @@ export function StatusBanner({
 
   return (
     <Animated.View
-      entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+      entering={FadeIn.duration(motion.duration.routine).reduceMotion(ReduceMotion.System)}
       accessibilityRole={tone === 'error' ? 'alert' : undefined}
       accessibilityLiveRegion={tone === 'error' ? 'assertive' : 'polite'}
       style={[

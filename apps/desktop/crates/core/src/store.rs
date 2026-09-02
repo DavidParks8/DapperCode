@@ -6,7 +6,6 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context, Result};
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -626,7 +625,7 @@ impl FileLease {
             .with_context(|| format!("failed to open {}", path.display()))?;
         platform::secure_private_file(path, &file)
             .with_context(|| format!("failed to secure {}", path.display()))?;
-        file.lock_exclusive()
+        file.lock()
             .with_context(|| format!("failed to lock {}", path.display()))?;
         Ok(Self { file })
     }

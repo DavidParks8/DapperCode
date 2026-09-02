@@ -124,23 +124,9 @@ export async function expectRightAligned(
   await expectEdgeAligned(targets, 'right', options);
 }
 
-export async function expectTopAligned(
-  targets: LocatorGroup,
-  options?: LayoutAssertionOptions,
-): Promise<void> {
-  await expectEdgeAligned(targets, 'top', options);
-}
-
-export async function expectBottomAligned(
-  targets: LocatorGroup,
-  options?: LayoutAssertionOptions,
-): Promise<void> {
-  await expectEdgeAligned(targets, 'bottom', options);
-}
-
 async function expectEdgeAligned(
   targets: LocatorGroup,
-  edge: 'left' | 'right' | 'top' | 'bottom',
+  edge: 'left' | 'right',
   options?: LayoutAssertionOptions,
 ): Promise<void> {
   const tolerance = options?.tolerance ?? DEFAULT_TOLERANCE;
@@ -157,30 +143,6 @@ async function expectEdgeAligned(
           `  element[0]: ${describeRect(first)}\n` +
           `  element[${String(offender + 1)}]: ${describeRect(actual)}\n` +
           `  ${edge} delta: ${String(Math.round((actual[edge] - baseline) * 100) / 100)}px`,
-      );
-    }
-  }, options);
-}
-
-/** Asserts the child is horizontally centered inside the container. */
-export async function expectHorizontallyCentered(
-  child: Locator,
-  container: Locator,
-  options?: LayoutAssertionOptions,
-): Promise<void> {
-  const tolerance = options?.tolerance ?? DEFAULT_TOLERANCE;
-  await pollLayout(async () => {
-    const [childRect, containerRect] = await Promise.all([readRect(child), readRect(container)]);
-    if (!within(childRect.centerX, containerRect.centerX, tolerance)) {
-      const leftInset = childRect.left - containerRect.left;
-      const rightInset = containerRect.right - childRect.right;
-      fail(
-        `Expected the child to be horizontally centered within ${String(tolerance)}px.\n` +
-          `  child:     ${describeRect(childRect)}\n` +
-          `  container: ${describeRect(containerRect)}\n` +
-          `  left inset ${String(Math.round(leftInset * 100) / 100)}px vs right inset ${String(
-            Math.round(rightInset * 100) / 100,
-          )}px`,
       );
     }
   }, options);
@@ -233,27 +195,6 @@ export async function expectVerticalGap(
   }, options);
 }
 
-export async function expectVerticalGapWithin(
-  above: Locator,
-  below: Locator,
-  range: { min: number; max: number },
-  options?: LayoutAssertionOptions,
-): Promise<void> {
-  await pollLayout(async () => {
-    const [aboveRect, belowRect] = await Promise.all([readRect(above), readRect(below)]);
-    const gap = verticalGap(aboveRect, belowRect);
-    if (gap < range.min || gap > range.max) {
-      fail(
-        `Expected a vertical gap between ${String(range.min)}px and ${String(
-          range.max,
-        )}px, measured ${String(Math.round(gap * 100) / 100)}px.\n` +
-          `  above: ${describeRect(aboveRect)}\n` +
-          `  below: ${describeRect(belowRect)}`,
-      );
-    }
-  }, options);
-}
-
 export async function expectHorizontalGap(
   leading: Locator,
   trailing: Locator,
@@ -290,23 +231,6 @@ export async function expectNoOverlap(
         `Expected the elements not to overlap, but they share ${String(
           Math.round(area),
         )}px² of area.\n` +
-          `  first:  ${describeRect(firstRect)}\n` +
-          `  second: ${describeRect(secondRect)}`,
-      );
-    }
-  }, options);
-}
-
-export async function expectOverlaps(
-  first: Locator,
-  second: Locator,
-  options?: LayoutAssertionOptions,
-): Promise<void> {
-  await pollLayout(async () => {
-    const [firstRect, secondRect] = await Promise.all([readRect(first), readRect(second)]);
-    if (overlapArea(firstRect, secondRect) <= 0) {
-      fail(
-        `Expected the elements to overlap, but they are disjoint.\n` +
           `  first:  ${describeRect(firstRect)}\n` +
           `  second: ${describeRect(secondRect)}`,
       );
@@ -412,25 +336,6 @@ export async function expectWithinViewport(
   }, options);
 }
 
-/** Asserts the element is not cut off by its nearest clipping ancestor. */
-export async function expectNotClipped(
-  target: Locator,
-  options?: LayoutAssertionOptions,
-): Promise<void> {
-  const tolerance = options?.tolerance ?? DEFAULT_TOLERANCE;
-  await pollLayout(async () => {
-    const geometry = await readGeometry(target);
-    const clip = geometry.overflowHiddenAncestor;
-    if (clip && !contains(clip, geometry.rect, tolerance)) {
-      fail(
-        `Expected the element not to be clipped by its scrolling or masked ancestor.\n` +
-          `  element:  ${describeRect(geometry.rect)}\n` +
-          `  clip box: ${describeRect(clip)}`,
-      );
-    }
-  }, options);
-}
-
 /** Asserts the element meets the minimum comfortable touch target size. */
 export async function expectTouchTarget(
   target: Locator,
@@ -447,53 +352,6 @@ export async function expectTouchTarget(
         )}px, measured ${String(Math.round(rect.width * 100) / 100)}×${String(
           Math.round(rect.height * 100) / 100,
         )}px.\n  element: ${describeRect(rect)}`,
-      );
-    }
-  }, options);
-}
-
-/** Asserts two elements render at the same size, which keeps paired controls visually balanced. */
-export async function expectSameSize(
-  first: Locator,
-  second: Locator,
-  options?: LayoutAssertionOptions,
-): Promise<void> {
-  const tolerance = options?.tolerance ?? DEFAULT_TOLERANCE;
-  await pollLayout(async () => {
-    const [firstRect, secondRect] = await Promise.all([readRect(first), readRect(second)]);
-    const sameWidth = within(firstRect.width, secondRect.width, tolerance);
-    const sameHeight = within(firstRect.height, secondRect.height, tolerance);
-    if (!sameWidth || !sameHeight) {
-      fail(
-        `Expected both elements to render at the same size within ${String(tolerance)}px.\n` +
-          `  first:  ${describeRect(firstRect)}\n` +
-          `  second: ${describeRect(secondRect)}`,
-      );
-    }
-  }, options);
-}
-
-/** Asserts an element keeps a stable box across an interaction, catching layout jumps. */
-export async function expectStableLayout(
-  target: Locator,
-  action: () => Promise<void>,
-  options?: LayoutAssertionOptions,
-): Promise<void> {
-  const tolerance = options?.tolerance ?? DEFAULT_TOLERANCE;
-  const before = await readRect(target);
-  await action();
-  await pollLayout(async () => {
-    const after = await readRect(target);
-    const moved =
-      !within(after.left, before.left, tolerance) ||
-      !within(after.top, before.top, tolerance) ||
-      !within(after.width, before.width, tolerance) ||
-      !within(after.height, before.height, tolerance);
-    if (moved) {
-      fail(
-        `Expected the element's layout to stay stable across the interaction.\n` +
-          `  before: ${describeRect(before)}\n` +
-          `  after:  ${describeRect(after)}`,
       );
     }
   }, options);

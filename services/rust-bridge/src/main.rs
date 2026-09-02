@@ -46,6 +46,7 @@ use dappercode_bridge_core::{
     BridgeError,
 };
 use dappercode_bridge_path_policy::{PathKind, PathPolicy};
+use dappercode_bridge_platform::{process_is_alive, wait_for_shutdown_signal};
 use futures_util::{SinkExt, StreamExt};
 use reqwest::{Method as HttpMethod, Url};
 use serde::{Deserialize, Serialize};
@@ -149,7 +150,7 @@ async fn main() {
         }
     };
     if let Some(owner_pid) = owner_pid {
-        if !owner_watchdog::process_is_alive(owner_pid) {
+        if !process_is_alive(owner_pid) {
             eprintln!("owning process {owner_pid} is not running; refusing to start");
             std::process::exit(1);
         }

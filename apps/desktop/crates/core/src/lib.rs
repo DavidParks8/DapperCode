@@ -5,7 +5,6 @@
 mod broker_supervisor;
 mod config;
 mod platform;
-mod platform_setup;
 mod secrets;
 mod setup;
 mod store;
@@ -16,9 +15,9 @@ pub use config::{
     runtime_executable_available, validate_workspace, BridgeRuntimeConfig, RuntimePaths,
 };
 pub use platform::{
-    process_start_identity, stop_child, wait_for_shutdown_signal, NetworkMode, SetupPreflightError,
+    process_start_identity, resolve_bridge_host, stop_child, wait_for_shutdown_signal, NetworkMode,
+    SetupPreflightError,
 };
-pub use platform_setup::resolve_bridge_host;
 pub use secrets::{BridgeSecret, SecretBackend, SecretStore};
 pub use setup::{
     discover_agent_executable, refresh_registered_agent, setup_profile, AgentRefresh, SetupRequest,

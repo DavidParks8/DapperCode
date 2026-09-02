@@ -8,10 +8,6 @@
  * the seed and fall back to onboarding.
  */
 
-export const APP_STATE_STORAGE_KEY = 'dappercode.app-state.v1';
-export const APP_STATE_VERSION = 3;
-export const SEEDED_PROFILE_ID = 'harness-profile';
-
 export interface SeedOptions {
   readonly bridgeUrl: string;
   readonly bridgeToken: string;

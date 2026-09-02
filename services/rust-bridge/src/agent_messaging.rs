@@ -14,7 +14,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use futures::{Stream, StreamExt};
+use futures_util::{Stream, StreamExt};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
@@ -1145,7 +1145,7 @@ async fn open_legacy_sse(
     });
 
     let endpoint = format!("{}?sessionId={session_id}", state.message_url);
-    let first = futures::stream::once(async move {
+    let first = futures_util::stream::once(async move {
         Ok::<_, Infallible>(Event::default().event("endpoint").data(endpoint))
     });
     let messages = LegacySseStream {

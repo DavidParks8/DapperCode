@@ -9,7 +9,7 @@ import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { feedback } from '@shared/feedback';
 import type { AppTheme } from '@shared/theme';
 import { computeHitSlop } from '@shared/ui/touchTarget';
-import { motionDuration } from '@shared/ui/motion';
+import { motion } from '@shared/theme';
 import { WorkspacePickerBrowser, type WorkspacePickerEntryMenuTarget } from './Browser';
 import { WorkspacePickerListFooter, WorkspacePickerToolbar } from './Footer';
 import { formatFolderCount, toPathCrumbs } from './helpers';
@@ -182,8 +182,8 @@ function WorkspacePickerNavBar({
       <View style={styles.navBarTitleSlot} pointerEvents={collapsed ? 'auto' : 'none'}>
         {collapsed ? (
           <Animated.View
-            entering={FadeIn.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
-            exiting={FadeOut.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
+            entering={FadeIn.duration(motion.duration.immediate).reduceMotion(ReduceMotion.System)}
+            exiting={FadeOut.duration(motion.duration.immediate).reduceMotion(ReduceMotion.System)}
             style={styles.navBarTitleWrap}
           >
             <View ref={inlineTitleRef} collapsable={false}>

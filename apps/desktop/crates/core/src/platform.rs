@@ -187,7 +187,7 @@ pub(crate) fn credential_layout() -> CredentialLayout {
     current().credential_layout()
 }
 
-pub(crate) fn resolve_bridge_host(
+pub fn resolve_bridge_host(
     mode: NetworkMode,
     manual_lan_host: Option<&str>,
 ) -> Result<String, SetupPreflightError> {

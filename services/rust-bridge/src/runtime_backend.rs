@@ -11,7 +11,6 @@ use agent_client_protocol::schema::v1::{
     ContentBlock, ElicitationContentValue, NewSessionRequest, ResourceLink,
     SessionConfigOptionValue,
 };
-use dappercode_bridge_platform::wait_for_shutdown_signal as wait_for_platform_shutdown;
 use futures_util::future::BoxFuture;
 use tokio_util::sync::CancellationToken;
 
@@ -2675,10 +2674,6 @@ pub(super) fn bridge_prompt(params: &Value) -> Result<Vec<ContentBlock>, String>
         return Err("ACP prompt requires at least one content block".to_string());
     }
     Ok(prompt)
-}
-
-pub(super) async fn wait_for_shutdown_signal() -> &'static str {
-    wait_for_platform_shutdown().await
 }
 
 #[cfg(test)]
