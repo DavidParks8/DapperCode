@@ -3395,6 +3395,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn interrupted_settlement_for_another_thread_does_not_mutate_the_schedule() {
+        let scheduler = ScheduledPromptService::inert_for_test();
+        let schedule_id = Uuid::new_v4().to_string();
+        let thread_id = test_thread("interrupted-settlement");
+        let entry = fixture_entry(
+            schedule_id.clone(),
+            thread_id.clone(),
+            Utc::now() + chrono::Duration::hours(1),
+        );
+        scheduler
+            .state
+            .lock()
+            .await
+            .prompts
+            .insert(schedule_id.clone(), entry.clone());
+        let (dispatcher, _) = make_dispatcher(false, Vec::new());
+        let queue = make_queue(dispatcher, None);
+        queue
+            .interrupted_definitive_settlements
+            .lock()
+            .await
+            .insert(
+                submission_id(&schedule_id),
+                (test_thread("other"), "interrupted".to_string()),
+            );
+
+        scheduler
+            .persist_interrupted_definitive_settlements(&queue)
+            .await;
+
+        assert_eq!(
+            scheduler.state.lock().await.prompts[&schedule_id].status,
+            entry.status
+        );
+        assert!(queue.interrupted_definitive_settlements().await.is_empty());
+    }
+
+    #[tokio::test]
     async fn ready_work_preserves_cancellation_queue_and_retry_on_persist_failure() {
         let due = Utc::now() - chrono::Duration::seconds(1);
 
