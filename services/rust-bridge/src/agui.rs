@@ -8,8 +8,8 @@ use crate::agui_generated::{
     AgUiEvent, AgUiEventContent, AgUiEventRole, AgUiEventType, Delta, Function, Message,
     MessageContent, MessageRole as AgUiMessageRole, ToolCall, ToolCallType,
 };
-use crate::resource_limits::NOTIFICATION_MAX_BYTES;
 use crate::*;
+use dappercode_bridge_core::resource_limits::NOTIFICATION_MAX_BYTES;
 use sha2::{Digest, Sha256};
 
 pub(super) const AG_UI_EVENT_METHOD: &str = "bridge/agui.event";

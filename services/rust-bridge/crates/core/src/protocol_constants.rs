@@ -1,0 +1,17 @@
+pub const DEFAULT_ATTACHMENTS_DIR_NAME: &str = ".dappercode-attachments";
+pub const BRIDGE_PROTOCOL_VERSION: u32 = 2;
+pub const NOTIFICATION_REPLAY_BUFFER_SIZE: usize = 2_000;
+pub const NOTIFICATION_REPLAY_MAX_LIMIT: usize = 1_000;
+pub const INTERNAL_NOTIFICATION_CHANNEL_CAPACITY: usize = 1_024;
+pub const WS_CLIENT_QUEUE_CAPACITY: usize = 256;
+pub const RPC_SERVER_OVERLOADED: i64 = -32005;
+pub const THREAD_LIST_STREAM_BATCH_METHOD: &str = "bridge/thread/list/stream/batch";
+pub const THREAD_LIST_STREAM_ERROR_METHOD: &str = "bridge/thread/list/stream/error";
+pub const THREAD_LIST_STREAM_DEFAULT_LIMITS: [usize; 3] = [5, 20, 50];
+pub const THREAD_LIST_STREAM_MAX_LIMIT: usize = 100;
+pub const THREAD_LIST_STREAM_DEFAULT_DELAY_MS: u64 = 900;
+pub const THREAD_LIST_STREAM_MAX_DELAY_MS: u64 = 5_000;
+pub const BROWSER_PREVIEW_COOKIE_NAME: &str = "dappercode_preview";
+pub const BROWSER_PREVIEW_VIEWPORT_COOKIE_NAME: &str = "dappercode_preview_vp";
+pub const BROWSER_PREVIEW_PROXY_PREFIX: &str = "/__dappercode_proxy__";
+pub const BROWSER_PREVIEW_RUNTIME_SCRIPT_PATH: &str = "/__dappercode_preview_runtime__.js";

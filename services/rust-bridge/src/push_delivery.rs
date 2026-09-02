@@ -1,4 +1,5 @@
 use crate::*;
+use dappercode_bridge_core::resource_limits::truncate_utf8_bytes;
 
 // ---- Push notifications ----------------------------------------------------
 //
@@ -189,7 +190,7 @@ impl PushService {
         let entry = replies.entry(thread_id.to_string()).or_default();
         if entry.len() < PUSH_PREVIEW_ACCUMULATE_CAP {
             let remaining = PUSH_PREVIEW_ACCUMULATE_CAP - entry.len();
-            let (bounded, _) = resource_limits::truncate_utf8_bytes(content, remaining);
+            let (bounded, _) = truncate_utf8_bytes(content, remaining);
             entry.push_str(&bounded);
         }
     }

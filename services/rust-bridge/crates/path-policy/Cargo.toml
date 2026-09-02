@@ -1,0 +1,21 @@
+[package]
+name = "dappercode-bridge-path-policy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+test-support = []
+
+[lints]
+workspace = true
+
+[dependencies]
+dappercode-bridge-core.workspace = true
+dappercode-bridge-platform.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true

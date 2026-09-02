@@ -18,17 +18,17 @@ function Invoke-Cargo {
 # The full desktop suite runs in the Desktop macOS job. Compile every test on Windows, then execute
 # the Windows strategy and supervisor tests without running Unix-only fixtures such as /bin/echo.
 Invoke-Cargo @(
-    "test", "--locked",
+    "test", "--locked", "--workspace",
     "--manifest-path", (Join-Path $root "apps/desktop/Cargo.toml"),
     "--no-run"
 )
 Invoke-Cargo @(
-    "test", "--locked",
+    "test", "--locked", "--package", "dappercode-desktop-core",
     "--manifest-path", (Join-Path $root "apps/desktop/Cargo.toml"),
     "platform::", "--", "--test-threads=1"
 )
 Invoke-Cargo @(
-    "test", "--locked",
+    "test", "--locked", "--package", "dappercode-desktop-core",
     "--manifest-path", (Join-Path $root "apps/desktop/Cargo.toml"),
     "supervisor::tests::windows_", "--", "--test-threads=1"
 )
@@ -36,12 +36,12 @@ Invoke-Cargo @(
 # The full bridge suite runs in the Rust Bridge job on Ubuntu. Compile every test on Windows, then
 # execute the Windows strategy tests without running Unix-only fixtures such as /bin/echo.
 Invoke-Cargo @(
-    "test", "--locked", "--all-targets", "--all-features",
+    "test", "--locked", "--workspace", "--all-targets", "--all-features",
     "--manifest-path", (Join-Path $root "services/rust-bridge/Cargo.toml"),
     "--no-run"
 )
 Invoke-Cargo @(
-    "test", "--locked", "--all-targets", "--all-features",
+    "test", "--locked", "--package", "dappercode-bridge-platform", "--all-targets", "--all-features",
     "--manifest-path", (Join-Path $root "services/rust-bridge/Cargo.toml"),
     "platform::", "--", "--test-threads=1"
 )

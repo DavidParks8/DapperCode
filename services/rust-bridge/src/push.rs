@@ -4,14 +4,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock};
 
-use crate::{
-    now_iso, read_bool,
-    resource_limits::{
-        PUSH_DEVICE_NAME_MAX_BYTES, PUSH_ID_MAX_BYTES, PUSH_PLATFORM_MAX_BYTES,
-        PUSH_REGISTRY_MAX_BYTES, PUSH_REGISTRY_MAX_DEVICES, PUSH_TOKEN_MAX_BYTES,
-    },
-    storage::atomic_write_private,
-    BridgeError,
+use crate::{now_iso, read_bool, storage::atomic_write_private, BridgeError};
+use dappercode_bridge_core::resource_limits::{
+    PUSH_DEVICE_NAME_MAX_BYTES, PUSH_ID_MAX_BYTES, PUSH_PLATFORM_MAX_BYTES,
+    PUSH_REGISTRY_MAX_BYTES, PUSH_REGISTRY_MAX_DEVICES, PUSH_TOKEN_MAX_BYTES,
 };
 
 const PUSH_REGISTRY_FILE_NAME: &str = "push-registry.json";

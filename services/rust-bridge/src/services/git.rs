@@ -4,16 +4,21 @@ use std::{
     sync::Arc,
 };
 
+use dappercode_bridge_core::{
+    resource_limits::{
+        truncate_utf8_bytes, GIT_DIFF_MAX_BYTES, GIT_STATUS_MAX_BYTES, GIT_STATUS_MAX_FILES,
+    },
+    BridgeError,
+};
+use dappercode_bridge_path_policy::PathPolicy;
+use dappercode_bridge_platform::git_global_config_path;
 use reqwest::Url;
 
-use crate::resource_limits::{
-    truncate_utf8_bytes, GIT_DIFF_MAX_BYTES, GIT_STATUS_MAX_BYTES, GIT_STATUS_MAX_FILES,
-};
 use crate::{
-    normalize_path, path_policy::PathPolicy, BridgeError, GitBranchSummary, GitBranchesResponse,
-    GitCloneResponse, GitCommitResponse, GitDiffResponse, GitHistoryCommit, GitHistoryResponse,
-    GitPushResponse, GitStageAllResponse, GitStageResponse, GitStatusEntry, GitStatusResponse,
-    GitSwitchResponse, GitUnstageAllResponse, GitUnstageResponse,
+    normalize_path, GitBranchSummary, GitBranchesResponse, GitCloneResponse, GitCommitResponse,
+    GitDiffResponse, GitHistoryCommit, GitHistoryResponse, GitPushResponse, GitStageAllResponse,
+    GitStageResponse, GitStatusEntry, GitStatusResponse, GitSwitchResponse, GitUnstageAllResponse,
+    GitUnstageResponse,
 };
 
 use super::{terminal::pinned_git_config_keys, TerminalService};
@@ -157,7 +162,7 @@ impl GitService {
                             "--no-ext-diff",
                             "--no-index",
                             "--",
-                            crate::platform::git_global_config_path(),
+                            git_global_config_path(),
                             entry.path.as_str(),
                         ],
                         true,
@@ -1312,7 +1317,9 @@ mod tests {
         validate_effective_git_config, validate_remote_name, validate_remote_url,
         validate_transport_config_output, GitSwitchTarget,
     };
-    use crate::{path_policy::PathPolicy, GitBranchSummary};
+    use crate::GitBranchSummary;
+    use dappercode_bridge_core::resource_limits::GIT_STATUS_MAX_FILES;
+    use dappercode_bridge_path_policy::PathPolicy;
     use std::{
         fs,
         path::{Path, PathBuf},
@@ -2589,7 +2596,7 @@ mod tests {
     async fn truncates_status_after_maximum_file_count() {
         let repo = TestDir::new("status-limit");
         repo.init();
-        for index in 0..=crate::resource_limits::GIT_STATUS_MAX_FILES {
+        for index in 0..=GIT_STATUS_MAX_FILES {
             fs::write(repo.0.join(format!("file-{index:04}.txt")), "")
                 .expect("write untracked file");
         }
@@ -2599,14 +2606,8 @@ mod tests {
             .await
             .expect("limited status");
         assert!(status.truncated);
-        assert_eq!(
-            status.total_files,
-            crate::resource_limits::GIT_STATUS_MAX_FILES + 1
-        );
-        assert_eq!(
-            status.files.len(),
-            crate::resource_limits::GIT_STATUS_MAX_FILES
-        );
+        assert_eq!(status.total_files, GIT_STATUS_MAX_FILES + 1);
+        assert_eq!(status.files.len(), GIT_STATUS_MAX_FILES);
         assert_eq!(status.omitted_files, 1);
     }
 }

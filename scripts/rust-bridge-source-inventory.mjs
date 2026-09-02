@@ -1,23 +1,33 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
-const TEST_ONLY_RUST_FILES = /^(?:coverage_main_.+|main_tests)\.rs$/;
+const TEST_ONLY_RUST_FILES = new Set(['source_policy.rs']);
 
 const walkRustSources = (directory) =>
-  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const entryPath = path.join(directory, entry.name);
-    if (entry.isDirectory()) return walkRustSources(entryPath);
-    if (!entry.name.endsWith('.rs') || TEST_ONLY_RUST_FILES.test(entry.name)) return [];
-    return [entryPath];
-  });
+  readdirSync(directory, { withFileTypes: true })
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .flatMap((entry) => {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) return walkRustSources(entryPath);
+      if (!entry.name.endsWith('.rs') || TEST_ONLY_RUST_FILES.has(entry.name)) return [];
+      return [entryPath];
+    });
 
 export const readRustBridgeProductionSources = (root) => {
-  const sourceRoot = path.join(root, 'services/rust-bridge/src');
+  const bridgeRoot = path.join(root, 'services/rust-bridge');
+  const cratesRoot = path.join(bridgeRoot, 'crates');
+  const crateSourceRoots = existsSync(cratesRoot)
+    ? readdirSync(cratesRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => path.join(cratesRoot, entry.name, 'src'))
+        .filter(existsSync)
+        .sort()
+    : [];
+  const sourceRoots = [path.join(bridgeRoot, 'src'), ...crateSourceRoots];
   return new Map(
-    walkRustSources(sourceRoot).map((file) => [
-      path.relative(root, file),
-      readFileSync(file, 'utf8'),
-    ]),
+    sourceRoots
+      .flatMap(walkRustSources)
+      .map((file) => [path.relative(root, file), readFileSync(file, 'utf8')]),
   );
 };
 

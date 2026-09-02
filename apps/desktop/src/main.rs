@@ -3,28 +3,16 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
+use dappercode_broker::BrokerServer;
+#[cfg(test)]
+use dappercode_desktop_core::BrokerSettings;
+use dappercode_desktop_core::{
+    discover_agent_executable, profile_id_for, resolve_bridge_host, setup_profile,
+    validate_workspace, AppPaths, BridgeSnapshot, BridgeState,
+    BridgeSupervisor as LegacyBridgeSupervisor, BrokerLifecycleAction, BrokerSupervisor, FileLease,
+    NetworkMode, Profile, RuntimePaths, SecretStore, SetupRequest,
+};
 use serde::Serialize;
-
-// LLVM 21 crashes while exporting this Axum module's coverage instantiation groups. Its behavioral
-// tests still run in coverage jobs; only the broken compiler mapping is disabled.
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod broker;
-mod broker_supervisor;
-mod config;
-mod platform;
-mod secrets;
-mod setup;
-mod store;
-#[allow(dead_code)]
-mod supervisor;
-
-use broker_supervisor::{BrokerLifecycleAction, BrokerSupervisor};
-use config::{validate_workspace, RuntimePaths};
-use platform::NetworkMode;
-use secrets::SecretStore;
-use setup::{discover_agent_executable, setup_profile, SetupRequest};
-use store::{profile_id_for, AppPaths, FileLease, Profile};
-use supervisor::{BridgeSnapshot, BridgeState, BridgeSupervisor as LegacyBridgeSupervisor};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,7 +108,7 @@ fn run() -> Result<()> {
             .enable_all()
             .build()
             .context("failed to create broker runtime")?;
-        runtime.block_on(broker::BrokerServer::new(paths, secrets, settings, owner_pid).serve())?;
+        runtime.block_on(BrokerServer::new(paths, secrets, settings, owner_pid).serve())?;
         return Ok(());
     }
 
@@ -213,7 +201,7 @@ fn run_setup(
     };
     let host = option(&mut args, "--host")
         .map(Ok)
-        .unwrap_or_else(|| platform::resolve_bridge_host(mode, None))?;
+        .unwrap_or_else(|| resolve_bridge_host(mode, None))?;
     let bridge_port = option(&mut args, "--port")
         .map(|value| {
             value
@@ -690,7 +678,7 @@ mod tests {
         let paths = AppPaths::for_tests(data.path().to_path_buf());
         paths
             .update_config(|config| {
-                config.broker = Some(store::BrokerSettings::new(
+                config.broker = Some(BrokerSettings::new(
                     "local".to_string(),
                     "192.168.1.20".to_string(),
                     18_787,

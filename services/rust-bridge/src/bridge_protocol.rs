@@ -17,60 +17,6 @@ pub(super) struct BrowserPreviewCloseRequest {
     pub(super) session_id: String,
 }
 
-#[derive(Debug)]
-pub(super) struct BridgeError {
-    pub(super) code: i64,
-    pub(super) message: String,
-    pub(super) data: Option<Value>,
-}
-
-impl BridgeError {
-    pub(super) fn method_not_found(message: &str) -> Self {
-        Self {
-            code: -32601,
-            message: message.to_string(),
-            data: None,
-        }
-    }
-
-    pub(super) fn invalid_params(message: &str) -> Self {
-        Self {
-            code: -32602,
-            message: message.to_string(),
-            data: None,
-        }
-    }
-
-    pub(super) fn resource_limit(resource: &str, limit: usize, actual: usize) -> Self {
-        Self {
-            code: -32602,
-            message: format!("{resource} exceeds limit of {limit}"),
-            data: Some(json!({
-                "error": "resource_limit_exceeded",
-                "resource": resource,
-                "limit": limit,
-                "actual": actual,
-            })),
-        }
-    }
-
-    pub(super) fn server(message: &str) -> Self {
-        Self {
-            code: -32000,
-            message: message.to_string(),
-            data: None,
-        }
-    }
-
-    pub(super) fn forbidden(error: &str, message: &str) -> Self {
-        Self {
-            code: -32003,
-            message: message.to_string(),
-            data: Some(json!({ "error": error })),
-        }
-    }
-}
-
 pub(super) fn queue_operation_error(error: String) -> BridgeError {
     let mut parts = error.split(':');
     if parts.next() == Some("resource_limit") {

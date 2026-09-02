@@ -16,9 +16,10 @@ The bridge is private-network software. Never treat it as internet-safe by defau
 ### Desktop
 
 - `apps/desktop/src/main.rs`: Rust `dappercode` operator CLI and JSON contract
-- `apps/desktop/src/setup.rs`: local ACP executable registration and secure config
-- `apps/desktop/src/supervisor.rs`: locked process lifecycle and authenticated status
-- `apps/desktop/src/config.rs`: runtime/resource/config discovery
+- `apps/desktop/crates/core/src/setup.rs`: local ACP executable registration and secure config
+- `apps/desktop/crates/core/src/supervisor.rs`: locked process lifecycle and authenticated status
+- `apps/desktop/crates/core/src/config.rs`: runtime/resource/config discovery
+- `apps/desktop/crates/broker`: authenticated broker and worker proxy
 - `apps/desktop/macos/DapperCodeApp.swift`: native SwiftUI/AppKit menu-bar shell
 - `scripts/build-desktop-macos.mjs`: deterministic macOS app assembly
 
@@ -30,6 +31,9 @@ SwiftUI/AppKit controls. Windows will require a native WinUI shell for Mica/futu
 ### Bridge
 
 - `services/rust-bridge/src/main.rs`: Axum composition root
+- `services/rust-bridge/crates/core`: stable protocol constants, limits, and errors
+- `services/rust-bridge/crates/platform`: compile-time-selected native OS services
+- `services/rust-bridge/crates/path-policy`: secure workspace and attachment path resolution
 - `src/acp/manager.rs`: installed ACP agent/session lifecycle
 - `src/acp/runtime.rs`: typed ACP transport and events
 - `src/services/git.rs`: Git helpers
@@ -40,8 +44,8 @@ environment in memory from its central store and never writes a secret to a repo
 registers and hashes an already-installed ACP executable; it does not install package-manager
 distributions.
 
-- `apps/desktop/src/store.rs`: central data directory, per-workspace profiles, `config.json`
-- `apps/desktop/src/secrets.rs`: keychain-backed bridge tokens with a private-file fallback
+- `apps/desktop/crates/core/src/store.rs`: central data directory, per-workspace profiles, `config.json`
+- `apps/desktop/crates/core/src/secrets.rs`: keychain-backed bridge tokens with a private-file fallback
 - `services/rust-bridge/src/owner_watchdog.rs`: bridge exits when the desktop app does
 
 ### Mobile
@@ -79,7 +83,7 @@ Do not automatically restart a user bridge during debugging unless explicitly re
 ## Editing Rules
 
 - Keep bridge contract changes mirrored in Rust, mobile types/client, fixtures, tests, and docs.
-- Setup/lifecycle changes belong under `apps/desktop/src` and native shell directories, not package scripts.
+- Setup/lifecycle changes belong under `apps/desktop/crates/core` and native shell directories, not package scripts.
 - Never add a Node bridge package, JavaScript operator fallback, or bridge update RPC.
 - Never write app-owned configuration or state into a user repository; it belongs in the central data
   directory (`DAPPERCODE_DATA_DIR` overrides it for tests).
@@ -114,18 +118,18 @@ Do not automatically restart a user bridge during debugging unless explicitly re
 Desktop changes:
 
 ```bash
-pnpm run cargo fmt --check --manifest-path apps/desktop/Cargo.toml
-pnpm run cargo clippy --locked --all-targets --manifest-path apps/desktop/Cargo.toml -- -D warnings
-pnpm run cargo test --locked --manifest-path apps/desktop/Cargo.toml -- --test-threads=1
+pnpm run cargo fmt --all --check --manifest-path apps/desktop/Cargo.toml
+pnpm run cargo clippy --locked --workspace --all-targets --manifest-path apps/desktop/Cargo.toml -- -D warnings
+pnpm run cargo test --locked --workspace --manifest-path apps/desktop/Cargo.toml -- --test-threads=1
 pnpm run desktop:build:macos
 ```
 
 Bridge changes:
 
 ```bash
-pnpm run cargo fmt --check --manifest-path services/rust-bridge/Cargo.toml
-pnpm run cargo check --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml
-pnpm run cargo test --locked --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml -- --test-threads=1
+pnpm run cargo fmt --all --check --manifest-path services/rust-bridge/Cargo.toml
+pnpm run cargo check --locked --workspace --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml
+pnpm run cargo test --locked --workspace --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml -- --test-threads=1
 ```
 
 Mobile changes:

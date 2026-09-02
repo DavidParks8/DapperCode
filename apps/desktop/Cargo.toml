@@ -1,35 +1,43 @@
 [package]
 name = "dappercode-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Native desktop control surface for the DapperCode bridge"
+license.workspace = true
+publish.workspace = true
+
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
-description = "Native desktop control surface for the DapperCode bridge"
+rust-version = "1.97.1"
 license = "MIT"
+publish = false
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage_nightly)"] }
-
-[[bin]]
-name = "dappercode"
-path = "src/main.rs"
-
-[dependencies]
+[workspace.dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["ws", "http1", "tokio"] }
+dappercode-broker = { path = "crates/broker" }
+dappercode-desktop-core = { path = "crates/core" }
+fs2 = "0.4.3"
 futures-util = "0.3"
 getrandom = "0.3"
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native"] }
 libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
-serde = { version = "1.0", features = ["derive"] }
+serde = "1.0"
 serde_json = "1.0"
 sha2 = "0.10"
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
-tokio = { version = "1", features = ["full"] }
+tempfile = "3.23"
+tokio = "1"
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 ureq = { version = "3.3.0", default-features = false, features = ["json"] }
-
-[target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",
@@ -42,5 +50,24 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Threading",
 ] }
 
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage_nightly)"] }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "dappercode"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+dappercode-broker.workspace = true
+dappercode-desktop-core.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["full"] }
+
 [dev-dependencies]
-tempfile = "3.23"
+dappercode-desktop-core = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true

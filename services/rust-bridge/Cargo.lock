@@ -432,14 +432,15 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
+ "dappercode-bridge-core",
+ "dappercode-bridge-path-policy",
+ "dappercode-bridge-platform",
  "futures-util",
  "getrandom 0.3.4",
- "libc",
  "qr2term",
  "regex",
  "reqwest",
  "rmcp",
- "rustix 1.1.4",
  "serde",
  "serde_json",
  "sha2",
@@ -448,6 +449,33 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite",
  "tokio-util",
+ "uuid",
+]
+
+[[package]]
+name = "dappercode-bridge-core"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "dappercode-bridge-path-policy"
+version = "0.1.0"
+dependencies = [
+ "dappercode-bridge-core",
+ "dappercode-bridge-platform",
+ "uuid",
+]
+
+[[package]]
+name = "dappercode-bridge-platform"
+version = "0.1.0"
+dependencies = [
+ "dappercode-bridge-core",
+ "libc",
+ "rustix 1.1.4",
+ "tokio",
  "uuid",
  "windows-sys 0.61.2",
 ]
@@ -607,7 +635,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1727,7 +1755,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2000,7 +2028,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

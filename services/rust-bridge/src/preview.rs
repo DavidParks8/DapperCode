@@ -6,6 +6,7 @@ use std::{
 
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
+use dappercode_bridge_platform::discover_loopback_listening_ports as platform_listening_ports;
 use futures_util::{stream, StreamExt};
 use getrandom::fill as fill_random;
 use reqwest::{Client as HttpClient, Url};
@@ -329,7 +330,7 @@ fn build_preview_bootstrap_path(
 }
 
 async fn discover_loopback_listening_ports(excluded_ports: &[u16]) -> Vec<u16> {
-    let mut ports = crate::platform::discover_loopback_listening_ports().await;
+    let mut ports = platform_listening_ports().await;
     ports.retain(|port| !excluded_ports.contains(port));
     ports
 }
