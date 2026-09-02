@@ -40,6 +40,11 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   /**
    * One static server per worker, always on an ephemeral port. The bundle itself is built once and
    * shared, but nothing about serving it is global, so concurrent runs never contend.
+   *
+   * `globalSetup` already forced the build before any worker existed, so `ensureWebBuild` here is
+   * normally just the fast, already-complete-on-disk check. It stays in the fixture too as a
+   * defense-in-depth fallback, but nothing about worker readiness is allowed to depend on winning a
+   * race against a cold `expo export`.
    */
   site: [
     async ({}, use) => {
