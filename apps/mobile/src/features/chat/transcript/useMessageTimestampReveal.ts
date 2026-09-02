@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Gesture } from 'react-native-gesture-handler';
 import { Easing, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 
-import { motionDuration, motionEasing } from '@shared/ui/motion';
+import { motion } from '@shared/theme';
 
 export const MESSAGE_TIMESTAMP_REVEAL_DISTANCE = 72;
 
@@ -26,8 +26,8 @@ export function useMessageTimestampReveal(
         })
         .onFinalize(() => {
           translationX.value = withTiming(0, {
-            duration: reduceMotion ? 0 : motionDuration.routine,
-            easing: Easing.bezier(...motionEasing.standard),
+            duration: reduceMotion ? 0 : motion.duration.routine,
+            easing: Easing.bezier(...motion.easing.standard),
           });
         }),
     [reduceMotion, translationX],

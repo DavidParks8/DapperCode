@@ -82,12 +82,10 @@ Expected a vertical gap of 40px (±1), measured 0px.
   below: x=0 y=780 w=390 h=64 (right=390, bottom=844)
 ```
 
-Available: `expectVisible`, `expectLeftAligned` / `Right` / `Top` / `Bottom`,
-`expectHorizontallyCentered`, `expectSymmetricHorizontalInsets`, `expectVerticalGap`,
-`expectVerticalGapWithin`, `expectHorizontalGap`, `expectNoOverlap`, `expectOverlaps`,
+Available: `expectVisible`, `expectLeftAligned`, `expectRightAligned`,
+`expectSymmetricHorizontalInsets`, `expectVerticalGap`, `expectHorizontalGap`, `expectNoOverlap`,
 `expectStackedVertically`, `expectRowOrder`, `expectContainedWithin`, `expectWithinViewport`,
-`expectNotClipped`, `expectTouchTarget`, `expectSameSize`, `expectStableLayout`,
-`expectStableDuring`.
+`expectTouchTarget`, `expectStableDuring`.
 
 Group assertions accept either an array of locators or a single locator that matches many, so list
 rows can be passed straight in.

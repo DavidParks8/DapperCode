@@ -4,7 +4,7 @@ import Animated, { FadeInDown, ReduceMotion } from 'react-native-reanimated';
 import { useEffect, useMemo, useState } from 'react';
 
 import type { PendingApproval } from '@bridge/types/types';
-import { useAppTheme, type AppTheme } from '@shared/theme';
+import { motion, useAppTheme, type AppTheme } from '@shared/theme';
 import { feedback } from '@shared/feedback';
 import {
   controlAccessibilityState,
@@ -12,7 +12,6 @@ import {
   useAccessibilityAnnouncement,
 } from '@shared/accessibility';
 import { computeHitSlop } from '@shared/ui/touchTarget';
-import { motionDuration } from '@shared/ui/motion';
 
 interface ApprovalBannerProps {
   approval: PendingApproval;
@@ -63,7 +62,7 @@ export function ApprovalBanner({ approval, onResolve }: ApprovalBannerProps) {
 
   return (
     <Animated.View
-      entering={FadeInDown.duration(motionDuration.layout).reduceMotion(ReduceMotion.System)}
+      entering={FadeInDown.duration(motion.duration.layout).reduceMotion(ReduceMotion.System)}
       style={styles.container}
       accessibilityLiveRegion="assertive"
     >

@@ -8,14 +8,14 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { motionDuration, motionEasing } from '@shared/ui/motion';
+import { motion } from '@shared/theme';
 import type { Chat } from '@bridge/types/types';
 import type { ActivityState } from '../helpers/helpers';
 import type { ActivityTone } from '../state/runtime';
 import { ActivityEvent } from './ActivityEvent';
 import { useActivityElapsedMs } from './activityDuration';
 
-export const ACTIVITY_COLLAPSE_DURATION_MS = motionDuration.layout;
+export const ACTIVITY_COLLAPSE_DURATION_MS = motion.duration.layout;
 
 /**
  * Only a settled row earns a graceful exit. A live row that disappears has been superseded — by a
@@ -24,7 +24,7 @@ export const ACTIVITY_COLLAPSE_DURATION_MS = motionDuration.layout;
  */
 const COLLAPSIBLE_TONES = new Set<ActivityTone>(['complete', 'error']);
 
-const COLLAPSE_EASING = Easing.bezier(...motionEasing.accelerate);
+const COLLAPSE_EASING = Easing.bezier(...motion.easing.accelerate);
 const COLLAPSE_CONFIG = {
   duration: ACTIVITY_COLLAPSE_DURATION_MS,
   easing: COLLAPSE_EASING,

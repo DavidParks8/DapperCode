@@ -28,9 +28,11 @@ try {
   }
 
   if (
-    !/Button\("About DapperCode"\)\s*\{\s*AboutPanelPresenter\.present\(\)\s*\}/.test(traySource)
+    !/Button\("About DapperCode"\)\s*\{\s*NSApplication\.shared\.activate\(ignoringOtherApps: true\)\s*NSApplication\.shared\.orderFrontStandardAboutPanel\(nil\)\s*\}/.test(
+      traySource,
+    )
   ) {
-    throw new Error('macOS tray menu does not invoke the tested About panel action.');
+    throw new Error('macOS tray menu does not activate the app before showing its About panel.');
   }
 
   execFileSync(
@@ -38,7 +40,6 @@ try {
     [
       'swiftc',
       '-parse-as-library',
-      'apps/desktop/macos/AboutPanelPresenter.swift',
       'apps/desktop/macos/AppTermination.swift',
       'apps/desktop/macos/BridgeStatusObserver.swift',
       'apps/desktop/macos/tests/AppTerminationTests.swift',

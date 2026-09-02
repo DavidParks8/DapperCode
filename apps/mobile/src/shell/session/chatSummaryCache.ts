@@ -350,7 +350,7 @@ function boundChatSummaryCache(cache: ChatSummaryCache): ChatSummaryCache {
   );
   const entries: ChatSummaryCacheEntry[] = [];
   const emptyCache = { ...cache, entries: [] };
-  let cacheBytes = utf8ByteLength(JSON.stringify(emptyCache));
+  let cacheBytes = new TextEncoder().encode(JSON.stringify(emptyCache)).length;
   for (const entry of ordered) {
     if (entries.length >= CHAT_SUMMARY_CACHE_MAX_ENTRIES) {
       break;
@@ -359,7 +359,7 @@ function boundChatSummaryCache(cache: ChatSummaryCache): ChatSummaryCache {
       summary: cloneChatSummary(entry.summary),
       cachedAt: entry.cachedAt,
     };
-    const entryBytes = utf8ByteLength(JSON.stringify(clonedEntry));
+    const entryBytes = new TextEncoder().encode(JSON.stringify(clonedEntry)).length;
     const separatorBytes = entries.length > 0 ? 1 : 0;
     if (cacheBytes + separatorBytes + entryBytes > CHAT_SUMMARY_CACHE_MAX_BYTES) {
       continue;
@@ -464,13 +464,4 @@ function optionalBoolean<K extends keyof ChatSummary>(
   return typeof source[key] === 'boolean'
     ? ({ [key]: source[key] } as Partial<Pick<ChatSummary, K>>)
     : {};
-}
-
-function utf8ByteLength(value: string): number {
-  let bytes = 0;
-  for (const character of value) {
-    const codePoint = character.codePointAt(0) ?? 0;
-    bytes += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
-  }
-  return bytes;
 }

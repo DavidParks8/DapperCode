@@ -38,19 +38,19 @@ pub(crate) async fn wait_for_owner_exit(owner_pid: Option<u32>) {
         std::future::pending::<()>().await;
         return;
     };
-    if !process_is_alive(owner_pid) {
+    if !crate::platform::process_is_alive(owner_pid) {
         return;
     }
     crate::platform::wait_for_owner_exit(owner_pid).await;
 }
 
-pub(crate) fn process_is_alive(pid: u32) -> bool {
-    crate::platform::process_is_alive(pid)
-}
-
 #[cfg(test)]
 async fn poll_until_owner_exits(owner_pid: u32) {
-    poll_while_owner_is_alive(|| process_is_alive(owner_pid), OWNER_POLL_INTERVAL).await;
+    poll_while_owner_is_alive(
+        || crate::platform::process_is_alive(owner_pid),
+        OWNER_POLL_INTERVAL,
+    )
+    .await;
 }
 
 #[cfg(test)]
@@ -62,6 +62,7 @@ async fn poll_while_owner_is_alive(mut owner_is_alive: impl FnMut() -> bool, int
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::platform::process_is_alive;
 
     const SHORT_LIVED_CHILD: &str = "__watchdog_short_lived_child";
     const LONG_LIVED_CHILD: &str = "__watchdog_long_lived_child";

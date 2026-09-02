@@ -148,7 +148,7 @@ async fn main() {
         }
     };
     if let Some(owner_pid) = owner_pid {
-        if !owner_watchdog::process_is_alive(owner_pid) {
+        if !platform::process_is_alive(owner_pid) {
             eprintln!("owning process {owner_pid} is not running; refusing to start");
             std::process::exit(1);
         }
@@ -360,7 +360,7 @@ async fn main() {
     let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             let signal = tokio::select! {
-                signal = wait_for_shutdown_signal() => signal,
+                signal = platform::wait_for_shutdown_signal() => signal,
                 () = owner_watchdog::wait_for_owner_exit(owner_pid) => "owner exit",
             };
             eprintln!("shutdown signal received ({signal}), terminating managed backends");

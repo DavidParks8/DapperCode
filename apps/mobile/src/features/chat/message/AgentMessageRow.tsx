@@ -4,8 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition, ReduceMotion } from 'react-native-reanimated';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
-import { useAppTheme, type AppTheme } from '@shared/theme';
-import { motionDuration } from '@shared/ui/motion';
+import { motion, useAppTheme, type AppTheme } from '@shared/theme';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import type { ChatAgentMessageMeta } from '@bridge/types/types';
 import { createStyles } from './styles';
@@ -84,7 +83,7 @@ export const AgentMessageRow = memo(function AgentMessageRowComponent({
         messageStyles.messageWrapperAssistant,
         toolStyles.rowLayoutClip,
       ]}
-      layout={LinearTransition.duration(motionDuration.layout).reduceMotion(ReduceMotion.System)}
+      layout={LinearTransition.duration(motion.duration.layout).reduceMotion(ReduceMotion.System)}
       testID={`agent-message-row-${messageId}`}
     >
       <Pressable
@@ -138,8 +137,8 @@ export const AgentMessageRow = memo(function AgentMessageRowComponent({
       </Pressable>
       {expanded ? (
         <Animated.View
-          entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
-          exiting={FadeOut.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+          entering={FadeIn.duration(motion.duration.routine).reduceMotion(ReduceMotion.System)}
+          exiting={FadeOut.duration(motion.duration.routine).reduceMotion(ReduceMotion.System)}
           style={toolStyles.panel}
         >
           <ScrollView

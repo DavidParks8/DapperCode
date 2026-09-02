@@ -12,7 +12,7 @@ function runChecker(report, minimum = '86') {
   const directory = mkdtempSync(path.join(tmpdir(), 'dappercode-rust-coverage-'));
   const reportPath = path.join(directory, 'coverage.json');
   writeFileSync(reportPath, JSON.stringify(report));
-  const result = spawnSync(process.execPath, [checker, reportPath], {
+  const result = spawnSync(process.execPath, [checker, `bridge=${reportPath}`], {
     cwd: root,
     env: { ...process.env, MIN_RUST_BRANCH_COVERAGE: minimum },
     encoding: 'utf8',
@@ -21,7 +21,16 @@ function runChecker(report, minimum = '86') {
   return result;
 }
 
-test('Rust coverage checker accepts the exact threshold', () => {
+test('Rust coverage checker rejects bare report paths', () => {
+  const result = spawnSync(process.execPath, [checker, 'coverage.json'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /expected name=path/);
+});
+
+test('Rust coverage checker accepts name=path at the exact threshold', () => {
   const result = runChecker({
     data: [{ totals: { branches: { count: 100, covered: 86 } } }],
   });

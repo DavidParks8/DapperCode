@@ -15,7 +15,7 @@ import { BridgeUiBanner } from '../approvals/BridgeUiSurface';
 import { ChatInput } from './ChatInput';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { computeHitSlop } from '@shared/ui/touchTarget';
-import { motionDuration } from '@shared/ui/motion';
+import { motion } from '@shared/theme';
 import { QueuedMessageDockView } from './QueuedMessageDockView';
 import { ScheduledPromptDock } from '../workflow/ScheduledPromptDock';
 import type {
@@ -222,8 +222,8 @@ function BridgeRecoveryBannerView({
 
   return (
     <Animated.View
-      entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
-      exiting={FadeOut.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
+      entering={FadeIn.duration(motion.duration.routine).reduceMotion(ReduceMotion.System)}
+      exiting={FadeOut.duration(motion.duration.immediate).reduceMotion(ReduceMotion.System)}
       style={styles.bridgeRecoveryBanner}
       accessibilityRole="alert"
       accessibilityLiveRegion="assertive"
@@ -324,8 +324,8 @@ function SlashSuggestionsView({
 
   return (
     <Animated.ScrollView
-      entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
-      exiting={FadeOut.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
+      entering={FadeIn.duration(motion.duration.routine).reduceMotion(ReduceMotion.System)}
+      exiting={FadeOut.duration(motion.duration.immediate).reduceMotion(ReduceMotion.System)}
       style={[styles.slashSuggestions, { maxHeight: slashSuggestionsMaxHeight }]}
       contentContainerStyle={styles.slashSuggestionsContent}
       keyboardShouldPersistTaps="handled"

@@ -10,8 +10,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { AtomGlyph } from '../screen/AtomGlyph';
-import { motionDuration, motionEasing } from '@shared/ui/motion';
-import { useAppTheme, type AppTheme } from '@shared/theme';
+import { motion, useAppTheme, type AppTheme } from '@shared/theme';
 import type { ActivityTone } from '../state/runtime';
 import {
   formatActivityElapsedAccessibilityLabel,
@@ -43,7 +42,7 @@ const ICON_BY_TONE: Record<ActivityTone, keyof typeof Ionicons.glyphMap> = {
  */
 export const COMPLETED_TITLE_HOLD_MS = 2_400;
 
-const VERDICT_FADE_EASING = Easing.bezier(...motionEasing.standard);
+const VERDICT_FADE_EASING = Easing.bezier(...motion.easing.standard);
 
 /**
  * The current activity rendered as the newest event in the transcript rather than floating above
@@ -97,7 +96,7 @@ export function ActivityEvent({
   // to the duration.
   const verdictStyle = useAnimatedStyle(() => ({
     opacity: withTiming(verdictFaded ? 0 : 1, {
-      duration: motionDuration.layout,
+      duration: motion.duration.layout,
       easing: VERDICT_FADE_EASING,
       reduceMotion: ReduceMotion.System,
     }),
@@ -105,7 +104,7 @@ export function ActivityEvent({
 
   return (
     <Animated.View
-      entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+      entering={FadeIn.duration(motion.duration.routine).reduceMotion(ReduceMotion.System)}
       style={[styles.row, error && styles.errorSurface]}
       testID={error ? 'activity-error-surface' : 'transcript-activity-event'}
       accessible

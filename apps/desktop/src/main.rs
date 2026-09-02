@@ -12,7 +12,6 @@ mod broker;
 mod broker_supervisor;
 mod config;
 mod platform;
-mod platform_setup;
 mod secrets;
 mod setup;
 mod store;
@@ -21,7 +20,7 @@ mod supervisor;
 
 use broker_supervisor::{BrokerLifecycleAction, BrokerSupervisor};
 use config::{validate_workspace, RuntimePaths};
-use platform_setup::NetworkMode;
+use platform::NetworkMode;
 use secrets::SecretStore;
 use setup::{discover_agent_executable, setup_profile, SetupRequest};
 use store::{profile_id_for, AppPaths, FileLease, Profile};
@@ -214,7 +213,7 @@ fn run_setup(
     };
     let host = option(&mut args, "--host")
         .map(Ok)
-        .unwrap_or_else(|| platform_setup::resolve_bridge_host(mode, None))?;
+        .unwrap_or_else(|| platform::resolve_bridge_host(mode, None))?;
     let bridge_port = option(&mut args, "--port")
         .map(|value| {
             value

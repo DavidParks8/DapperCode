@@ -20,7 +20,7 @@ import {
   type SharedValue,
 } from 'react-native-reanimated';
 
-import { motionDuration, motionEasing } from '@shared/ui/motion';
+import { motion } from '@shared/theme';
 import type { ResponseUsageAnchor } from '../state/modals';
 
 /** How small the glass is when it is still a bead sitting on its button. */
@@ -42,7 +42,7 @@ const POUR_SPREAD_DELAY_MS = 45;
 const POUR_FILL_DELAY_MS = 90;
 
 /** How long a dismissed panel takes to retract into its button, and so how long it stays mounted. */
-export const POUR_EXIT_MS = motionDuration.routine;
+export const POUR_EXIT_MS = motion.duration.routine;
 
 const REACH_SPRING = {
   damping: 17,
@@ -59,26 +59,26 @@ const SPREAD_SPRING = {
 } as const;
 
 const SHELL_FADE_IN = {
-  duration: motionDuration.immediate,
-  easing: Easing.bezier(...motionEasing.decelerate),
+  duration: motion.duration.immediate,
+  easing: Easing.bezier(...motion.easing.decelerate),
   reduceMotion: ReduceMotion.System,
 } as const;
 
 const CONTENT_SETTLE = {
-  duration: motionDuration.routine,
-  easing: Easing.bezier(...motionEasing.decelerate),
+  duration: motion.duration.routine,
+  easing: Easing.bezier(...motion.easing.decelerate),
   reduceMotion: ReduceMotion.System,
 } as const;
 
 const SHAPE_RETRACT = {
   duration: POUR_EXIT_MS,
-  easing: Easing.bezier(...motionEasing.accelerate),
+  easing: Easing.bezier(...motion.easing.accelerate),
   reduceMotion: ReduceMotion.System,
 } as const;
 
 const CONTENT_RETRACT = {
-  duration: motionDuration.immediate,
-  easing: Easing.bezier(...motionEasing.accelerate),
+  duration: motion.duration.immediate,
+  easing: Easing.bezier(...motion.easing.accelerate),
   reduceMotion: ReduceMotion.System,
 } as const;
 

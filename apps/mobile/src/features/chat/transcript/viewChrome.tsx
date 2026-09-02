@@ -20,7 +20,7 @@ import type { TranscriptDisplayItem } from './messages';
 import type { TranscriptContinuationState } from './controllers/continuationController';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import type { computeHitSlop } from '@shared/ui/touchTarget';
-import { motionDuration } from '@shared/ui/motion';
+import { motion } from '@shared/theme';
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 
 export const JUMP_TO_LATEST_VISIBLE_SIZE = { width: 48, height: 48 };
@@ -152,8 +152,8 @@ export function renderJumpToLatestButton(params: {
   }
   return (
     <Animated.View
-      entering={ZoomIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
-      exiting={ZoomOut.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
+      entering={ZoomIn.duration(motion.duration.routine).reduceMotion(ReduceMotion.System)}
+      exiting={ZoomOut.duration(motion.duration.immediate).reduceMotion(ReduceMotion.System)}
       style={[
         params.styles.jumpToLatestButton,
         { bottom: params.bottomInset + params.theme.spacing.xs },

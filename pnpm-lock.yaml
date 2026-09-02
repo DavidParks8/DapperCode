@@ -242,9 +242,6 @@ importers:
       react-test-renderer:
         specifier: 19.2.3
         version: 19.2.3(react@19.2.3)
-      resolve-from:
-        specifier: 5.0.0
-        version: 5.0.0
       typescript:
         specifier: ~6.0.3
         version: 6.0.3

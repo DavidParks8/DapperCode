@@ -27,7 +27,6 @@ export interface ScenarioOverrides {
 export const FIXED_NOW_MS = Date.UTC(2026, 0, 15, 12, 0, 0);
 const FIXED_NOW_SECONDS = Math.floor(FIXED_NOW_MS / 1000);
 
-export const DEFAULT_WORKSPACE = '/workspace/dappercode';
 export const E2E_AGENT_ID = 'local-primary';
 
 export function scenarioThreadId(acpSessionId: string, agentId = E2E_AGENT_ID): string {

@@ -6,9 +6,8 @@ import Animated, { FadeIn, LinearTransition, ReduceMotion } from 'react-native-r
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import { expandedToolInvocationIdsAtom } from '../state/toolInvocations';
-import { useAppTheme } from '@shared/theme';
+import { motion, useAppTheme } from '@shared/theme';
 import { HorizontalFadeMask } from '@shared/ui/HorizontalFadeMask';
-import { motionDuration } from '@shared/ui/motion';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { createStyles } from './styles';
 import { ToolHeaderShimmer } from './ToolHeaderShimmer';
@@ -232,7 +231,7 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
         messageStyles.messageWrapperAssistant,
         styles.rowLayoutClip,
       ]}
-      layout={LinearTransition.duration(motionDuration.layout).reduceMotion(ReduceMotion.System)}
+      layout={LinearTransition.duration(motion.duration.layout).reduceMotion(ReduceMotion.System)}
       testID="tool-row-layout"
     >
       <View
@@ -304,7 +303,7 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
       </View>
       {expanded ? (
         <Animated.View
-          entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+          entering={FadeIn.duration(motion.duration.routine).reduceMotion(ReduceMotion.System)}
           testID="tool-output-container"
         >
           <ToolInvocationOutput

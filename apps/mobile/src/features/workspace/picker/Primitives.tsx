@@ -4,8 +4,7 @@ import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import Animated, { FadeIn, ReduceMotion } from 'react-native-reanimated';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
-import { useAppTheme, type AppTheme } from '@shared/theme';
-import { motionDuration } from '@shared/ui/motion';
+import { motion, useAppTheme, type AppTheme } from '@shared/theme';
 import { createWorkspacePickerStyles, type WorkspacePickerStyles } from './styles';
 
 type IoniconName = ComponentProps<typeof Ionicons>['name'];
@@ -114,7 +113,7 @@ export function LoadingRow({ label }: { label: string }) {
   const styles = useMemo(() => createWorkspacePickerStyles(theme), [theme]);
   return (
     <Animated.View
-      entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+      entering={FadeIn.duration(motion.duration.routine).reduceMotion(ReduceMotion.System)}
       style={styles.statusRow}
       accessibilityRole="progressbar"
       accessibilityLabel={label}

@@ -19,7 +19,7 @@ use crate::bridge_protocol::{
 };
 use crate::client_hub::ClientHub;
 use crate::queue_service::QueueSubmissionCancelOutcome;
-use crate::resource_limits::{QUEUE_MAX_CONTENT_BYTES, QUEUE_MAX_ITEM_BYTES};
+use crate::resource_limits::{truncate_utf8_bytes, QUEUE_MAX_CONTENT_BYTES, QUEUE_MAX_ITEM_BYTES};
 
 const SCHEDULER_STATE_VERSION: u32 = 1;
 const SCHEDULER_STATE_MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -1162,7 +1162,11 @@ fn summary(entry: &StoredScheduledPrompt) -> Option<ScheduledPromptSummary> {
     Some(ScheduledPromptSummary {
         schedule_id: metadata.schedule_id,
         thread_id: metadata.thread_id,
-        prompt_preview: truncate_utf8(metadata.prompt.trim(), SCHEDULE_PROMPT_PREVIEW_MAX_BYTES),
+        prompt_preview: truncate_utf8_bytes(
+            metadata.prompt.trim(),
+            SCHEDULE_PROMPT_PREVIEW_MAX_BYTES,
+        )
+        .0,
         prompt_bytes: metadata.prompt_bytes,
         scheduled_for: metadata.scheduled_for,
         created_at: metadata.created_at,
@@ -1223,14 +1227,6 @@ fn truncate_error(mut error: String) -> String {
         error.pop();
     }
     error
-}
-
-fn truncate_utf8(value: &str, max_bytes: usize) -> String {
-    let mut end = value.len().min(max_bytes);
-    while !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    value[..end].to_string()
 }
 
 #[cfg(test)]
@@ -1473,13 +1469,13 @@ mod tests {
             test_thread("preview"),
             Utc::now() + chrono::Duration::hours(1),
         );
-        stored.prompt = "é".repeat(SCHEDULE_PROMPT_PREVIEW_MAX_BYTES);
+        stored.prompt = format!("{}é", "a".repeat(SCHEDULE_PROMPT_PREVIEW_MAX_BYTES - 1));
         let bounded = summary(&stored).expect("public summary");
-        assert!(bounded.prompt_preview.len() <= SCHEDULE_PROMPT_PREVIEW_MAX_BYTES);
+        assert_eq!(
+            bounded.prompt_preview,
+            "a".repeat(SCHEDULE_PROMPT_PREVIEW_MAX_BYTES - 1)
+        );
         assert_eq!(bounded.prompt_bytes, stored.prompt.len());
-        assert!(bounded
-            .prompt_preview
-            .is_char_boundary(bounded.prompt_preview.len()));
     }
 
     #[tokio::test]
@@ -3246,7 +3242,6 @@ mod tests {
             truncate_error("é".repeat(SCHEDULER_ERROR_MAX_BYTES)).len(),
             SCHEDULER_ERROR_MAX_BYTES
         );
-        assert_eq!(truncate_utf8("é", 1), "");
     }
 
     #[tokio::test]
@@ -3397,6 +3392,44 @@ mod tests {
             .await
             .prompts
             .contains_key(&schedule_id));
+    }
+
+    #[tokio::test]
+    async fn interrupted_settlement_for_another_thread_does_not_mutate_the_schedule() {
+        let scheduler = ScheduledPromptService::inert_for_test();
+        let schedule_id = Uuid::new_v4().to_string();
+        let thread_id = test_thread("interrupted-settlement");
+        let entry = fixture_entry(
+            schedule_id.clone(),
+            thread_id.clone(),
+            Utc::now() + chrono::Duration::hours(1),
+        );
+        scheduler
+            .state
+            .lock()
+            .await
+            .prompts
+            .insert(schedule_id.clone(), entry.clone());
+        let (dispatcher, _) = make_dispatcher(false, Vec::new());
+        let queue = make_queue(dispatcher, None);
+        queue
+            .interrupted_definitive_settlements
+            .lock()
+            .await
+            .insert(
+                submission_id(&schedule_id),
+                (test_thread("other"), "interrupted".to_string()),
+            );
+
+        scheduler
+            .persist_interrupted_definitive_settlements(&queue)
+            .await;
+
+        assert_eq!(
+            scheduler.state.lock().await.prompts[&schedule_id].status,
+            entry.status
+        );
+        assert!(queue.interrupted_definitive_settlements().await.is_empty());
     }
 
     #[tokio::test]

@@ -5,8 +5,7 @@ import Markdown from 'react-native-markdown-display';
 import Animated, { FadeIn, FadeOut, LinearTransition, ReduceMotion } from 'react-native-reanimated';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
-import { useAppTheme } from '@shared/theme';
-import { motionDuration } from '@shared/ui/motion';
+import { motion, useAppTheme } from '@shared/theme';
 import type { createMarkdownRules } from './markdownRules';
 import { createReasoningMarkdownStyles } from './markdownStyles';
 import { SelectableMessageText } from './Primitives';
@@ -119,8 +118,8 @@ function ReasoningCardDetails({
   }
   return (
     <Animated.View
-      entering={FadeIn.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
-      exiting={FadeOut.duration(motionDuration.routine).reduceMotion(ReduceMotion.System)}
+      entering={FadeIn.duration(motion.duration.routine).reduceMotion(ReduceMotion.System)}
+      exiting={FadeOut.duration(motion.duration.routine).reduceMotion(ReduceMotion.System)}
       style={styles.reasoningDetailWrap}
     >
       <Markdown style={markdownStyles} rules={markdownRules}>
@@ -167,7 +166,7 @@ export function ReasoningEntryCard({
 
   return (
     <Animated.View
-      layout={LinearTransition.duration(motionDuration.layout).reduceMotion(ReduceMotion.System)}
+      layout={LinearTransition.duration(motion.duration.layout).reduceMotion(ReduceMotion.System)}
     >
       <Pressable
         disabled={!canToggle}

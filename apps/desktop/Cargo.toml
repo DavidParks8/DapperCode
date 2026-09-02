@@ -16,7 +16,6 @@ path = "src/main.rs"
 anyhow = "1.0"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["ws", "http1", "tokio"] }
-fs2 = "0.4.3"
 futures-util = "0.3"
 getrandom = "0.3"
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native"] }
