@@ -28,8 +28,7 @@ import {
 } from './surfaceHelpers';
 import { AppSheet } from '@shared/ui/AppSheet';
 import { createBridgeUiSurfaceStyles } from './surfaceStyles';
-import { useAppTheme } from '@shared/theme';
-import { motionDuration, motionEasing } from '@shared/ui/motion';
+import { motion, useAppTheme } from '@shared/theme';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { feedback } from '@shared/feedback';
 import { createWorkflowMarkdownStyles } from '../styles/styles';
@@ -64,8 +63,8 @@ export function BridgeUiWorkflowCard({
   return (
     <Animated.View
       style={[styles.surfaceCard, styles.workflowCard]}
-      layout={LinearTransition.duration(motionDuration.layout).easing(
-        Easing.bezier(...motionEasing.standard),
+      layout={LinearTransition.duration(motion.duration.layout).easing(
+        Easing.bezier(...motion.easing.standard),
       )}
     >
       <SurfaceHeader
@@ -76,10 +75,10 @@ export function BridgeUiWorkflowCard({
       />
       {collapsed ? null : (
         <Animated.View
-          entering={FadeIn.duration(motionDuration.routine).easing(
-            Easing.bezier(...motionEasing.standard),
+          entering={FadeIn.duration(motion.duration.routine).easing(
+            Easing.bezier(...motion.easing.standard),
           )}
-          exiting={FadeOut.duration(motionDuration.immediate)}
+          exiting={FadeOut.duration(motion.duration.immediate)}
         >
           <ScrollView
             nestedScrollEnabled
@@ -326,8 +325,8 @@ function ProgressBlock({ block }: { block: BridgeUiProgressBlock }) {
 
   useEffect(() => {
     progressWidth.value = withTiming(ratio, {
-      duration: motionDuration.routine,
-      easing: Easing.bezier(...motionEasing.standard),
+      duration: motion.duration.routine,
+      easing: Easing.bezier(...motion.easing.standard),
       reduceMotion: ReduceMotion.System,
     });
   }, [ratio, progressWidth]);

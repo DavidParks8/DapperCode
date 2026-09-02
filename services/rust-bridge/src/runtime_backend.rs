@@ -2676,10 +2676,6 @@ pub(super) fn bridge_prompt(params: &Value) -> Result<Vec<ContentBlock>, String>
     Ok(prompt)
 }
 
-pub(super) async fn wait_for_shutdown_signal() -> &'static str {
-    crate::platform::wait_for_shutdown_signal().await
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod client_request_tests {

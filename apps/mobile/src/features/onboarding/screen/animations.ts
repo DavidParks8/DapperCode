@@ -12,7 +12,7 @@ import {
 import { useEffect } from 'react';
 import type { ViewStyle } from 'react-native';
 
-import { motionDuration, motionEasing } from '@shared/ui/motion';
+import { motion } from '@shared/theme';
 
 export type OnboardingHeroAnimatedStyle = AnimatedStyle<ViewStyle>;
 export type OnboardingTranslateAnimatedStyle = AnimatedStyle<ViewStyle>;
@@ -41,15 +41,15 @@ export function useOnboardingIntroAnimations(
     actionsProgress.value = 0;
     const timingConfig = {
       reduceMotion: ReduceMotion.System,
-      easing: Easing.bezier(...motionEasing.decelerate),
+      easing: Easing.bezier(...motion.easing.decelerate),
     };
     heroProgress.value = withTiming(1, {
       ...timingConfig,
-      duration: motionDuration.layout,
+      duration: motion.duration.layout,
     });
     actionsProgress.value = withDelay(
-      motionDuration.layout,
-      withTiming(1, { ...timingConfig, duration: motionDuration.routine }),
+      motion.duration.layout,
+      withTiming(1, { ...timingConfig, duration: motion.duration.routine }),
     );
   }, [actionsProgress, heroProgress, reduceMotion, showIntroStep]);
 

@@ -152,13 +152,19 @@ pub(super) fn maybe_print_pairing_qr(config: &BridgeConfig) {
 }
 
 pub(super) async fn wait_for_shutdown_trigger(shutdown_rx: &mut watch::Receiver<bool>) {
-    if *shutdown_rx.borrow() {
-        return;
-    }
+    let _ = shutdown_rx.wait_for(|shutdown| *shutdown).await;
+}
 
-    while shutdown_rx.changed().await.is_ok() {
-        if *shutdown_rx.borrow() {
-            break;
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn shutdown_wait_returns_when_channel_closes_before_triggering() {
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        drop(shutdown_tx);
+
+        wait_for_shutdown_trigger(&mut shutdown_rx).await;
+        assert!(!*shutdown_rx.borrow());
     }
 }

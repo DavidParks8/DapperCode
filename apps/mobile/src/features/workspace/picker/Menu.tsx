@@ -5,7 +5,7 @@ import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import type { AppTheme } from '@shared/theme';
-import { motionDuration } from '@shared/ui/motion';
+import { motion } from '@shared/theme';
 import { MENU_ROW_HEIGHT, MENU_TITLE_HEIGHT, MENU_WIDTH } from './stylesLayout';
 import type { WorkspacePickerStyles } from './styles';
 
@@ -179,8 +179,8 @@ export function WorkspacePickerMenu({
         accessibilityLabel="Close menu"
       />
       <Animated.View
-        entering={FadeIn.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
-        exiting={FadeOut.duration(motionDuration.immediate).reduceMotion(ReduceMotion.System)}
+        entering={FadeIn.duration(motion.duration.immediate).reduceMotion(ReduceMotion.System)}
+        exiting={FadeOut.duration(motion.duration.immediate).reduceMotion(ReduceMotion.System)}
         style={[styles.menuCard, { top, left }]}
         accessibilityViewIsModal
         accessibilityRole="menu"

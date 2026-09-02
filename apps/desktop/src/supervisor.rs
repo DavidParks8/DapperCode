@@ -728,7 +728,6 @@ fn valid_sha256_digest(value: &str) -> bool {
 mod tests {
     use super::*;
     use crate::store::ProfileAgent;
-    use fs2::FileExt;
     use std::sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc,
@@ -922,9 +921,9 @@ mod tests {
                 .write(true)
                 .open(contender_path)
                 .unwrap();
-            second.lock_exclusive().unwrap();
+            second.lock().unwrap();
             acquired_tx.send(()).unwrap();
-            FileExt::unlock(&second).unwrap();
+            second.unlock().unwrap();
         });
 
         assert!(acquired_rx

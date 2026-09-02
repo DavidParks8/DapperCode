@@ -649,7 +649,8 @@ private struct TrayMenu: View {
             set: { model.setLaunchAtLogin($0) }
         ))
         Button("About DapperCode") {
-            AboutPanelPresenter.present()
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            NSApplication.shared.orderFrontStandardAboutPanel(nil)
         }
         Divider()
         Button("Quit DapperCode") {

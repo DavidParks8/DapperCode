@@ -230,12 +230,12 @@ function boundChatSnapshotCache(cache: ChatSnapshotCache): ChatSnapshotCache {
   // Track the accumulated byte size incrementally instead of re-serializing
   // the whole (ever-growing) candidate entries array on every iteration,
   // which turns bounding into O(n^2) work for large caches.
-  let cacheBytes = utf8ByteLength(JSON.stringify({ ...cache, entries: [] }));
+  let cacheBytes = new TextEncoder().encode(JSON.stringify({ ...cache, entries: [] })).length;
   for (const entry of ordered) {
     if (entries.length >= CHAT_SNAPSHOT_CACHE_MAX_ENTRIES) {
       break;
     }
-    const entryBytes = utf8ByteLength(JSON.stringify(entry));
+    const entryBytes = new TextEncoder().encode(JSON.stringify(entry)).length;
     const separatorBytes = entries.length > 0 ? 1 : 0;
     if (cacheBytes + separatorBytes + entryBytes > CHAT_SNAPSHOT_CACHE_MAX_BYTES) {
       continue;
@@ -250,15 +250,6 @@ function boundChatSnapshotCache(cache: ChatSnapshotCache): ChatSnapshotCache {
       : null,
     entries,
   };
-}
-
-function utf8ByteLength(value: string): number {
-  let bytes = 0;
-  for (const character of value) {
-    const codePoint = character.codePointAt(0) ?? 0;
-    bytes += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
-  }
-  return bytes;
 }
 
 function normalizeCacheEntry(value: unknown): ChatSnapshotCacheEntry | null {
