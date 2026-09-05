@@ -38,8 +38,11 @@ export const routes = {
       params: { profileId, chatId },
     };
   },
-  browser(profileId: string): Href {
-    return { pathname: '/profiles/[profileId]/browser', params: { profileId } };
+  browser(profileId: string, source?: { chatId: string; threadId?: string }): Href {
+    return {
+      pathname: '/profiles/[profileId]/browser',
+      params: { profileId, returnChatId: source?.chatId, returnThreadId: source?.threadId },
+    };
   },
   settings(profileId: string): Href {
     return { pathname: '/profiles/[profileId]/settings', params: { profileId } };

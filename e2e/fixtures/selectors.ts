@@ -15,6 +15,12 @@ export const selectors = {
   drawerNewChat: (page: Page): Locator => page.getByLabel('New chat').first(),
   drawerSearch: (page: Page): Locator => page.getByLabel('Search sessions'),
   drawerSettings: (page: Page): Locator => page.getByLabel('Open settings'),
+  chatPreviewLink: (page: Page, url: string): Locator =>
+    page.getByRole('button', { name: `Open ${url} in Browser`, exact: true }),
+  browserReturnToChat: (page: Page): Locator => page.getByTestId('browser-return-to-chat'),
+  browserAddress: (page: Page): Locator => page.getByLabel('Preview address', { exact: true }),
+  browserUnavailable: (page: Page): Locator =>
+    page.getByText('This bridge did not start its preview server.', { exact: false }),
 
   topChrome: (page: Page): Locator => page.getByTestId('main-screen-top-chrome'),
   chatHeaderRow: (page: Page): Locator => page.getByTestId('chat-header-row'),
@@ -44,7 +50,8 @@ export const selectors = {
   composer: (page: Page): Locator => page.getByTestId('chat-composer'),
   composerControls: (page: Page): Locator => page.getByTestId('composer-control-groups'),
   composerInputSurface: (page: Page): Locator => page.getByTestId('composer-input-glass-surface'),
-  composerInput: (page: Page): Locator => page.getByLabel('Message', { exact: true }),
+  composerInput: (page: Page): Locator =>
+    page.getByRole('textbox', { name: 'Message', exact: true }),
   composerSubmitSlot: (page: Page): Locator => page.getByTestId('composer-submit-slot'),
   composerStopSlot: (page: Page): Locator => page.getByTestId('composer-stop-slot'),
   composerAttachment: (page: Page): Locator => page.getByLabel('Add attachment'),

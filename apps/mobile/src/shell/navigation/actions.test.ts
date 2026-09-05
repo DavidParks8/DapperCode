@@ -155,6 +155,20 @@ describe('router-backed navigation actions', () => {
     }
   });
 
+  it('carries the source chat in the browser URL without clearing the chat', () => {
+    const store = createBridgeTestStore({ api: {} as HostBridgeApiClient });
+    const source = chat('root-thread');
+    store.set(chatContextChangedAtom, source);
+
+    store.set(openBrowserAtom, 'http://localhost:3000');
+
+    expect(mockRouter.navigate).toHaveBeenLastCalledWith({
+      pathname: '/profiles/[profileId]/browser',
+      params: { profileId: 'profile-1', returnChatId: 'root-thread' },
+    });
+    expect(store.get(activeChatAtom)).toBe(source);
+  });
+
   it('opens the Settings-owned connection editor with an anchored push, never dismissTo/navigate', () => {
     const store = createBridgeTestStore({ api: {} as HostBridgeApiClient });
     store.set(chatContextChangedAtom, chat('root-thread'));

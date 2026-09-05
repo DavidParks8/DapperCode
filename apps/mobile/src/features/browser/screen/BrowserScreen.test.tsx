@@ -1,5 +1,6 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import * as mockReact from 'react';
+import { router } from 'expo-router';
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 import { BackHandler, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -19,6 +20,7 @@ import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { BrowserScreen } from './BrowserScreen';
 import { createBrowserScreenStyles } from './styles';
 import { feedback } from '@shared/feedback';
+import { routes } from '@shell/navigation/routes';
 import {
   getRenderedGlassViewProps,
   setMockGlassEffectAPIAvailable,
@@ -412,6 +414,7 @@ describe('BrowserScreen behavior', () => {
       canGoForward: true,
       loading: false,
     });
+
     expect(result.ref.current?.handleHardwareBackPress()).toBe(true);
     expect(mockWebViewMethods.goBack).toHaveBeenCalled();
     await invoke(findByLabel(root, 'Forward'));
@@ -433,6 +436,39 @@ describe('BrowserScreen behavior', () => {
     expect(result.api.closeBrowserPreviewSession).toHaveBeenCalledWith(session.sessionId);
     act(() => result.tree.unmount());
   });
+
+  it.each([false, true])(
+    'returns to the source chat independently of page history (preview failure: %s)',
+    async (fails) => {
+      router.replace({
+        pathname: '/profiles/[profileId]/browser',
+        params: { profileId: 'profile-1', returnChatId: 'source-chat' },
+      });
+      const result = await renderBrowser({
+        pendingTargetUrl: 'http://localhost:3000',
+        api: createApi(fails ? { createError: new Error('Preview unavailable') } : {}),
+      });
+      const root = result.tree.root as Queryable;
+
+      if (fails) {
+        expect(hasText(root, 'Preview unavailable')).toBe(true);
+      } else {
+        const webView = requireTestValue(root.findAll((node) => node.type === 'mock-web-view')[0]);
+        await invoke(webView, 'onNavigationStateChange', {
+          url: 'http://bridge:4173/preview/session-1/second-page',
+          canGoBack: true,
+          canGoForward: false,
+          loading: false,
+        });
+      }
+
+      await invoke(findByLabel(root, 'Back to chat'));
+
+      expect(router.navigate).toHaveBeenLastCalledWith(routes.chat('profile-1', 'source-chat'));
+      expect(mockWebViewMethods.goBack).not.toHaveBeenCalled();
+      act(() => result.tree.unmount());
+    },
+  );
 
   it('handles invalid input, create failures, pending targets, and clear/scan actions', async () => {
     const invalid = await renderBrowser();
@@ -682,6 +718,7 @@ describe('BrowserScreen behavior', () => {
   it('renders web iframe mobile/desktop branches and reloads without native methods', async () => {
     setPlatform('web');
     const result = await renderBrowser();
+    expect(BackHandler.addEventListener).not.toHaveBeenCalled();
     const root = result.tree.root as Queryable;
     await invoke(findByLabel(root, 'Open preview'));
     let iframe = root.findAll((node) => node.type === 'iframe')[0];

@@ -1,15 +1,55 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import Animated, { Easing, FadeIn, ReduceMotion } from 'react-native-reanimated';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
+import { routes } from '@shell/navigation/routes';
 
 const MOTION_ROUTINE_MS = 200;
 const EASING_STANDARD = [0.4, 0, 0.2, 1] as const;
 import { useAppTheme } from '@shared/theme';
 import { createBrowserScreenStyles } from './styles';
 import { VIEWPORT_MODES, type ViewportPreset } from './shared';
+
+export function BrowserChatReturn() {
+  const { profileId, returnChatId, returnThreadId } = useLocalSearchParams<{
+    profileId?: string;
+    returnChatId?: string;
+    returnThreadId?: string;
+  }>();
+  const theme = useAppTheme();
+  const styles = useMemo(() => createBrowserScreenStyles(theme), [theme]);
+  if (!profileId || !returnChatId) {
+    return null;
+  }
+  const destination = returnThreadId
+    ? routes.agent(profileId, returnChatId, returnThreadId)
+    : routes.chat(profileId, returnChatId);
+
+  return (
+    <Pressable
+      onPress={() => router.navigate(destination)}
+      style={({ pressed }) => [
+        styles.chatReturnButton,
+        pressed && styles.viewportPresetChipPressed,
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel="Back to chat"
+      accessibilityHint="Returns to the conversation that opened this preview"
+      testID="browser-return-to-chat"
+    >
+      <Ionicons
+        {...decorativeAccessibilityProps}
+        name="chevron-back"
+        size={20}
+        color={theme.colors.accent}
+      />
+      <Text style={styles.chatReturnText}>Back to chat</Text>
+    </Pressable>
+  );
+}
 
 export function StatusBanner({ tone, message }: { tone: 'warning' | 'error'; message: string }) {
   const theme = useAppTheme();
