@@ -549,6 +549,7 @@ export function useDrawerChatLoading(
     active,
     cancelMaintenanceWork,
     onThreadDeleted: handleThreadDeleted,
+    refreshFullHistoryRef: retryDeepChatListRef,
     scheduleLoadChats,
     setRunIndicators: setRunIndicatorsByThread,
     setWsConnected,

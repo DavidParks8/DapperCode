@@ -95,6 +95,16 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
     }
     const request = {};
     historyRequestRef.current = request;
+    if (chat.historyRecoveryError) {
+      try {
+        await loadChat(chat.id, { preserveRuntimeState: true, revalidate: true });
+      } finally {
+        if (historyRequestRef.current === request) {
+          historyRequestRef.current = null;
+        }
+      }
+      return;
+    }
     setTranscriptContinuationState((previous) => ({ ...previous, loading: true, error: null }));
     const result = await transcriptContinuationController.loadEarlier(chat);
     if (historyRequestRef.current !== request) {

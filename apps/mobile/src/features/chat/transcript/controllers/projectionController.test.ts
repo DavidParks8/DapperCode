@@ -28,6 +28,53 @@ function liveState(
 }
 
 describe('transcriptProjectionController', () => {
+  it.each([false, true])(
+    'matches a replayed prompt to its reconstructed answer (authoritative=%s) without hiding a repeated follow-up',
+    (authoritativeSnapshot) => {
+      const user = {
+        id: 'bridge-user',
+        role: 'user' as const,
+        content: 'Repeat this task',
+        createdAt: '',
+      };
+      const answer = {
+        id: 'answer',
+        role: 'assistant' as const,
+        content: 'Done',
+        createdAt: '',
+      };
+      const state = liveState([user, answer], { terminal: [user.id, answer.id] });
+      state.authoritativeSnapshot = authoritativeSnapshot;
+      state.runByMessageId = { [user.id]: 'turn-1', [answer.id]: 'turn-1' };
+      const base = {
+        chat: {
+          ...chat,
+          status: 'complete' as const,
+          messages: [
+            { ...user, id: 'history-user' },
+            { ...answer, id: 'answer' },
+          ],
+        },
+        parentChat: null,
+        showToolCalls: true,
+        threadStatuses: new Map(),
+      };
+      expect(
+        projectTranscript({ ...base, liveMessageState: state }).messages.map(({ id }) => id),
+      ).toEqual(['history-user', 'answer']);
+
+      const followup = { ...user, id: 'next-turn-user' };
+      const continuing = {
+        ...state,
+        messages: [...state.messages, followup],
+        runByMessageId: { ...state.runByMessageId, [followup.id]: 'turn-2' },
+      };
+      expect(
+        projectTranscript({ ...base, liveMessageState: continuing }).messages.map(({ id }) => id),
+      ).toEqual(['history-user', 'answer', 'next-turn-user']);
+    },
+  );
+
   it('projects inherited messages and a non-duplicate live assistant message', () => {
     const parent = {
       ...chat,

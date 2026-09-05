@@ -20,6 +20,7 @@ export function useMainScreenLocalTranscriptActions(
 ) {
   const {
     activeSlashCommands,
+    api,
     bumpAgentRuntimeRevision,
     draft,
     parentChatCacheRef,
@@ -165,7 +166,8 @@ export function useMainScreenLocalTranscriptActions(
     }
 
     parentChatCacheRef.current[selectedChat.id] = selectedChat;
-  }, [parentChatCacheRef, selectedChat]);
+    api.rememberChat(selectedChat);
+  }, [api, parentChatCacheRef, selectedChat]);
 
   return {
     slashQuery,

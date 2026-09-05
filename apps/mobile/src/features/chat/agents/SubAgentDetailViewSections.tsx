@@ -134,6 +134,7 @@ export interface SubAgentTranscriptProps {
   openBrowser: ChatTranscriptViewProps['onOpenLocalPreview'];
   showToolCalls: boolean;
   onOpenSubAgentThread: (threadId: string) => void;
+  onRetryHistory: () => void;
   agentThreadStatusById: ReadonlyMap<string, Chat['status']>;
   scrollRef: RefObject<FlatList<TranscriptDisplayItem> | null>;
   autoScrollStateRef: RefObject<AutoScrollState>;
@@ -288,6 +289,18 @@ export function SubAgentLoadingState({
   );
 }
 
+function hasTranscriptContent(
+  chat: Chat | null,
+  isStarting: boolean,
+  isEmpty: boolean,
+  projectedMessageCount: number,
+): boolean {
+  return (
+    Boolean(chat) &&
+    (Boolean(chat?.historyRecoveryError) || (!isStarting && !isEmpty && projectedMessageCount > 0))
+  );
+}
+
 export function SubAgentTranscriptContent({
   chat,
   parentChat,
@@ -296,6 +309,7 @@ export function SubAgentTranscriptContent({
   openBrowser,
   showToolCalls,
   onOpenSubAgentThread,
+  onRetryHistory,
   agentThreadStatusById,
   scrollRef,
   autoScrollStateRef,
@@ -309,8 +323,12 @@ export function SubAgentTranscriptContent({
   styles,
   theme,
 }: SubAgentTranscriptProps) {
-  const shouldRenderTranscript =
-    Boolean(chat) && !isStarting && !isEmpty && projectedMessageCount > 0;
+  const shouldRenderTranscript = hasTranscriptContent(
+    chat,
+    isStarting,
+    isEmpty,
+    projectedMessageCount,
+  );
   const shouldRenderLoading =
     !isStarting && !isEmpty && !shouldRenderTranscript && !isHydratingTranscript;
   const transcriptChat = shouldRenderTranscript ? chat : null;
@@ -322,10 +340,10 @@ export function SubAgentTranscriptContent({
         accessibilityElementsHidden={showHydrationShimmer}
         importantForAccessibility={showHydrationShimmer ? 'no-hide-descendants' : 'auto'}
       >
-        {isStarting ? (
+        {isStarting && !shouldRenderTranscript ? (
           <SubAgentStartingState detailLoading={detailLoading} styles={styles} theme={theme} />
         ) : null}
-        {isEmpty ? (
+        {isEmpty && !shouldRenderTranscript ? (
           <SubAgentEmptyState detailLoading={detailLoading} styles={styles} theme={theme} />
         ) : null}
         {transcriptChat ? (
@@ -338,6 +356,7 @@ export function SubAgentTranscriptContent({
             onOpenLocalPreview={openBrowser}
             showToolCalls={showToolCalls}
             onOpenSubAgentThread={onOpenSubAgentThread}
+            onLoadEarlier={onRetryHistory}
             agentThreadStatusById={agentThreadStatusById}
             scrollRef={scrollRef}
             inlineChoicesEnabled={false}

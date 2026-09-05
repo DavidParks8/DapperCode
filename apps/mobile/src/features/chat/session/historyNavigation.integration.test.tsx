@@ -193,6 +193,19 @@ function expectSettled(current: Chat | null) {
 }
 
 describe('older history request lifecycle', () => {
+  it('retries the current snapshot rather than paginating when history recovery failed', async () => {
+    const harness = setup({ ...chat(), historyRecoveryError: 'History unavailable' });
+    await act(async () => {
+      await harness.load();
+    });
+    expect(harness.context.loadChat).toHaveBeenCalledWith('thread', {
+      preserveRuntimeState: true,
+      revalidate: true,
+    });
+    expect(harness.readSnapshotPage).not.toHaveBeenCalled();
+    harness.unmount();
+  });
+
   it('keeps the completed response and settled controls when a running-turn page arrives late', async () => {
     const harness = setup();
     expect(isChatLikelyRunning(harness.context.selectedChatRef.current!)).toBe(true);

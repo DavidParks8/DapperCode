@@ -63,6 +63,7 @@ export function areChatsEquivalent(previous: Chat | null, next: Chat | null): bo
     areChatPlansEquivalent(previous.latestPlan, next.latestPlan) &&
     areChatPlansEquivalent(previous.latestTurnPlan, next.latestTurnPlan) &&
     previous.latestTurnStatus === next.latestTurnStatus &&
+    previous.historyRecoveryError === next.historyRecoveryError &&
     areChatRuntimeFieldsEquivalent(previous, next) &&
     areContextUsagesEquivalent(previous.acpUsage, next.acpUsage) &&
     areTokenTotalsEquivalent(previous.tokenTotals, next.tokenTotals) &&

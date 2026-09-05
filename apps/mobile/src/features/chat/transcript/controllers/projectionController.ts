@@ -97,7 +97,10 @@ function buildTranscriptProjectionBase({
   const messages = dedupeTransientUserMessages(
     syncVisibleSubAgentStatuses(inheritedMessages.messages, threadStatuses),
   );
-  const rawLiveMessages = liveMessageState?.messages ?? [];
+  const rawLiveMessages = (liveMessageState?.messages ?? []).map((message) => {
+    const reconstructed = findReconstructedUserMessage(messages, message, liveMessageState);
+    return reconstructed ? { ...message, id: reconstructed.id } : message;
+  });
 
   return {
     messages,
@@ -317,6 +320,37 @@ function mergeLiveMessage(
     useLivePending,
     useLiveCompletion,
   });
+}
+
+function findReconstructedUserMessage(
+  messages: ChatMessage[],
+  liveMessage: ChatMessage,
+  state: AgUiThreadMessageState | null | undefined,
+): ChatMessage | undefined {
+  const runId = state?.runByMessageId[liveMessage.id];
+  if (liveMessage.role !== 'user' || !state || !runId) {
+    return undefined;
+  }
+  const following = state.messages.slice(state.messages.indexOf(liveMessage) + 1);
+  for (const candidate of following) {
+    if (candidate.role === 'user') {
+      break;
+    }
+    if (candidate.role !== 'assistant' || state.runByMessageId[candidate.id] !== runId) {
+      continue;
+    }
+    const answer = findPersistedLiveMessage(messages, candidate);
+    if (answer) {
+      // A replayed prompt may have a different ID after ACP load. Anchor it to its
+      // known answer, not text alone: a later turn can legitimately repeat the prompt.
+      const user = messages
+        .slice(0, messages.indexOf(answer))
+        .reverse()
+        .find((message) => message.role === 'user');
+      return isMatchingTrailingUserMessage(user, liveMessage) ? user : undefined;
+    }
+  }
+  return undefined;
 }
 
 function findPersistedLiveMessage(

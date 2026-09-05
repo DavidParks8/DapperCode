@@ -203,6 +203,27 @@ describe('ChatTranscriptView activity event', () => {
     jest.useRealTimers();
   });
 
+  it('renders a retry action independently of settled turn activity and clears it on recovery', () => {
+    const retry = jest.fn();
+    const tree = render({ chat, onLoadEarlier: retry });
+    expect(tree.root.findAllByProps({ testID: 'chat-history-recovery' })).toHaveLength(0);
+    update(tree, {
+      chat: { ...chat, historyRecoveryError: 'History unavailable' },
+      onLoadEarlier: retry,
+    });
+    const button = tree.root.findAllByProps({
+      accessibilityLabel: 'Retry loading chat history',
+    })[0];
+    expect(button).toBeDefined();
+    act(() => button!.props.onPress());
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(tree.root.findAllByProps({ testID: 'atom-glyph' })).toHaveLength(0);
+    expect(getList(tree).props.data).toHaveLength(1);
+    update(tree, { chat: { ...chat, historyRecoveryError: null }, onLoadEarlier: retry });
+    expect(tree.root.findAllByProps({ testID: 'chat-history-recovery' })).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
   it('advances the live duration without resetting on status copy and freezes on settlement', () => {
     const runningChat = makeChat({
       status: 'running',

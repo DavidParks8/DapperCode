@@ -5,6 +5,7 @@ import {
   useState,
   type Dispatch,
   type SetStateAction,
+  type RefObject,
 } from 'react';
 import { AppState } from 'react-native';
 import type { HostBridgeWsClient } from '@bridge/ws/ws';
@@ -24,6 +25,7 @@ interface DrawerChatLiveSyncOptions {
   active: boolean;
   cancelMaintenanceWork: () => void;
   onThreadDeleted: (threadId: string) => void;
+  refreshFullHistoryRef: RefObject<() => Promise<void>>;
   scheduleLoadChats: (delay?: number, forceRefresh?: boolean) => void;
   setRunIndicators: Dispatch<SetStateAction<DrawerRunIndicatorMap>>;
   setWsConnected: Dispatch<SetStateAction<boolean>>;
@@ -46,6 +48,7 @@ export function useDrawerChatLiveSync({
   active,
   cancelMaintenanceWork,
   onThreadDeleted,
+  refreshFullHistoryRef,
   scheduleLoadChats,
   setRunIndicators,
   setWsConnected,
@@ -82,6 +85,7 @@ export function useDrawerChatLiveSync({
         setRunIndicators({});
         if (isMaintenanceActive()) {
           scheduleLoadChats(0, true);
+          void refreshFullHistoryRef.current();
         }
         return;
       }
@@ -96,7 +100,14 @@ export function useDrawerChatLiveSync({
         scheduleLoadChats(DRAWER_EVENT_REFRESH_DEBOUNCE_MS, true);
       }
     });
-  }, [isMaintenanceActive, onThreadDeleted, scheduleLoadChats, setRunIndicators, ws]);
+  }, [
+    isMaintenanceActive,
+    onThreadDeleted,
+    refreshFullHistoryRef,
+    scheduleLoadChats,
+    setRunIndicators,
+    ws,
+  ]);
 
   useEffect(() => {
     return ws.onStatus((connected) => {

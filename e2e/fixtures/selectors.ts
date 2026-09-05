@@ -28,6 +28,7 @@ export const selectors = {
   sessionMetaRow: (page: Page): Locator => page.getByTestId('session-meta-row'),
 
   transcript: (page: Page): Locator => page.getByTestId('chat-transcript'),
+  historyRecovery: (page: Page): Locator => page.getByTestId('chat-history-recovery'),
   transcriptScroll: (page: Page): Locator =>
     page.getByTestId('chat-transcript').locator('[aria-label$=" transcript"]'),
   scrollRailBars: (page: Page): Locator => page.locator('[data-testid^="chat-scroll-rail-bar-"]'),

@@ -3,7 +3,6 @@ import {
   appendSyntheticUserMessage,
   isMaterializationGapError,
   isTransientThreadReadError,
-  preserveCachedTranscript,
   sleep,
 } from '@bridge/client/clientChatCloneAndRetryInternals';
 import {
@@ -18,6 +17,11 @@ import {
   toTurnCollaborationMode,
 } from '@bridge/client/clientTurnInputInternals';
 import { mapChat, type RawThread, toRawThread } from '@bridge/mapping/chatMapping';
+import { shortSessionId } from '@bridge/mapping/chatMappingSnapshotAndSummaryProjection';
+import {
+  isChatHistoryIncomplete,
+  reconcileChatTranscript,
+} from '@bridge/mapping/chatReconciliation';
 import {
   normalizeApprovalPolicy,
   normalizeEffort,
@@ -144,7 +148,13 @@ export abstract class HostBridgeApiClientTurnPreparationLayer extends HostBridge
     const rawThread = toRawThread(rawThreadValue);
     this.rememberRawThreadTitle(rawThread);
     const mapped = mapChat(rawThread);
-    const chat = this.applyRememberedTitle(mapped);
+    const latest = this.applyRememberedTitle(mapped);
+    const cached = this.peekChat(latest.id);
+    const missingHistory = isChatHistoryIncomplete(cached, latest);
+    const chat = {
+      ...(cached ? reconcileChatTranscript(cached, latest) : latest),
+      historyRecoveryError: missingHistory ? 'Chat history could not be restored.' : null,
+    };
     this.rememberChat(chat);
     return chat;
   }
@@ -158,10 +168,19 @@ export abstract class HostBridgeApiClientTurnPreparationLayer extends HostBridge
   }
   protected applyRememberedTitle<T extends ChatSummary>(mapped: T): T {
     const cachedTitle = this.renamedTitles.get(mapped.id);
-    if (!cachedTitle) {
-      return mapped;
+    if (cachedTitle) {
+      return { ...mapped, title: cachedTitle };
     }
-    return { ...mapped, title: cachedTitle };
+    if (
+      mapped.title === `Session ${shortSessionId(mapped.id)}` ||
+      mapped.title === `Chat ${mapped.id.slice(0, 8)}`
+    ) {
+      const knownTitle = this.peekChatSummary(mapped.id)?.title;
+      if (knownTitle) {
+        return { ...mapped, title: knownTitle };
+      }
+    }
+    return mapped;
   }
   protected async readChatSnapshot(id: string): Promise<ChatSnapshot> {
     try {
@@ -174,11 +193,7 @@ export abstract class HostBridgeApiClientTurnPreparationLayer extends HostBridge
       }
       const response = await this.readAppServerThread(id, false);
       const rawThread = toRawThread(response.thread);
-      const cached = this.peekChat(id);
-      this.rememberRawThreadTitle(rawThread);
-      const chat = preserveCachedTranscript(cached, this.applyRememberedTitle(mapChat(rawThread)));
-      this.rememberChat(chat);
-      return { rawThread, chat };
+      return { rawThread, chat: this.mapChatWithCachedTitle(rawThread) };
     }
   }
   protected async readAppServerThread(

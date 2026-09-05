@@ -50,6 +50,9 @@ export function resolveHydrationErrorState(
 ): SubAgentDetailState {
   return {
     ...current,
+    chat: current.chat
+      ? { ...current.chat, historyRecoveryError: 'Chat history could not be restored.' }
+      : null,
     loading: false,
     error: !showLoading && current.chat ? current.error : (error as Error).message,
   };

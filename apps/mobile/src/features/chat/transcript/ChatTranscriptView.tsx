@@ -43,12 +43,13 @@ import { areChatTranscriptViewPropsEqual } from './comparison';
 import { renderChatTranscriptItem } from './item';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { useForkBoundaries, useForkConversationAction } from './useForkConversationAction';
-import { TranscriptActivitySlot, useCollapsibleActivity } from './TranscriptActivitySlot';
+import { useCollapsibleActivity } from './TranscriptActivitySlot';
 import { TranscriptEdgeScrim } from './TranscriptEdgeScrim';
 import {
   ensureRailJumpController,
   JUMP_TO_LATEST_VISIBLE_SIZE,
   renderHistoryBoundary,
+  renderHistoryRecovery,
   renderJumpToLatestButton,
   renderScrollRail,
   resolveListBatchingConfig,
@@ -421,19 +422,18 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     () => resolveListBatchingConfig(displayMessages.length, isLargeChat),
     [displayMessages.length, isLargeChat],
   );
-  const threadRunning = chat.status === 'running';
   const activityPresentation = useCollapsibleActivity(activity);
   const listExtraData = useMemo(
     () => ({ liveMessageState, chatStatus: chat.status }),
     [chat.status, liveMessageState],
   );
-  const activityEvent = activityPresentation ? (
-    <TranscriptActivitySlot
-      chat={chat}
-      presentation={activityPresentation}
-      animationActive={activityVisible}
-    />
-  ) : null;
+  const activityEvent = renderHistoryRecovery(
+    chat,
+    activityPresentation,
+    activityVisible,
+    onLoadEarlier,
+    styles,
+  );
   const renderMessageItem = useCallback<ListRenderItem<TranscriptDisplayItem>>(
     ({ item }) =>
       renderChatTranscriptItem({
@@ -453,7 +453,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           item.kind === 'message' && forkBoundaries.get(item.message.id) === forkingMessageId,
         onForkConversation: handleForkConversation,
         timestampRevealTranslationX: timestampReveal.translationX,
-        threadRunning,
+        threadRunning: chat.status === 'running',
         animationVisible: item.kind !== 'toolInvocation' || visibleItemIds.has(item.invocation.id),
       }),
     [
@@ -469,7 +469,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       onForkConversation,
       styles,
       timestampReveal.translationX,
-      threadRunning,
+      chat.status,
       visibleItemIds,
     ],
   );
