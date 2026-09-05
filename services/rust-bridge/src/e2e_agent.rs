@@ -1,4 +1,9 @@
-use std::{env, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
 use agent_client_protocol::{
     on_receive_notification, on_receive_request,
@@ -97,12 +102,21 @@ enum MessageRole {
 struct PromptControl {
     chunks: Vec<String>,
     #[serde(default)]
+    tool_steps: Vec<ToolStep>,
+    #[serde(default)]
     delay_ms: u64,
     #[serde(default = "default_success")]
     succeed: bool,
     #[serde(default)]
     hold: bool,
     message_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolStep {
+    update: SessionUpdate,
+    #[serde(default)]
+    hold: bool,
 }
 
 fn default_success() -> bool {
@@ -225,6 +239,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .map_err(agent_client_protocol::Error::into_internal_error)?,
                     )
                     .map_err(agent_client_protocol::Error::into_internal_error)?;
+                    for (index, step) in control.tool_steps.iter().enumerate() {
+                        connection.send_notification(SessionNotification::new(
+                            request.session_id.clone(),
+                            step.update.clone(),
+                        ))?;
+                        if step.hold {
+                            wait_for_release(&control_path, &format!("tool-{index}.")).await?;
+                        }
+                    }
                     for chunk in &control.chunks {
                         if control.delay_ms > 0 {
                             sleep(Duration::from_millis(control.delay_ms)).await;
@@ -238,25 +261,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ))?;
                     }
                     if control.hold {
-                        let holding = control_path.with_extension("holding");
-                        let release = control_path.with_extension("release");
-                        fs::write(&holding, b"holding")
-                            .await
-                            .map_err(agent_client_protocol::Error::into_internal_error)?;
-                        let deadline = Instant::now() + HOLD_TIMEOUT;
-                        while !fs::try_exists(&release)
-                            .await
-                            .map_err(agent_client_protocol::Error::into_internal_error)?
-                        {
-                            if Instant::now() >= deadline {
-                                return responder.respond_with_error(
-                                    agent_client_protocol::Error::internal_error(),
-                                );
-                            }
-                            sleep(Duration::from_millis(10)).await;
-                        }
-                        let _ = fs::remove_file(release).await;
-                        let _ = fs::remove_file(holding).await;
+                        wait_for_release(&control_path, "").await?;
                     }
                     if control.succeed {
                         responder.respond(PromptResponse::new(StopReason::EndTurn))
@@ -300,6 +305,34 @@ fn required_path(name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     Ok(PathBuf::from(value))
 }
 
+async fn wait_for_release(
+    control_path: &Path,
+    checkpoint: &str,
+) -> Result<(), agent_client_protocol::Error> {
+    let holding = control_path.with_extension(format!("{checkpoint}holding"));
+    let release = control_path.with_extension(format!("{checkpoint}release"));
+    fs::write(&holding, b"holding")
+        .await
+        .map_err(agent_client_protocol::Error::into_internal_error)?;
+    let deadline = Instant::now() + HOLD_TIMEOUT;
+    while !fs::try_exists(&release)
+        .await
+        .map_err(agent_client_protocol::Error::into_internal_error)?
+    {
+        if Instant::now() >= deadline {
+            return Err(agent_client_protocol::Error::internal_error());
+        }
+        sleep(Duration::from_millis(10)).await;
+    }
+    fs::remove_file(release)
+        .await
+        .map_err(agent_client_protocol::Error::into_internal_error)?;
+    fs::remove_file(holding)
+        .await
+        .map_err(agent_client_protocol::Error::into_internal_error)?;
+    Ok(())
+}
+
 async fn replay_chat(
     scenario: &Scenario,
     session_id: &str,
@@ -322,4 +355,78 @@ async fn replay_chat(
         connection.send_notification(SessionNotification::new(session_id.to_string(), update))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prompt_control_accepts_typed_patch_steps_and_status_only_completion() {
+        let control: PromptControl = serde_json::from_value(serde_json::json!({
+            "chunks": [],
+            "messageId": "patch-message",
+            "toolSteps": [
+                {
+                    "update": {
+                        "sessionUpdate": "tool_call",
+                        "toolCallId": "patch",
+                        "title": "apply_patch",
+                        "kind": "other",
+                        "status": "pending"
+                    },
+                    "hold": true
+                },
+                {
+                    "update": {
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": "patch",
+                        "status": "in_progress",
+                        "content": [{
+                            "type": "diff",
+                            "path": "src/settings.ts",
+                            "oldText": "old\n",
+                            "newText": "new\n"
+                        }]
+                    },
+                    "hold": true
+                },
+                {
+                    "update": {
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": "patch",
+                        "status": "completed"
+                    }
+                }
+            ]
+        }))
+        .expect("typed ACP patch control");
+        assert!(matches!(
+            control.tool_steps[0].update,
+            SessionUpdate::ToolCall(_)
+        ));
+        let update = serde_json::to_value(&control.tool_steps[1].update).unwrap();
+        assert_eq!(update["content"][0]["type"], "diff");
+        assert_eq!(update["content"][0]["oldText"], "old\n");
+        assert_eq!(update["content"][0]["newText"], "new\n");
+        assert!(control.tool_steps[1].hold);
+        let completed = serde_json::to_value(&control.tool_steps[2].update).unwrap();
+        assert_eq!(completed["status"], "completed");
+        assert!(completed.get("content").is_none());
+        assert!(!control.tool_steps[2].hold);
+        assert!(control.succeed);
+    }
+
+    #[test]
+    fn existing_assistant_controls_need_no_tool_steps() {
+        let control: PromptControl = serde_json::from_value(serde_json::json!({
+            "chunks": ["Working."],
+            "messageId": "existing-message",
+            "hold": true
+        }))
+        .unwrap();
+        assert!(control.tool_steps.is_empty());
+        assert!(control.hold);
+        assert_eq!(control.chunks, ["Working."]);
+    }
 }

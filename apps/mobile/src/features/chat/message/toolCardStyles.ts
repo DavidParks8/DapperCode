@@ -72,6 +72,32 @@ export const createToolCardStyles = (theme: AppTheme) =>
       paddingLeft: theme.spacing.sm,
       paddingRight: theme.spacing.sm,
     },
+    patchFiles: {
+      paddingLeft: 16 + theme.spacing.sm * 2,
+      paddingRight: theme.spacing.sm,
+      paddingBottom: theme.spacing.xs,
+    },
+    patchFile: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+      paddingVertical: theme.spacing.xs,
+    },
+    patchFileInfo: { flex: 1, minWidth: 0 },
+    patchFileName: {
+      ...theme.typography.caption,
+      color: theme.colors.textSecondary,
+    },
+    patchFilePath: {
+      ...theme.typography.metadata,
+      fontFamily: theme.fonts.monoRegular,
+      color: theme.colors.textMuted,
+    },
+    patchStats: {
+      flexDirection: 'row',
+      flexShrink: 0,
+      gap: theme.spacing.xs,
+    },
     horizontalScrollFrame: { flex: 1, minWidth: 0, position: 'relative' },
     commandScroll: { flex: 1, minWidth: 0 },
     commandScrollContent: { flexDirection: 'row', flexGrow: 1 },
@@ -183,6 +209,7 @@ export const createToolCardStyles = (theme: AppTheme) =>
       fontFamily: theme.fonts.monoRegular,
       color: theme.colors.textMuted,
       flex: 1,
+      minWidth: 0,
     },
     diffStats: {
       flexDirection: 'row',
@@ -193,6 +220,7 @@ export const createToolCardStyles = (theme: AppTheme) =>
       minWidth: 24,
       textAlign: 'center',
       fontWeight: '700',
+      fontVariant: ['tabular-nums'],
     },
     diffAddedStat: {
       color: theme.colors.diffAddedText,

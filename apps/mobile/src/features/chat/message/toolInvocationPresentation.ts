@@ -1,6 +1,10 @@
 import type { ChatToolKind, ChatToolStatus } from '@bridge/types/types';
 import { buildCompactDiff, type CompactDiff } from '@shared/diff/compactDiff';
-import type { ToolInvocation, ToolInvocationDiff } from './toolInvocationModel';
+import {
+  normalizeLocationPath,
+  type ToolInvocation,
+  type ToolInvocationDiff,
+} from './toolInvocationModel';
 
 const TOOL_STATUS_PHRASES: Record<ChatToolKind, Record<ChatToolStatus, string>> = {
   read: {
@@ -86,6 +90,37 @@ export interface ToolInvocationHeader {
   status: ChatToolStatus;
 }
 
+export interface ToolInvocationFile {
+  path: string;
+  additions: number | null;
+  deletions: number | null;
+}
+
+export function resolveToolInvocationFiles(invocation: ToolInvocation): ToolInvocationFile[] {
+  const files = new Map<string, ToolInvocationFile>();
+  for (const diff of invocation.diffs) {
+    const stats = compactToolDiff(diff);
+    const path = normalizeLocationPath(diff.path);
+    files.set(path, {
+      path,
+      additions: stats.unavailable ? null : stats.additions,
+      deletions: stats.unavailable ? null : stats.deletions,
+    });
+  }
+  if (['edit', 'delete', 'move'].includes(invocation.kind)) {
+    for (const { path } of invocation.locations) {
+      if (!files.has(path)) {
+        files.set(path, { path, additions: null, deletions: null });
+      }
+    }
+  }
+  return [...files.values()];
+}
+
+export function formatChangedLineCount(count: number, kind: 'added' | 'removed'): string {
+  return `${String(count)} ${count === 1 ? 'line' : 'lines'} ${kind}`;
+}
+
 export function resolveToolInvocationHeader(
   invocation: ToolInvocation,
   threadRunning = true,
@@ -101,8 +136,9 @@ export function resolveToolInvocationHeader(
 
   const action = TOOL_STATUS_PHRASES[invocation.kind][status];
   const subject = resolveHeaderSubject(invocation, title);
-  if (invocation.kind === 'edit' && invocation.diffs.length > 0) {
-    const editSubject = resolveEditSubject(invocation.diffs);
+  const files = resolveToolInvocationFiles(invocation);
+  if (['edit', 'delete', 'move'].includes(invocation.kind) && files.length > 0) {
+    const editSubject = resolveEditSubject(files);
     return {
       action,
       subject: editSubject,
@@ -142,15 +178,16 @@ function resolveHeaderSubject(invocation: ToolInvocation, title: string): string
   return title;
 }
 
-function resolveEditSubject(diffs: ToolInvocationDiff[]): string {
-  const available = diffs.map(compactToolDiff).filter((diff) => !diff.unavailable);
-  const additions = available.reduce((total, diff) => total + diff.additions, 0);
-  const deletions = available.reduce((total, diff) => total + diff.deletions, 0);
-  const stats = formatDiffStats(additions, deletions);
-  if (diffs.length === 1) {
-    return [basename(diffs[0]?.path ?? ''), stats].filter(Boolean).join(' ');
+function resolveEditSubject(files: ToolInvocationFile[]): string {
+  const additions = files.reduce((total, file) => total + (file.additions ?? 0), 0);
+  const deletions = files.reduce((total, file) => total + (file.deletions ?? 0), 0);
+  const stats = files.every((file) => file.additions !== null && file.deletions !== null)
+    ? formatDiffStats(additions, deletions)
+    : '';
+  if (files.length === 1) {
+    return [basename(files[0]?.path ?? ''), stats].filter(Boolean).join(' ');
   }
-  return [`${String(diffs.length)} files`, stats].filter(Boolean).join(' ');
+  return [`${String(files.length)} files`, stats].filter(Boolean).join(' ');
 }
 
 function formatDiffStats(additions: number, deletions: number): string {
