@@ -123,6 +123,7 @@ test('same-session transcript recovers after offline replay overflow and a cache
   let disconnectedFrames = 0;
 
   await test.step('baseline', async () => {
+    await expect(selectors.transcriptScroll(page)).toHaveCSS('overflow-anchor', 'none');
     await selectors.composerInput(page).fill(kickoff);
     await selectors.composerSend(page).click();
     await prompt.waitForStart();
