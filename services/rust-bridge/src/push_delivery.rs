@@ -717,6 +717,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn canonical_reply_previews_evict_at_capacity_and_restart_evicted_threads() {
+        let directory =
+            std::env::temp_dir().join(format!("dappercode-push-eviction-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let service = PushService::load(
+            &directory,
+            "project".to_string(),
+            Arc::new(OperationalMetrics::new()),
+        )
+        .await;
+        let full_preview = "x".repeat(PUSH_PREVIEW_ACCUMULATE_CAP);
+        for index in 0..PUSH_PREVIEW_MAX_THREADS {
+            service
+                .accumulate_canonical_reply(&format!("old-{index}"), &full_preview)
+                .await;
+        }
+        service.accumulate_canonical_reply("old-0", "ignored").await;
+        assert_eq!(service.recent_replies.read().await["old-0"], full_preview);
+        assert_eq!(
+            service.recent_replies.read().await.len(),
+            PUSH_PREVIEW_MAX_THREADS
+        );
+
+        service.accumulate_canonical_reply("new", "new reply").await;
+        let evicted_thread = {
+            let replies = service.recent_replies.read().await;
+            assert_eq!(replies.len(), PUSH_PREVIEW_MAX_THREADS);
+            assert_eq!(replies["new"], "new reply");
+            // Any saturated preview may be evicted; HashMap order is unspecified.
+            let mut evicted_threads = (0..PUSH_PREVIEW_MAX_THREADS)
+                .map(|index| format!("old-{index}"))
+                .filter(|thread_id| !replies.contains_key(thread_id))
+                .collect::<Vec<_>>();
+            assert_eq!(evicted_threads.len(), 1);
+            evicted_threads.pop().unwrap()
+        };
+        service
+            .accumulate_canonical_reply(&evicted_thread, "ignored")
+            .await;
+        assert_eq!(
+            service.recent_replies.read().await[&evicted_thread],
+            "ignored"
+        );
+        assert_eq!(
+            service.recent_replies.read().await.len(),
+            PUSH_PREVIEW_MAX_THREADS
+        );
+
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
     async fn canonical_reply_previews_are_bounded_and_terminal_events_consume_them() {
         let directory =
             std::env::temp_dir().join(format!("dappercode-push-preview-{}", uuid::Uuid::new_v4()));
@@ -731,21 +783,17 @@ mod tests {
 
         service.accumulate_canonical_reply("empty", "").await;
         assert!(!service.recent_replies.read().await.contains_key("empty"));
-        {
-            let mut replies = service.recent_replies.write().await;
-            for index in 0..PUSH_PREVIEW_MAX_THREADS.saturating_sub(1) {
-                replies.insert(format!("old-{index}"), "old".to_string());
-            }
-            replies.insert("full".to_string(), "x".repeat(PUSH_PREVIEW_ACCUMULATE_CAP));
-        }
         service
-            .accumulate_canonical_reply("new", "first\n final   answer ")
+            .accumulate_canonical_reply("full", &"x".repeat(PUSH_PREVIEW_ACCUMULATE_CAP + 1))
             .await;
         service.accumulate_canonical_reply("full", "ignored").await;
         assert_eq!(
             service.recent_replies.read().await["full"].len(),
             PUSH_PREVIEW_ACCUMULATE_CAP
         );
+        service
+            .accumulate_canonical_reply("new", "first\n final   answer ")
+            .await;
         assert_eq!(
             service.take_reply_preview("new").await.as_deref(),
             Some("final answer")
