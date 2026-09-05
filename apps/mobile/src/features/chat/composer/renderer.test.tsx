@@ -40,6 +40,7 @@ function baseContext(
     activeAgentLabel: 'Codex',
     attachmentControlsDisabled: false,
     attachmentController: {
+      pasteScopeKey: 'test-scope',
       pasteImage: jest.fn(),
       setPasteBusy: jest.fn(),
       pasteError: jest.fn(),
@@ -269,7 +270,10 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
         nativeEvent: { scopeKey: 'test-scope', uri: 'file:///photo.png', width: 10, height: 10 },
       }),
     );
-    expect(context.attachmentController.pasteImage).not.toHaveBeenCalled();
+    expect(context.attachmentController.pasteImage).toHaveBeenCalledWith(
+      { scopeKey: 'test-scope', uri: 'file:///photo.png', width: 10, height: 10 },
+      false,
+    );
     expect(
       root(tree).findAll(
         (node) =>

@@ -339,7 +339,7 @@ export function shouldRestoreDraftForCreateFailure(params: {
 }): boolean {
   const { tracker, submissionController, submission, currentDraft, selectedChatIdRef } = params;
   if (!tracker.createdChatId) {
-    return true;
+    return currentDraft.value === '';
   }
 
   if (submissionController.fail(submission, currentDraft)) {
@@ -360,8 +360,9 @@ export function handleCreateChatFailure(params: {
   submission: ChatSubmission;
   tracker: ChatCreationVisibilityTracker;
   attachmentController: MainScreenChatCreationFlowContext['attachmentController'];
-  pendingRestoredDraftRef: { current: string | null };
-  setDraft: MainScreenChatCreationFlowContext['setDraft'];
+  restoreSubmission: (
+    submission: Pick<ChatSubmission, 'draft' | 'mentions' | 'localImages'>,
+  ) => void;
   discardOptimisticUserMessage: MainScreenChatCreationFlowContext['discardOptimisticUserMessage'];
   optimisticMessage: ChatTranscriptMessage;
   selectedChatIdRef: MainScreenChatCreationFlowContext['selectedChatIdRef'];
@@ -374,17 +375,26 @@ export function handleCreateChatFailure(params: {
   error: unknown;
 }): void {
   const currentDraft = params.draftController.snapshot();
-  const shouldRestoreDraft = shouldRestoreDraftForCreateFailure({
-    tracker: params.tracker,
-    submissionController: params.submissionController,
-    submission: params.submission,
-    currentDraft,
-    selectedChatIdRef: params.selectedChatIdRef,
-  });
+  const ownsComposer =
+    params.selectedChatIdRef.current === (params.tracker.createdChatId ?? params.optimisticChatId);
+  const shouldRestoreDraft =
+    ownsComposer &&
+    shouldRestoreDraftForCreateFailure({
+      tracker: params.tracker,
+      submissionController: params.submissionController,
+      submission: params.submission,
+      currentDraft,
+      selectedChatIdRef: params.selectedChatIdRef,
+    });
   params.attachmentController.finishSubmission(false, shouldRestoreDraft);
   if (shouldRestoreDraft) {
-    params.pendingRestoredDraftRef.current = params.submission.draft;
-    params.setDraft(params.submission.draft);
+    params.restoreSubmission(params.submission);
+  } else if (ownsComposer && !params.tracker.createdChatId && currentDraft.value !== '') {
+    params.restoreSubmission({
+      draft: currentDraft.value,
+      mentions: params.attachmentController.pendingMentionPaths,
+      localImages: params.attachmentController.pendingLocalImagePaths,
+    });
   }
   if (params.tracker.createdChatId) {
     params.discardOptimisticUserMessage(params.tracker.createdChatId, params.optimisticMessage.id);

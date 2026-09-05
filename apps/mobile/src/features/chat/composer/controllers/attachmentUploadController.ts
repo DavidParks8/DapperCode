@@ -74,31 +74,51 @@ export function useAttachmentUploadController({
   const scopeRef = useRef(scopeKey);
   scopeRef.current = scopeKey;
   const uploadsRef = useRef(new Map<string, symbol>());
+  const ownedImageUrisRef = useRef(new Set<string>());
+  const discardPreparedImage = useCallback(async (uri: string) => {
+    if (ownedImageUrisRef.current.delete(uri)) {
+      await deleteTemporaryImage(uri);
+    }
+  }, []);
+  const discardPreparedImages = useCallback(() => {
+    for (const uri of ownedImageUrisRef.current) {
+      void discardPreparedImage(uri);
+    }
+  }, [discardPreparedImage]);
   const generation = generationRef.current;
+  const pasteScopeKey = JSON.stringify([scopeKey, generation]);
   const isCurrent = useCallback(
     () => generation === generationRef.current && scopeKey === scopeRef.current,
     [generation, scopeKey],
   );
   const clearUploads = useCallback(() => {
     generationRef.current += 1;
+    discardPreparedImages();
     uploadsRef.current.clear();
     pickerInProgressRef.current = false;
     setPickerBusy(false);
     setNativePasteBusy(false);
     setPreparing(0);
     setPreparedAttachments([]);
-  }, []);
+  }, [discardPreparedImages]);
 
   useLayoutEffect(() => {
     return () => {
       generationRef.current += 1;
+      discardPreparedImages();
     };
-  }, [scopeKey]);
+  }, [discardPreparedImages, scopeKey]);
 
-  const removePreparedAttachment = useCallback((id: string) => {
-    uploadsRef.current.delete(id);
-    setPreparedAttachments((current) => current.filter((entry) => entry.id !== id));
-  }, []);
+  const removePreparedAttachment = useCallback(
+    (id: string) => {
+      uploadsRef.current.delete(id);
+      if (id.startsWith('image:')) {
+        void discardPreparedImage(id.slice('image:'.length));
+      }
+      setPreparedAttachments((current) => current.filter((entry) => entry.id !== id));
+    },
+    [discardPreparedImage],
+  );
   const uploading =
     pickerBusy ||
     pasteBusy ||
@@ -113,6 +133,7 @@ export function useAttachmentUploadController({
       kind,
       knownSize,
       onPrepared,
+      retry,
     }: {
       uri: string;
       fileName?: string;
@@ -120,10 +141,8 @@ export function useAttachmentUploadController({
       kind: 'file' | 'image';
       knownSize?: number;
       onPrepared?: () => void;
+      retry?: boolean;
     }) => {
-      if (!isCurrent()) {
-        return;
-      }
       const normalizedUri = normalizeAttachmentPath(uri);
       if (!normalizedUri) {
         setError('Unable to read attachment from this device');
@@ -133,6 +152,8 @@ export function useAttachmentUploadController({
       const token = Symbol();
       uploadsRef.current.set(preparedId, token);
       const isActive = () => isCurrent() && uploadsRef.current.get(preparedId) === token;
+      let preparedForRetry = retry === true;
+      let retainForRetry = false;
       try {
         const info = await FileSystem.getInfoAsync(normalizedUri);
         if (!isActive()) {
@@ -162,6 +183,7 @@ export function useAttachmentUploadController({
           ...current.filter((entry) => entry.id !== prepared.id),
           prepared,
         ]);
+        preparedForRetry = true;
         onPrepared?.();
         const uploaded = await api.uploadAttachment({
           uri: normalizedUri,
@@ -180,17 +202,21 @@ export function useAttachmentUploadController({
         }
         setPreparedAttachments((current) => current.filter((entry) => entry.id !== preparedId));
         uploadsRef.current.delete(preparedId);
-        setError(null);
       } catch (error) {
         if (!isActive()) {
           return;
         }
         uploadsRef.current.delete(preparedId);
         setPreparedAttachments((current) => retainFailedPreparedAttachment(current, preparedId));
+        retainForRetry = preparedForRetry;
         setError((error as Error).message);
+      } finally {
+        if (!retainForRetry) {
+          await discardPreparedImage(normalizedUri);
+        }
       }
     },
-    [addImage, addMention, api, chat?.id, isCurrent, setError],
+    [addImage, addMention, api, chat?.id, discardPreparedImage, isCurrent, setError],
   );
 
   const retryFailedUploads = useCallback(() => {
@@ -198,6 +224,7 @@ export function useAttachmentUploadController({
       return;
     }
     const failed = preparedAttachments.filter((attachment) => attachment.status === 'failed');
+    setError(null);
     for (const attachment of failed) {
       if (uploadsRef.current.has(attachment.id)) {
         continue;
@@ -213,9 +240,10 @@ export function useAttachmentUploadController({
         mimeType: attachment.mimeType,
         kind: attachment.kind,
         knownSize: attachment.sizeBytes,
+        retry: true,
       });
     }
-  }, [isCurrent, preparedAttachments, upload]);
+  }, [isCurrent, preparedAttachments, setError, upload]);
 
   const prepareAndUploadImage = useCallback(
     async (image: Omit<PastedImage, 'scopeKey'>, pasted = false, onPrepared?: () => void) => {
@@ -229,10 +257,12 @@ export function useAttachmentUploadController({
         } finally {
           // Only native paste transfers ownership of its source temp file to us.
           if (pasted) {
-            await FileSystem.deleteAsync(image.uri, { idempotent: true }).catch(() => undefined);
+            await deleteTemporaryImage(image.uri);
           }
         }
+        ownedImageUrisRef.current.add(prepared.uri);
         if (!isCurrent()) {
+          await discardPreparedImage(prepared.uri);
           return;
         }
         await upload({
@@ -248,17 +278,16 @@ export function useAttachmentUploadController({
         }
       }
     },
-    [isCurrent, setError, upload],
+    [discardPreparedImage, isCurrent, setError, upload],
   );
 
   const pasteImage = useCallback(
-    async (image: PastedImage): Promise<void> => {
-      if (!isCurrent() || image.scopeKey !== scopeKey) {
-        await FileSystem.deleteAsync(image.uri, { idempotent: true }).catch(() => undefined);
+    async (image: PastedImage, enabled = true): Promise<void> => {
+      if (!enabled || !isCurrent() || image.scopeKey !== pasteScopeKey) {
+        await deleteTemporaryImage(image.uri);
         return;
       }
       setPreparing((current) => current + 1);
-      setError(null);
       let preparing = true;
       const finishPreparing = () => {
         if (preparing && isCurrent()) {
@@ -272,25 +301,28 @@ export function useAttachmentUploadController({
         finishPreparing();
       }
     },
-    [isCurrent, prepareAndUploadImage, scopeKey, setError],
+    [isCurrent, prepareAndUploadImage, pasteScopeKey],
   );
 
   const setPasteBusy = useCallback(
     (event: { busy: boolean; scopeKey: string }) => {
-      if (isCurrent() && event.scopeKey === scopeKey) {
+      if (isCurrent() && event.scopeKey === pasteScopeKey) {
+        if (event.busy) {
+          setError(null);
+        }
         setNativePasteBusy(event.busy);
       }
     },
-    [isCurrent, scopeKey],
+    [isCurrent, pasteScopeKey, setError],
   );
 
   const pasteError = useCallback(
     (event: { message: string; scopeKey: string }) => {
-      if (isCurrent() && event.scopeKey === scopeKey) {
+      if (isCurrent() && event.scopeKey === pasteScopeKey) {
         setError(event.message);
       }
     },
-    [isCurrent, scopeKey, setError],
+    [isCurrent, pasteScopeKey, setError],
   );
 
   const runPicker = useCallback(
@@ -300,6 +332,7 @@ export function useAttachmentUploadController({
       }
       pickerInProgressRef.current = true;
       setPickerBusy(true);
+      setError(null);
       try {
         await picker();
       } catch (error) {
@@ -409,6 +442,7 @@ export function useAttachmentUploadController({
     clearUploads,
     pasteImage,
     pasteBusy,
+    pasteScopeKey,
     setPasteBusy,
     pasteError,
     pickerBusy: pickerBusy || preparing > 0,
@@ -443,15 +477,28 @@ async function prepareImage(uri: string, width: number, height: number, knownSiz
     compress: IMAGE_COMPRESSION,
     format: ImageManipulator.SaveFormat.JPEG,
   });
-  const info = await FileSystem.getInfoAsync(result.uri);
-  if (!info.exists || info.isDirectory) {
-    throw new Error('Unable to prepare image');
+  try {
+    const info = await FileSystem.getInfoAsync(result.uri);
+    if (!info.exists || info.isDirectory) {
+      throw new Error('Unable to prepare image');
+    }
+    const sizeError = attachmentSizeError(info.size);
+    if (sizeError) {
+      throw new Error(`Compressed image still exceeds the ${ATTACHMENT_MAX_LABEL} limit`);
+    }
+    return result;
+  } catch (error) {
+    await deleteTemporaryImage(result.uri);
+    throw error;
   }
-  const sizeError = attachmentSizeError(info.size);
-  if (sizeError) {
-    throw new Error(`Compressed image still exceeds the ${ATTACHMENT_MAX_LABEL} limit`);
+}
+
+async function deleteTemporaryImage(uri: string): Promise<void> {
+  try {
+    await FileSystem.deleteAsync(uri, { idempotent: true });
+  } catch (error) {
+    console.warn('Unable to remove temporary attachment image', error);
   }
-  return result;
 }
 
 function toJpegFileName(fileName: string): string {

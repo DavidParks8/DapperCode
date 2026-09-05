@@ -97,6 +97,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     queueActionKind === 'editStart' ||
     queueActionKind === 'editCommit' ||
     queueActionKind === 'editCancel';
+  const pasteDisabled = editingQueuedMessage || queueActionKind === 'editStart';
 
   const renderComposer = (overlay: boolean) => (
     <View
@@ -131,7 +132,11 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         showingOptimisticQueuedMessage={showingOptimisticQueuedMessage}
         canSteerQueuedMessage={canSteerQueuedMessage}
         canCancelQueuedMessage={canCancelQueuedMessage}
-        canEditQueuedMessage={canEditQueuedMessage}
+        canEditQueuedMessage={
+          canEditQueuedMessage &&
+          !context.uploadingAttachment &&
+          !context.hasFailedAttachmentUploads
+        }
         queueActionItemId={queueActionItemId}
         queueActionKind={queueActionKind}
         oldestQueuedMessageIsPendingSteer={oldestQueuedMessageIsPendingSteer}
@@ -159,15 +164,21 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         showStopButton={isTurnLoading || isTurnLikelyRunning || stoppingTurn}
         isStopping={stoppingTurn}
         onAttachPress={openAttachmentMenu}
-        pasteScopeKey={context.draftController.snapshot().scopeKey}
+        pasteScopeKey={attachmentController.pasteScopeKey}
         onPasteImage={({ nativeEvent }) => {
-          if (!editingQueuedMessage) {
-            void attachmentController.pasteImage(nativeEvent);
+          void attachmentController.pasteImage(nativeEvent, !pasteDisabled);
+        }}
+        onPasteBusy={({ nativeEvent }) => {
+          if (!pasteDisabled) {
+            attachmentController.setPasteBusy(nativeEvent);
           }
         }}
-        onPasteBusy={({ nativeEvent }) => attachmentController.setPasteBusy(nativeEvent)}
-        onPasteError={({ nativeEvent }) => attachmentController.pasteError(nativeEvent)}
-        attachDisabled={attachmentControlsDisabled || editingQueuedMessage}
+        onPasteError={({ nativeEvent }) => {
+          if (!pasteDisabled) {
+            attachmentController.pasteError(nativeEvent);
+          }
+        }}
+        attachDisabled={attachmentControlsDisabled || pasteDisabled}
         attachments={composerAttachments}
         onRemoveAttachment={removeComposerAttachment}
         isLoading={isLoading}

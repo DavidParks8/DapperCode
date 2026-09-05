@@ -43,7 +43,8 @@ export interface AttachmentController {
   pendingLocalImagePaths: string[];
   pickerBusy: boolean;
   pasteBusy: boolean;
-  pasteImage: (image: PastedImage) => Promise<void>;
+  pasteScopeKey: string;
+  pasteImage: (image: PastedImage, enabled?: boolean) => Promise<void>;
   setPasteBusy: (event: { busy: boolean; scopeKey: string }) => void;
   pasteError: (event: { message: string; scopeKey: string }) => void;
   uploading: boolean;
@@ -58,6 +59,7 @@ export interface AttachmentController {
   removeMentionPath: (path: string) => void;
   retryFailedUploads: () => void;
   clearPending: () => void;
+  restorePending: (attachments: { mentions: string[]; localImages: string[] }) => void;
   beginSubmission: () => void;
   finishSubmission: (succeeded: boolean, restoringDraft?: boolean) => void;
   clear: () => void;
@@ -96,7 +98,6 @@ export function useAttachmentController({
         return false;
       }
       setPendingMentionPaths((current) => addUniqueAttachmentPath(current, normalized) ?? current);
-      setError(null);
       return true;
     },
     [setError],
@@ -112,7 +113,6 @@ export function useAttachmentController({
       setPendingLocalImagePaths(
         (current) => addUniqueAttachmentPath(current, normalized) ?? current,
       );
-      setError(null);
       return true;
     },
     [setError],
@@ -123,6 +123,7 @@ export function useAttachmentController({
     clearUploads,
     pasteImage,
     pasteBusy,
+    pasteScopeKey,
     setPasteBusy,
     pasteError,
     pickerBusy,
@@ -213,6 +214,15 @@ export function useAttachmentController({
     clear();
   }, [clear, scopeKey]);
 
+  const restorePending = useCallback(
+    (attachments: { mentions: string[]; localImages: string[] }) => {
+      skipNextDraftReconcileRef.current = true;
+      setPendingMentionPaths(attachments.mentions);
+      setPendingLocalImagePaths(attachments.localImages);
+    },
+    [],
+  );
+
   const composerAttachments = useMemo(
     () => [
       ...pendingLocalImagePaths.map((path) => ({
@@ -237,6 +247,7 @@ export function useAttachmentController({
     pickerBusy,
     pasteImage,
     pasteBusy,
+    pasteScopeKey,
     setPasteBusy,
     pasteError,
     uploading,
@@ -256,6 +267,7 @@ export function useAttachmentController({
     closePathModal,
     submitPath: () => {
       if (addMention(attachmentPathDraft)) {
+        setError(null);
         setAttachmentPathDraft('');
         setAttachmentModalVisible(false);
       }
@@ -278,6 +290,7 @@ export function useAttachmentController({
       setPendingMentionPaths([]);
       setPendingLocalImagePaths([]);
     },
+    restorePending,
     beginSubmission: () => {
       submissionPendingRef.current = true;
     },

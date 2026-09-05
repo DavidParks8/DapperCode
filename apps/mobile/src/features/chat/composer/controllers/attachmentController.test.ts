@@ -62,6 +62,9 @@ function makeHarness(workspace: string | null = '/repo', draft = '', scopeKey?: 
     get current() {
       return current!;
     },
+    get image(): PastedImage {
+      return { ...pastedImage, scopeKey: current!.pasteScopeKey };
+    },
     async mount(props = { workspace, draft, scopeKey }) {
       await act(async () => {
         tree = renderer.create(React.createElement(Probe, props));
@@ -193,14 +196,14 @@ describe('attachmentController', () => {
     harness.api.uploadAttachment.mockReturnValueOnce(uploaded.promise);
     const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => undefined);
     await harness.mount();
-    act(() => harness.current.setPasteBusy({ busy: true, scopeKey: 'thread-1' }));
+    act(() => harness.current.setPasteBusy({ busy: true, scopeKey: harness.image.scopeKey }));
     expect(harness.current.pasteBusy).toBe(true);
     expect(harness.current.uploading).toBe(true);
 
     let paste!: Promise<void>;
     act(() => {
-      paste = harness.current.pasteImage(pastedImage);
-      harness.current.setPasteBusy({ busy: false, scopeKey: 'thread-1' });
+      paste = harness.current.pasteImage(harness.image);
+      harness.current.setPasteBusy({ busy: false, scopeKey: harness.image.scopeKey });
     });
     expect(harness.current.pasteBusy).toBe(false);
     expect(harness.current.pickerBusy).toBe(true);
@@ -248,7 +251,10 @@ describe('attachmentController', () => {
     ]) {
       expect(interaction).not.toHaveBeenCalled();
     }
-    expect(deleteFile).toHaveBeenCalledTimes(1);
+    expect(deleteFile.mock.calls).toEqual([
+      [pastedImage.uri, { idempotent: true }],
+      ['file:///prepared.jpg', { idempotent: true }],
+    ]);
     harness.unmount();
   });
 
@@ -256,12 +262,13 @@ describe('attachmentController', () => {
     const harness = makeHarness();
     harness.api.uploadAttachment.mockRejectedValueOnce(new Error('offline'));
     await harness.mount();
-    await act(async () => harness.current.pasteImage(pastedImage));
+    await act(async () => harness.current.pasteImage(harness.image));
     expect(harness.current.uploading).toBe(false);
     expect(harness.current.pickerBusy).toBe(false);
     expect(harness.current.hasFailedUploads).toBe(true);
     expect(harness.current.composerAttachments[0]?.label).toBe('retry · paste.jpg');
     expect(harness.setError).toHaveBeenLastCalledWith('offline');
+    expect(deleteFile.mock.calls).toEqual([[pastedImage.uri, { idempotent: true }]]);
     const uploaded = deferred<{ kind: string; path: string }>();
     harness.api.uploadAttachment.mockReturnValueOnce(uploaded.promise);
     act(() => harness.current.retryFailedUploads());
@@ -273,7 +280,10 @@ describe('attachmentController', () => {
     expect(harness.current.toTurnInputs().localImages).toEqual([{ path: '/repo/retried.jpg' }]);
     expect(harness.setError).toHaveBeenLastCalledWith(null);
     expect(manipulate).toHaveBeenCalledTimes(1);
-    expect(deleteFile.mock.calls).toEqual([[pastedImage.uri, { idempotent: true }]]);
+    expect(deleteFile.mock.calls).toEqual([
+      [pastedImage.uri, { idempotent: true }],
+      ['file:///prepared.jpg', { idempotent: true }],
+    ]);
     expect(harness.api.uploadAttachment.mock.calls[1]).toEqual(
       harness.api.uploadAttachment.mock.calls[0],
     );
@@ -289,11 +299,12 @@ describe('attachmentController', () => {
       await harness.mount();
       let paste!: Promise<void>;
       await act(async () => {
-        paste = harness.current.pasteImage(pastedImage);
+        paste = harness.current.pasteImage(harness.image);
       });
       expect(harness.current.uploading).toBe(true);
       act(() => harness.current.removeComposerAttachment('prepared:image:file:///prepared.jpg'));
       expect(harness.current.uploading).toBe(false);
+      expect(deleteFile).toHaveBeenCalledWith('file:///prepared.jpg', { idempotent: true });
       harness.setError.mockClear();
       await act(async () => {
         if (outcome === 'success') {
@@ -307,6 +318,129 @@ describe('attachmentController', () => {
       expect(harness.current.toTurnInputs().localImages).toEqual([]);
       expect(harness.current.hasFailedUploads).toBe(false);
       expect(harness.setError).not.toHaveBeenCalled();
+      harness.unmount();
+    },
+  );
+
+  it('retains a retryable JPEG through a transient retry metadata failure', async () => {
+    const harness = makeHarness();
+    harness.api.uploadAttachment.mockRejectedValueOnce(new Error('offline'));
+    await harness.mount();
+    await act(async () => harness.current.pasteImage(harness.image));
+    getInfo.mockRejectedValueOnce(new Error('temporarily unavailable'));
+    await act(async () => harness.current.retryFailedUploads());
+    expect(harness.current.hasFailedUploads).toBe(true);
+    expect(harness.current.uploading).toBe(false);
+    expect(harness.setError).toHaveBeenLastCalledWith('temporarily unavailable');
+    expect(deleteFile.mock.calls).toEqual([[pastedImage.uri, { idempotent: true }]]);
+    harness.api.uploadAttachment.mockResolvedValueOnce({
+      kind: 'image',
+      path: '/repo/retried.jpg',
+    });
+    await act(async () => harness.current.retryFailedUploads());
+    expect(harness.current.hasFailedUploads).toBe(false);
+    expect(harness.current.toTurnInputs().localImages).toEqual([{ path: '/repo/retried.jpg' }]);
+    expect(deleteFile.mock.calls).toEqual([
+      [pastedImage.uri, { idempotent: true }],
+      ['file:///prepared.jpg', { idempotent: true }],
+    ]);
+    harness.unmount();
+  });
+
+  it.each(['clear', 'clearPending', 'unmount', 'remove'] as const)(
+    'releases a failed prepared photo on %s',
+    async (action) => {
+      const harness = makeHarness();
+      harness.api.uploadAttachment.mockRejectedValueOnce(new Error('offline'));
+      await harness.mount();
+      await act(async () => harness.current.pasteImage(harness.image));
+      expect(deleteFile.mock.calls).toEqual([[pastedImage.uri, { idempotent: true }]]);
+      if (action === 'unmount') {
+        harness.unmount();
+      } else {
+        await act(async () => {
+          if (action === 'remove') {
+            harness.current.removeComposerAttachment('prepared:image:file:///prepared.jpg');
+          } else {
+            harness.current[action]();
+          }
+        });
+        expect(harness.current.hasFailedUploads).toBe(false);
+        expect(harness.current.composerAttachments).toEqual([]);
+        expect(harness.current.uploading).toBe(false);
+        harness.unmount();
+      }
+      expect(deleteFile.mock.calls).toEqual([
+        [pastedImage.uri, { idempotent: true }],
+        ['file:///prepared.jpg', { idempotent: true }],
+      ]);
+    },
+  );
+
+  it.each(['clear', 'clearPending'] as const)(
+    'changes native ownership on %s even when the draft scope is unchanged',
+    async (action) => {
+      const harness = makeHarness();
+      await harness.mount();
+      const image = harness.image;
+      act(() => harness.current.setPasteBusy({ busy: true, scopeKey: image.scopeKey }));
+      act(() => harness.current[action]());
+      expect(harness.current.pasteScopeKey).not.toBe(image.scopeKey);
+      harness.setError.mockClear();
+      await act(async () => {
+        harness.current.setPasteBusy({ busy: true, scopeKey: image.scopeKey });
+        harness.current.pasteError({ message: 'stale', scopeKey: image.scopeKey });
+        await harness.current.pasteImage(image);
+      });
+      expect(harness.current.uploading).toBe(false);
+      expect(harness.current.composerAttachments).toEqual([]);
+      expect(manipulate).not.toHaveBeenCalled();
+      expect(harness.api.uploadAttachment).not.toHaveBeenCalled();
+      expect(harness.setError).not.toHaveBeenCalled();
+      expect(deleteFile).toHaveBeenCalledWith(image.uri, { idempotent: true });
+      harness.unmount();
+    },
+  );
+
+  it.each([
+    { kind: 'native', failureFirst: true },
+    { kind: 'native', failureFirst: false },
+    { kind: 'preparation', failureFirst: true },
+    { kind: 'preparation', failureFirst: false },
+  ])(
+    'preserves a partial $kind failure when failureFirst=$failureFirst',
+    async ({ kind, failureFirst }) => {
+      const harness = makeHarness();
+      harness.api.uploadAttachment.mockResolvedValue({ kind: 'image', path: '/repo/good.jpg' });
+      await harness.mount();
+      const scopeKey = harness.image.scopeKey;
+      const fail = async () => {
+        if (kind === 'native') {
+          harness.current.pasteError({ message: 'Unable to extract photo', scopeKey });
+        } else {
+          await harness.current.pasteImage({
+            ...harness.image,
+            uri: 'file:///oversized.png',
+            fileSize: ATTACHMENT_MAX_BYTES + 1,
+          });
+        }
+      };
+      act(() => harness.current.setPasteBusy({ busy: true, scopeKey }));
+      await act(async () => {
+        if (failureFirst) {
+          await fail();
+        }
+        await harness.current.pasteImage(harness.image);
+        if (!failureFirst) {
+          await fail();
+        }
+        harness.current.setPasteBusy({ busy: false, scopeKey });
+      });
+      expect(harness.setError).toHaveBeenLastCalledWith(
+        expect.stringContaining(kind === 'native' ? 'Unable to extract photo' : '20 MB'),
+      );
+      expect(harness.current.uploading).toBe(false);
+      expect(harness.current.toTurnInputs().localImages).toEqual([{ path: '/repo/good.jpg' }]);
       harness.unmount();
     },
   );
@@ -325,7 +459,7 @@ describe('attachmentController', () => {
       const old = harness.current;
       let paste!: Promise<void>;
       await act(async () => {
-        paste = old.pasteImage({ ...pastedImage, scopeKey: 'draft-a' });
+        paste = old.pasteImage(harness.image);
       });
       expect(harness.current.uploading).toBe(true);
       await harness.update({ workspace: '/repo', draft: '', scopeKey: 'draft-b' });
@@ -334,14 +468,14 @@ describe('attachmentController', () => {
       expect(harness.current.pasteBusy).toBe(false);
       harness.setError.mockClear();
       await act(async () => {
-        old.setPasteBusy({ busy: true, scopeKey: 'draft-a' });
-        old.pasteError({ message: 'old native error', scopeKey: 'draft-a' });
-        harness.current.setPasteBusy({ busy: true, scopeKey: 'draft-a' });
-        harness.current.pasteError({ message: 'stale scope', scopeKey: 'draft-a' });
+        old.setPasteBusy({ busy: true, scopeKey: old.pasteScopeKey });
+        old.pasteError({ message: 'old native error', scopeKey: old.pasteScopeKey });
+        harness.current.setPasteBusy({ busy: true, scopeKey: old.pasteScopeKey });
+        harness.current.pasteError({ message: 'stale scope', scopeKey: old.pasteScopeKey });
         await harness.current.pasteImage({
           ...pastedImage,
           uri: 'file:///stale.png',
-          scopeKey: 'draft-a',
+          scopeKey: old.pasteScopeKey,
         });
         gate.reject(new Error('old async error'));
         await paste;
@@ -357,7 +491,7 @@ describe('attachmentController', () => {
       }
 
       await harness.update({ workspace: '/repo', draft: '', scopeKey: 'draft-a' });
-      await act(async () => old.pasteImage({ ...pastedImage, scopeKey: 'draft-a' }));
+      await act(async () => old.pasteImage({ ...pastedImage, scopeKey: old.pasteScopeKey }));
       expect(harness.current.uploading).toBe(false);
       expect(harness.current.composerAttachments).toEqual([]);
       harness.unmount();
@@ -374,7 +508,7 @@ describe('attachmentController', () => {
       const old = harness.current;
       let paste!: Promise<void>;
       await act(async () => {
-        paste = old.pasteImage(pastedImage);
+        paste = old.pasteImage(harness.image);
       });
       if (action === 'unmount') {
         harness.unmount();
@@ -383,9 +517,13 @@ describe('attachmentController', () => {
       }
       harness.setError.mockClear();
       await act(async () => {
-        old.setPasteBusy({ busy: true, scopeKey: 'thread-1' });
-        old.pasteError({ message: 'late', scopeKey: 'thread-1' });
-        await old.pasteImage({ ...pastedImage, uri: 'file:///late.png' });
+        old.setPasteBusy({ busy: true, scopeKey: old.pasteScopeKey });
+        old.pasteError({ message: 'late', scopeKey: old.pasteScopeKey });
+        await old.pasteImage({
+          ...pastedImage,
+          scopeKey: old.pasteScopeKey,
+          uri: 'file:///late.png',
+        });
         uploaded.resolve({ kind: 'image', path: '/repo/late.jpg' });
         await paste;
       });
@@ -418,13 +556,13 @@ describe('attachmentController', () => {
       } else if (failure === 'unreadable') {
         getInfo.mockResolvedValueOnce({ exists: false });
       }
-      act(() => harness.current.setPasteBusy({ busy: true, scopeKey: 'thread-1' }));
+      act(() => harness.current.setPasteBusy({ busy: true, scopeKey: harness.image.scopeKey }));
       await act(async () => {
         const paste = harness.current.pasteImage({
-          ...pastedImage,
+          ...harness.image,
           fileSize: failure === 'source' ? ATTACHMENT_MAX_BYTES + 1 : 100,
         });
-        harness.current.setPasteBusy({ busy: false, scopeKey: 'thread-1' });
+        harness.current.setPasteBusy({ busy: false, scopeKey: harness.image.scopeKey });
         await paste;
       });
       expect(harness.setError).toHaveBeenLastCalledWith(
@@ -436,7 +574,10 @@ describe('attachmentController', () => {
       expect(harness.current.hasFailedUploads).toBe(false);
       expect(harness.current.composerAttachments).toEqual([]);
       expect(harness.api.uploadAttachment).not.toHaveBeenCalled();
-      expect(deleteFile.mock.calls).toEqual([[pastedImage.uri, { idempotent: true }]]);
+      expect(deleteFile.mock.calls).toEqual([
+        ...(failure === 'prepared' ? [['file:///prepared.jpg', { idempotent: true }]] : []),
+        [pastedImage.uri, { idempotent: true }],
+      ]);
       harness.unmount();
     },
   );
@@ -445,12 +586,15 @@ describe('attachmentController', () => {
     const harness = makeHarness();
     await harness.mount();
     act(() => {
-      harness.current.setPasteBusy({ busy: true, scopeKey: 'thread-1' });
-      harness.current.pasteError({ message: 'Cannot extract photo', scopeKey: 'thread-1' });
+      harness.current.setPasteBusy({ busy: true, scopeKey: harness.image.scopeKey });
+      harness.current.pasteError({
+        message: 'Cannot extract photo',
+        scopeKey: harness.image.scopeKey,
+      });
     });
     expect(harness.current.uploading).toBe(true);
     expect(harness.setError).toHaveBeenLastCalledWith('Cannot extract photo');
-    act(() => harness.current.setPasteBusy({ busy: false, scopeKey: 'thread-1' }));
+    act(() => harness.current.setPasteBusy({ busy: false, scopeKey: harness.image.scopeKey }));
     expect(harness.current.uploading).toBe(false);
     harness.unmount();
   });
@@ -469,17 +613,20 @@ describe('attachmentController', () => {
     let first!: Promise<void>;
     let second!: Promise<void>;
     await act(async () => {
-      harness.current.setPasteBusy({ busy: true, scopeKey: 'thread-1' });
-      first = harness.current.pasteImage(pastedImage);
-      second = harness.current.pasteImage({ ...pastedImage, uri: 'file:///second.png' });
-      harness.current.setPasteBusy({ busy: false, scopeKey: 'thread-1' });
+      harness.current.setPasteBusy({ busy: true, scopeKey: harness.image.scopeKey });
+      first = harness.current.pasteImage(harness.image);
+      second = harness.current.pasteImage({ ...harness.image, uri: 'file:///second.png' });
+      harness.current.setPasteBusy({ busy: false, scopeKey: harness.image.scopeKey });
     });
     expect(deleteFile).not.toHaveBeenCalled();
     await act(async () => {
       firstRender.resolve({ saveAsync: jest.fn().mockResolvedValue({ uri: 'file:///first.jpg' }) });
       await first;
     });
-    expect(deleteFile.mock.calls).toEqual([[pastedImage.uri, { idempotent: true }]]);
+    expect(deleteFile.mock.calls).toEqual([
+      [pastedImage.uri, { idempotent: true }],
+      ['file:///first.jpg', { idempotent: true }],
+    ]);
     expect(harness.current.uploading).toBe(true);
     expect(harness.current.pickerBusy).toBe(true);
     expect(harness.current.toTurnInputs().localImages).toEqual([{ path: '/repo/first.jpg' }]);
@@ -507,7 +654,7 @@ describe('attachmentController', () => {
       await harness.mount();
       let paste!: Promise<void>;
       await act(async () => {
-        paste = harness.current.pasteImage(pastedImage);
+        paste = harness.current.pasteImage(harness.image);
       });
       if (action === 'clear') {
         act(() => harness.current.clear());
@@ -522,7 +669,10 @@ describe('attachmentController', () => {
         });
         await paste;
       });
-      expect(deleteFile.mock.calls).toEqual([[pastedImage.uri, { idempotent: true }]]);
+      expect(deleteFile.mock.calls).toEqual([
+        [pastedImage.uri, { idempotent: true }],
+        ['file:///prepared.jpg', { idempotent: true }],
+      ]);
       expect(harness.api.uploadAttachment).not.toHaveBeenCalled();
       expect(harness.setError).not.toHaveBeenCalled();
       if (action === 'clear') {
@@ -545,7 +695,7 @@ describe('attachmentController', () => {
     expect(harness.current.pickerBusy).toBe(true);
     expect(harness.api.uploadAttachment).not.toHaveBeenCalled();
     await harness.update({ workspace: '/repo', draft: '', scopeKey: 'draft-b' });
-    act(() => harness.current.setPasteBusy({ busy: true, scopeKey: 'draft-b' }));
+    act(() => harness.current.setPasteBusy({ busy: true, scopeKey: harness.image.scopeKey }));
     await act(async () => {
       rendered.resolve({ saveAsync: jest.fn().mockResolvedValue({ uri: 'file:///prepared.jpg' }) });
     });
@@ -554,7 +704,7 @@ describe('attachmentController', () => {
     expect(harness.current.pickerBusy).toBe(false);
     expect(harness.current.composerAttachments).toEqual([]);
     expect(harness.api.uploadAttachment).not.toHaveBeenCalled();
-    expect(deleteFile).not.toHaveBeenCalled();
+    expect(deleteFile.mock.calls).toEqual([['file:///prepared.jpg', { idempotent: true }]]);
     harness.unmount();
   });
 

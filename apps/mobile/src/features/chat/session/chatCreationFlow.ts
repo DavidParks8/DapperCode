@@ -16,7 +16,11 @@ import {
 } from '../state/models';
 import { activityAtom } from '../state/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type ComposerSubmission,
+  submissionScopeKey,
+} from '../turn/controllers/submissionController';
 import { shouldAutoEnablePlanModeFromChat } from '../helpers/helpers';
 import type {
   MainScreenAgentThreadEventBootstrapContext,
@@ -42,6 +46,7 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
     activeModelId,
     activeServiceTier,
     attachmentController,
+    bridgeProfileId,
     bumpRunWatchdog,
     clearRunWatchdog,
     discardOptimisticUserMessage,
@@ -59,7 +64,6 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
     registerTurnStarted,
     rememberChatModelPreference,
     scrollToBottomReliable,
-    selectedChatId,
     selectedChatIdRef,
     selectedChatRef,
     setDraft,
@@ -84,16 +88,27 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
   const selectedAcpModeId = useAtomValue(selectedAcpModeIdAtom);
   const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
   const setActivity = useSetAtom(activityAtom);
-  const pendingRestoredDraftRef = useRef<string | null>(null);
+  const [pendingRestoredSubmission, setPendingRestoredSubmission] = useState<{
+    submission: Pick<ComposerSubmission, 'draft' | 'mentions' | 'localImages'>;
+    scopeKey: string;
+  } | null>(null);
+  const attachmentControllerRef = useRef(attachmentController);
+  attachmentControllerRef.current = attachmentController;
+  const { restorePending } = attachmentController;
+  const { snapshot: draftSnapshot } = draftController;
 
   useEffect(() => {
-    if (pendingRestoredDraftRef.current === null) {
+    if (pendingRestoredSubmission === null) {
       return;
     }
-    const restoredDraft = pendingRestoredDraftRef.current;
-    pendingRestoredDraftRef.current = null;
-    setDraft(restoredDraft);
-  }, [selectedChatId, setDraft]);
+    const { submission, scopeKey } = pendingRestoredSubmission;
+    const current = draftSnapshot();
+    if (current.scopeKey === scopeKey) {
+      setDraft(submission.draft);
+      restorePending(submission);
+    }
+    setPendingRestoredSubmission(null);
+  }, [draftSnapshot, pendingRestoredSubmission, restorePending, setDraft]);
 
   const createChat = useCallback(async () => {
     const draftSnapshot = draftController.snapshot();
@@ -231,9 +246,15 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
         submissionController,
         submission,
         tracker,
-        attachmentController,
-        pendingRestoredDraftRef,
-        setDraft,
+        attachmentController: attachmentControllerRef.current,
+        restoreSubmission: (restored) =>
+          setPendingRestoredSubmission({
+            submission: restored,
+            scopeKey: submissionScopeKey({
+              profileId: bridgeProfileId,
+              threadId: tracker.createdChatId,
+            }),
+          }),
         discardOptimisticUserMessage,
         optimisticMessage,
         selectedChatIdRef,
@@ -253,6 +274,7 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
   }, [
     turnExecutionController,
     attachmentController,
+    bridgeProfileId,
     draftController,
     activeEffort,
     activeAgentId,
