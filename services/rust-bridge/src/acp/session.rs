@@ -154,6 +154,16 @@ impl AcpSession {
         self.instance_id
     }
 
+    pub(super) async fn runtime_activity(&self) -> (usize, usize) {
+        let state = self.inner.lock().await;
+        (
+            usize::from(state.snapshot.active_run_id.is_some()),
+            usize::from(
+                state.snapshot.history_reconstruction || !state.snapshot.active_tool_ids.is_empty(),
+            ),
+        )
+    }
+
     pub(crate) async fn lock_interactions(&self) -> OwnedMutexGuard<()> {
         self.interaction_lock.clone().lock_owned().await
     }

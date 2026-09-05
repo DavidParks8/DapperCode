@@ -34,6 +34,22 @@ describe('chatSyncController', () => {
     expect(assessChatSync(null, latest, false).shouldShowRunning).toBe(true);
   });
 
+  it('does not rearm a completed run from the cached prompt while history is recovering', () => {
+    const cached = chat('idle', [
+      { id: 'u', role: 'user', content: 'work', createdAt: new Date().toISOString() },
+    ]);
+    expect(
+      assessChatSync(
+        chat('running'),
+        {
+          ...cached,
+          historyRecoveryError: 'History unavailable',
+        },
+        true,
+      ),
+    ).toMatchObject({ terminal: true, shouldShowRunning: false, shouldRefreshWatchdog: false });
+  });
+
   it('selects foreground and background polling intervals', () => {
     expect(getChatSyncInterval(false, true)).toBe(15_000);
     expect(getChatSyncInterval(true, true)).toBe(2_000);
@@ -102,6 +118,7 @@ describe('chatSyncController', () => {
       .mockResolvedValueOnce(snapshot)
       .mockRejectedValueOnce(new Error('offline'));
     const onSnapshot = jest.fn();
+    const onError = jest.fn();
     function Probe({
       threadId = 'thread',
       paused = false,
@@ -118,6 +135,7 @@ describe('chatSyncController', () => {
         isAppActive: () => true,
         isTurnActive: () => false,
         onSnapshot,
+        onError,
       });
       return null;
     }
@@ -131,6 +149,7 @@ describe('chatSyncController', () => {
       await Promise.resolve();
     });
     expect(poll).toHaveBeenCalledTimes(2);
+    expect(onError).toHaveBeenCalledWith(new Error('offline'));
     act(() => tree!.unmount());
     act(() => {
       jest.runOnlyPendingTimers();

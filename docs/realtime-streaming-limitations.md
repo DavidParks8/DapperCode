@@ -13,6 +13,12 @@ Last reviewed: July 19, 2026
 The bridge does not discover or install remote agents. Desktop setup validates an already-installed
 ACP executable and writes the local manifest consumed by Rust.
 
+Workspace-worker lifetime is independent of the mobile connection. The desktop broker retires a
+disconnected worker only after affirmative idle status and the configured idle grace; failed or
+timed-out status probes are treated as busy, not as permission to terminate its agents. Active turns,
+history reconstruction, queues, approvals, and future scheduled work prevent idle retirement.
+Retirement status reads in-memory activity without loading transcripts or launching history exports.
+
 ## Live Delivery And Replay
 
 - Canonical ACP events are the internal authority for queue coordination, push delivery, and AG-UI
@@ -35,6 +41,17 @@ ACP executable and writes the local manifest consumed by Rust.
 - A bounded snapshot can omit the kickoff of a long turn. Mobile retains the cached transcript
   prefix and merges the recovered tail instead of discarding new responses when that user message
   is absent. Older snapshot revisions must not replace newer cached history.
+- Transcript-returning restoration prefers ACP `session/load` when supported. ACP
+  `session/resume` can restore a session without replaying its messages, so it is not a substitute
+  for loading the history of a session evicted from the bridge's bounded in-memory registry.
+- Transcript preservation also runs before normal reads replace the shared mobile cache. An empty
+  refresh cannot erase known messages or replace a known title with a generated session label when
+  navigating away and back. A failed or incomplete history read shows a separate retry notice;
+  foreground polling retries automatically, and tapping the notice retries immediately. Recovery
+  does not infer that a completed agent is running just because the retained prompt has no answer.
+  Snapshot recovery does not acknowledge its replay watermark while history remains incomplete.
+- A replay gap also refreshes the drawer's complete history, even if it was already loaded before
+  disconnect. Refreshing only the newest cached rows cannot remove sessions deleted while offline.
 - Earlier-history responses merge into the current transcript only while their selection, revision,
   and cursor remain valid. They cannot restore an older turn status or replace newer message content.
 - Snapshot comparisons include tool status and structured content, agent configuration, and history

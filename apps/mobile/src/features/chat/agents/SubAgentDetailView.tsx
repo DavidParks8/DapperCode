@@ -2,7 +2,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FlatList } from 'react-native';
-import { Text } from 'react-native';
+import { AppState, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { Chat, RpcNotification } from '@bridge/types/types';
@@ -148,7 +148,7 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
         if (requestRef.current !== requestId) {
           return;
         }
-        hydrationFailedRef.current = false;
+        hydrationFailedRef.current = Boolean(chat.historyRecoveryError);
         setDetail((current) => resolveHydratedDetailState(current, chat, parent));
       } catch (error) {
         if (requestRef.current !== requestId) {
@@ -164,6 +164,34 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
     },
     [controller, threadId],
   );
+
+  const retryHistory = useCallback(() => {
+    void hydrate(false);
+  }, [hydrate]);
+  useEffect(() => {
+    if (!detail.chat?.historyRecoveryError || !bridgeConnected) {
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const schedule = () => {
+      if (cancelled) {
+        return;
+      }
+      timer = setTimeout(() => {
+        if (AppState.currentState === 'active') {
+          void hydrate(false).finally(schedule);
+        } else {
+          schedule();
+        }
+      }, 5_000);
+    };
+    schedule();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [bridgeConnected, detail.chat?.historyRecoveryError, hydrate]);
 
   useEffect(() => {
     requestRef.current += 1;
@@ -310,6 +338,7 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
           openBrowser={openBrowser}
           showToolCalls={showToolCalls}
           onOpenSubAgentThread={openSubAgentThread}
+          onRetryHistory={retryHistory}
           agentThreadStatusById={agentThreadStatusById}
           scrollRef={scrollRef}
           autoScrollStateRef={autoScrollStateRef}

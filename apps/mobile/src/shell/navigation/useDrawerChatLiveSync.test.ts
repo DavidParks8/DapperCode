@@ -56,12 +56,14 @@ function renderLiveSync(
   let currentProps: ProbeProps = { ws: harness.ws, ...initialProps };
   const cancelMaintenanceWork = jest.fn();
   const setRunIndicators = jest.fn();
+  const refreshFullHistoryRef = { current: jest.fn(async () => {}) };
 
   function Probe(props: ProbeProps) {
     latestControls = useDrawerChatLiveSync({
       active: props.active,
       cancelMaintenanceWork,
       onThreadDeleted: jest.fn(),
+      refreshFullHistoryRef,
       scheduleLoadChats: props.scheduleLoadChats,
       setRunIndicators,
       setWsConnected: jest.fn(),

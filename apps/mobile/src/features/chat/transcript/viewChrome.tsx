@@ -22,6 +22,8 @@ import { decorativeAccessibilityProps } from '@shared/accessibility';
 import type { computeHitSlop } from '@shared/ui/touchTarget';
 import { motion } from '@shared/theme';
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
+import type { Chat } from '@bridge/types/types';
+import { TranscriptActivitySlot, type useCollapsibleActivity } from './TranscriptActivitySlot';
 
 export const JUMP_TO_LATEST_VISIBLE_SIZE = { width: 48, height: 48 };
 
@@ -34,6 +36,40 @@ export const resolveListBatchingConfig = (count: number, isLarge: boolean) => ({
   updateCellsBatchingPeriod: isLarge ? 32 : undefined,
   windowSize: isLarge ? 13 : 11,
 });
+export function renderHistoryRecovery(
+  chat: Chat,
+  presentation: ReturnType<typeof useCollapsibleActivity>,
+  animationActive: boolean,
+  onRetry: (() => void) | undefined,
+  styles: ReturnType<typeof createStyles>,
+): ReactElement | null {
+  const activity = presentation ? (
+    <TranscriptActivitySlot
+      chat={chat}
+      presentation={presentation}
+      animationActive={animationActive}
+    />
+  ) : null;
+  if (!chat.historyRecoveryError) {
+    return activity;
+  }
+  return (
+    <>
+      {activity}
+      <Pressable
+        testID="chat-history-recovery"
+        onPress={onRetry}
+        accessibilityRole="button"
+        accessibilityLabel="Retry loading chat history"
+        style={{ minHeight: 48, justifyContent: 'center' }}
+      >
+        <Text style={styles.inlineChoiceHint} accessibilityRole="alert">
+          Chat history could not be restored. Retrying automatically. Tap to retry now.
+        </Text>
+      </Pressable>
+    </>
+  );
+}
 export function renderHistoryBoundary(params: {
   continuationState?: TranscriptContinuationState;
   onLoadEarlier?: () => void;

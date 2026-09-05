@@ -1,6 +1,6 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
-import { ActivityIndicator, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, AppState, StyleSheet, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
@@ -21,6 +21,7 @@ import { ReasoningEntryCard } from '../message/ReasoningCard';
 import { ChatTranscriptView } from '../transcript/ChatTranscriptView';
 import { SubAgentDetailView } from './SubAgentDetailView';
 import { routes } from '@shell/navigation/routes';
+import { bridgeConnectedAtom } from '@shell/state/bridge/atoms';
 
 const theme = createAppTheme('dark');
 
@@ -445,9 +446,63 @@ describe('SubAgentDetailView starting state', () => {
     });
 
     expect(getChat).toHaveBeenCalledTimes(2);
-    expect(renderedText(tree)).not.toContain('Background refresh failed');
-    expect(renderedText(tree)).toContain('Existing transcript');
+    expect(textContent(tree.root as Queryable)).not.toContain('Background refresh failed');
+    expect(textContent(tree.root as Queryable)).toContain('Existing transcript');
+    expect(countByLabel(tree, 'Retry loading chat history')).toBeGreaterThan(0);
     act(() => tree.unmount());
+  });
+
+  it('wires manual and automatic history retry and cancels polling after unmount', async () => {
+    jest.useFakeTimers();
+    const previousState = AppState.currentState;
+    AppState.currentState = 'active';
+    const complete = {
+      ...chat([{ id: 'answer', role: 'assistant', content: 'Recovered answer', createdAt: '' }]),
+      status: 'complete' as const,
+      historyRecoveryError: null,
+    };
+    const incomplete = { ...complete, historyRecoveryError: 'History unavailable' };
+    const getChat = jest
+      .fn()
+      .mockResolvedValueOnce(incomplete)
+      .mockRejectedValueOnce(new Error('Still unavailable'))
+      .mockResolvedValue(complete);
+    let tree: ReactTestRenderer | undefined;
+    try {
+      const rendered = await render({ loadedChat: incomplete, getChat });
+      tree = rendered.tree;
+      act(() => rendered.store.set(bridgeConnectedAtom, true));
+      const button = (tree.root as Queryable).findAll(
+        (node) => node.props['accessibilityLabel'] === 'Retry loading chat history',
+      )[0];
+      expect(button).toBeDefined();
+      const onPress = button?.props['onPress'];
+      if (typeof onPress !== 'function') {
+        throw new Error('History retry must have a press handler');
+      }
+      await act(async () => {
+        onPress();
+      });
+      expect(getChat).toHaveBeenCalledTimes(2);
+      expect(countByLabel(tree, 'Retry loading chat history')).toBeGreaterThan(0);
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(5_000);
+      });
+      expect(getChat).toHaveBeenCalledTimes(3);
+      expect(countByLabel(tree, 'Retry loading chat history')).toBe(0);
+      act(() => tree!.unmount());
+      tree = undefined;
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(10_000);
+      });
+      expect(getChat).toHaveBeenCalledTimes(3);
+    } finally {
+      if (tree) {
+        act(() => tree!.unmount());
+      }
+      AppState.currentState = previousState;
+      jest.useRealTimers();
+    }
   });
 
   it('does not rehydrate an already loaded thread when adoption arrives', async () => {

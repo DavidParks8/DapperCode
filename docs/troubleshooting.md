@@ -121,6 +121,31 @@ pnpm run mobile
 The Expo script reads the bridge host from the central `config.json`, falling back to a repo-root
 `.env.secure` for the `pnpm run bridge` development flow.
 
+## Completed Turn Has Missing Messages
+
+Keep the phone connected to the same bridge on its private network. The app preserves the
+last-known transcript and title while history is being recovered, including when switching chats.
+If it displays **Chat history could not be restored**, leave the chat open for automatic retry or
+tap the notice to retry immediately. History recovery is separate from turn status: a completed
+turn should not show a Stop action merely because messages have not finished loading.
+
+Do not delete the chat, clear the app's data, or restart the bridge to refresh the transcript.
+If recovery continues to fail, inspect the bridge/agent diagnostics and record whether the failure
+followed a bridge restart or opening many other sessions. ACP history reconstruction must load the
+conversation; a successful resume alone does not prove that the agent replayed its messages.
+
+## Agent Stops When the Phone Disconnects
+
+Disconnecting or locking the phone must not cancel an accepted turn. The desktop broker keeps its
+workspace worker alive while work remains, including when a worker status probe fails. Status probes
+must not depend on slow agent history reconstruction.
+
+If work stops, compare the OpenCode and workspace bridge logs. A bridge
+`shutdown signal received (SIGTERM)` followed by a fresh agent process on reconnect indicates worker
+termination, not proof of a completed turn. Older builds could terminate a disconnected worker after
+three failed status probes. Use matching updated desktop and mobile builds; do not clear session data
+or restart a working agent merely to refresh the transcript.
+
 ## macOS Asks for Keychain Access After a Rebuild
 
 The app is ad-hoc code-signed, so `pnpm run desktop:build:macos` produces a new code signature and

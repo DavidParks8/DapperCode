@@ -173,6 +173,8 @@ export interface SessionTokenTotals {
 
 export interface Chat extends ChatSummary {
   messages: ChatMessage[];
+  /** Local read/recovery failure, independent of the agent's run status. */
+  historyRecoveryError?: string | null;
   acpSnapshot?: RawAcpSnapshot;
   latestPlan?: ChatPlanSnapshot | null;
   latestTurnPlan?: ChatPlanSnapshot | null;

@@ -362,6 +362,11 @@ async function expectKickoffRetained(page: Page): Promise<void> {
       } finally {
         await page.mouse.up();
       }
+      // Paging can move the virtualized target after the rail jump. Finish revealing the
+      // retained prefix through the same scroll container instead of racing another measurement.
+      if (!(await message.count())) {
+        await scroll.evaluate((element) => element.scrollTo(0, element.scrollHeight));
+      }
       if (await message.count()) {
         await message.scrollIntoViewIfNeeded({ timeout: 500 });
       }

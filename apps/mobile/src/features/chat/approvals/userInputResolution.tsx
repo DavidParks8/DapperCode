@@ -171,6 +171,13 @@ export function useMainScreenApprovalAndUserInputResolution(
       appStateRef.current === 'active' &&
       (Boolean(activeTurnIdRef.current) || runWatchdogUntilRef.current > Date.now()),
     onSnapshot: applySynchronizedChat,
+    onError: () => {
+      setSelectedChat((current) =>
+        current?.id === selectedChatId
+          ? { ...current, historyRecoveryError: 'Chat history could not be restored.' }
+          : current,
+      );
+    },
   });
 
   const handleResolveApproval = useCallback(

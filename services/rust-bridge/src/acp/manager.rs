@@ -1930,6 +1930,18 @@ impl AgentManager {
         loaded
     }
 
+    pub(crate) async fn runtime_activity(&self) -> (usize, usize) {
+        let mut activity = (0, 0);
+        for runtime in self.agents.values() {
+            if let Some(connection) = &runtime.connection {
+                let (active_runs, other_live_work) = connection.runtime_activity().await;
+                activity.0 += active_runs;
+                activity.1 += other_live_work;
+            }
+        }
+        activity
+    }
+
     #[cfg(test)]
     pub async fn resume_session(
         &self,
@@ -1998,13 +2010,14 @@ impl AgentManager {
             .map(|family_identity| SessionId::new(family_identity.acp_session_id.clone()))
             .collect::<Vec<_>>();
         let configured_selections = self.configured_selections(connection, &session_id).await;
-        let (restoration, credential) = if connection.negotiated().supports_session_resume() {
-            let mut request = ResumeSessionRequest::new(session_id.clone(), cwd.clone());
+        // This operation returns the transcript; ACP resume explicitly omits history replay.
+        let (restoration, credential) = if connection.negotiated().supports_session_load() {
+            let mut request = LoadSessionRequest::new(session_id.clone(), cwd.clone());
             let credential =
                 self.append_agent_messaging_server(&identity.agent_id, &mut request.mcp_servers)?;
             (
                 connection
-                    .resume_session_with_policy_for_sessions(
+                    .load_session_with_policy_for_sessions(
                         request,
                         approval_policy,
                         policy_session_ids,
@@ -2014,12 +2027,12 @@ impl AgentManager {
                 credential,
             )
         } else {
-            let mut request = LoadSessionRequest::new(session_id.clone(), cwd.clone());
+            let mut request = ResumeSessionRequest::new(session_id.clone(), cwd.clone());
             let credential =
                 self.append_agent_messaging_server(&identity.agent_id, &mut request.mcp_servers)?;
             (
                 connection
-                    .load_session_with_policy_for_sessions(
+                    .resume_session_with_policy_for_sessions(
                         request,
                         approval_policy,
                         policy_session_ids,
@@ -2731,20 +2744,7 @@ impl AgentManager {
                 let configured_selections =
                     self.configured_selections(connection, &session_id).await;
                 let (config_options, credential) =
-                    if connection.negotiated().supports_session_resume() {
-                        let mut request = ResumeSessionRequest::new(session_id.clone(), cwd);
-                        let credential = self.append_agent_messaging_server(
-                            &identity.agent_id,
-                            &mut request.mcp_servers,
-                        )?;
-                        (
-                            connection
-                                .resume_session_with_policy(request, entry.approval_policy)
-                                .await?
-                                .config_options,
-                            credential,
-                        )
-                    } else if connection.negotiated().supports_session_load() {
+                    if connection.negotiated().supports_session_load() {
                         let mut request = LoadSessionRequest::new(session_id.clone(), cwd);
                         let credential = self.append_agent_messaging_server(
                             &identity.agent_id,
@@ -2753,6 +2753,19 @@ impl AgentManager {
                         (
                             connection
                                 .load_session_with_policy(request, entry.approval_policy)
+                                .await?
+                                .config_options,
+                            credential,
+                        )
+                    } else if connection.negotiated().supports_session_resume() {
+                        let mut request = ResumeSessionRequest::new(session_id.clone(), cwd);
+                        let credential = self.append_agent_messaging_server(
+                            &identity.agent_id,
+                            &mut request.mcp_servers,
+                        )?;
+                        (
+                            connection
+                                .resume_session_with_policy(request, entry.approval_policy)
                                 .await?
                                 .config_options,
                             credential,
@@ -4504,6 +4517,17 @@ impl AgentManager {
                     "session has no durable canonical workspace path".to_string(),
                 )
             })?;
+        if entry.forked_from_acp_session_id.is_none() {
+            self.adopt_snapshot_subagents(&snapshot, &entry.cwd).await?;
+            self.adopt_exported_subagents(&identity, &entry.cwd).await?;
+        }
+        // Agent-message activities are a durable overlay, not proof that the agent replayed its
+        // conversation. An activity-only snapshot still needs its ordinary transcript hydrated.
+        if !snapshot.has_ordinary_transcript() {
+            self.seed_exported_session(&identity, &entry.cwd, &session)
+                .await;
+            snapshot = session.snapshot().await;
+        }
         if let Some(title) = &entry.title {
             snapshot.title = Some(title.clone());
         } else if snapshot.title.is_none() || snapshot.updated_at.is_none() {
@@ -4518,20 +4542,6 @@ impl AgentManager {
                         snapshot.updated_at = summary.updated_at.clone();
                     }
                 }
-            }
-        }
-        if entry.forked_from_acp_session_id.is_none() {
-            self.adopt_snapshot_subagents(&snapshot, &entry.cwd).await?;
-            self.adopt_exported_subagents(&identity, &entry.cwd).await?;
-        }
-        // Agent-message activities are a durable overlay, not proof that the agent replayed its
-        // conversation. An activity-only snapshot still needs its ordinary transcript hydrated.
-        if !snapshot.has_ordinary_transcript() {
-            self.seed_exported_session(&identity, &entry.cwd, &session)
-                .await;
-            snapshot = session.snapshot().await;
-            if let Some(title) = entry.title.clone() {
-                snapshot.title = Some(title);
             }
         }
         let parent_thread_id = parent_thread_id(&entry);
@@ -6223,7 +6233,7 @@ mod tests {
                 {
                     let requests = requests.clone();
                     let response_barrier = response_barrier.clone();
-                    async move |request: ResumeSessionRequest, responder, connection| {
+                    async move |_: ResumeSessionRequest, responder, _| {
                         requests.fetch_add(1, Ordering::SeqCst);
                         if let Some(barrier) = &response_barrier {
                             barrier.0.notify_one();
@@ -6234,18 +6244,6 @@ mod tests {
                                 agent_client_protocol::Error::internal_error(),
                             );
                         }
-                        let update = serde_json::from_value(serde_json::json!({
-                            "sessionUpdate": "agent_message_chunk",
-                            "content": {"type": "text", "text": "restored"},
-                            "messageId": "restored-message"
-                        }))
-                        .expect("typed update");
-                        connection.send_notification(
-                            agent_client_protocol::schema::v1::SessionNotification::new(
-                                request.session_id,
-                                update,
-                            ),
-                        )?;
                         responder.respond(ResumeSessionResponse::new())
                     }
                 },
@@ -7778,6 +7776,408 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(unix)]
+    async fn runtime_activity_never_hydrates_history_and_counts_reconstruction() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!(
+            "dappercode-activity-export-fixture-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let executable = directory.join("opencode");
+        std::fs::write(
+            &executable,
+            r#"#!/bin/sh
+# Deterministic slow history fixture; never invokes an installed agent.
+printf invoked > history-probed
+exec /bin/sleep 5
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let (observed, _) = mpsc::unbounded_channel();
+        let ready = connection("opencode", false, "unused", observed).await;
+        let identity = AgentSessionId::new("opencode", "activity-session").unwrap();
+        let session = ready
+            .0
+            .ensure_session(identity.acp_session_id.clone().into())
+            .await
+            .unwrap();
+        let mut fixture_manifest = manifest("opencode", "OpenCode activity fixture");
+        fixture_manifest.resolved.executable = executable;
+        fixture_manifest.resolved.argv = vec!["acp".into()];
+        let manager = Arc::new(
+            AgentManager::from_start_results_with_index(
+                "opencode".into(),
+                vec![(fixture_manifest, Ok(ready))],
+                Some(directory.join(SESSION_INDEX_FILE)),
+                directory.clone(),
+                false,
+            )
+            .await
+            .unwrap(),
+        );
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([index_entry(identity.clone(), directory.clone())])
+            .await
+            .unwrap();
+        let backend = crate::runtime_backend::RuntimeBackend::from_manager_for_test(
+            manager,
+            Arc::new(crate::client_hub::ClientHub::new()),
+            Arc::new(crate::retirement_journal::ThreadRetirementJournal::inert_for_test()),
+        )
+        .await;
+        let (generation, _) = session
+            .admit_prompt("run".into(), "turn".into())
+            .await
+            .unwrap();
+        session
+            .emit(CanonicalEvent::Tool {
+                agent_id: "opencode".into(),
+                thread_id: identity.encode(),
+                run_id: Some("run".into()),
+                source_turn_id: Some("turn".into()),
+                generation: Some(generation),
+                tool_call_id: "tool".into(),
+                kind: agent_client_protocol::schema::v1::ToolKind::Execute,
+                status: agent_client_protocol::schema::v1::ToolCallStatus::InProgress,
+                title: "Running tool".into(),
+                content: FieldUpdate::Unchanged,
+                structured_content: FieldUpdate::Unchanged,
+                locations: FieldUpdate::Unchanged,
+            })
+            .await;
+        let active =
+            tokio::time::timeout(Duration::from_millis(250), backend.runtime_activity()).await;
+        session
+            .emit(CanonicalEvent::RunFinished {
+                agent_id: "opencode".into(),
+                thread_id: identity.encode(),
+                run_id: "run".into(),
+                source_turn_id: "turn".into(),
+                generation,
+                stop_reason: StopReason::EndTurn,
+            })
+            .await;
+        let settled =
+            tokio::time::timeout(Duration::from_millis(250), backend.runtime_activity()).await;
+        let reconstruction = session.begin_reconstruction().await.unwrap();
+        let loading =
+            tokio::time::timeout(Duration::from_millis(250), backend.runtime_activity()).await;
+        reconstruction.finish(true).await;
+        let reloaded =
+            tokio::time::timeout(Duration::from_millis(250), backend.runtime_activity()).await;
+        let probed_history = directory.join("history-probed").exists();
+        backend.shutdown().await;
+        std::fs::remove_dir_all(&directory).unwrap();
+
+        assert_eq!(
+            active.expect("activity must not wait for history export"),
+            (1, 0, 0, 1)
+        );
+        assert_eq!(settled.unwrap(), (0, 0, 0, 0));
+        assert_eq!(loading.unwrap(), (0, 0, 0, 1));
+        assert_eq!(reloaded.unwrap(), (0, 0, 0, 0));
+        assert!(!probed_history);
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn completed_history_recovery_export_keeps_catalog_metadata() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!(
+            "dappercode-history-export-fixture-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let executable = directory.join("opencode");
+        std::fs::write(
+            &executable,
+            r#"#!/bin/sh
+# Deterministic fixture only; never invokes an installed agent.
+case "$1" in
+  session) printf '%s' '[{"id":"completed","title":"Catalog title","updated":1750000000000}]' ;;
+  export) if [ -f history.json ]; then cat history.json; else exit 1; fi ;;
+  *) exit 1 ;;
+esac
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let (observed, _) = mpsc::unbounded_channel();
+        let ready = connection_with_capabilities(
+            "opencode",
+            AgentCapabilities::new().load_session(true),
+            observed,
+        )
+        .await;
+        let mut fixture_manifest = manifest("opencode", "OpenCode fixture");
+        fixture_manifest.resolved.executable = executable;
+        fixture_manifest.resolved.argv = vec!["acp".into()];
+        let manager = AgentManager::from_start_results_with_index(
+            "opencode".into(),
+            vec![(fixture_manifest, Ok(ready))],
+            Some(directory.join(SESSION_INDEX_FILE)),
+            directory.clone(),
+            false,
+        )
+        .await
+        .unwrap();
+        let identity = AgentSessionId::new("opencode", "completed").unwrap();
+        manager
+            .session_index
+            .lock()
+            .await
+            .insert_all([index_entry(identity.clone(), directory.clone())])
+            .await
+            .unwrap();
+        let unavailable = manager.read_session(&identity.encode()).await.unwrap();
+        let unavailable_again = manager.read_session(&identity.encode()).await.unwrap();
+        std::fs::write(
+            directory.join("history.json"),
+            serde_json::json!({
+                "messages": [
+                    {"info": {"id": "user", "role": "user"}, "parts": [
+                        {"type": "text", "text": "A phone prompt"}
+                    ]},
+                    {"info": {"id": "answer", "role": "assistant"}, "parts": [
+                        {"type": "text", "text": "Recovered answer"}
+                    ]}
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let recovered = manager.read_session(&identity.encode()).await.unwrap();
+        let reopened = manager.read_session(&identity.encode()).await.unwrap();
+        let renamed = manager
+            .rename_session(&identity.encode(), "Authoritative rename")
+            .await
+            .unwrap();
+        manager.shutdown().await;
+        std::fs::remove_dir_all(&directory).unwrap();
+
+        assert!(unavailable.snapshot.messages.is_empty());
+        assert!(unavailable_again.snapshot.messages.is_empty());
+        assert_eq!(recovered.snapshot.messages.len(), 2);
+        assert_eq!(reopened.snapshot.messages.len(), 2);
+        assert_eq!(
+            reopened.snapshot.messages[1].parts[0]["text"],
+            "Recovered answer"
+        );
+        for snapshot in [
+            unavailable.snapshot,
+            unavailable_again.snapshot,
+            recovered.snapshot,
+            reopened.snapshot,
+        ] {
+            assert_eq!(snapshot.title.as_deref(), Some("Catalog title"));
+            assert_eq!(snapshot.updated_at, milliseconds_to_iso(1_750_000_000_000));
+            assert!(!snapshot.history_reconstruction);
+            assert!(snapshot.active_run_id.is_none());
+        }
+        assert_eq!(
+            renamed.snapshot.title.as_deref(),
+            Some("Authoritative rename")
+        );
+    }
+
+    #[tokio::test]
+    async fn completed_history_recovery_reads_load_instead_of_historyless_resume() {
+        assert_completed_history_recovery(false).await;
+    }
+
+    #[tokio::test]
+    async fn completed_history_recovery_resumes_load_instead_of_historyless_resume() {
+        assert_completed_history_recovery(true).await;
+    }
+
+    async fn assert_completed_history_recovery(explicit_resume: bool) {
+        use agent_client_protocol::schema::v1::{SessionNotification, SessionUpdate};
+
+        let directory = std::env::temp_dir().join(format!(
+            "dappercode-completed-history-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let history: Vec<SessionUpdate> = [
+            serde_json::json!({
+                "sessionUpdate": "user_message_chunk",
+                "content": {"type": "text", "text": "A phone prompt"},
+                "messageId": "user-message"
+            }),
+            serde_json::json!({
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "Completed while disconnected"},
+                "messageId": "agent-message"
+            }),
+            serde_json::json!({
+                "sessionUpdate": "session_info_update",
+                "title": "Known conversation",
+                "updatedAt": "2026-09-05T10:00:00Z"
+            }),
+        ]
+        .into_iter()
+        .map(|value| serde_json::from_value(value).unwrap())
+        .collect();
+        let complete = Arc::new(tokio::sync::Notify::new());
+        let (observed, mut methods) = mpsc::unbounded_channel();
+        let agent = Agent
+            .builder()
+            .on_receive_request(
+                async |request: InitializeRequest, responder, _| {
+                    responder.respond(
+                        InitializeResponse::new(request.protocol_version).agent_capabilities(
+                            AgentCapabilities::new()
+                                .load_session(true)
+                                .session_capabilities(
+                                    SessionCapabilities::new()
+                                        .resume(SessionResumeCapabilities::new()),
+                                ),
+                        ),
+                    )
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async |_: NewSessionRequest, responder, _| {
+                    responder.respond(NewSessionResponse::new("completed-session"))
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let complete = complete.clone();
+                    let history = history.clone();
+                    async move |request: PromptRequest, responder, connection| {
+                        complete.notified().await;
+                        for update in history.iter().skip(1) {
+                            connection.send_notification(SessionNotification::new(
+                                request.session_id.clone(),
+                                update.clone(),
+                            ))?;
+                        }
+                        responder.respond(PromptResponse::new(StopReason::EndTurn))
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                {
+                    let observed = observed.clone();
+                    async move |request: LoadSessionRequest, responder, connection| {
+                        let _ = observed.send("load");
+                        for update in &history {
+                            connection.send_notification(SessionNotification::new(
+                                request.session_id.clone(),
+                                update.clone(),
+                            ))?;
+                        }
+                        responder.respond(LoadSessionResponse::new())
+                    }
+                },
+                agent_client_protocol::on_receive_request!(),
+            )
+            .on_receive_request(
+                async move |_: ResumeSessionRequest, responder, _| {
+                    let _ = observed.send("resume");
+                    responder.respond(ResumeSessionResponse::new())
+                },
+                agent_client_protocol::on_receive_request!(),
+            );
+        let ready = AcpConnection::start_transport("alpha".into(), agent, Duration::from_secs(1))
+            .await
+            .unwrap();
+        let manager = AgentManager::from_start_results_with_index(
+            "alpha".into(),
+            vec![(manifest("alpha", "Alpha"), Ok(ready))],
+            Some(directory.join(SESSION_INDEX_FILE)),
+            directory.clone(),
+            false,
+        )
+        .await
+        .unwrap();
+        let mut events = manager.take_events().await.unwrap();
+        let created = manager
+            .new_session("alpha", NewSessionRequest::new(directory.clone()))
+            .await
+            .unwrap();
+        assert!(created.snapshot.messages.is_empty());
+        manager
+            .prompt(
+                &created.thread_id,
+                vec!["A phone prompt".into()],
+                "run-1".into(),
+                "turn-1".into(),
+            )
+            .await
+            .unwrap();
+        let running = manager.read_session(&created.thread_id).await.unwrap();
+        assert_eq!(running.snapshot.active_run_id.as_deref(), Some("run-1"));
+        assert_eq!(running.snapshot.messages.len(), 1);
+        complete.notify_one();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while let Some(event) = events.recv().await {
+                if matches!(event, CanonicalEvent::RunFinished { .. }) {
+                    return;
+                }
+            }
+            panic!("completion event channel closed");
+        })
+        .await
+        .expect("turn completes without a mobile subscriber");
+        let completed = manager.read_session(&created.thread_id).await.unwrap();
+        assert_eq!(completed.snapshot.messages.len(), 2);
+        assert!(completed.snapshot.active_run_id.is_none());
+
+        manager
+            .connection("alpha")
+            .unwrap()
+            .evict_session(&SessionId::new("completed-session"))
+            .await;
+        let recovered = if explicit_resume {
+            manager
+                .resume_session(&created.thread_id, directory.clone())
+                .await
+                .unwrap()
+        } else {
+            manager.read_session(&created.thread_id).await.unwrap()
+        };
+        let reopened = manager.read_session(&created.thread_id).await.unwrap();
+        let page = manager
+            .snapshot_page(&created.thread_id, None, None, 10)
+            .await
+            .unwrap();
+        manager.shutdown().await;
+        std::fs::remove_dir_all(&directory).unwrap();
+
+        for snapshot in [recovered.snapshot, reopened.snapshot] {
+            assert_eq!(snapshot.messages.len(), 2);
+            assert_eq!(snapshot.messages[0].parts[0]["text"], "A phone prompt");
+            assert_eq!(
+                snapshot.messages[1].parts[0]["text"],
+                "Completed while disconnected"
+            );
+            assert_eq!(snapshot.title.as_deref(), Some("Known conversation"));
+            assert_eq!(snapshot.updated_at.as_deref(), Some("2026-09-05T10:00:00Z"));
+            assert!(!snapshot.history_reconstruction);
+            assert!(snapshot.active_run_id.is_none());
+            assert!(snapshot.active_generation.is_none());
+        }
+        assert_eq!(page.entries.len(), 2);
+        assert_eq!(methods.try_recv().unwrap(), "load");
+        assert!(
+            methods.try_recv().is_err(),
+            "warm reads must not reload history"
+        );
+    }
+
+    #[tokio::test]
     async fn durable_reads_lazy_reconstruct_typed_history_once_for_read_and_page() {
         let directory = std::env::temp_dir().join(format!(
             "dappercode-session-lazy-read-{}",
@@ -7793,9 +8193,11 @@ mod tests {
             .unwrap();
 
         let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let capabilities = AgentCapabilities::new().session_capabilities(
-            SessionCapabilities::new().resume(SessionResumeCapabilities::new()),
-        );
+        let capabilities = AgentCapabilities::new()
+            .load_session(true)
+            .session_capabilities(
+                SessionCapabilities::new().resume(SessionResumeCapabilities::new()),
+            );
         let response_barrier = Arc::new((tokio::sync::Notify::new(), tokio::sync::Notify::new()));
         let ready = reconstructing_connection(
             "alpha",

@@ -301,6 +301,9 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
             return;
           }
           installReplayRecoverySnapshot(snapshot, installGuard);
+          if (snapshot.threads.some(({ chat }) => chat.historyRecoveryError)) {
+            throw new Error('Chat history recovery is incomplete');
+          }
           replayRecoveryEpochResetPendingRef.current = false;
           if (acknowledge && resumeAfterEventId !== null) {
             ws.acknowledgeSnapshotRecovery(resumeAfterEventId);

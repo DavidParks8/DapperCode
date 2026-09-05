@@ -898,6 +898,37 @@ describe('DrawerContent render behavior matrix', () => {
     act(() => tree.unmount());
   });
 
+  it('refreshes complete history after a replay gap even when the docked drawer already loaded it', async () => {
+    const removed = createChat({ id: 'removed', title: 'Deleted while offline' });
+    const surviving = createChat({ id: 'surviving', title: 'Surviving chat' });
+    const harness = createHarness({ chats: [removed, surviving] });
+    const tree = await renderDrawer(harness);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(3_000);
+    });
+    expect(hasText(tree.root as Queryable, removed.title)).toBe(true);
+    expect(harness.api.listAllChats).toHaveBeenCalledTimes(1);
+    (harness.api.listChats as jest.Mock).mockResolvedValue([surviving]);
+    let cachedHistory = [removed, surviving];
+    (harness.api.peekAllChats as jest.Mock).mockImplementation(() => cachedHistory);
+    (harness.api.listAllChats as jest.Mock).mockImplementation(async () => {
+      cachedHistory = [surviving];
+      return { chats: cachedHistory, partial: false, diagnostics: [] };
+    });
+    (harness.api.startChatListStream as jest.Mock).mockImplementation(async (_options, onBatch) => {
+      onBatch({ streamId: 'fresh', limit: 20, done: true, chats: [surviving] });
+      return { streamId: 'fresh', cancel: harness.cancelStream };
+    });
+    await act(async () => {
+      harness.emitEvent({ method: 'bridge/events/snapshotRequired', params: null });
+      await jest.advanceTimersByTimeAsync(250);
+    });
+    expect(harness.api.listAllChats).toHaveBeenCalledTimes(2);
+    expect(hasText(tree.root as Queryable, removed.title)).toBe(false);
+    expect(hasText(tree.root as Queryable, surviving.title)).toBe(true);
+    act(() => tree.unmount());
+  });
+
   it('refreshes pending interaction lanes from websocket request events', async () => {
     const pendingChat = createChat({
       id: 'pending',

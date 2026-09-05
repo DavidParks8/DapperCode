@@ -26,7 +26,8 @@ export function assessChatSync(
   watchdogActive: boolean,
 ): ChatSyncAssessment {
   const hasTerminalStatus = latest.status === 'complete' || latest.status === 'error';
-  const pendingUserMessage = !hasTerminalStatus && hasRecentUnansweredUserTurn(latest);
+  const pendingUserMessage =
+    !hasTerminalStatus && !latest.historyRecoveryError && hasRecentUnansweredUserTurn(latest);
   // An idle snapshot that already answers the latest prompt is authoritative. Treating the
   // newly arrived answer as streaming progress re-armed the watchdog after the run had ended.
   const terminal = hasTerminalStatus || (latest.status === 'idle' && !pendingUserMessage);
@@ -79,6 +80,7 @@ export function useChatSynchronization({
   isAppActive,
   isTurnActive,
   onSnapshot,
+  onError,
 }: {
   controller: ChatSyncController;
   threadId: string | null;
@@ -88,6 +90,7 @@ export function useChatSynchronization({
   isAppActive: () => boolean;
   isTurnActive: () => boolean;
   onSnapshot: (chat: Chat, assessment: ChatSyncAssessment) => void;
+  onError?: (error: unknown) => void;
 }): void {
   const callbacksRef = useRef({
     getPrevious,
@@ -95,6 +98,7 @@ export function useChatSynchronization({
     isAppActive,
     isTurnActive,
     onSnapshot,
+    onError,
   });
   callbacksRef.current = {
     getPrevious,
@@ -102,6 +106,7 @@ export function useChatSynchronization({
     isAppActive,
     isTurnActive,
     onSnapshot,
+    onError,
   };
 
   useEffect(() => {
@@ -112,7 +117,7 @@ export function useChatSynchronization({
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     const sync = async () => {
-      if (paused) {
+      if (paused || !callbacksRef.current.isAppActive()) {
         return;
       }
       try {
@@ -125,8 +130,10 @@ export function useChatSynchronization({
           latest,
           assessChatSync(callbacks.getPrevious(), latest, callbacks.isWatchdogActive()),
         );
-      } catch {
-        // Polling is best effort; keep the current projection on failure.
+      } catch (error) {
+        if (!stopped) {
+          callbacksRef.current.onError?.(error);
+        }
       }
     };
 

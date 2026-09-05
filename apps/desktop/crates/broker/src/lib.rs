@@ -69,7 +69,6 @@ const WORKER_RUNTIME_WATCH_INTERVAL: Duration = Duration::from_secs(1);
 const WORKER_RUNTIME_MISSING_SAMPLES: u8 = 3;
 const BROKER_GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 const SWEEP_INTERVAL: Duration = Duration::from_secs(5);
-const ACTIVITY_FAILURE_LIMIT: u32 = 3;
 const MAX_CREDENTIAL_BYTES: usize = 4096;
 const MAX_WEBSOCKET_BYTES: usize = 32 * 1024 * 1024;
 
@@ -1256,7 +1255,6 @@ struct WorkerRecord {
     last_idle_at: Instant,
     last_used: u64,
     known_busy: bool,
-    activity_failures: u32,
     retiring: bool,
 }
 
@@ -1455,7 +1453,6 @@ impl WorkerPool {
                 }
                 record.clients += 1;
                 record.known_busy = true;
-                record.activity_failures = 0;
                 record.last_used = self.usage_counter.fetch_add(1, Ordering::Relaxed);
                 return Ok(WorkerClientSession {
                     profile_id,
@@ -1483,7 +1480,6 @@ impl WorkerPool {
                     last_idle_at: Instant::now(),
                     last_used: self.usage_counter.fetch_add(1, Ordering::Relaxed),
                     known_busy: true,
-                    activity_failures: 0,
                     retiring: false,
                 },
             );
@@ -1539,66 +1535,17 @@ impl WorkerPool {
             }
             match activity {
                 Ok(activity) if activity.can_retire => {
-                    record.activity_failures = 0;
                     if record.known_busy {
                         record.last_idle_at = Instant::now();
                     }
                     record.known_busy = false;
                 }
-                Ok(_) => {
-                    record.activity_failures = 0;
+                _ => {
+                    // Unavailable status is not evidence that an accepted turn has stopped.
                     record.known_busy = true;
                     record.last_idle_at = Instant::now();
                 }
-                Err(_) => {
-                    record.activity_failures = record.activity_failures.saturating_add(1);
-                    record.known_busy = true;
-                    if record.activity_failures == 1 {
-                        record.last_idle_at = Instant::now();
-                    }
-                }
             }
-        }
-
-        let unreachable = {
-            let state = self.state.lock().await;
-            state
-                .workers
-                .iter()
-                .filter_map(|(profile_id, record)| {
-                    if record.clients == 0
-                        && !record.retiring
-                        && record.activity_failures >= ACTIVITY_FAILURE_LIMIT
-                    {
-                        Some((profile_id.clone(), record.worker.clone()))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-        };
-        for (profile_id, worker) in unreachable {
-            {
-                let mut state = self.state.lock().await;
-                let Some(record) = state.workers.get_mut(&profile_id) else {
-                    continue;
-                };
-                if record.clients > 0
-                    || record.retiring
-                    || record.activity_failures < ACTIVITY_FAILURE_LIMIT
-                    || !Arc::ptr_eq(&record.worker, &worker)
-                {
-                    continue;
-                }
-                record.retiring = true;
-            }
-            if let Err(error) = worker.stop().await {
-                if let Some(record) = self.state.lock().await.workers.get_mut(&profile_id) {
-                    record.retiring = false;
-                }
-                return Err(error);
-            }
-            self.state.lock().await.workers.remove(&profile_id);
         }
 
         let now = Instant::now();
@@ -2080,7 +2027,59 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sustained_activity_failures_evict_a_wedged_worker_but_transient_failures_do_not() {
+    async fn disconnected_active_worker_survives_failed_probes_and_reconnects_without_restart() {
+        let launcher = Arc::new(FakeLauncher::default());
+        let pool = Arc::new(WorkerPool::new(
+            launcher.clone(),
+            1,
+            0,
+            Duration::from_millis(1),
+        ));
+        let workspace = tempdir().unwrap();
+        let access = access("active", workspace.path().to_path_buf());
+        let client = pool.acquire_client(access.clone()).await.unwrap();
+        let worker = launcher
+            .workers
+            .lock()
+            .await
+            .get("active")
+            .cloned()
+            .unwrap();
+        worker.busy.store(true, Ordering::SeqCst);
+        client.release().await;
+        pool.sweep(false).await.unwrap();
+        assert_eq!(pool.snapshot().await.connected_clients, 0);
+        assert_eq!(pool.snapshot().await.busy_workers, 1);
+
+        worker
+            .activity_failures_remaining
+            .store(6, Ordering::SeqCst);
+        for capacity_pressure in [false, true, false, true, false, true] {
+            pool.sweep(capacity_pressure).await.unwrap();
+            assert!(
+                pool.contains("active").await,
+                "failed probes must not stop an accepted disconnected turn"
+            );
+            assert!(worker.running.load(Ordering::SeqCst));
+            assert_eq!(worker.stops.load(Ordering::SeqCst), 0);
+            assert_eq!(pool.snapshot().await.busy_workers, 1);
+        }
+
+        let reconnected = pool.acquire_client(access).await.unwrap();
+        assert_eq!(launcher.launches.load(Ordering::SeqCst), 1);
+        assert_eq!(pool.snapshot().await.connected_clients, 1);
+        worker.busy.store(false, Ordering::SeqCst);
+        reconnected.release().await;
+        pool.sweep(false).await.unwrap();
+        assert_eq!(pool.snapshot().await.busy_workers, 0);
+        sleep(Duration::from_millis(2)).await;
+        pool.sweep(false).await.unwrap();
+        assert!(!pool.contains("active").await);
+        assert_eq!(worker.stops.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn unreachable_live_workers_are_preserved_but_exited_workers_release_capacity() {
         let launcher = Arc::new(FakeLauncher::default());
         let pool = Arc::new(WorkerPool::new(
             launcher.clone(),
@@ -2108,18 +2107,23 @@ mod tests {
         assert!(pool.contains("first").await);
         first_worker
             .activity_failures_remaining
-            .store(ACTIVITY_FAILURE_LIMIT as usize, Ordering::SeqCst);
-        for _ in 0..ACTIVITY_FAILURE_LIMIT {
+            .store(6, Ordering::SeqCst);
+        for _ in 0..6 {
             pool.sweep(false).await.unwrap();
         }
+        assert!(pool.contains("first").await);
+        assert_eq!(first_worker.stops.load(Ordering::SeqCst), 0);
+
+        first_worker.running.store(false, Ordering::SeqCst);
+        pool.sweep(false).await.unwrap();
         assert!(!pool.contains("first").await);
-        assert_eq!(first_worker.stops.load(Ordering::SeqCst), 1);
+        assert_eq!(first_worker.stops.load(Ordering::SeqCst), 0);
 
         let replacement_dir = tempdir().unwrap();
         let replacement = pool
             .acquire_client(access("replacement", replacement_dir.path().to_path_buf()))
             .await
-            .expect("wedged worker eviction releases capacity");
+            .expect("confirmed worker exit releases capacity");
         replacement.release().await;
     }
 

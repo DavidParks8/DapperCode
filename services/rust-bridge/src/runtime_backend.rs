@@ -1785,25 +1785,13 @@ impl RuntimeBackend {
     }
 
     pub(super) async fn runtime_activity(&self) -> (usize, usize, usize, usize) {
-        let mut active_runs = 0;
-        let mut other_live_work = self.client_requests.active_request_count();
-        for thread_id in self.manager.loaded_session_ids().await {
-            let Ok(session) = self.manager.read_session(&thread_id).await else {
-                other_live_work += 1;
-                continue;
-            };
-            if session.snapshot.active_run_id.is_some() {
-                active_runs += 1;
-            }
-            if !session.snapshot.active_tool_ids.is_empty() {
-                other_live_work += 1;
-            }
-        }
+        // Broker retirement probes must not depend on history hydration or agent subprocesses.
+        let (active_runs, other_live_work) = self.manager.runtime_activity().await;
         (
             active_runs,
             self.manager.pending_permissions().await.len(),
             self.manager.pending_elicitations().await.len(),
-            other_live_work,
+            other_live_work + self.client_requests.active_request_count(),
         )
     }
 

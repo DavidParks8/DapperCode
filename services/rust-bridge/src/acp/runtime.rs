@@ -935,6 +935,16 @@ impl AcpConnection {
         loaded
     }
 
+    pub(super) async fn runtime_activity(&self) -> (usize, usize) {
+        let mut activity = (0, 0);
+        for session in self.sessions.all().await {
+            let (active_runs, other_live_work) = session.runtime_activity().await;
+            activity.0 += active_runs;
+            activity.1 += other_live_work;
+        }
+        activity
+    }
+
     async fn call<T>(
         &self,
         make: impl FnOnce(oneshot::Sender<Result<T, AcpRuntimeError>>) -> Command,
