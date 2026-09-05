@@ -98,6 +98,12 @@ export interface ToolInvocationFile {
 
 export function resolveToolInvocationFiles(invocation: ToolInvocation): ToolInvocationFile[] {
   const files = new Map<string, ToolInvocationFile>();
+  if (['edit', 'delete', 'move'].includes(invocation.kind)) {
+    for (const location of invocation.locations) {
+      const path = normalizeLocationPath(location.path);
+      files.set(path, { path, additions: null, deletions: null });
+    }
+  }
   for (const diff of invocation.diffs) {
     const stats = compactToolDiff(diff);
     const path = normalizeLocationPath(diff.path);
@@ -106,13 +112,6 @@ export function resolveToolInvocationFiles(invocation: ToolInvocation): ToolInvo
       additions: stats.unavailable ? null : stats.additions,
       deletions: stats.unavailable ? null : stats.deletions,
     });
-  }
-  if (['edit', 'delete', 'move'].includes(invocation.kind)) {
-    for (const { path } of invocation.locations) {
-      if (!files.has(path)) {
-        files.set(path, { path, additions: null, deletions: null });
-      }
-    }
   }
   return [...files.values()];
 }

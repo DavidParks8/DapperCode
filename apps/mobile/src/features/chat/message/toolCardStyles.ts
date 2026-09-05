@@ -76,12 +76,16 @@ export const createToolCardStyles = (theme: AppTheme) =>
       paddingLeft: 16 + theme.spacing.sm * 2,
       paddingRight: theme.spacing.sm,
       paddingBottom: theme.spacing.xs,
+      gap: theme.spacing.xs,
     },
     patchFile: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: theme.spacing.sm,
       paddingVertical: theme.spacing.xs,
+      paddingHorizontal: theme.spacing.sm,
+      borderRadius: theme.radius.sm,
+      backgroundColor: theme.colors.inlineCodeBg,
     },
     patchFileInfo: { flex: 1, minWidth: 0 },
     patchFileName: {

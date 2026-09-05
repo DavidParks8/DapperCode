@@ -76,22 +76,37 @@ pub async fn handle_session_notification(
         )
         .await
         .expect("thought chunks always produce canonical events"),
-        SessionUpdate::ToolCall(tool) => CanonicalEvent::Tool {
-            agent_id: agent_id.to_string(),
-            thread_id,
-            run_id,
-            source_turn_id,
-            generation,
-            tool_call_id: tool.tool_call_id.to_string(),
-            kind: tool.kind,
-            status: tool.status,
-            title: tool.title,
-            content: FieldUpdate::Set(tool_content(&tool.content)),
-            structured_content: FieldUpdate::Set(bounded_tool_values(&tool.content)),
-            locations: FieldUpdate::Set(bounded_values(&tool.locations, MAX_LOCATION_ITEMS)),
-        },
+        SessionUpdate::ToolCall(tool) => {
+            let locations =
+                tool_locations(&tool.locations, &tool.title, tool.raw_input.as_ref(), &[]);
+            CanonicalEvent::Tool {
+                agent_id: agent_id.to_string(),
+                thread_id,
+                run_id,
+                source_turn_id,
+                generation,
+                tool_call_id: tool.tool_call_id.to_string(),
+                kind: tool.kind,
+                status: tool.status,
+                title: tool.title,
+                content: FieldUpdate::Set(tool_content(&tool.content)),
+                structured_content: FieldUpdate::Set(bounded_tool_values(&tool.content)),
+                locations: FieldUpdate::Set(locations),
+            }
+        }
         SessionUpdate::ToolCallUpdate(update) => {
             let existing = snapshot.tools.get(&update.tool_call_id.to_string());
+            let title = update
+                .fields
+                .title
+                .or_else(|| existing.map(|tool| tool.title.clone()))
+                .unwrap_or_default();
+            let locations = tool_locations(
+                update.fields.locations.as_deref().unwrap_or_default(),
+                &title,
+                update.fields.raw_input.as_ref(),
+                existing.map_or(&[], |tool| tool.locations.as_slice()),
+            );
             CanonicalEvent::Tool {
                 agent_id: agent_id.to_string(),
                 thread_id,
@@ -109,11 +124,7 @@ pub async fn handle_session_notification(
                     .status
                     .or_else(|| existing.map(|tool| tool.status))
                     .unwrap_or(ToolCallStatus::Pending),
-                title: update
-                    .fields
-                    .title
-                    .or_else(|| existing.map(|tool| tool.title.clone()))
-                    .unwrap_or_default(),
+                title,
                 content: update
                     .fields
                     .content
@@ -128,13 +139,7 @@ pub async fn handle_session_notification(
                     .map_or(FieldUpdate::Unchanged, |content| {
                         FieldUpdate::Append(bounded_tool_values(content))
                     }),
-                locations: update
-                    .fields
-                    .locations
-                    .as_ref()
-                    .map_or(FieldUpdate::Unchanged, |locations| {
-                        FieldUpdate::Append(bounded_values(locations, MAX_LOCATION_ITEMS))
-                    }),
+                locations: FieldUpdate::Append(locations),
             }
         }
         SessionUpdate::Plan(plan) => CanonicalEvent::Plan {
@@ -352,6 +357,64 @@ fn bounded_tool_values(content: &[ToolCallContent]) -> Vec<serde_json::Value> {
     bounded_values(content, MAX_STRUCTURED_ITEMS)
 }
 
+fn tool_locations<T: serde::Serialize>(
+    locations: &[T],
+    title: &str,
+    raw_input: Option<&serde_json::Value>,
+    existing: &[serde_json::Value],
+) -> Vec<serde_json::Value> {
+    let mut locations = bounded_values(locations, MAX_LOCATION_ITEMS);
+    locations.retain(|location| !existing.contains(location));
+    let patch = raw_input
+        .filter(|_| {
+            matches!(
+                title.trim().to_ascii_lowercase().as_str(),
+                "apply_patch" | "functions.apply_patch"
+            )
+        })
+        .and_then(|input| {
+            input.as_str().or_else(|| {
+                ["patch", "input", "patchText", "patch_text"]
+                    .iter()
+                    .find_map(|key| input.get(key).and_then(serde_json::Value::as_str))
+            })
+        });
+    if let Some(patch) = patch.filter(|patch| patch.lines().next() == Some("*** Begin Patch")) {
+        // ACP rawInput updates replace the input-so-far. Publish only terminated headers;
+        // an unfinished filename must not become a permanent location in the snapshot.
+        for line in patch.split_inclusive('\n') {
+            if !line.ends_with('\n') || line.trim_end() == "*** End Patch" {
+                break;
+            }
+            let path = [
+                "*** Add File: ",
+                "*** Update File: ",
+                "*** Delete File: ",
+                "*** Move to: ",
+            ]
+            .iter()
+            .find_map(|prefix| line.strip_prefix(prefix))
+            .map(str::trim);
+            let Some(path) =
+                path.filter(|path| !path.is_empty() && path.len() <= MAX_STRUCTURED_VALUE_BYTES)
+            else {
+                continue;
+            };
+            let known = existing.iter().chain(&locations).any(|location| {
+                location.get("path").and_then(serde_json::Value::as_str) == Some(path)
+            });
+            if !known {
+                locations.push(serde_json::json!({ "path": path }));
+            }
+            if existing.len() + locations.len() >= MAX_LOCATION_ITEMS {
+                break;
+            }
+        }
+    }
+    locations.truncate(MAX_LOCATION_ITEMS.saturating_sub(existing.len()));
+    locations
+}
+
 fn bounded_values<T: serde::Serialize>(values: &[T], max_items: usize) -> Vec<serde_json::Value> {
     values
         .iter()
@@ -440,6 +503,173 @@ fn serde_wire_value<T: serde::Serialize + std::fmt::Debug>(value: &T) -> String 
 mod tests {
     use super::*;
     use crate::acp::snapshot::{SnapshotMessage, SnapshotTimelineKind};
+
+    #[test]
+    fn patch_locations_only_interpret_headers_inside_a_patch() {
+        let input = serde_json::json!({
+            "patchText": "*** Begin Patch\r\n*** Add File: src/a file.ts\r\n\
+                +*** Delete File: not-a-header.ts\r\n*** Update File: src/a file.ts\r\n\
+                *** End Patch\r\n*** Delete File: outside.ts\r\n"
+        });
+        assert_eq!(
+            tool_locations::<serde_json::Value>(&[], "apply_patch", Some(&input), &[]),
+            vec![serde_json::json!({"path": "src/a file.ts"})]
+        );
+        for input in [
+            serde_json::json!({"secret": "*** Begin Patch\n*** Add File: hidden\n"}),
+            serde_json::json!("*** Begin Patch typo\n*** Add File: hidden\n"),
+            serde_json::json!("*** Add File: hidden\n"),
+            serde_json::json!(null),
+        ] {
+            assert!(
+                tool_locations::<serde_json::Value>(&[], "apply_patch", Some(&input), &[])
+                    .is_empty()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn unrelated_tool_patch_shaped_input_remains_private() {
+        let session = AcpSession::new("agent".into(), "thread".into());
+        for update_type in ["tool_call", "tool_call_update"] {
+            let update: SessionUpdate = serde_json::from_value(serde_json::json!({
+                "sessionUpdate": update_type, "toolCallId": "private-tool",
+                "title": "Review private patch", "kind": "other", "status": "in_progress",
+                "rawInput": {"patch":"*** Begin Patch\n*** Add File: private-filename\n+secret\n"},
+                "locations": [{"path":"public.ts"}]
+            }))
+            .unwrap();
+            handle_session_notification(
+                "agent",
+                &session,
+                SessionNotification::new("session", update).into(),
+            )
+            .await;
+            let snapshot = session.snapshot().await;
+            assert_eq!(
+                snapshot.tools["private-tool"].locations,
+                vec![serde_json::json!({"path":"public.ts"})]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn patch_input_publishes_complete_file_headers_before_the_patch_finishes() {
+        for status in ["completed", "failed"] {
+            let session = AcpSession::new("agent".into(), "thread".into());
+            let first = "*** Begin Patch\n*** Add File: src/first.ts\n+private-patch-body\n";
+            let partial = format!("{first}*** Update File: src/sec");
+            let full = format!(
+                "{partial}ond.ts\n*** Move to: src/renamed.ts\n@@\n-old\n+new\n\
+                 *** Delete File: src/obsolete.ts\n*** End Patch\n"
+            );
+            let updates = [
+                (
+                    serde_json::json!({
+                        "sessionUpdate": "tool_call", "toolCallId": "patch",
+                        "title": "apply_patch", "kind": "other", "status": "pending",
+                        "rawInput": "*** Begin Patch\n*** Add File: src/fir"
+                    }),
+                    vec![],
+                ),
+                (
+                    serde_json::json!({
+                        "sessionUpdate": "tool_call_update", "toolCallId": "patch",
+                        "status": "in_progress", "rawInput": {"input": partial}
+                    }),
+                    vec!["src/first.ts"],
+                ),
+                (
+                    serde_json::json!({
+                        "sessionUpdate": "tool_call_update", "toolCallId": "patch",
+                        "rawInput": {"patch": full, "secret": "private-argument"}
+                    }),
+                    vec![
+                        "src/first.ts",
+                        "src/second.ts",
+                        "src/renamed.ts",
+                        "src/obsolete.ts",
+                    ],
+                ),
+                (
+                    serde_json::json!({
+                        "sessionUpdate": "tool_call_update", "toolCallId": "patch", "status": status
+                    }),
+                    vec![
+                        "src/first.ts",
+                        "src/second.ts",
+                        "src/renamed.ts",
+                        "src/obsolete.ts",
+                    ],
+                ),
+            ];
+            for (value, expected) in updates {
+                let update: SessionUpdate = serde_json::from_value(value).unwrap();
+                handle_session_notification(
+                    "agent",
+                    &session,
+                    SessionNotification::new("session", update).into(),
+                )
+                .await;
+                let snapshot = session.snapshot().await;
+                let tool = &snapshot.tools["patch"];
+                assert_eq!(
+                    tool.locations
+                        .iter()
+                        .map(|location| location["path"].as_str().unwrap())
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+                let serialized = serde_json::to_string(tool).unwrap();
+                assert!(!serialized.contains("private-"));
+                assert!(!serialized.contains("rawInput"));
+                assert!(!serialized.contains("*** Begin Patch"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn repeated_patch_input_does_not_crowd_new_files_out_of_location_budget() {
+        let session = AcpSession::new("agent".into(), "thread".into());
+        let mut input = "*** Begin Patch\n*** Update File: src/first.ts\n@@\n-old\n".to_string();
+        for index in 0..40 {
+            input.push_str("+more\n");
+            let update: SessionUpdate = serde_json::from_value(serde_json::json!({
+                "sessionUpdate": if index == 0 { "tool_call" } else { "tool_call_update" },
+                "toolCallId": "patch", "title": "functions.apply_patch",
+                "kind": "edit", "status": "in_progress", "rawInput": input,
+                "locations": [{"path":"src/explicit.ts","line":7}]
+            }))
+            .unwrap();
+            handle_session_notification(
+                "agent",
+                &session,
+                SessionNotification::new("session", update).into(),
+            )
+            .await;
+        }
+        input.push_str("*** Add File: src/last.ts\n");
+        let update = serde_json::from_value(serde_json::json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "patch", "rawInput": input
+        }))
+        .unwrap();
+        handle_session_notification(
+            "agent",
+            &session,
+            SessionNotification::new("session", update).into(),
+        )
+        .await;
+        let snapshot = session.snapshot().await;
+        assert_eq!(
+            snapshot.tools["patch"].locations,
+            serde_json::json!([
+                {"path":"src/explicit.ts","line":7}, {"path":"src/first.ts"}, {"path":"src/last.ts"}
+            ])
+            .as_array()
+            .unwrap()
+            .to_vec()
+        );
+    }
 
     #[tokio::test]
     async fn plan_entries_use_acp_wire_values_not_debug_formatting() {
