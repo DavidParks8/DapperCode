@@ -452,19 +452,15 @@ fn operator_snapshot(
     snapshot: BridgeSnapshot,
     paths: &AppPaths,
 ) -> OperatorSnapshot {
-    let runtime_config = supervisor.runtime_config().ok();
+    let pairing = supervisor.pairing().ok();
     let snapshot = profile_snapshot(
         supervisor.profile(),
         snapshot,
         paths,
-        runtime_config.as_ref().and_then(|config| {
-            config
-                .pairing_payload(&supervisor.profile().profile_id)
-                .ok()
-        }),
-        runtime_config
+        pairing.as_ref().map(|(payload, _)| payload.clone()),
+        pairing
             .as_ref()
-            .map(|config| config.secret_backend.as_str().to_string()),
+            .map(|(_, backend)| backend.as_str().to_string()),
     );
     with_broker_log_path(snapshot, paths)
 }

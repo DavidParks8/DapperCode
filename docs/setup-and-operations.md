@@ -281,17 +281,31 @@ Native setup records the lowercase SHA-256 digest of the selected executable. Th
 rechecks that digest immediately before constructing the SDK process transport, so a moved or
 modified executable fails closed and must be registered again.
 
-Agent upgrades are handled without that manual step. Package managers install each release under a
-versioned directory and only keep the launcher entry stable, so an upgrade invalidates the recorded
-path and digest together and would otherwise break every workspace runtime until setup was rerun.
-Before waking a workspace, the operator therefore re-registers an agent whose recorded executable no
-longer matches. Re-registration remains an operator decision rather than implicit trust: the
-replacement must be published by one of the platform's trusted agent directories
-(`/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` on macOS) and must not be writable by other
-users. The new path, version, and digest are written to `config.json` and the profile manifest, the
-change is recorded in `broker.log`, and the bridge still recomputes and fails closed on whatever
-digest it is handed. A binary that changes at an unchanged path, or a replacement outside those
-directories, is still rejected and requires setup.
+Setup also records the selected stable launcher as `agent.launcherPath`, separately from its
+canonical executable. Before waking a workspace, the operator resolves that launcher again and
+refreshes the path and digest when a package manager retargets it or a self-updater replaces its
+binary in place. This works even if the old release still exists. Select the stable installer entry
+(for example, `/opt/homebrew/bin/opencode` or `~/.opencode/bin/opencode`), not a version-specific
+release file. Discovery preserves that entry rather than resolving away its symlink.
+
+Older profiles without a launcher can recover through platform-trusted directories
+(`/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` on macOS), and remember the discovered launcher
+for later updates. Recovery never searches the workspace or the worker's `PATH`. Unix replacements
+must be executable and owned by the current user or root, with no unprivileged write access to the
+file or its parent directories. macOS administrator-writable Homebrew directories are permitted.
+An unavailable or unsafe launcher fails explicitly without replacing the saved registration; retry
+after installation finishes. Moving to a different installation requires setup.
+
+The operator updates `config.json` and the manifest together, preserving credentials, ports, and
+session state, and records the refresh in `broker.log`. Version reporting is optional metadata:
+the probe is bounded to two seconds and 2 KiB, and failures are logged with a `local` metadata value.
+The bridge independently rechecks the digest before spawning. Failed agent initialization does not
+leave an unusable worker cached: the next connection can retry. Existing workers are not restarted
+just because an update is installed, and pairing remains available while the agent is being updated.
+
+This handles installation updates, not arbitrary future protocol incompatibilities. If an update
+removes ACP support or changes required launch arguments, repair the installation or rerun setup
+with compatible arguments; DapperCode never disables integrity checks to force it to run.
 
 The bridge also retains compatibility with typed `dappercode-tree-v1` manifests. When such a
 manifest is loaded, it independently recomputes the complete controlled installation tree. The

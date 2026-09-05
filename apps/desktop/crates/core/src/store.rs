@@ -508,12 +508,14 @@ pub struct Profile {
     pub updated_at: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileAgent {
     pub agent_id: String,
     pub display_name: String,
     pub executable: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launcher_path: Option<PathBuf>,
     #[serde(default)]
     pub argv: Vec<String>,
     pub resolved_version: String,
@@ -759,6 +761,7 @@ mod tests {
                 agent_id: "opencode".to_string(),
                 display_name: "OpenCode".to_string(),
                 executable: PathBuf::from("/bin/echo"),
+                launcher_path: None,
                 argv: vec!["acp".to_string()],
                 resolved_version: "local".to_string(),
                 verified_digest: "sha256:abc".to_string(),

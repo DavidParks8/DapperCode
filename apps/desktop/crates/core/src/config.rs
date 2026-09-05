@@ -250,12 +250,20 @@ impl BridgeRuntimeConfig {
     }
 
     pub fn pairing_payload(&self, workspace_id: &str) -> Result<String> {
+        Self::pairing_payload_for(&self.connect_url, workspace_id, &self.auth_token)
+    }
+
+    pub(crate) fn pairing_payload_for(
+        connect_url: &str,
+        workspace_id: &str,
+        token: &str,
+    ) -> Result<String> {
         Ok(serde_json::to_string(&serde_json::json!({
             "type": "dappercode-bridge-pair",
             "brokerProtocolVersion": 1,
             "workspaceId": workspace_id,
-            "bridgeUrl": self.connect_url,
-            "bridgeToken": self.auth_token,
+            "bridgeUrl": connect_url,
+            "bridgeToken": token,
         }))?)
     }
 
@@ -460,6 +468,7 @@ mod tests {
                 agent_id: "echo".to_string(),
                 display_name: "Echo".to_string(),
                 executable: PathBuf::from("/bin/echo"),
+                launcher_path: None,
                 argv: vec!["acp".to_string()],
                 resolved_version: "local".to_string(),
                 verified_digest: "sha256:abc".to_string(),

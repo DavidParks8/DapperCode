@@ -777,6 +777,7 @@ mod tests {
                 agent_id: "echo".to_string(),
                 display_name: "Echo".to_string(),
                 executable: test_executable(),
+                launcher_path: None,
                 argv: vec!["acp".to_string()],
                 resolved_version: "local".to_string(),
                 verified_digest: format!("sha256:{}", "a".repeat(64)),

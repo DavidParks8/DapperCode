@@ -15,7 +15,7 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use crate::{
     config::{runtime_executable_available, BridgeRuntimeConfig},
     platform::{detach_process, process_start_identity, request_process_stop, ProcessStopRequest},
-    secrets::SecretStore,
+    secrets::{SecretBackend, SecretStore},
     store::{
         atomic_private_write, remove_file_if_exists, AppPaths, BrokerSettings, FileLease, Profile,
     },
@@ -129,12 +129,17 @@ impl BrokerSupervisor {
         &self.profile
     }
 
-    pub fn runtime_config(&self) -> Result<BridgeRuntimeConfig> {
+    pub fn pairing(&self) -> Result<(String, SecretBackend)> {
         let secret = self
             .secrets
             .get(&self.paths, &self.profile.profile_id)?
             .context("no stored workspace credential; start the broker or run setup again")?;
-        BridgeRuntimeConfig::from_profile(&self.profile, &secret.token, secret.backend, &self.paths)
+        let payload = BridgeRuntimeConfig::pairing_payload_for(
+            &self.settings.connect_url,
+            &self.profile.profile_id,
+            &secret.token,
+        )?;
+        Ok((payload, secret.backend))
     }
 
     pub fn snapshot(&self) -> BridgeSnapshot {
@@ -787,6 +792,7 @@ mod tests {
                 agent_id: "agent".to_string(),
                 display_name: "Agent".to_string(),
                 executable: std::env::current_exe().unwrap(),
+                launcher_path: None,
                 argv: Vec::new(),
                 resolved_version: "test".to_string(),
                 verified_digest: format!("sha256:{}", "a".repeat(64)),
@@ -807,6 +813,23 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         drop(listener);
         port
+    }
+
+    #[test]
+    fn pairing_survives_removal_of_the_registered_agent_release() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(root.path().to_path_buf());
+        let mut supervisor = test_supervisor(&paths, closed_port(), None);
+        supervisor
+            .secrets
+            .get_or_create(&paths, &supervisor.profile.profile_id)
+            .unwrap();
+        let executable = root.path().join("obsolete-agent");
+        fs::write(&executable, b"fixture").unwrap();
+        supervisor.profile.agent.executable = executable.clone();
+        let before = supervisor.pairing().unwrap();
+        fs::remove_file(&executable).unwrap();
+        assert_eq!(supervisor.pairing().unwrap(), before);
     }
 
     fn health_server(body: &'static str, requests: usize) -> (u16, thread::JoinHandle<()>) {
@@ -1622,6 +1645,7 @@ mod tests {
                 agent_id: "agent".to_string(),
                 display_name: "Agent".to_string(),
                 executable: std::env::current_exe().unwrap(),
+                launcher_path: None,
                 argv: Vec::new(),
                 resolved_version: "test".to_string(),
                 verified_digest: format!("sha256:{}", "a".repeat(64)),

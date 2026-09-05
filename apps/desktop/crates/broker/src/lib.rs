@@ -1029,6 +1029,7 @@ impl WorkerRuntimeActivity {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkerStatusResponse {
+    status: String,
     runtime: WorkerRuntimeActivity,
 }
 
@@ -1059,22 +1060,24 @@ struct ProcessWorkerLauncher {
 async fn refreshed_workspace_profile(paths: &AppPaths, profile: &Profile) -> Result<Profile> {
     let refresh_paths = paths.clone();
     let profile_id = profile.profile_id.clone();
-    let refreshed = tokio::task::spawn_blocking(move || -> Result<Option<Profile>> {
-        let Some(refresh) = refresh_registered_agent(&refresh_paths, &profile_id)? else {
-            return Ok(None);
-        };
-        println!(
-            "workspace {profile_id} re-registered {} after an upgrade: {} -> {} ({})",
-            refresh.agent_id,
-            refresh.previous_version,
-            refresh.resolved_version,
-            refresh.executable.display()
-        );
-        Ok(refresh_paths.load_config()?.find(&profile_id).cloned())
+    tokio::task::spawn_blocking(move || -> Result<Profile> {
+        if let Some(refresh) = refresh_registered_agent(&refresh_paths, &profile_id)? {
+            println!(
+                "workspace {profile_id} re-registered {} after an upgrade: {} -> {} ({})",
+                refresh.agent_id,
+                refresh.previous_version,
+                refresh.resolved_version,
+                refresh.executable.display()
+            );
+        }
+        refresh_paths
+            .load_config()?
+            .find(&profile_id)
+            .cloned()
+            .context("workspace profile disappeared during agent refresh")
     })
     .await
-    .context("agent refresh task failed")??;
-    Ok(refreshed.unwrap_or_else(|| profile.clone()))
+    .context("agent refresh task failed")?
 }
 
 #[async_trait]
@@ -1160,7 +1163,10 @@ impl WorkerLauncher for ProcessWorkerLauncher {
         )
         .await
         {
-            let _ = worker.stop().await;
+            worker
+                .stop()
+                .await
+                .with_context(|| format!("{error:#}; failed to stop unavailable worker"))?;
             return Err(error);
         }
         Ok(worker)
@@ -1180,20 +1186,7 @@ impl ManagedWorker for ProcessWorker {
     }
 
     async fn activity(&self) -> Result<WorkerRuntimeActivity> {
-        let response = self
-            .http
-            .get(format!("{}status", self.target.http_base))
-            .header(AUTHORIZATION, bearer_header(&self.target.internal_token)?)
-            .send()
-            .await
-            .context("worker status request failed")?
-            .error_for_status()
-            .context("worker status was not successful")?;
-        Ok(response
-            .json::<WorkerStatusResponse>()
-            .await
-            .context("worker status was malformed")?
-            .runtime)
+        Ok(self.status().await?.runtime)
     }
 
     async fn is_running(&self) -> bool {
@@ -1214,14 +1207,33 @@ impl ManagedWorker for ProcessWorker {
     }
 }
 
-async fn wait_for_worker(worker: Arc<dyn ManagedWorker>, wait: Duration) -> Result<()> {
+impl ProcessWorker {
+    async fn status(&self) -> Result<WorkerStatusResponse> {
+        let response = self
+            .http
+            .get(format!("{}status", self.target.http_base))
+            .header(AUTHORIZATION, bearer_header(&self.target.internal_token)?)
+            .send()
+            .await
+            .context("worker status request failed")?
+            .error_for_status()
+            .context("worker status was not successful")?;
+        response
+            .json::<WorkerStatusResponse>()
+            .await
+            .context("worker status was malformed")
+    }
+}
+
+async fn wait_for_worker(worker: Arc<ProcessWorker>, wait: Duration) -> Result<()> {
     timeout(wait, async {
         loop {
             if !worker.is_running().await {
                 bail!("workspace worker exited before accepting requests");
             }
-            match worker.activity().await {
-                Ok(_) => return Ok(()),
+            match worker.status().await {
+                Ok(status) if matches!(status.status.as_str(), "ok" | "degraded") => return Ok(()),
+                Ok(_) => bail!("workspace agent failed to initialize; inspect the workspace bridge log and retry after the agent update finishes"),
                 Err(_) => sleep(WORKER_POLL_INTERVAL).await,
             }
         }
@@ -1770,12 +1782,97 @@ mod tests {
                 agent_id: "agent".to_string(),
                 display_name: "Agent".to_string(),
                 executable: PathBuf::from("/bin/echo"),
+                launcher_path: None,
                 argv: vec!["acp".to_string()],
                 resolved_version: "1".to_string(),
                 verified_digest: "sha256:test".to_string(),
             },
             updated_at: "now".to_string(),
         }
+    }
+
+    #[tokio::test]
+    async fn worker_launch_reloads_registration_even_if_another_launch_already_refreshed_it() {
+        use sha2::{Digest, Sha256};
+
+        let root = tempdir().unwrap();
+        let paths = AppPaths::for_tests(root.path().to_path_buf());
+        let mut stale = profile("workspace", root.path().to_path_buf());
+        stale.agent.executable = root.path().join("removed-release");
+        let mut current = stale.clone();
+        current.agent.executable = std::env::current_exe().unwrap();
+        current.agent.verified_digest = format!(
+            "sha256:{:x}",
+            Sha256::digest(std::fs::read(&current.agent.executable).unwrap())
+        );
+        paths
+            .update_config(|config| {
+                config.upsert(current.clone());
+                Ok(())
+            })
+            .unwrap();
+
+        let refreshed = refreshed_workspace_profile(&paths, &stale).await.unwrap();
+        assert_eq!(refreshed.agent.executable, current.agent.executable);
+        assert_eq!(
+            refreshed.agent.verified_digest,
+            current.agent.verified_digest
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unavailable_agent_is_not_admitted_and_a_later_ready_launch_recovers() {
+        let ready = Arc::new(AtomicBool::new(false));
+        let server_ready = ready.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = Router::new().route(
+            "/status",
+            get(move || {
+                let ready = server_ready.load(Ordering::SeqCst);
+                async move {
+                    Json(serde_json::json!({
+                        "status": if ready { "ok" } else { "unhealthy" },
+                        "runtime": WorkerRuntimeActivity::default(),
+                    }))
+                }
+            }),
+        );
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let create_worker = || {
+            Arc::new(ProcessWorker {
+                target: WorkerTarget {
+                    http_base: format!("http://{address}/"),
+                    websocket_base: format!("ws://{address}"),
+                    internal_token: "fixture-token".into(),
+                },
+                child: Mutex::new(
+                    Command::new("/bin/sleep")
+                        .arg("30")
+                        .kill_on_drop(true)
+                        .spawn()
+                        .unwrap(),
+                ),
+                http: Client::new(),
+            })
+        };
+        let failed = create_worker();
+        let error = wait_for_worker(failed.clone(), Duration::from_secs(2))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("agent failed to initialize"));
+        failed.stop().await.unwrap();
+        assert!(!failed.is_running().await);
+        ready.store(true, Ordering::SeqCst);
+        let recovered = create_worker();
+        wait_for_worker(recovered.clone(), Duration::from_secs(2))
+            .await
+            .unwrap();
+        assert!(recovered.is_running().await);
+        recovered.stop().await.unwrap();
+        assert!(!recovered.is_running().await);
+        server.abort();
     }
 
     struct FakeWorker {

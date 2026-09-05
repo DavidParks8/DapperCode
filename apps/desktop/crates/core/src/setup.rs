@@ -2,8 +2,8 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
-    process::Command,
-    time::{SystemTime, UNIX_EPOCH},
+    process::Stdio,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{bail, Context, Result};
@@ -14,7 +14,7 @@ use crate::{
     broker_supervisor::clean_stale_broker_ownership,
     config::{
         allocate_broker_replacement_ports, allocate_port_pair, allocate_preview_port, format_host,
-        validate_workspace,
+        runtime_executable_available, validate_workspace,
     },
     platform,
     secrets::{BridgeSecret, SecretStore},
@@ -180,6 +180,8 @@ pub fn setup_profile(
         .context("agent executable has no parent directory")?;
     let digest = file_digest(&executable)?;
     let version = executable_version(&executable);
+    // Keep the selected entry, not just its versioned symlink target.
+    let launcher_path = std::path::absolute(&request.executable)?;
 
     let profile_id = profile_id_for(&workspace);
     paths.prepare_profile(&profile_id)?;
@@ -321,6 +323,7 @@ pub fn setup_profile(
                 agent_id: request.agent_id.clone(),
                 display_name: request.display_name.trim().to_string(),
                 executable: executable.clone(),
+                launcher_path: Some(launcher_path.clone()),
                 argv: request.argv.clone(),
                 resolved_version: version.clone(),
                 verified_digest: digest.clone(),
@@ -348,16 +351,20 @@ pub fn setup_profile(
 }
 
 pub fn discover_agent_executable(agent_id: &str) -> Option<PathBuf> {
-    let executable_name = platform::agent_executable_name(agent_id);
     let mut directories: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|value| std::env::split_paths(&value).collect())
         .unwrap_or_default();
     directories.extend(platform::agent_search_roots());
+    discover_agent_in(agent_id, directories)
+}
+
+fn discover_agent_in(agent_id: &str, directories: Vec<PathBuf>) -> Option<PathBuf> {
+    let executable_name = platform::agent_executable_name(agent_id);
     directories
         .into_iter()
         .map(|directory| directory.join(&executable_name))
-        .find(|candidate| candidate.is_file())
-        .and_then(|candidate| candidate.canonicalize().ok())
+        .find(|candidate| candidate.is_file() && runtime_executable_available(candidate))
+        .and_then(|candidate| std::path::absolute(candidate).ok())
 }
 
 /// The re-registration performed after an installed agent changed underneath a workspace.
@@ -377,10 +384,10 @@ pub struct AgentRefresh {
 /// invalidates both halves of the pin at once and would otherwise brick every workspace runtime
 /// until setup was rerun by hand.
 ///
-/// Re-registration stays an operator decision rather than becoming implicit trust: the replacement
-/// must be published by one of the platform's trusted agent directories and must not be writable by
-/// other users. The bridge still recomputes and fails closed on the digest it is handed, so a
-/// tampered binary at an unchanged path is still rejected.
+/// Re-registration follows the explicitly selected launcher. Legacy registrations can discover a
+/// launcher only in platform-trusted directories, never the worker's PATH. The bridge still checks
+/// the refreshed digest independently before spawning; installation changes during launch fail
+/// closed and can be retried.
 pub fn refresh_registered_agent(
     paths: &AppPaths,
     profile_id: &str,
@@ -399,21 +406,50 @@ fn refresh_registered_agent_within(
         .with_context(|| format!("workspace profile {profile_id} is not configured"))?
         .agent
         .clone();
-    if registered_agent_is_current(&agent) {
-        return Ok(None);
-    }
-
-    let executable = trusted_agent_executable(&agent.agent_id, search_roots).with_context(|| {
-        format!(
+    let launcher_path = agent.launcher_path.clone().or_else(|| {
+        let name = platform::agent_executable_name(&agent.agent_id);
+        search_roots
+            .iter()
+            .map(|root| root.join(&name))
+            .find(|candidate| trusted_agent_target(candidate).is_some())
+    });
+    let Some(launcher_path) = launcher_path else {
+        if registered_agent_is_current(&agent) {
+            return Ok(None);
+        }
+        bail!(
             "the registered {} executable is no longer installed and no trusted replacement was found; run setup again",
             agent.agent_id
+        );
+    };
+    let executable = trusted_agent_target(&launcher_path).with_context(|| {
+        format!(
+            "the registered {} launcher is missing, not executable, or writable by another user: {}; retry after the update finishes or run setup again",
+            agent.agent_id, launcher_path.display()
         )
     })?;
     let verified_digest = file_digest(&executable)?;
-    if executable == agent.executable && verified_digest == agent.verified_digest {
+    let unchanged = executable == agent.executable && verified_digest == agent.verified_digest;
+    if unchanged && agent.launcher_path.as_ref() == Some(&launcher_path) {
         return Ok(None);
     }
-    let resolved_version = executable_version(&executable);
+    let manifest_path = paths.manifest_path(profile_id);
+    let expected_manifest = fs::read(&manifest_path)
+        .with_context(|| format!("failed to read {}", manifest_path.display()))?;
+    refreshable_agent(
+        &mut serde_json::from_slice(&expected_manifest)?,
+        &agent.agent_id,
+    )?;
+    let resolved_version = if unchanged {
+        agent.resolved_version.clone()
+    } else {
+        executable_version(&executable)
+    };
+    if trusted_agent_target(&launcher_path).as_ref() != Some(&executable)
+        || file_digest(&executable)? != verified_digest
+    {
+        bail!("agent installation changed during refresh; retry after the update finishes");
+    }
 
     let mut side_effects = ManifestRefreshSideEffects {
         paths,
@@ -422,11 +458,13 @@ fn refresh_registered_agent_within(
         executable: executable.clone(),
         resolved_version: resolved_version.clone(),
         verified_digest: verified_digest.clone(),
+        expected_manifest,
         previous_manifest: None,
     };
     let owned_profile_id = profile_id.to_string();
     let recorded_executable = executable.clone();
     let recorded_version = resolved_version.clone();
+    let expected_agent = agent.clone();
     paths.update_config_with_side_effects(
         move |config| {
             let profile = config
@@ -436,7 +474,11 @@ fn refresh_registered_agent_within(
                 .with_context(|| {
                     format!("workspace profile {owned_profile_id} disappeared during agent refresh")
                 })?;
+            if profile.agent != expected_agent {
+                bail!("agent registration changed during refresh; retry with the current profile");
+            }
             profile.agent.executable = recorded_executable;
+            profile.agent.launcher_path = Some(launcher_path);
             profile.agent.resolved_version = recorded_version;
             profile.agent.verified_digest = verified_digest;
             Ok(())
@@ -460,7 +502,31 @@ struct ManifestRefreshSideEffects<'a> {
     executable: PathBuf,
     resolved_version: String,
     verified_digest: String,
+    expected_manifest: Vec<u8>,
     previous_manifest: Option<Vec<u8>>,
+}
+
+fn refreshable_agent<'a>(
+    manifest: &'a mut serde_json::Value,
+    agent_id: &str,
+) -> Result<&'a mut serde_json::Map<String, serde_json::Value>> {
+    let entry = manifest
+        .get_mut("agents")
+        .and_then(serde_json::Value::as_array_mut)
+        .context("the agent manifest does not list any agents")?
+        .iter_mut()
+        .filter_map(serde_json::Value::as_object_mut)
+        .find(|entry| entry.get("agentId").and_then(serde_json::Value::as_str) == Some(agent_id))
+        .with_context(|| format!("the agent manifest has no {agent_id} entry"))?;
+    if entry
+        .get("integrity")
+        .and_then(|integrity| integrity.get("kind"))
+        .and_then(serde_json::Value::as_str)
+        != Some("executable")
+    {
+        bail!("automatic agent refresh requires executable integrity; run setup again");
+    }
+    Ok(entry)
 }
 
 impl ConfigSideEffects for ManifestRefreshSideEffects<'_> {
@@ -470,19 +536,12 @@ impl ConfigSideEffects for ManifestRefreshSideEffects<'_> {
         let manifest_path = self.paths.manifest_path(self.profile_id);
         let contents = fs::read(&manifest_path)
             .with_context(|| format!("failed to read {}", manifest_path.display()))?;
+        if contents != self.expected_manifest {
+            bail!("agent manifest changed during refresh; retry with the current manifest");
+        }
         let mut manifest: serde_json::Value = serde_json::from_slice(&contents)
             .with_context(|| format!("invalid agent manifest at {}", manifest_path.display()))?;
-        let agents = manifest
-            .get_mut("agents")
-            .and_then(serde_json::Value::as_array_mut)
-            .context("the agent manifest does not list any agents")?;
-        let entry = agents
-            .iter_mut()
-            .filter_map(serde_json::Value::as_object_mut)
-            .find(|entry| {
-                entry.get("agentId").and_then(serde_json::Value::as_str) == Some(&self.agent_id)
-            })
-            .with_context(|| format!("the agent manifest has no {} entry", self.agent_id))?;
+        let entry = refreshable_agent(&mut manifest, &self.agent_id)?;
         entry.insert(
             "executable".to_string(),
             serde_json::Value::String(path_to_manifest_string(&self.executable)?),
@@ -523,29 +582,37 @@ fn registered_agent_is_current(agent: &ProfileAgent) -> bool {
             .unwrap_or(false)
 }
 
-/// Resolves the agent through a platform-trusted launcher directory.
-///
-/// The launcher entry is the part a package manager keeps stable across upgrades, so it is the only
-/// location an automatic re-registration will accept. The resolved target must still be a regular
-/// file that other users cannot rewrite.
-fn trusted_agent_executable(agent_id: &str, search_roots: &[PathBuf]) -> Option<PathBuf> {
-    let executable_name = platform::agent_executable_name(agent_id);
-    search_roots
-        .iter()
-        .map(|directory| directory.join(&executable_name))
-        .filter(|candidate| candidate.is_file())
-        .find_map(|candidate| {
-            let canonical = candidate.canonicalize().ok()?;
-            (canonical.is_file() && !is_writable_by_other_users(&canonical)).then_some(canonical)
-        })
+/// Checks the selected launcher and its resolved target before accepting an installation update.
+fn trusted_agent_target(launcher: &Path) -> Option<PathBuf> {
+    if !launcher.is_absolute() {
+        return None;
+    }
+    let canonical = launcher.canonicalize().ok()?;
+    (canonical.is_file()
+        && runtime_executable_available(&canonical)
+        && launcher
+            .ancestors()
+            .chain(canonical.ancestors())
+            .all(|path| !is_writable_by_other_users(path)))
+    .then_some(canonical)
 }
 
 #[cfg(unix)]
 fn is_writable_by_other_users(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::MetadataExt;
 
     fs::metadata(path)
-        .map(|metadata| metadata.permissions().mode() & 0o022 != 0)
+        .map(|metadata| {
+            let root_owned = metadata.uid() == 0;
+            let owned = root_owned || metadata.uid() == unsafe { libc::geteuid() };
+            // Root-owned sticky temporary directories cannot replace a user's existing entries.
+            let sticky_root = metadata.is_dir() && root_owned && metadata.mode() & 0o1000 != 0;
+            // Homebrew uses group-writable directories owned by macOS's built-in admin group.
+            let admin_directory =
+                cfg!(target_os = "macos") && metadata.is_dir() && metadata.gid() == 80;
+            let write_mask = if admin_directory { 0o002 } else { 0o022 };
+            !owned || (metadata.mode() & write_mask != 0 && !sticky_root)
+        })
         .unwrap_or(true)
 }
 
@@ -591,21 +658,68 @@ fn file_digest(path: &Path) -> Result<String> {
 }
 
 fn executable_version(executable: &Path) -> String {
-    Command::new(executable)
-        .arg("--version")
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| {
-            let value = String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .unwrap_or_default()
-                .trim()
-                .to_string();
-            (!value.is_empty() && value.len() <= 2048).then_some(value)
-        })
-        .unwrap_or_else(|| "local".to_string())
+    match executable_version_with_timeout(executable, Duration::from_secs(2)) {
+        Ok(version) => version,
+        Err(error) => {
+            eprintln!("agent version probe unavailable; using local version metadata: {error:#}");
+            "local".to_string()
+        }
+    }
+}
+
+fn executable_version_with_timeout(executable: &Path, wait: Duration) -> Result<String> {
+    // Setup is also called from async hosts; keep the bounded probe off their runtime thread.
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| -> Result<String> {
+                use tokio::io::AsyncReadExt;
+
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()?
+                    .block_on(async {
+                        let mut child = tokio::process::Command::new(executable)
+                            .arg("--version")
+                            .stdin(Stdio::null())
+                            .stdout(Stdio::piped())
+                            .stderr(Stdio::null())
+                            .kill_on_drop(true)
+                            .spawn()?;
+                        let mut stdout = child
+                            .stdout
+                            .take()
+                            .context("agent version stdout missing")?
+                            .take(2049);
+                        let mut bytes = Vec::new();
+                        let result = tokio::time::timeout(wait, async {
+                            stdout.read_to_end(&mut bytes).await?;
+                            if bytes.len() > 2048 {
+                                bail!("agent version output exceeded 2048 bytes");
+                            }
+                            if !child.wait().await?.success() {
+                                bail!("agent version command failed");
+                            }
+                            let version = String::from_utf8_lossy(&bytes)
+                                .lines()
+                                .next()
+                                .unwrap_or_default()
+                                .trim()
+                                .to_string();
+                            if version.is_empty() {
+                                bail!("agent version command returned no version");
+                            }
+                            Ok(version)
+                        })
+                        .await;
+                        if child.try_wait()?.is_none() {
+                            child.kill().await?;
+                        }
+                        result.context("agent version command timed out")?
+                    })
+            })
+            .join()
+            .map_err(|_| anyhow::anyhow!("agent version probe panicked"))?
+    })
 }
 
 fn now_iso8601() -> String {
@@ -1200,6 +1314,83 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn an_upgrade_follows_the_launcher_even_when_the_old_release_still_exists() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let install = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let launcher_dir = install.path().join("bin");
+        fs::create_dir_all(&launcher_dir).unwrap();
+        let launcher = launcher_dir.join("agent");
+        let first = publish_release(install.path(), "1.0");
+        symlink(&first, &launcher).unwrap();
+        let profile_id = register_launcher_agent(&paths, workspace.path(), &launcher, 18875);
+
+        let second = publish_release(install.path(), "2.0");
+        fs::remove_file(&launcher).unwrap();
+        symlink(&second, &launcher).unwrap();
+        let refresh = refresh_registered_agent_within(&paths, &profile_id, &[launcher_dir])
+            .unwrap()
+            .expect("the launcher's new release must supersede the retained old release");
+        assert_eq!(refresh.executable, second.canonicalize().unwrap());
+        assert!(first.is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn updates_to_a_selected_custom_launcher_recover_without_path_discovery() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let install = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let launcher = install.path().join("custom-launcher");
+        let first = publish_release(install.path(), "1.0");
+        symlink(&first, &launcher).unwrap();
+        let profile_id = register_launcher_agent(&paths, workspace.path(), &launcher, 18877);
+        let secret = store().get(&paths, &profile_id).unwrap().unwrap().token;
+
+        // An installer can temporarily remove its entry; that must not corrupt the registration.
+        fs::remove_file(&launcher).unwrap();
+        fs::remove_file(&first).unwrap();
+        let before = fs::read(paths.config_path()).unwrap();
+        assert!(refresh_registered_agent_within(&paths, &profile_id, &[]).is_err());
+        assert_eq!(fs::read(paths.config_path()).unwrap(), before);
+
+        let second = publish_release(install.path(), "2.0");
+        symlink(&second, &launcher).unwrap();
+        let refresh = refresh_registered_agent_within(&paths, &profile_id, &[])
+            .unwrap()
+            .expect("the selected launcher must recover without global discovery");
+        assert_eq!(refresh.executable, second.canonicalize().unwrap());
+
+        // Self-updaters also replace a binary in place without changing its path.
+        fs::write(&second, "#!/bin/sh\necho 2.1\n").unwrap();
+        let refresh = refresh_registered_agent_within(&paths, &profile_id, &[])
+            .unwrap()
+            .expect("an in-place update must refresh the digest");
+        assert_eq!(refresh.resolved_version, "2.1");
+        let profile = paths
+            .load_config()
+            .unwrap()
+            .find(&profile_id)
+            .unwrap()
+            .clone();
+        assert_eq!(profile.agent.verified_digest, file_digest(&second).unwrap());
+        assert_eq!(
+            store().get(&paths, &profile_id).unwrap().unwrap().token,
+            secret
+        );
+        assert!(refresh_registered_agent_within(&paths, &profile_id, &[])
+            .unwrap()
+            .is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn an_uninstalled_agent_without_a_trusted_replacement_still_fails_closed() {
         use std::os::unix::fs::symlink;
 
@@ -1239,9 +1430,195 @@ mod tests {
         fs::write(&executable, "#!/bin/sh\necho hi\n").unwrap();
 
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(trusted_agent_executable("agent", std::slice::from_ref(&launcher_dir)).is_some());
+        assert!(trusted_agent_target(&executable).is_some());
 
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o777)).unwrap();
-        assert!(trusted_agent_executable("agent", &[launcher_dir]).is_none());
+        assert!(trusted_agent_target(&executable).is_none());
+
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&launcher_dir, fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(trusted_agent_target(&executable).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discovery_preserves_the_launcher_instead_of_the_versioned_target() {
+        use std::os::unix::fs::symlink;
+
+        let install = tempdir().unwrap();
+        let target = publish_release(install.path(), "1.0");
+        let launcher = install.path().join("agent");
+        symlink(&target, &launcher).unwrap();
+        assert_eq!(
+            discover_agent_in("agent", vec![install.path().to_path_buf()]),
+            Some(launcher)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_registrations_learn_the_trusted_launcher_and_follow_future_updates() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let install = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let launcher = install.path().join("agent");
+        let first = publish_release(install.path(), "1.0");
+        symlink(&first, &launcher).unwrap();
+        let id = register_launcher_agent(&paths, workspace.path(), &launcher, 18879);
+        paths
+            .update_config(|config| {
+                config
+                    .profiles
+                    .iter_mut()
+                    .find(|p| p.profile_id == id)
+                    .unwrap()
+                    .agent
+                    .launcher_path = None;
+                Ok(())
+            })
+            .unwrap();
+        let roots = vec![install.path().to_path_buf()];
+        refresh_registered_agent_within(&paths, &id, &roots)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            paths
+                .load_config()
+                .unwrap()
+                .find(&id)
+                .unwrap()
+                .agent
+                .launcher_path,
+            Some(launcher.clone())
+        );
+        let second = publish_release(install.path(), "2.0");
+        fs::remove_file(&launcher).unwrap();
+        symlink(&second, &launcher).unwrap();
+        assert_eq!(
+            refresh_registered_agent_within(&paths, &id, &[])
+                .unwrap()
+                .unwrap()
+                .executable,
+            second.canonicalize().unwrap()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn version_probes_are_bounded_and_do_not_block_upgrades() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let install = tempdir().unwrap();
+        let executable = install.path().join("agent");
+        fs::write(&executable, "#!/bin/sh\nexec /bin/sleep 60\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        let start = std::time::Instant::now();
+        let error =
+            executable_version_with_timeout(&executable, Duration::from_millis(50)).unwrap_err();
+        assert!(error.to_string().contains("timed out"), "{error:#}");
+        assert!(start.elapsed() < Duration::from_secs(2));
+        fs::write(
+            &executable,
+            "#!/bin/sh\nwhile :; do printf 'too much output'; done\n",
+        )
+        .unwrap();
+        assert!(
+            executable_version_with_timeout(&executable, Duration::from_secs(1))
+                .unwrap_err()
+                .to_string()
+                .contains("exceeded")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refresh_preserves_manifest_options_and_rejects_tree_integrity_without_partial_writes() {
+        let workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let install = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let executable = publish_release(install.path(), "1.0");
+        let id = register_launcher_agent(&paths, workspace.path(), &executable, 18881);
+        let manifest_path = paths.manifest_path(&id);
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        manifest["agents"][0]["environment"] = serde_json::json!({
+            "LANG": { "kind": "literal", "value": "en_US.UTF-8" }
+        });
+        atomic_private_write(&manifest_path, &serde_json::to_vec(&manifest).unwrap()).unwrap();
+        fs::write(&executable, "#!/bin/sh\necho 2.0\n").unwrap();
+        refresh_registered_agent_within(&paths, &id, &[])
+            .unwrap()
+            .unwrap();
+        let refreshed: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        assert_eq!(
+            refreshed["agents"][0]["environment"],
+            manifest["agents"][0]["environment"]
+        );
+        assert_eq!(
+            refreshed["agents"][0]["argv"],
+            manifest["agents"][0]["argv"]
+        );
+
+        manifest = refreshed;
+        manifest["agents"][0]["integrity"] = serde_json::json!({
+            "kind": "tree", "root": install.path(), "treeSha256": "sha256:fixture"
+        });
+        atomic_private_write(&manifest_path, &serde_json::to_vec(&manifest).unwrap()).unwrap();
+        fs::write(&executable, "#!/bin/sh\necho 3.0\n").unwrap();
+        let config_before = fs::read(paths.config_path()).unwrap();
+        let manifest_before = fs::read(&manifest_path).unwrap();
+        assert!(refresh_registered_agent_within(&paths, &id, &[])
+            .unwrap_err()
+            .to_string()
+            .contains("requires executable integrity"));
+        assert_eq!(fs::read(paths.config_path()).unwrap(), config_before);
+        assert_eq!(fs::read(&manifest_path).unwrap(), manifest_before);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refresh_does_not_overwrite_setup_that_changes_registration_during_the_version_probe() {
+        let workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let install = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let executable = publish_release(install.path(), "1.0");
+        let id = register_launcher_agent(&paths, workspace.path(), &executable, 18883);
+        let manifest_before = fs::read(paths.manifest_path(&id)).unwrap();
+        let mut concurrent = paths.load_config().unwrap();
+        concurrent
+            .profiles
+            .iter_mut()
+            .find(|p| p.profile_id == id)
+            .unwrap()
+            .agent
+            .argv = vec!["new-acp-mode".into()];
+        let concurrent_path = install.path().join("concurrent-config.json");
+        let concurrent_bytes = serde_json::to_vec_pretty(&concurrent).unwrap();
+        fs::write(&concurrent_path, &concurrent_bytes).unwrap();
+        fs::write(
+            &executable,
+            format!(
+                "#!/bin/sh\ncp '{}' '{}'\necho 2.0\n",
+                concurrent_path.display(),
+                paths.config_path().display()
+            ),
+        )
+        .unwrap();
+
+        let error = refresh_registered_agent_within(&paths, &id, &[]).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("registration changed during refresh"),
+            "{error:#}"
+        );
+        assert_eq!(fs::read(paths.config_path()).unwrap(), concurrent_bytes);
+        assert_eq!(fs::read(paths.manifest_path(&id)).unwrap(), manifest_before);
     }
 }

@@ -86,7 +86,16 @@ Common causes:
 - the workspace has no profile yet, or its stored agent manifest is missing or invalid
 - Tailscale/LAN connectivity changed
 
-Rerun setup after moving or upgrading an agent so its canonical path and SHA-256 digest are refreshed.
+Normal agent upgrades are refreshed automatically when the next workspace worker starts. Setup
+remembers the stable launcher separately from the versioned executable, so package-manager and
+in-place updates do not require re-pairing. If installation is still in progress, retry the connection
+after it finishes. Existing workers continue without interruption.
+
+If recovery reports a missing or unsafe launcher, inspect that installation rather than clearing app
+data. Rerun setup only when moving to a different launcher, repairing an old custom registration, or
+changing ACP launch arguments. Select the stable entry (such as `/opt/homebrew/bin/opencode`), not
+the versioned file in `Cellar`. An update that is no longer ACP-compatible still requires a compatible
+agent release; automatic refresh does not bypass integrity or protocol validation.
 
 On Windows, logs and non-secret state are under `%APPDATA%\DapperCode`; bearer tokens are held in
 Windows Credential Manager rather than `config.json`.
