@@ -25,7 +25,7 @@ jest.mock('@shell/boot/AppShells', () => ({
   },
 }));
 
-import { act, renderRouter, screen, waitFor } from 'expo-router/testing-library';
+import { act, fireEvent, renderRouter, screen, waitFor } from 'expo-router/testing-library';
 import {
   useEffect,
   useState,
@@ -43,11 +43,15 @@ import { navigateRoot, replaceRoot } from '@shell/navigation/routeNavigation';
 import { routes } from '@shell/navigation/routes';
 import { usePromoteNewChatRoute } from '@shell/navigation/usePromoteNewChatRoute';
 import { useProfileRouteReady } from '@shell/navigation/ProfileRouteBoundary';
+import { navigateAtom, openBrowserAtom } from '@shell/navigation/actions';
+import { selectedChatIdAtom } from '@shell/state/chat/atoms';
+import { BrowserChatReturn } from '../../features/browser/screen/TopSections';
 
 const mainLifecycle: string[] = [];
 const mainRenders: string[] = [];
 let promoteChat: ((chatId: string) => void) | null = null;
 let defaultWrapper: ComponentType<PropsWithChildren>;
+let navigationStore: ReturnType<typeof createTestStore>;
 
 function RootLayout() {
   return <Stack screenOptions={{ headerShown: false }} />;
@@ -235,6 +239,7 @@ describe('Expo Router route topology', () => {
       ],
     };
     const store = createTestStore({ data });
+    navigationStore = store;
     defaultWrapper = ({ children }: PropsWithChildren) => (
       <AppStateProvider store={store}>{children}</AppStateProvider>
     );
@@ -384,6 +389,64 @@ describe('Expo Router route topology', () => {
 
     expect(router.canGoBack()).toBe(false);
     expect(mainLifecycle).toEqual(['mount']);
+  });
+
+  it.each([undefined, 'grandchild'])(
+    'returns from a chat preview in one tap without remounting or losing nested history (%s)',
+    (threadId) => {
+      navigationStore.set(selectedChatIdAtom, 'chat-1');
+      const result = renderRouter(
+        {
+          appDir: './src/app',
+          overrides: {
+            ...baseOverrides,
+            'profiles/[profileId]/(drawer)/chats/[chatId]/index': MainRoute,
+            'profiles/[profileId]/(drawer)/chats/[chatId]/agents/[threadId]': AgentRoute,
+            'profiles/[profileId]/(drawer)/browser': BrowserChatReturn,
+          },
+        },
+        { initialUrl: '/profiles/profile-1/chats/chat-1', wrapper: defaultWrapper },
+      );
+      if (threadId) {
+        act(() => router.push(routes.agent('profile-1', 'chat-1', 'child')));
+        act(() => router.push(routes.agent('profile-1', 'chat-1', threadId)));
+      }
+      const sourcePath = result.getPathname();
+      for (let visit = 0; visit < 2; visit += 1) {
+        act(() => navigationStore.set(openBrowserAtom, 'http://localhost:3000', threadId));
+        expect(result.getPathname()).toBe('/profiles/profile-1/browser');
+        fireEvent.press(screen.getByRole('button', { name: 'Back to chat' }));
+        expect(result.getPathname()).toBe(sourcePath);
+        expect(mainLifecycle).toEqual(['mount']);
+      }
+      if (threadId) {
+        act(() => router.back());
+        expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1/agents/child');
+      }
+
+      act(() => navigationStore.set(navigateAtom, 'Browser'));
+      expect(result.getPathname()).toBe('/profiles/profile-1/browser');
+      expect(screen.queryByRole('button', { name: 'Back to chat' })).toBeNull();
+    },
+  );
+
+  it('can return to the source chat from a cold browser URL without navigation history', () => {
+    const result = renderRouter(
+      {
+        appDir: './src/app',
+        overrides: {
+          ...baseOverrides,
+          'profiles/[profileId]/(drawer)/chats/[chatId]/index': MainRoute,
+          'profiles/[profileId]/(drawer)/browser': BrowserChatReturn,
+        },
+      },
+      {
+        initialUrl: '/profiles/profile-1/browser?returnChatId=chat-1',
+        wrapper: defaultWrapper,
+      },
+    );
+    fireEvent.press(screen.getByRole('button', { name: 'Back to chat' }));
+    expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1');
   });
 
   it('pushes nested agents and returns one level at a time without remounting MainScreen', () => {

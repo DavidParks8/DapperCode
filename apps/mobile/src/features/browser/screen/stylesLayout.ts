@@ -169,6 +169,19 @@ export function createBrowserScreenLayoutStyles(theme: AppTheme) {
       alignItems: 'center',
       gap: theme.spacing.sm,
     },
+    chatReturnButton: {
+      alignSelf: 'flex-start',
+      minHeight: 48,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.xs,
+      paddingRight: theme.spacing.sm,
+    },
+    chatReturnText: {
+      ...theme.typography.body,
+      color: theme.colors.accent,
+      fontWeight: '600',
+    },
     chromeButton: {
       width: 40,
       height: 40,

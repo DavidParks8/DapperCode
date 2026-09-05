@@ -94,19 +94,24 @@ export const startNewChatAtom = atom(
   },
 );
 
-export const openBrowserAtom = atom(null, (get, set, targetUrl?: string | null): void => {
-  const profileId = activeProfileId(get);
-  if (!profileId) {
-    replaceRoot(routes.onboarding);
-    return;
-  }
-  if (typeof targetUrl === 'string' && targetUrl.trim().length > 0) {
-    set(pendingBrowserTargetUrlAtom, targetUrl.trim());
-  }
-  set(cancelChatTransitionAtom);
-  set(closeDrawerAtom);
-  navigateRoot(routes.browser(profileId));
-});
+export const openBrowserAtom = atom(
+  null,
+  (get, set, targetUrl?: string | null, sourceThreadId?: string): void => {
+    const profileId = activeProfileId(get);
+    if (!profileId) {
+      replaceRoot(routes.onboarding);
+      return;
+    }
+    if (typeof targetUrl === 'string' && targetUrl.trim().length > 0) {
+      set(pendingBrowserTargetUrlAtom, targetUrl.trim());
+    }
+    set(cancelChatTransitionAtom);
+    set(closeDrawerAtom);
+    navigateRoot(
+      routes.browser(profileId, { chatId: activeChatId(get), threadId: sourceThreadId }),
+    );
+  },
+);
 
 /**
  * Opens the Settings-owned connection editor directly from the drawer's connection footer, so

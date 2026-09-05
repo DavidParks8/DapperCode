@@ -1,14 +1,14 @@
 import { useAtomValue } from 'jotai';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo } from 'react';
-import { Animated as RNAnimated, BackHandler, View } from 'react-native';
+import { Animated as RNAnimated, BackHandler, Platform, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAppTheme } from '@shared/theme';
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { BrowserPreviewSurface } from './PreviewSurface';
 import { BrowserBottomBar, BrowserStartPage } from './StartBottom';
-import { BrowserTopBar, StatusBanner, ViewportTray } from './TopSections';
+import { BrowserChatReturn, BrowserTopBar, StatusBanner, ViewportTray } from './TopSections';
 import { ViewportMenu } from './ViewportMenu';
 import { createBrowserScreenStyles } from './styles';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
@@ -27,6 +27,9 @@ export function BrowserScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (Platform.OS === 'web') {
+        return;
+      }
       const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
         if (!model.previewUrl || !model.canGoBack) {
           return false;
@@ -47,6 +50,7 @@ export function BrowserScreen() {
       >
         <SafeAreaView edges={['top']}>
           <View style={styles.chrome}>
+            <BrowserChatReturn />
             <BrowserTopBar
               onOpenDrawer={drawerCommands?.toggleNavigation}
               inputValue={model.inputValue}

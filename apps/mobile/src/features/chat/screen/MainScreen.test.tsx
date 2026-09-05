@@ -3953,7 +3953,9 @@ function MainRouteShell() {
       expect(rootMessage).toBeTruthy();
       act(() => rootMessage.props.onOpenLocalPreview('http://127.0.0.1:5173'));
       expect(store.get(pendingBrowserTargetUrlAtom)).toBe('http://127.0.0.1:5173');
-      expect(router.navigate).toHaveBeenCalledWith(routes.browser('profile-1'));
+      expect(router.navigate).toHaveBeenLastCalledWith(
+        routes.browser('profile-1', { chatId: rootChat.id }),
+      );
       act(() => router.back());
 
       await act(async () => {
@@ -3975,7 +3977,9 @@ function MainRouteShell() {
       ).toHaveLength(0);
       act(() => detailMessage?.props.onOpenLocalPreview('http://localhost:4173'));
       expect(store.get(pendingBrowserTargetUrlAtom)).toBe('http://localhost:4173');
-      expect(router.navigate).toHaveBeenCalledWith(routes.browser('profile-1'));
+      expect(router.navigate).toHaveBeenLastCalledWith(
+        routes.browser('profile-1', { chatId: rootChat.id, threadId: subAgentChat.id }),
+      );
 
       act(() => tree.unmount());
     });

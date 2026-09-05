@@ -108,7 +108,11 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
   const agentRuntimeRevision = useAtomValue(agentRuntimeRevisionAtom);
   const runWatchdogNow = useAtomValue(runWatchdogNowAtom);
   const threadRuntimeSnapshots = useAtomValue(threadRuntimeSnapshotsAtom);
-  const openBrowser = useSetAtom(openBrowserAtom);
+  const openBrowserFromChat = useSetAtom(openBrowserAtom);
+  const openBrowser = useCallback(
+    (targetUrl: string) => openBrowserFromChat(targetUrl, threadId),
+    [openBrowserFromChat, threadId],
+  );
   const openSubAgent = useSetAtom(openSubAgentAtom);
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);

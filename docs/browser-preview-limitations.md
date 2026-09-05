@@ -31,6 +31,9 @@ general-purpose remote browser.
 
 ## Practical guidance
 
+- When opening a localhost link from chat, tap **Back to chat** above the address bar to return to
+  that conversation (including a sub-agent transcript). The browser's Back arrow still navigates
+  web-page history; the chat-return button also works while a preview is loading or unavailable.
 - Prefer relative API calls like `/api/*` when possible
 - For split frontend/backend local stacks, make requests through supported browser APIs instead of
   embedding raw `localhost` URLs in places the runtime cannot rewrite
