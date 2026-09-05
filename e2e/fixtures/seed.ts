@@ -19,6 +19,8 @@ export interface SeedOptions {
  * closure over module scope.
  */
 export function seedBridgeProfileScript(options: SeedOptions): void {
+  // Playwright also injects this into sandboxed tool-output frames, which have no app storage.
+  if (window !== window.top) return;
   const timestamp = new Date(options.nowMs).toISOString();
   const state = {
     version: 3,

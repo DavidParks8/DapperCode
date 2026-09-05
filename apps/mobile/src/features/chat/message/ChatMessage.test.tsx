@@ -1938,6 +1938,8 @@ describe('ChatMessage system timeline matrices', () => {
     });
     const rendered = expectValue(tree);
     const root = rendered.root as QueryableTestInstance;
+    expect(hasRenderedText(root, 'src/app.ts')).toBe(true);
+    expect(hasRenderedText(root, 'const a = 1;')).toBe(false);
     const control = requireTestValue(
       root.findAll(
         (node) =>
@@ -1958,7 +1960,7 @@ describe('ChatMessage system timeline matrices', () => {
       root.findAllByProps({ accessibilityLabel: 'Added line: const a = 2;' }).length,
     ).toBeGreaterThan(0);
     expect(hasRenderedText(root, 'Edited app.ts +1 -1')).toBe(true);
-    expect(hasRenderedText(root, 'src/app.ts')).toBe(false);
+    expect(hasRenderedText(root, 'src/app.ts')).toBe(true);
     act(() => rendered.unmount());
   });
 

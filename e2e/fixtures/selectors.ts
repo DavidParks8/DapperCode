@@ -37,6 +37,15 @@ export const selectors = {
   userMessages: (page: Page): Locator =>
     page.locator('[data-testid^="transcript-item-message-user-"]'),
   toolRows: (page: Page): Locator => page.locator('[data-testid^="transcript-item-tool-"]'),
+  toolHeader: (root: Page | Locator): Locator => root.getByTestId('tool-row'),
+  toolTitleToggle: (root: Page | Locator): Locator => root.getByTestId('tool-title-toggle'),
+  toolOutput: (root: Page | Locator): Locator => root.getByTestId('tool-output-container'),
+  toolShimmer: (root: Page | Locator): Locator => root.getByTestId('tool-header-shimmer'),
+  toolPatchFiles: (root: Page | Locator): Locator => root.getByTestId('tool-patch-files'),
+  toolPatchFile: (root: Page | Locator): Locator => root.getByTestId('tool-patch-file'),
+  toolPatchName: (root: Page | Locator): Locator => root.getByTestId('tool-patch-name'),
+  toolPatchPath: (root: Page | Locator): Locator => root.getByTestId('tool-patch-path'),
+  toolPatchStats: (root: Page | Locator): Locator => root.getByTestId('tool-patch-stats'),
 
   composer: (page: Page): Locator => page.getByTestId('chat-composer'),
   composerControls: (page: Page): Locator => page.getByTestId('composer-control-groups'),

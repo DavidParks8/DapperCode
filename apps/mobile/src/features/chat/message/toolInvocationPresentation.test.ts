@@ -1,6 +1,9 @@
 import type { ChatToolKind, ChatToolStatus } from '@bridge/types/types';
 import type { ToolInvocation } from './toolInvocationModel';
-import { resolveToolInvocationHeader } from './toolInvocationPresentation';
+import {
+  resolveToolInvocationFiles,
+  resolveToolInvocationHeader,
+} from './toolInvocationPresentation';
 
 const EXPECTED_ACTIONS: Record<ChatToolKind, Record<ChatToolStatus, string>> = {
   read: {
@@ -96,5 +99,52 @@ describe('tool invocation status language', () => {
         ).toBe(action);
       }
     }
+  });
+
+  describe('per-file patch progress', () => {
+    it('counts additions and removals, retaining unchanged files as zero rather than unknown', () => {
+      const value = {
+        ...invocation('edit', 'in_progress'),
+        diffs: [
+          { path: 'added.ts', oldText: null, newText: 'one\ntwo\n' },
+          { path: 'deleted.ts', oldText: 'old\n', newText: '' },
+          { path: 'unchanged.ts', oldText: 'same\n', newText: 'same\n' },
+        ],
+      };
+      expect(resolveToolInvocationFiles(value)).toEqual([
+        { path: 'added.ts', additions: 2, deletions: 0 },
+        { path: 'deleted.ts', additions: 0, deletions: 1 },
+        { path: 'unchanged.ts', additions: 0, deletions: 0 },
+      ]);
+    });
+
+    it('deduplicates location-only files without inventing counts or an incomplete total', () => {
+      const value = {
+        ...invocation('edit', 'in_progress'),
+        diffs: [{ path: './src//app.ts', oldText: 'old', newText: 'new' }],
+        locations: [
+          { path: 'src/app.ts', line: 1 },
+          { path: 'other.ts', line: 2 },
+          { path: 'other.ts', line: 3 },
+        ],
+      };
+      expect(resolveToolInvocationFiles(value)).toEqual([
+        { path: 'src/app.ts', additions: 1, deletions: 1 },
+        { path: 'other.ts', additions: null, deletions: null },
+      ]);
+      expect(resolveToolInvocationHeader(value).label).toBe('Editing 2 files');
+      expect(resolveToolInvocationFiles({ ...value, kind: 'read', diffs: [] })).toEqual([]);
+    });
+
+    it('does not turn unavailable diffs into zero changes', () => {
+      const value = {
+        ...invocation('edit', 'completed'),
+        diffs: [{ path: 'large.ts', oldText: 'old', newText: 'x'.repeat(16 * 1024) }],
+      };
+      expect(resolveToolInvocationFiles(value)).toEqual([
+        { path: 'large.ts', additions: null, deletions: null },
+      ]);
+      expect(resolveToolInvocationHeader(value).label).toBe('Edited large.ts');
+    });
   });
 });

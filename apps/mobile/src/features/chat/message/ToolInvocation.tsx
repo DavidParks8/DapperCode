@@ -13,6 +13,7 @@ import { createStyles } from './styles';
 import { ToolHeaderShimmer } from './ToolHeaderShimmer';
 import { createToolCardStyles } from './toolCardStyles';
 import { ToolInvocationOutput } from './ToolOutput';
+import { ToolPatchFiles } from './ToolPatchFiles';
 import { toolKindIcon, type ToolInvocation } from './toolInvocationModel';
 import {
   resolveToolInvocationHeader,
@@ -301,6 +302,7 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
           toggle={toggle}
         />
       </View>
+      <ToolPatchFiles invocation={invocation} />
       {expanded ? (
         <Animated.View
           entering={FadeIn.duration(motion.duration.routine).reduceMotion(ReduceMotion.System)}
