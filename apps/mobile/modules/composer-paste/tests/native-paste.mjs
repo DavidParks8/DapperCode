@@ -54,6 +54,9 @@ export default async function scenario(e2e) {
         result.stdout,
         /COMPOSER_PASTE_NATIVE_PASS/,
       );
+      for (const line of result.stdout.split('\n').filter((line) => line.startsWith('PASS: '))) {
+        await e2e.expectMatch(line.slice(6), line, /^PASS: /);
+      }
     });
   } finally {
     if (simulator) {

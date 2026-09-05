@@ -3,6 +3,8 @@ package expo.modules.composerpaste
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
@@ -32,8 +34,7 @@ class ComposerPasteView(context: Context, appContext: AppContext) : ExpoView(con
   var scopeKey = ""
     set(value) {
       if (field != value) {
-        generation += 1
-        busy = false
+        cancel()
       }
       field = value
     }
@@ -55,9 +56,15 @@ class ComposerPasteView(context: Context, appContext: AppContext) : ExpoView(con
         item.uri?.let { context.contentResolver.getType(it)?.startsWith("image/") } == true
       }
       val images = parts.first
-      if (images != null && pasteEnabled && !busy) {
-        val uris = (0 until images.clip.itemCount).mapNotNull { images.clip.getItemAt(it).uri }
-        paste(uris)
+      if (images != null) {
+        if (!pasteEnabled || busy) {
+          val message = if (busy) "Wait for the current photo paste to finish"
+            else "Photo paste is unavailable right now"
+          onPasteError(mapOf("message" to message, "scopeKey" to scopeKey))
+        } else {
+          val uris = (0 until images.clip.itemCount).mapNotNull { images.clip.getItemAt(it).uri }
+          paste(uris)
+        }
       }
       // Unhandled text keeps Android's normal selection/replacement behavior.
       parts.second
@@ -72,8 +79,14 @@ class ComposerPasteView(context: Context, appContext: AppContext) : ExpoView(con
   private fun detachInput() {
     input?.let { ViewCompat.setOnReceiveContentListener(it, null, null) }
     input = null
+    cancel()
+  }
+
+  private fun cancel() {
     generation += 1
+    val wasBusy = busy
     busy = false
+    if (wasBusy) onPasteBusy(mapOf("busy" to false, "scopeKey" to scopeKey))
   }
 
   private fun findInput(view: View): EditText? {
@@ -118,7 +131,7 @@ class ComposerPasteView(context: Context, appContext: AppContext) : ExpoView(con
           val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
           BitmapFactory.decodeFile(destination.absolutePath, options)
           check(options.outWidth > 0 && options.outHeight > 0) { "Unable to read pasted photo" }
-          post {
+          mainHandler.post {
             if (generation == owner && scopeKey == scope && input != null) {
               onPasteImage(mapOf("uri" to Uri.fromFile(destination).toString(),
                 "fileName" to destination.name, "fileSize" to destination.length(),
@@ -129,15 +142,15 @@ class ComposerPasteView(context: Context, appContext: AppContext) : ExpoView(con
           }
         } catch (error: Exception) {
           file?.delete()
-          post {
-            if (generation == owner && scopeKey == scope) {
+          mainHandler.post {
+            if (generation == owner && scopeKey == scope && input != null) {
               onPasteError(mapOf("message" to (error.message ?: "Unable to paste photo"), "scopeKey" to scope))
             }
           }
         }
       }
-      post {
-        if (generation == owner) {
+      mainHandler.post {
+        if (generation == owner && scopeKey == scope && input != null) {
           busy = false
           onPasteBusy(mapOf("busy" to false, "scopeKey" to scope))
         }
@@ -147,5 +160,7 @@ class ComposerPasteView(context: Context, appContext: AppContext) : ExpoView(con
 
   companion object {
     private val worker = Executors.newSingleThreadExecutor()
+    // View.post queues indefinitely after detach; cleanup must not depend on reattachment.
+    private val mainHandler = Handler(Looper.getMainLooper())
   }
 }

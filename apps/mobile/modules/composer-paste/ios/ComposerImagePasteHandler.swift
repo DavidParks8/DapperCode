@@ -8,8 +8,7 @@ final class ComposerImagePasteHandler: NSObject, UITextPasteDelegate {
   var scopeKey = "" {
     didSet {
       if oldValue != scopeKey {
-        generation += 1
-        pending = 0
+        cancel(scope: oldValue)
       }
     }
   }
@@ -23,6 +22,19 @@ final class ComposerImagePasteHandler: NSObject, UITextPasteDelegate {
   private var generation = 0
   private var pending = 0
   private let maxBytes = 20 * 1024 * 1024
+  private let imageKey = NSAttributedString.Key("ComposerPasteImage")
+
+  private final class PasteImage: NSObject {
+    let provider: NSItemProvider
+    let type: String
+    let generation: Int
+
+    init(provider: NSItemProvider, type: String, generation: Int) {
+      self.provider = provider
+      self.type = type
+      self.generation = generation
+    }
+  }
 
   func attach(to input: UITextView) {
     guard self.input !== input else { return }
@@ -40,14 +52,20 @@ final class ComposerImagePasteHandler: NSObject, UITextPasteDelegate {
   }
 
   func detach() {
-    generation += 1
-    pending = 0
+    cancel(scope: scopeKey)
     if input?.pasteDelegate === self {
       input?.pasteDelegate = previousDelegate
       input?.pasteConfiguration = previousConfiguration
       input?.allowsEditingTextAttributes = previousAllowsEditingTextAttributes
     }
     input = nil
+  }
+
+  private func cancel(scope: String) {
+    generation += 1
+    let wasBusy = pending > 0
+    pending = 0
+    if wasBusy { onBusy(["busy": false, "scopeKey": scope]) }
   }
 
   func textPasteConfigurationSupporting(
@@ -67,15 +85,66 @@ final class ComposerImagePasteHandler: NSObject, UITextPasteDelegate {
       return
     }
 
-    // Never insert an attachment character or replace the selected draft with image data.
-    item.setNoResult()
-    guard enabled, pending < 8 else { return }
+    // The marker is removed at UIKit's transaction boundary, before anything reaches the draft.
+    item.setResult(attributedString: NSAttributedString(string: "\u{fffc}", attributes: [
+      imageKey: PasteImage(provider: provider, type: type, generation: generation)
+    ]))
+  }
+
+  func textPasteConfigurationSupporting(
+    _ textPasteConfigurationSupporting: UITextPasteConfigurationSupporting,
+    combineItemAttributedStrings itemStrings: [NSAttributedString],
+    for textRange: UITextRange
+  ) -> NSAttributedString {
+    var photos: [PasteImage] = []
+    let text = itemStrings.filter { string in
+      guard string.length > 0,
+            let photo = string.attribute(imageKey, at: 0, effectiveRange: nil) as? PasteImage else {
+        return true
+      }
+      photos.append(photo)
+      return false
+    }
+    if !photos.isEmpty, input === textPasteConfigurationSupporting as? UITextView,
+       photos.allSatisfy({ $0.generation == generation }) {
+      let failure: String?
+      if !enabled {
+        failure = "Photo paste is unavailable right now"
+      } else if photos.count > 8 {
+        failure = "Paste no more than 8 photos at a time"
+      } else if pending > 0 {
+        failure = "Wait for the current photo paste to finish"
+      } else {
+        failure = nil
+      }
+      if let failure {
+        onError(["message": failure, "scopeKey": scopeKey])
+      } else {
+        pending = photos.count
+        onBusy(["busy": true, "scopeKey": scopeKey])
+        for photo in photos { load(photo) }
+      }
+    }
+    if !text.isEmpty, let result = previousDelegate?.textPasteConfigurationSupporting?(
+      textPasteConfigurationSupporting, combineItemAttributedStrings: text, for: textRange
+    ) {
+      return result
+    }
+    let result = NSMutableAttributedString(string: "")
+    for (index, string) in text.enumerated() {
+      // UIKit separates text items with a space, even beside existing whitespace or empty items.
+      if index > 0 { result.append(NSAttributedString(string: " ")) }
+      result.append(string)
+    }
+    return result
+  }
+
+  private func load(_ photo: PasteImage) {
     let scope = scopeKey
-    let owner = generation
-    pending += 1
-    if pending == 1 { onBusy(["busy": true, "scopeKey": scope]) }
+    let owner = photo.generation
+    let type = photo.type
     let limit = maxBytes
-    provider.loadFileRepresentation(forTypeIdentifier: type) { [weak self] source, error in
+    photo.provider.loadFileRepresentation(forTypeIdentifier: type) { [weak self] source, error in
       var payload: [String: Any]?
       var output: URL?
       var failure = error?.localizedDescription
@@ -115,6 +184,7 @@ final class ComposerImagePasteHandler: NSObject, UITextPasteDelegate {
         } else if self.scopeKey == scope {
           self.onError(["message": failure ?? "Unable to paste photo", "scopeKey": scope])
         }
+        guard self.generation == owner else { return }
         self.pending -= 1
         if self.pending == 0 { self.onBusy(["busy": false, "scopeKey": scope]) }
       }
