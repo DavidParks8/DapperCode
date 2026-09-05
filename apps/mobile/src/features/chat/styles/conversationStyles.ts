@@ -1,4 +1,4 @@
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 
 import type { AppTheme } from '@shared/theme';
 
@@ -78,7 +78,12 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
       lineHeight: 18,
     },
     messageListShell: { flex: 1 },
-    messageList: { flex: 1 },
+    messageList: {
+      flex: 1,
+      // Browser anchoring follows the inverted list's moving tail spacer, scrolling past
+      // unmeasured cells before FlatList can measure them. Let the list own its position.
+      ...(Platform.OS === 'web' ? { overflowAnchor: 'none' } : {}),
+    },
     transcriptEdgeScrim: {
       position: 'absolute',
       right: 0,

@@ -101,6 +101,53 @@ describe('chat scroll rail jump controller', () => {
     expect(scrollToIndex.mock.calls).toEqual([[20], [8]]);
   });
 
+  it('resumes a stalled jump when new cells are measured and the paged target moves', () => {
+    jest.useFakeTimers();
+    let displayIndex = 929;
+    let highestMeasuredFrameIndex = 69;
+    const scrollToOffset = jest.fn();
+    const controller = createChatScrollRailJumpController({
+      resolveDisplayIndex: () => displayIndex,
+      revealTranscriptIndex: jest.fn(),
+      scrollToIndex: (index) => {
+        if (index > highestMeasuredFrameIndex) {
+          controller.handleScrollToIndexFailed({
+            index,
+            highestMeasuredFrameIndex,
+            averageItemLength: 64,
+          });
+        }
+      },
+      scrollToOffset,
+    });
+    try {
+      controller.request({ messageId: 'kickoff', transcriptIndex: 0 });
+      jest.runAllTimers();
+      expect(scrollToOffset).toHaveBeenCalledTimes(CHAT_SCROLL_RAIL_JUMP_RETRY_LIMIT);
+
+      displayIndex = 1025;
+      controller.notifyDataChanged();
+      expect(scrollToOffset).toHaveBeenCalledTimes(CHAT_SCROLL_RAIL_JUMP_RETRY_LIMIT);
+
+      highestMeasuredFrameIndex = 300;
+      controller.notifyLayoutProgress();
+      expect(scrollToOffset).toHaveBeenLastCalledWith(1025 * 64);
+      jest.runAllTimers();
+      expect(scrollToOffset).toHaveBeenCalledTimes(CHAT_SCROLL_RAIL_JUMP_RETRY_LIMIT * 2);
+
+      highestMeasuredFrameIndex = displayIndex;
+      controller.notifyLayoutProgress();
+      const settledCount = scrollToOffset.mock.calls.length;
+      displayIndex += 1;
+      controller.notifyDataChanged();
+      jest.runAllTimers();
+      expect(scrollToOffset).toHaveBeenCalledTimes(settledCount);
+    } finally {
+      controller.cancel();
+      jest.useRealTimers();
+    }
+  });
+
   it('caps failures and ignores unrelated or cancelled failures', () => {
     const controllerRef: {
       current: ReturnType<typeof createChatScrollRailJumpController> | null;

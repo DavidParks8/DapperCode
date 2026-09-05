@@ -26,6 +26,7 @@ interface PendingJump {
   target: ChatScrollRailJumpTarget;
   displayIndex: number | null;
   retries: number;
+  highestMeasuredFrameIndex: number;
   awaitingProgress: boolean;
 }
 
@@ -94,6 +95,7 @@ export function createChatScrollRailJumpController(
         target,
         displayIndex: null,
         retries: 0,
+        highestMeasuredFrameIndex: -1,
         awaitingProgress: false,
       };
       attempt(generation);
@@ -112,15 +114,20 @@ export function createChatScrollRailJumpController(
       attempt(pending.generation);
     },
     handleScrollToIndexFailed(failure) {
-      if (
-        !pending ||
-        pending.displayIndex !== failure.index ||
-        pending.retries >= CHAT_SCROLL_RAIL_JUMP_RETRY_LIMIT
-      ) {
+      if (!pending || pending.displayIndex !== failure.index) {
+        return;
+      }
+      pending.awaitingProgress = true;
+      // Exhausted estimates are not a successful jump. Resume only when the list measures
+      // more cells; large recovered transcripts cannot reach a distant anchor in three batches.
+      if (failure.highestMeasuredFrameIndex > pending.highestMeasuredFrameIndex) {
+        pending.highestMeasuredFrameIndex = failure.highestMeasuredFrameIndex;
+        pending.retries = 0;
+      }
+      if (pending.retries >= CHAT_SCROLL_RAIL_JUMP_RETRY_LIMIT) {
         return;
       }
       pending.retries += 1;
-      pending.awaitingProgress = true;
       const measuredIndex = Math.max(0, failure.highestMeasuredFrameIndex);
       const estimatedIndex = Math.max(measuredIndex, failure.index);
       dependencies.scrollToOffset(estimatedIndex * Math.max(1, failure.averageItemLength));

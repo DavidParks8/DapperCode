@@ -970,6 +970,27 @@ describe('ChatTranscriptView magical scroll rail', () => {
 });
 
 describe('ChatTranscriptView continuation', () => {
+  it.each(['web', 'ios', 'android'] as const)(
+    'leaves inverted scroll positioning to FlatList on %s',
+    (platform) => {
+      const originalOS = Platform.OS;
+      Object.defineProperty(Platform, 'OS', { configurable: true, value: platform });
+      let tree: QueryableRenderer | undefined;
+      try {
+        tree = render();
+        const style = StyleSheet.flatten(getList(tree).props['style'] as never);
+        expect(style).toEqual(
+          platform === 'web' ? { flex: 1, overflowAnchor: 'none' } : { flex: 1 },
+        );
+      } finally {
+        if (tree) {
+          act(() => tree!.unmount());
+        }
+        Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOS });
+      }
+    },
+  );
+
   it('top-aligns short transcripts in the inverted list', () => {
     const tree = render();
     const list = getList(tree);

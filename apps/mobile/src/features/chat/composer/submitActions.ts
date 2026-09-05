@@ -140,6 +140,8 @@ export function useMainScreenComposerSubmitActions(
       }
       const draftSnapshot = draftController.snapshot();
       const composerHasContent =
+        uploadingAttachment ||
+        hasFailedAttachmentUploads ||
         Boolean(draftSnapshot.value.trim()) ||
         pendingMentionPaths.length > 0 ||
         pendingLocalImagePaths.length > 0;
@@ -174,6 +176,8 @@ export function useMainScreenComposerSubmitActions(
       draftController,
       pendingLocalImagePaths,
       pendingMentionPaths,
+      uploadingAttachment,
+      hasFailedAttachmentUploads,
       queueActionItemId,
       selectedChatIdRef,
       setDraft,

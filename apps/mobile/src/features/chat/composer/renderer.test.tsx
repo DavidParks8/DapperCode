@@ -10,6 +10,7 @@ import type { AppStore } from '@shell/state/types';
 import { useMainScreenStyles } from '../styles/useStyles';
 import { useMainScreenComposerRenderer } from './renderer';
 import type { MainScreenComposerRendererContext } from './renderer';
+import { ComposerPasteView, type ComposerPasteViewProps } from './ComposerPasteView';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
@@ -38,6 +39,13 @@ function baseContext(
   return {
     activeAgentLabel: 'Codex',
     attachmentControlsDisabled: false,
+    attachmentController: {
+      pasteScopeKey: 'test-scope',
+      pasteImage: jest.fn(),
+      setPasteBusy: jest.fn(),
+      pasteError: jest.fn(),
+    },
+    draftController: { snapshot: () => ({ scopeKey: 'test-scope' }) },
     bannerBridgeUiSurfaces: [],
     canCancelQueuedMessage: false,
     canEditQueuedMessage: false,
@@ -254,6 +262,18 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
           typeof node.props['onPress'] === 'function',
       ),
     ).toHaveLength(1);
+    const paste = tree.root.findByType(ComposerPasteView)
+      .props as unknown as ComposerPasteViewProps;
+    expect(paste.enabled).toBe(false);
+    act(() =>
+      paste.onPasteImage?.({
+        nativeEvent: { scopeKey: 'test-scope', uri: 'file:///photo.png', width: 10, height: 10 },
+      }),
+    );
+    expect(context.attachmentController.pasteImage).toHaveBeenCalledWith(
+      { scopeKey: 'test-scope', uri: 'file:///photo.png', width: 10, height: 10 },
+      false,
+    );
     expect(
       root(tree).findAll(
         (node) =>

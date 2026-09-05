@@ -33,6 +33,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
   const {
     activeAgentLabel,
     attachmentControlsDisabled,
+    attachmentController,
     bannerBridgeUiSurfaces,
     canCancelQueuedMessage,
     canEditQueuedMessage,
@@ -90,6 +91,13 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     const nextHeight = Math.ceil(event.nativeEvent.layout.height);
     setComposerHeight((previous) => (previous === nextHeight ? previous : nextHeight));
   };
+  const submitDisabled =
+    context.uploadingAttachment ||
+    context.hasFailedAttachmentUploads ||
+    queueActionKind === 'editStart' ||
+    queueActionKind === 'editCommit' ||
+    queueActionKind === 'editCancel';
+  const pasteDisabled = editingQueuedMessage || queueActionKind === 'editStart';
 
   const renderComposer = (overlay: boolean) => (
     <View
@@ -124,7 +132,11 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         showingOptimisticQueuedMessage={showingOptimisticQueuedMessage}
         canSteerQueuedMessage={canSteerQueuedMessage}
         canCancelQueuedMessage={canCancelQueuedMessage}
-        canEditQueuedMessage={canEditQueuedMessage}
+        canEditQueuedMessage={
+          canEditQueuedMessage &&
+          !context.uploadingAttachment &&
+          !context.hasFailedAttachmentUploads
+        }
         queueActionItemId={queueActionItemId}
         queueActionKind={queueActionKind}
         oldestQueuedMessageIsPendingSteer={oldestQueuedMessageIsPendingSteer}
@@ -152,17 +164,28 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         showStopButton={isTurnLoading || isTurnLikelyRunning || stoppingTurn}
         isStopping={stoppingTurn}
         onAttachPress={openAttachmentMenu}
-        attachDisabled={attachmentControlsDisabled || editingQueuedMessage}
+        pasteScopeKey={attachmentController.pasteScopeKey}
+        onPasteImage={({ nativeEvent }) => {
+          void attachmentController.pasteImage(nativeEvent, !pasteDisabled);
+        }}
+        onPasteBusy={({ nativeEvent }) => {
+          if (!pasteDisabled) {
+            attachmentController.setPasteBusy(nativeEvent);
+          }
+        }}
+        onPasteError={({ nativeEvent }) => {
+          if (!pasteDisabled) {
+            attachmentController.pasteError(nativeEvent);
+          }
+        }}
+        attachDisabled={attachmentControlsDisabled || pasteDisabled}
         attachments={composerAttachments}
         onRemoveAttachment={removeComposerAttachment}
         isLoading={isLoading}
+        isUploading={context.uploadingAttachment}
         submitLabel={editingQueuedMessage ? 'Save queued message' : undefined}
         submitHint={editingQueuedMessage ? 'Saves changes to the queued message' : undefined}
-        submitDisabled={
-          queueActionKind === 'editStart' ||
-          queueActionKind === 'editCommit' ||
-          queueActionKind === 'editCancel'
-        }
+        submitDisabled={submitDisabled}
         placeholder={
           editingQueuedMessage
             ? 'Edit queued message...'

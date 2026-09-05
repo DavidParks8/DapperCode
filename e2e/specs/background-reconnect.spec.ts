@@ -123,6 +123,7 @@ test('same-session transcript recovers after offline replay overflow and a cache
   let disconnectedFrames = 0;
 
   await test.step('baseline', async () => {
+    await expect(selectors.transcriptScroll(page)).toHaveCSS('overflow-anchor', 'none');
     await selectors.composerInput(page).fill(kickoff);
     await selectors.composerSend(page).click();
     await prompt.waitForStart();
@@ -216,7 +217,7 @@ test('same-session transcript recovers after offline replay overflow and a cache
       await expectSettled(page);
       await expect.poll(() => deletedThreadConfirmedMissing).toBe(true);
       await expect(selectors.scrollRailBars(page)).toHaveCount(1);
-      await expectKickoffRetained(page);
+      await expectKickoffRetained(page, 'Offline answer complete.');
       expect(textDeltasAfterDisconnect).toBeLessThan(chunks.length);
       expect(page.url()).toBe(route);
       expect(await page.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
@@ -316,7 +317,7 @@ test('same-session transcript recovers after offline replay overflow and a cache
         }),
       });
     }
-    await expectKickoffRetained(page);
+    await expectKickoffRetained(page, 'Follow-up completed after reconnect.');
     await expectSettled(page);
     expect(liveTextDeltasAfterDisconnect).toBeGreaterThan(0);
     expect(page.url()).toBe(route);
@@ -338,7 +339,7 @@ async function setVisibility(page: Page, visibility: 'hidden' | 'visible'): Prom
   }, visibility);
 }
 
-async function expectKickoffRetained(page: Page): Promise<void> {
+async function expectKickoffRetained(page: Page, latestAnswer: string): Promise<void> {
   // The rail targets the cached kickoff even while older pages change the virtualized window.
   const scroll = selectors.transcriptScroll(page);
   const message = selectors.userMessages(page).filter({ hasText: kickoff });
@@ -365,7 +366,10 @@ async function expectKickoffRetained(page: Page): Promise<void> {
       // Paging can move the virtualized target after the rail jump. Finish revealing the
       // retained prefix through the same scroll container instead of racing another measurement.
       if (!(await message.count())) {
-        await scroll.evaluate((element) => element.scrollTo(0, element.scrollHeight));
+        await scroll.evaluate((element) => {
+          // React Native Web replaces scrollTo with its (y, x) API, not the DOM (x, y) API.
+          element.scrollTop = element.scrollHeight;
+        });
       }
       if (await message.count()) {
         await message.scrollIntoViewIfNeeded({ timeout: 500 });
@@ -395,10 +399,11 @@ async function expectKickoffRetained(page: Page): Promise<void> {
       }),
     });
   }
-  await scroll.evaluate((element) => element.scrollTo(0, 0));
+  await selectors.jumpToLatest(page).click();
   await expect(
-    selectors.assistantMessages(page).filter({ hasText: 'Offline answer complete.' }),
+    selectors.assistantMessages(page).filter({ hasText: latestAnswer }),
   ).toBeInViewport();
+  await expect(selectors.jumpToLatest(page)).toHaveCount(0);
 }
 
 async function expectSettled(page: Page): Promise<void> {

@@ -1,6 +1,7 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { ComposerPasteView, type ComposerPasteViewProps } from '../composer/ComposerPasteView';
 import * as ImagePicker from 'expo-image-picker';
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 jest.mock('expo-router/react-navigation', () => ({ usePreventRemove: jest.fn() }));
@@ -74,6 +75,28 @@ function accessibilityLabel(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+function pasteView(tree: ReactTestRenderer): ComposerPasteViewProps {
+  const props = tree.root.findByType(ComposerPasteView).props;
+  const { enabled, scopeKey } = props;
+  if (typeof enabled !== 'boolean' || typeof scopeKey !== 'string') {
+    throw new Error('Missing native paste ownership props');
+  }
+  return { ...props, enabled, scopeKey };
+}
+
+function deliverPhoto(tree: ReactTestRenderer, scopeKey = pasteView(tree).scopeKey): void {
+  pasteView(tree).onPasteImage?.({
+    nativeEvent: {
+      scopeKey,
+      uri: 'file:///paste/photo.png',
+      width: 1200,
+      height: 900,
+      fileName: 'photo.png',
+      fileSize: 1024,
+    },
+  });
+}
+
 /** Marker for the running status, which rotates through phrases instead of one fixed string. */
 const ROTATING_WORKING_STATUS = '__rotating-working-status__';
 
@@ -91,6 +114,7 @@ jest.mock('expo-file-system/legacy', () => ({
   readAsStringAsync: jest.fn().mockRejectedValue(new Error('missing')),
   writeAsStringAsync: jest.fn().mockResolvedValue(undefined),
   getInfoAsync: jest.fn(),
+  deleteAsync: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn() }));
 jest.mock('expo-image-picker', () => ({
@@ -1194,6 +1218,111 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
+    it.each(['extracting', 'uploading', 'failed'] as const)(
+      'does not enter queued editing while a photo is %s',
+      async (phase) => {
+        const api = createApi();
+        (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({
+          exists: true,
+          isDirectory: false,
+          size: 1024,
+        });
+        let finishUpload!: (value: { kind: string; path: string }) => void;
+        (api.uploadAttachment as jest.Mock).mockImplementationOnce(() =>
+          phase === 'failed'
+            ? Promise.reject(new Error('offline'))
+            : new Promise((resolve) => {
+                finishUpload = resolve;
+              }),
+        );
+        const { tree } = await renderMain({
+          api,
+          pendingOpenChatId: chat.id,
+          pendingOpenChatSnapshot: chat,
+        });
+        const root = tree.root as Queryable;
+        await emitWs({
+          method: 'bridge/thread/queue/updated',
+          params: {
+            ...emptyQueue,
+            items: [{ id: 'queued-1', content: 'Queued draft', createdAt: chat.createdAt }],
+          },
+        });
+        const scopeKey = pasteView(tree).scopeKey;
+        await act(async () => {
+          pasteView(tree).onPasteBusy?.({ nativeEvent: { scopeKey, busy: true } });
+          if (phase !== 'extracting') {
+            deliverPhoto(tree, scopeKey);
+            pasteView(tree).onPasteBusy?.({ nativeEvent: { scopeKey, busy: false } });
+          }
+        });
+        const edit = root.findAll(
+          (node) => node.props['accessibilityLabel'] === 'Edit queued message',
+        )[0];
+        expect(edit?.props['accessibilityState']).toMatchObject({ disabled: true });
+        await pressLabel(root, 'Edit queued message');
+        expect(api.startQueuedThreadMessageEdit).not.toHaveBeenCalled();
+        expect(messageInput(root).props['value']).toBe('');
+        await act(async () => {
+          if (phase === 'extracting') {
+            pasteView(tree).onPasteBusy?.({ nativeEvent: { scopeKey, busy: false } });
+          } else if (phase === 'uploading') {
+            finishUpload({ kind: 'image', path: '/workspace/photo.jpg' });
+          }
+        });
+        if (phase !== 'extracting') {
+          const chip = root.findAll((node) =>
+            accessibilityLabel(node.props['accessibilityLabel']).endsWith(', remove attachment'),
+          )[0];
+          await act(async () => chip?.props.onPress());
+        }
+        await pressLabel(root, 'Edit queued message');
+        expect(api.startQueuedThreadMessageEdit).toHaveBeenCalledTimes(1);
+        act(() => tree.unmount());
+      },
+    );
+
+    it('discards native photo events delivered while queued editing starts', async () => {
+      const api = createApi();
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const root = tree.root as Queryable;
+      const queued = { id: 'queued-1', content: 'Queued draft', createdAt: chat.createdAt };
+      await emitWs({
+        method: 'bridge/thread/queue/updated',
+        params: { ...emptyQueue, items: [queued] },
+      });
+      let finishEdit!: (value: unknown) => void;
+      (api.startQueuedThreadMessageEdit as jest.Mock).mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishEdit = resolve;
+        }),
+      );
+      const scopeKey = pasteView(tree).scopeKey;
+      await pressLabel(root, 'Edit queued message');
+      expect(pasteView(tree).enabled).toBe(false);
+      (FileSystem.deleteAsync as jest.Mock).mockClear();
+      await act(async () => {
+        deliverPhoto(tree, scopeKey);
+        pasteView(tree).onPasteBusy?.({ nativeEvent: { scopeKey, busy: true } });
+        finishEdit({
+          ok: true,
+          queue: { ...emptyQueue, items: [queued], editingItemId: queued.id },
+        });
+      });
+      expect(FileSystem.deleteAsync).toHaveBeenCalledWith('file:///paste/photo.png', {
+        idempotent: true,
+      });
+      expect(api.uploadAttachment).not.toHaveBeenCalled();
+      expect(messageInput(root).props['value']).toBe('Queued draft');
+      await pressLabel(root, 'Save queued message');
+      expect(api.commitQueuedThreadMessageEdit).toHaveBeenCalledTimes(1);
+      act(() => tree.unmount());
+    });
+
     it('keeps a queued edit recoverable across replay snapshot replacement', async () => {
       const api = createApi();
       const queuedMessage = {
@@ -1837,24 +1966,144 @@ function MainRouteShell() {
     it.each([
       { stage: 'create', method: 'createChatIdempotent' },
       { stage: 'first send', method: 'sendChatMessageIdempotent' },
-    ])('restores the new-thread draft when $stage fails', async ({ stage, method }) => {
+    ])('restores the new-thread draft and photo when $stage fails', async ({ stage, method }) => {
       const api = createApi();
-      (api[method as keyof HostBridgeApiClient] as jest.Mock).mockRejectedValueOnce(
-        new Error(`${method} failed`),
+      let failRequest!: (error: Error) => void;
+      (api[method as keyof HostBridgeApiClient] as jest.Mock).mockReturnValueOnce(
+        new Promise((_resolve, reject) => {
+          failRequest = reject;
+        }),
       );
+      (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({
+        exists: true,
+        isDirectory: false,
+        size: 1024,
+      });
+      (api.uploadAttachment as jest.Mock).mockResolvedValue({
+        kind: 'image',
+        path: '/workspace/photo.jpg',
+      });
       const { tree } = await renderMain({ api });
       const root = tree.root as Queryable;
+      await act(async () => deliverPhoto(tree));
       act(() => messageInput(root).props.onChangeText('Keep this draft'));
 
       await pressLabel(root, 'Send message');
+      expect(messageInput(root).props['value']).toBe('');
+      await act(async () => failRequest(new Error(`${method} failed`)));
 
       expect(messageInput(root).props['value']).toBe('Keep this draft');
       expect(hasText(root, `${method} failed`)).toBe(true);
+      expect(
+        root.findAll(
+          (node) => node.props['accessibilityLabel'] === 'image · photo.jpg, remove attachment',
+        ),
+      ).not.toHaveLength(0);
       if (stage === 'create') {
         expect(textCount(root, 'Keep this draft')).toBe(0);
       }
+      await pressLabel(root, 'Send message');
+      const send = stage === 'create' ? api.sendChatMessageIdempotent : api.sendOrQueueChatMessage;
+      expect((send as jest.Mock).mock.lastCall?.slice(0, 2)).toEqual([
+        'thread-created',
+        expect.objectContaining({ localImages: [{ path: '/workspace/photo.jpg' }] }),
+      ]);
       act(() => tree.unmount());
     });
+
+    it('rejects old native events through current callbacks after resetting the same new composer', async () => {
+      const api = createApi();
+      const { tree, ref } = await renderMain({ api });
+      const root = tree.root as Queryable;
+      const scopeKey = pasteView(tree).scopeKey;
+      await act(async () => {
+        pasteView(tree).onPasteBusy?.({ nativeEvent: { scopeKey, busy: true } });
+      });
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Preparing attachment'),
+      ).not.toHaveLength(0);
+      await act(async () => ref.current?.startNewChat());
+      expect(pasteView(tree).scopeKey).not.toBe(scopeKey);
+      (FileSystem.deleteAsync as jest.Mock).mockClear();
+      await act(async () => {
+        pasteView(tree).onPasteBusy?.({ nativeEvent: { scopeKey, busy: true } });
+        pasteView(tree).onPasteError?.({ nativeEvent: { scopeKey, message: 'stale paste' } });
+        deliverPhoto(tree, scopeKey);
+      });
+      expect(api.uploadAttachment).not.toHaveBeenCalled();
+      expect(FileSystem.deleteAsync).toHaveBeenCalledWith('file:///paste/photo.png', {
+        idempotent: true,
+      });
+      expect(hasText(root, 'stale paste')).toBe(false);
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Preparing attachment'),
+      ).toHaveLength(0);
+      act(() => messageInput(root).props.onChangeText('Fresh draft'));
+      await pressLabel(root, 'Send message');
+      expect(api.sendChatMessageIdempotent).toHaveBeenCalledWith(
+        'thread-created',
+        expect.objectContaining({ localImages: [] }),
+        expect.any(String),
+        expect.any(Object),
+      );
+      act(() => tree.unmount());
+    });
+
+    it.each([
+      { method: 'createChatIdempotent', next: 'new' },
+      { method: 'sendChatMessageIdempotent', next: 'new' },
+      { method: 'createChatIdempotent', next: 'chat' },
+      { method: 'sendChatMessageIdempotent', next: 'chat' },
+      { method: 'createChatIdempotent', next: 'draft' },
+      { method: 'sendChatMessageIdempotent', next: 'draft' },
+    ])(
+      'does not restore $method attachments into a later $next composer',
+      async ({ method, next }) => {
+        const api = createApi();
+        let failRequest!: (error: Error) => void;
+        (api[method as keyof HostBridgeApiClient] as jest.Mock).mockReturnValueOnce(
+          new Promise((_resolve, reject) => {
+            failRequest = reject;
+          }),
+        );
+        (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({
+          exists: true,
+          isDirectory: false,
+          size: 1024,
+        });
+        (api.uploadAttachment as jest.Mock)
+          .mockResolvedValueOnce({ kind: 'image', path: '/workspace/original.jpg' })
+          .mockResolvedValueOnce({ kind: 'image', path: '/workspace/later.jpg' });
+        const { tree, ref } = await renderMain({ api });
+        const root = tree.root as Queryable;
+        await act(async () => deliverPhoto(tree));
+        act(() => messageInput(root).props.onChangeText('Original draft'));
+        await pressLabel(root, 'Send message');
+        await act(async () => {
+          if (next === 'new') {
+            ref.current?.startNewChat();
+          } else if (next === 'chat') {
+            ref.current?.openChat(chat.id, chat);
+          }
+        });
+        act(() => messageInput(root).props.onChangeText('Later draft'));
+        await act(async () => deliverPhoto(tree));
+        await act(async () => failRequest(new Error('old request failed')));
+        expect(messageInput(root).props['value']).toBe('Later draft');
+        expect(
+          root.findAll(
+            (node) =>
+              node.props['accessibilityLabel'] === 'image · original.jpg, remove attachment',
+          ),
+        ).toHaveLength(0);
+        expect(
+          root.findAll(
+            (node) => node.props['accessibilityLabel'] === 'image · later.jpg, remove attachment',
+          ),
+        ).not.toHaveLength(0);
+        act(() => tree.unmount());
+      },
+    );
 
     it.each([
       { label: 'Cancel request', action: 'cancel' },
@@ -3597,6 +3846,83 @@ function MainRouteShell() {
       });
       expect(store.get(defaultStartCwdAtom)).toBe('/workspace/destination/repo');
 
+      act(() => tree.unmount());
+    });
+
+    it('pastes a photo without the attachment menu and blocks send until the upload settles', async () => {
+      const api = createApi();
+      let finishUpload!: (value: { kind: 'image'; path: string }) => void;
+      (api.uploadAttachment as jest.Mock).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishUpload = resolve;
+          }),
+      );
+      const { tree } = await renderMain({ api, defaultStartCwd: '/workspace' });
+      const root = rootOf(tree);
+      await act(async () => {
+        textInput(root, 'Message').props.onChangeText('Explain this photo');
+        await flush();
+      });
+      const paste = () =>
+        tree.root.findByType(ComposerPasteView).props as unknown as ComposerPasteViewProps;
+      const scopeKey = paste().scopeKey;
+      await act(async () => {
+        paste().onPasteBusy?.({ nativeEvent: { scopeKey, busy: true } });
+        await flush();
+      });
+      expect(byLabel(root, 'Preparing attachment').props['accessibilityState']).toMatchObject({
+        disabled: true,
+      });
+      expect(byLabel(root, 'Add attachment').props['accessibilityState']).toMatchObject({
+        disabled: true,
+      });
+      await act(async () => {
+        paste().onPasteImage?.({
+          nativeEvent: {
+            scopeKey,
+            uri: 'file:///paste/photo.png',
+            width: 1200,
+            height: 900,
+            fileName: 'photo.png',
+            fileSize: 1024,
+          },
+        });
+        paste().onPasteBusy?.({ nativeEvent: { scopeKey, busy: false } });
+        await flush();
+      });
+      expect(api.uploadAttachment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          uri: 'file:///prepared.jpg',
+          kind: 'image',
+          mimeType: 'image/jpeg',
+        }),
+      );
+      expect(textInput(root, 'Message').props['value']).toBe('Explain this photo');
+      expect(byLabel(root, 'Preparing attachment').props['accessibilityState']).toMatchObject({
+        disabled: true,
+      });
+      await press(byLabel(root, 'Preparing attachment'));
+      expect(api.sendChatMessageIdempotent).not.toHaveBeenCalled();
+      expect(DocumentPicker.getDocumentAsync).not.toHaveBeenCalled();
+      await act(async () => {
+        finishUpload({ kind: 'image', path: '/workspace/pasted-photo.jpg' });
+        await flush();
+      });
+      expect(byLabel(root, 'image · pasted-photo.jpg, remove attachment')).toBeDefined();
+      expect(byLabel(root, 'Send message').props['accessibilityState']).toMatchObject({
+        disabled: false,
+      });
+      expect(byLabel(root, 'Add attachment').props['accessibilityState']).toMatchObject({
+        disabled: false,
+      });
+      await press(byLabel(root, 'Send message'));
+      expect(api.sendChatMessageIdempotent).toHaveBeenCalledWith(
+        'thread-created',
+        expect.objectContaining({ localImages: [{ path: '/workspace/pasted-photo.jpg' }] }),
+        expect.any(String),
+        expect.any(Object),
+      );
       act(() => tree.unmount());
     });
 
