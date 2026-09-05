@@ -136,6 +136,17 @@ export const createToolCardStyles = (theme: AppTheme) =>
       ...theme.typography.metadata,
       color: theme.colors.textMuted,
     },
+    todoList: { gap: theme.spacing.sm },
+    todoRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: theme.spacing.sm,
+    },
+    todoContent: { flex: 1, minWidth: 0, gap: theme.spacing.xs },
+    todoText: {
+      ...theme.typography.caption,
+      color: theme.colors.textSecondary,
+    },
     timingMetrics: {
       flexDirection: 'row',
       alignItems: 'center',

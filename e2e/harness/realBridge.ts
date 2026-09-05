@@ -38,12 +38,18 @@ interface ToolFields {
   readonly kind?: 'edit' | 'other';
   readonly status?: 'pending' | 'in_progress' | 'completed' | 'failed';
   readonly rawInput?: string | Readonly<Record<string, string>>;
-  readonly content?: readonly {
-    readonly type: 'diff';
-    readonly path: string;
-    readonly oldText: string | null;
-    readonly newText: string;
-  }[];
+  readonly content?: readonly (
+    | {
+        readonly type: 'diff';
+        readonly path: string;
+        readonly oldText: string | null;
+        readonly newText: string;
+      }
+    | {
+        readonly type: 'content';
+        readonly content: { readonly type: 'text'; readonly text: string };
+      }
+  )[];
   readonly locations?: readonly { readonly path: string; readonly line?: number }[];
 }
 

@@ -30,6 +30,40 @@ function meta(overrides: Partial<ChatToolMeta> = {}): ChatToolMeta {
 }
 
 describe('buildToolInvocations', () => {
+  it('keeps structured-only todo output expandable', () => {
+    const invocation = buildToolInvocations([
+      toolMessage(
+        'tool-result:call-1',
+        '',
+        meta({
+          title: 'todowrite',
+          content: [
+            {
+              type: 'content',
+              content: {
+                type: 'text',
+                text: '[{"content":"Read the response","status":"in_progress"}]',
+              },
+            },
+          ],
+        }),
+        'call-1',
+      ),
+    ])[0];
+    expect(invocation).toMatchObject({
+      empty: false,
+      todos: [
+        {
+          text: 'Read the response',
+          status: 'In progress',
+          description: null,
+          priority: null,
+        },
+      ],
+      textLines: [],
+    });
+  });
+
   it('merges the call, metadata, and result of one tool into a single row', () => {
     const messages: ChatMessage[] = [
       {

@@ -1,6 +1,8 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useMemo, type ReactElement, type ReactNode } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 
+import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { useAppTheme } from '@shared/theme';
 import { HorizontalFadeMask } from '@shared/ui/HorizontalFadeMask';
 import { toMarkdownImageSource } from './imageSource';
@@ -16,6 +18,7 @@ import type { ToolInvocation, ToolInvocationDiff } from './toolInvocationModel';
 import { compactToolDiff, formatChangedLineCount } from './toolInvocationPresentation';
 import { useHorizontalOverflow } from '@shared/ui/useHorizontalOverflow';
 import { SelectableOutput } from './SelectableOutput/SelectableOutput';
+import type { ToolTodo } from './toolTodos';
 import {
   formatToolElapsedAccessibilityLabel,
   formatToolElapsedTime,
@@ -125,19 +128,10 @@ export function ToolInvocationOutput({
     addSection('images', imageElements);
   }
 
-  if (invocation.textLines.length > 0) {
+  if (renderedTextLineCount(invocation) > 0) {
     addSection(
       'text-response',
-      <>
-        <Text style={styles.sectionLabel}>Response</Text>
-        <View style={styles.outputSurface}>
-          <SelectableOutput
-            text={invocation.textLines.join('\n')}
-            testID="selectable-output-text"
-            accessibilityLabel={`Tool output: ${invocation.textLines.join('\n')}`}
-          />
-        </View>
-      </>,
+      <ToolTextResponse todos={invocation.todos} textLines={invocation.textLines} />,
     );
   }
 
@@ -176,6 +170,84 @@ export function ToolInvocationOutput({
     >
       {panel}
     </ScrollView>
+  );
+}
+
+function ToolTextResponse({
+  todos,
+  textLines,
+}: {
+  todos: ToolTodo[] | undefined;
+  textLines: string[];
+}): ReactElement {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createToolCardStyles(theme), [theme]);
+  if (todos === undefined) {
+    const text = textLines.join('\n');
+    return (
+      <>
+        <Text style={styles.sectionLabel}>Response</Text>
+        <View style={styles.outputSurface}>
+          <SelectableOutput
+            text={text}
+            testID="selectable-output-text"
+            accessibilityLabel={`Tool output: ${text}`}
+          />
+        </View>
+      </>
+    );
+  }
+  return (
+    <View testID="tool-todo-list" style={styles.todoList}>
+      <Text style={styles.sectionLabel}>Todos</Text>
+      {todos.length === 0 ? <Text style={styles.note}>No todos.</Text> : null}
+      {todos.map((todo, index) => (
+        <View
+          key={index}
+          testID="tool-todo-item"
+          style={styles.todoRow}
+          accessible
+          accessibilityRole="text"
+          accessibilityLabel={[
+            todo.text,
+            todo.status,
+            todo.priority ? `${todo.priority} priority` : null,
+            todo.description,
+          ]
+            .filter(Boolean)
+            .join('. ')}
+        >
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name={
+              todo.status === 'Completed'
+                ? 'checkmark-circle-outline'
+                : todo.status === 'In progress'
+                  ? 'time-outline'
+                  : todo.status === 'Cancelled'
+                    ? 'close-circle-outline'
+                    : 'ellipse-outline'
+            }
+            size={16}
+            color={theme.colors.textSecondary}
+          />
+          <View style={styles.todoContent}>
+            <SelectableMessageText style={styles.todoText} testID="tool-todo-text">
+              {todo.text}
+            </SelectableMessageText>
+            {todo.description ? (
+              <SelectableMessageText style={styles.todoText}>
+                {todo.description}
+              </SelectableMessageText>
+            ) : null}
+            <Text style={styles.note}>
+              {todo.status}
+              {todo.priority ? ` / ${todo.priority} priority` : ''}
+            </Text>
+          </View>
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -361,9 +433,13 @@ function locationsNotRepeatedInHeader(
   return labelIsFullyVisible && labelEndsHeader ? [] : invocation.locations;
 }
 
+function renderedTextLineCount(invocation: ToolInvocation): number {
+  return invocation.todos ? Math.max(1, invocation.todos.length * 2) : invocation.textLines.length;
+}
+
 function renderedLineCount(invocation: ToolInvocation): number {
   return (
-    invocation.textLines.length +
+    renderedTextLineCount(invocation) +
     invocation.terminals.reduce(
       (total, terminal) => total + splitLines(terminal.output).length,
       0,

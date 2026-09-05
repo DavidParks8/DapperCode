@@ -1,9 +1,11 @@
 import type { Ionicons } from '@expo/vector-icons';
 
 import { getMessageText, getToolCallDisplayLines } from '@bridge/messages';
+import { renderAgUiCustomContent } from '@bridge/agui/agUiContent';
 import type { ChatMessage, ChatToolKind, ChatToolMeta, ChatToolStatus } from '@bridge/types/types';
 import { buildCompactDiff, type CompactDiff } from '@shared/diff/compactDiff';
 import { lookupDispatchEntry } from '@shared/runtimeValidation';
+import { isTodoToolTitle, parseToolTodos, type ToolTodo } from './toolTodos';
 
 export interface ToolInvocationLocation {
   path: string;
@@ -42,6 +44,7 @@ export interface ToolInvocation {
   diffs: ToolInvocationDiff[];
   terminals: ToolInvocationTerminal[];
   textLines: string[];
+  todos?: ToolTodo[];
   images: string[];
   truncated: boolean;
   /** True while the invocation only has metadata, i.e. no output to expand. */
@@ -188,6 +191,7 @@ function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocat
   const textLines = rawLines.filter(
     (line) => !parsed.suppressedLines.has(line.trim()) && line.trim().length > 0,
   );
+  const todos = resolveToolTodos(title, meta, textLines);
   return {
     id: draft.id,
     kind: metaFields.kind,
@@ -202,10 +206,24 @@ function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocat
     diffs: parsed.diffs,
     terminals: parsed.terminals,
     textLines,
+    ...(todos === null ? {} : { todos }),
     images: parsed.images,
     truncated: metaFields.truncated || parsed.truncated,
-    empty: computeInvocationEmpty(textLines, parsed, locations),
+    empty: todos === null && computeInvocationEmpty(textLines, parsed, locations),
   };
+}
+
+function resolveToolTodos(
+  title: string,
+  meta: ChatToolMeta | null,
+  textLines: string[],
+): ToolTodo[] | null {
+  if (meta?.status === 'failed' || !isTodoToolTitle(title)) {
+    return null;
+  }
+  // Snapshot display text can repeat the title and live result; typed content is authoritative.
+  const text = meta?.content?.length ? renderAgUiCustomContent(meta.content) : textLines.join('\n');
+  return parseToolTodos(title, text);
 }
 
 function collectMessageTiming(draft: ToolInvocationDraft, message: ChatMessage): void {
