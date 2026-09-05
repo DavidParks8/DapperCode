@@ -37,6 +37,7 @@ interface ToolFields {
   readonly title?: string;
   readonly kind?: 'edit' | 'other';
   readonly status?: 'pending' | 'in_progress' | 'completed' | 'failed';
+  readonly rawInput?: string | Readonly<Record<string, string>>;
   readonly content?: readonly {
     readonly type: 'diff';
     readonly path: string;

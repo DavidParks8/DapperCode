@@ -17,6 +17,69 @@ const theme = createAppTheme('dark');
 const firstDiff = { type: 'diff', path: 'src/first.ts', oldText: 'old\n', newText: 'new\n' };
 const secondDiff = { type: 'diff', path: 'src/second.ts', oldText: null, newText: 'added\n' };
 
+it('shows input-derived file chips immediately and keeps their order as diffs arrive', () => {
+  let state = createAgUiThreadMessageState();
+  const meta = (value: Record<string, unknown>) => {
+    state = reduceThreadState(state, {
+      threadId: 'thread',
+      runId: 'run',
+      event: {
+        type: EventType.CUSTOM,
+        name: TOOL_META_EVENT_NAME,
+        value: {
+          toolCallId: 'patch',
+          kind: 'other',
+          title: 'functions.apply_patch',
+          status: 'in_progress',
+          ...value,
+        },
+      },
+    });
+  };
+  const element = () => (
+    <Provider>
+      <AppThemeProvider theme={theme}>
+        <ToolInvocationRow
+          invocation={requireTestValue(buildToolInvocations(state.messages)[0], 'patch row')}
+        />
+      </AppThemeProvider>
+    </Provider>
+  );
+  meta({});
+  const screen = render(element());
+  expect(screen.queryByTestId('tool-patch-file')).toBeNull();
+
+  meta({ locations: [{ path: firstDiff.path }] });
+  screen.rerender(element());
+  expect(screen.getByLabelText('src/first.ts, Counts unavailable')).toBeTruthy();
+  expect(screen.queryByTestId('tool-output-container')).toBeNull();
+  expect(screen.getByTestId('tool-header-shimmer', { includeHiddenElements: true })).toBeTruthy();
+
+  meta({ locations: [{ path: firstDiff.path }, { path: secondDiff.path }] });
+  screen.rerender(element());
+  expect(screen.getAllByTestId('tool-patch-file')).toHaveLength(2);
+  expect(screen.getByLabelText('src/second.ts, Counts unavailable')).toBeTruthy();
+
+  meta({ content: [secondDiff] });
+  screen.rerender(element());
+  expect(screen.getAllByTestId('tool-patch-path').map((node) => node.props['children'])).toEqual([
+    firstDiff.path,
+    secondDiff.path,
+  ]);
+  expect(screen.getByLabelText('src/first.ts, Counts unavailable')).toBeTruthy();
+  expect(screen.getByLabelText('src/second.ts, 1 line added, 0 lines removed')).toBeTruthy();
+
+  meta({ status: 'completed', content: [secondDiff, firstDiff] });
+  screen.rerender(element());
+  expect(screen.getAllByTestId('tool-patch-path').map((node) => node.props['children'])).toEqual([
+    firstDiff.path,
+    secondDiff.path,
+  ]);
+  expect(screen.getByTestId('tool-row').props['accessibilityLabel']).toBe('Edited 2 files +2 -1');
+  expect(screen.queryByTestId('tool-header-shimmer', { includeHiddenElements: true })).toBeNull();
+  expect(screen.queryByTestId('tool-output-container')).toBeNull();
+});
+
 it.each(['completed', 'failed'] as const)(
   'keeps live per-file patch counts visible through a %s status-only update and snapshot',
   (status) => {

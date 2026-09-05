@@ -162,6 +162,15 @@ duration, including a live elapsed value while `completedAtMs` is null.
 
 Raw tool input is deliberately absent. The bridge strips `rawInput`, `rawOutput`, and `_meta` in
 `acp/handlers.rs` and `acp/snapshot.rs`; rows are built from the ACP `title` and `locations` instead.
+For calls titled `apply_patch` or `functions.apply_patch`, the handler also derives locations from
+complete Add/Update/Delete/Move file headers in incoming patch input (a string or a `patch`, `input`,
+`patchText`, or `patch_text` field).
+It does not wait for `*** End Patch` or tool completion. Unterminated filename headers wait for the
+next input update; repeated input-so-far updates do not duplicate files. Only paths enter the existing
+bounded location metadata (32 locations), never patch bodies or other raw arguments. Mobile shows
+these as inline file chips even while tool details are collapsed, then fills in counts when
+structured diffs arrive without reordering the chips. Agents that do not send input or locations
+until completion cannot provide earlier file discovery.
 
 For a local smoke test of the generic renderer only, open a chat in the mobile app and run:
 ```bash

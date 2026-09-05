@@ -134,6 +134,10 @@ order without duplicates, counts and accessible labels agree, and rows do not ov
 transcript. It also verifies settled shimmer/stop/composer state and preservation through a page
 reload from the real bridge snapshot. Running and settled screenshots use `testInfo.outputPath`
 (`patch-running.png`, `patch-settled.png`, `patch-before-failure.png`, `patch-failed.png`).
+It also streams unfinished `apply_patch` input one file header at a time, before any structured
+diff or end marker. Add/update/move/delete chips appear immediately; partial filenames and raw
+patch bodies stay hidden. Later diffs, completion/failure, and a snapshot reload preserve chip order.
+These cases capture `patch-input-running.png` and `patch-input-settled.png`.
 
 Run just this regression with `pnpm run e2e -- patch-progress.spec.ts`. When using the
 `local-e2e-validation` skill, execute that command through its scripted runner rather than manually

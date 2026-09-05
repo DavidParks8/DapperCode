@@ -32,6 +32,93 @@ interface FileCounts {
 }
 
 test.describe('live per-file patch progress', () => {
+  for (const status of ['completed', 'failed'] as const) {
+    test(`discovers patch input file chips before output and retains them when ${status}`, async ({
+      createApp,
+    }, testInfo) => {
+      const app = await createApp({ chatId: E2E_THREADS.short });
+      const toolCallId = `streamed-input-${status}`;
+      const paths = [FIRST_PATH, LONG_PATH, 'src/renamed.ts', 'src/obsolete.ts'];
+      const prefixes = [
+        `*** Begin Patch\n*** Add File: ${FIRST_PATH}\n`,
+        `+private-patch-body\n*** Update File: ${LONG_PATH}\n`,
+        '*** Move to: src/renamed.ts\n@@\n-old\n+new\n',
+        '*** Delete File: src/obsolete.ts\n',
+      ];
+      await app.bridge.streamAssistantTurn({
+        threadId: E2E_THREADS.short,
+        chunks: [],
+        succeed: status === 'completed',
+        toolSteps: [
+          {
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId,
+              title: 'functions.apply_patch',
+              kind: 'other',
+              status: 'pending',
+              rawInput: '*** Begin Patch\n*** Add File: src/sett',
+            },
+            whilePaused: async () => {
+              await expectHeader(app, /^Waiting to edit\b/);
+              await expect(selectors.toolPatchFile(app.page)).toHaveCount(0);
+              await expectVisible(selectors.composerStopSlot(app.page));
+            },
+          },
+          ...prefixes.map((_prefix, index) => ({
+            update: {
+              sessionUpdate: 'tool_call_update' as const,
+              toolCallId,
+              status: 'in_progress' as const,
+              rawInput: { input: prefixes.slice(0, index + 1).join('') },
+            },
+            whilePaused: async () => {
+              await expectHeader(app, /^Editing\b/);
+              await expectCollapsedFiles(app, paths.slice(0, index + 1));
+              await expectVisible(selectors.toolShimmer(app.page));
+              await expectVisible(selectors.composerStopSlot(app.page));
+              await expect(app.page.getByText('private-patch-body', { exact: false })).toHaveCount(
+                0,
+              );
+            },
+          })),
+          {
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId,
+              rawInput: { patch: `${prefixes.join('')}*** End Patch\n` },
+              content: [diff(LONG_PATH, INITIAL_TEXT, FIRST_REVISION)],
+            },
+            whilePaused: async () => {
+              // A diff for the second file enriches its chip without jumping ahead of the first.
+              await expectCollapsedFiles(app, paths);
+              await expectCounts(selectors.toolPatchFile(app.page).nth(1), {
+                path: LONG_PATH,
+                added: 1,
+                removed: 1,
+              });
+              await app.page.screenshot({ path: testInfo.outputPath('patch-input-running.png') });
+            },
+          },
+          {
+            update: { sessionUpdate: 'tool_call_update', toolCallId, status },
+            whilePaused: async () => {
+              await expectHeader(app, status === 'completed' ? /^Edited\b/ : /^Failed to edit\b/);
+              await expectCollapsedFiles(app, paths);
+              await expect(selectors.toolShimmer(app.page)).toHaveCount(0);
+            },
+          },
+        ],
+      });
+      await expectSettledComposer(app);
+      await app.page.reload({ waitUntil: 'domcontentloaded' });
+      await expectHeader(app, status === 'completed' ? /^Edited\b/ : /^Failed to edit\b/);
+      await expectCollapsedFiles(app, paths);
+      await expectSettledComposer(app);
+      await app.page.screenshot({ path: testInfo.outputPath('patch-input-settled.png') });
+    });
+  }
+
   test('updates collapsed rows in place and preserves settled counts after reload', async ({
     createApp,
   }, testInfo) => {
