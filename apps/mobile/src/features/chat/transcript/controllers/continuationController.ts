@@ -5,6 +5,7 @@ import {
 } from '@bridge/client/client';
 import { applySnapshotToChat } from '@bridge/mapping/chatMapping';
 import type { Chat } from '@bridge/types/types';
+import { resolveEquivalentChat } from '../../state/chatReconciliation';
 
 export interface TranscriptContinuationState {
   loading: boolean;
@@ -84,7 +85,11 @@ export class TranscriptContinuationController {
         limit: snapshot.continuation?.maxPageSize || 50,
       });
       const mergedSnapshot = mergeSnapshotPage(snapshot, page);
-      const mergedChat = applySnapshotToChat(chat, mergedSnapshot);
+      const mergedChat = {
+        ...resolveEquivalentChat(chat, applySnapshotToChat(chat, mergedSnapshot)),
+        // An empty final page still advances the cursor even if the transcript is unchanged.
+        acpSnapshot: mergedSnapshot,
+      };
       return {
         kind: 'merged',
         chat: mergedChat,

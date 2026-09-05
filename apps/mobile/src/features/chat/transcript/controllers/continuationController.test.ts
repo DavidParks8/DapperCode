@@ -1,5 +1,5 @@
 import type { SnapshotPageResponse } from '@bridge/client/client';
-import type { RawAcpSnapshot } from '@bridge/mapping/chatMapping';
+import { applySnapshotToChat, type RawAcpSnapshot } from '@bridge/mapping/chatMapping';
 import type { Chat } from '@bridge/types/types';
 import {
   TranscriptContinuationController,
@@ -151,6 +151,63 @@ describe('TranscriptContinuationController', () => {
       exhausted: true,
       unavailableCount: 4,
     });
+  });
+
+  it('keeps the recovered kickoff while paging through history that no longer contains it', async () => {
+    const recovered = applySnapshotToChat(chat(), snapshot());
+    recovered.messages.unshift({
+      id: 'kickoff',
+      role: 'user',
+      content: 'Finish while my phone is locked',
+      createdAt: recovered.createdAt,
+    });
+    const readSnapshotPage = jest
+      .fn()
+      .mockResolvedValueOnce(
+        page({
+          entries: [
+            {
+              sequence: 2,
+              kind: 'message',
+              canonicalId: 'middle',
+              message: {
+                id: 'middle',
+                role: 'agent',
+                parts: [{ type: 'text', text: 'middle' }],
+                truncated: false,
+              },
+            },
+          ],
+          beforeCursor: 'cursor-2',
+          hasMoreBefore: true,
+          unavailableCount: 1,
+        }),
+      )
+      .mockResolvedValueOnce(page({ unavailableCount: 1 }));
+    const controller = new TranscriptContinuationController({ readSnapshotPage });
+
+    const first = await controller.loadEarlier(recovered);
+    expect(first.kind).toBe('merged');
+    if (first.kind !== 'merged') {
+      throw new Error('Expected an earlier history page');
+    }
+    expect(first.chat.messages.filter(({ role }) => role !== 'system').map(({ id }) => id)).toEqual(
+      ['kickoff', 'middle', 'newest'],
+    );
+    expect(first.state.exhausted).toBe(false);
+
+    const second = await controller.loadEarlier(first.chat);
+    expect(second.kind).toBe('merged');
+    if (second.kind !== 'merged') {
+      throw new Error('Expected the final history boundary');
+    }
+    expect(
+      second.chat.messages.filter(({ role }) => role !== 'system').map(({ id }) => id),
+    ).toEqual(['kickoff', 'middle', 'newest']);
+    expect(second.state.exhausted).toBe(true);
+    expect(second.state.unavailableCount).toBe(1);
+    await controller.loadEarlier(second.chat);
+    expect(readSnapshotPage).toHaveBeenCalledTimes(2);
   });
 
   it('returns an error for retry and succeeds on the next request', async () => {

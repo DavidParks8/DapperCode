@@ -62,6 +62,12 @@ export interface RealBridge {
   readonly scenario: Scenario;
   waitForConnection(timeoutMs?: number): Promise<void>;
   request(method: string, params: Record<string, unknown>): Promise<unknown>;
+  /** Arms the ACP fixture without starting a turn: the user must submit through the app. */
+  prepareAssistantTurn(options: {
+    readonly chunks: readonly string[];
+    readonly messageId: string;
+    readonly separateMessages?: boolean;
+  }): Promise<{ waitForStart(): Promise<void>; release(): Promise<void> }>;
   streamAssistantTurn(options: StreamAssistantTurnOptions): Promise<void>;
   close(): Promise<void>;
 }
@@ -207,6 +213,21 @@ export async function startRealBridge(options: RealBridgeOptions = {}): Promise<
         } finally {
           await closeSocket(socket);
         }
+      },
+      async prepareAssistantTurn(promptOptions) {
+        const holdingPath = replaceExtension(controlPath, 'holding');
+        const releasePath = replaceExtension(controlPath, 'release');
+        await Promise.all([
+          rm(holdingPath, { force: true }),
+          rm(releasePath, { force: true }),
+          writeFile(controlPath, JSON.stringify({ ...promptOptions, holdBeforeChunks: true }), {
+            mode: 0o600,
+          }),
+        ]);
+        return {
+          waitForStart: () => waitForFile(holdingPath, RPC_TIMEOUT_MS),
+          release: () => writeFile(releasePath, 'release', { mode: 0o600 }),
+        };
       },
       async streamAssistantTurn(streamOptions) {
         const messageId = streamOptions.messageId ?? `e2e-message-${randomUUID()}`;

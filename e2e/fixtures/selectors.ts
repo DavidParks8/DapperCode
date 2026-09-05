@@ -28,6 +28,10 @@ export const selectors = {
   sessionMetaRow: (page: Page): Locator => page.getByTestId('session-meta-row'),
 
   transcript: (page: Page): Locator => page.getByTestId('chat-transcript'),
+  transcriptScroll: (page: Page): Locator =>
+    page.getByTestId('chat-transcript').locator('[aria-label$=" transcript"]'),
+  scrollRailBars: (page: Page): Locator => page.locator('[data-testid^="chat-scroll-rail-bar-"]'),
+  jumpToLatest: (page: Page): Locator => page.getByLabel('Jump to latest message'),
   transcriptItems: (page: Page): Locator => page.locator('[data-testid^="transcript-item-"]'),
   message: (page: Page, role: 'user' | 'assistant', messageId: string): Locator =>
     page.getByTestId(`transcript-item-message-${role}-${messageId}`),
@@ -53,9 +57,12 @@ export const selectors = {
   composerInput: (page: Page): Locator =>
     page.getByRole('textbox', { name: 'Message', exact: true }),
   composerSubmitSlot: (page: Page): Locator => page.getByTestId('composer-submit-slot'),
+  composerSend: (page: Page): Locator => page.getByLabel('Send message', { exact: true }),
   composerStopSlot: (page: Page): Locator => page.getByTestId('composer-stop-slot'),
   composerAttachment: (page: Page): Locator => page.getByLabel('Add attachment'),
 
   activityEvent: (page: Page): Locator => page.getByTestId('transcript-activity-event'),
+  activityError: (page: Page): Locator => page.getByTestId('activity-error-surface'),
+  runningGlyph: (page: Page): Locator => page.getByTestId('atom-glyph'),
   transcriptBottomScrim: (page: Page): Locator => page.getByTestId('transcript-bottom-scrim'),
 } as const;

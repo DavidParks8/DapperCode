@@ -1,4 +1,9 @@
-import { AGENT_MESSAGE_ACTIVITY_TYPE, createActivityMessage } from '@bridge/messages';
+import {
+  AGENT_MESSAGE_ACTIVITY_TYPE,
+  createActivityMessage,
+  getMessageText,
+} from '@bridge/messages';
+import { applySnapshotToChat } from '@bridge/mapping/chatMapping';
 import type { Chat } from '@bridge/types/types';
 import { resolveEquivalentChat } from './chatReconciliation';
 
@@ -25,6 +30,26 @@ function chat(overrides: Partial<Chat> = {}): Chat {
     ],
     ...overrides,
   };
+}
+
+function boundedChat(messages: Chat['messages'], revision: number): Chat {
+  return applySnapshotToChat(chat(), {
+    version: 2,
+    messages: messages.map((message) => ({
+      id: message.id,
+      role: message.role === 'assistant' ? 'agent' : message.role,
+      parts: [{ type: 'text', text: getMessageText(message) }],
+      truncated: false,
+    })),
+    tools: [],
+    messageCollection: { truncated: true, omittedCount: 1, revision },
+    plan: [],
+    usage: {},
+    config: [],
+    commands: [],
+    session: { agentId: 'codex', threadId: 'thread-status', historyReconstruction: false },
+    active: { toolIds: [] },
+  });
 }
 
 describe('resolveEquivalentChat local transcript reconciliation', () => {
@@ -323,6 +348,106 @@ describe('resolveEquivalentChat local transcript reconciliation', () => {
 
     expect(resolved.messages).toBe(previous.messages);
     expect(resolved.lastMessagePreview).toBe('Current question');
+  });
+
+  it.each(['running', 'complete'] as const)(
+    'recovers a bounded %s response-only tail after the kickoff has been evicted',
+    (status) => {
+      const kickoff: Chat['messages'][number] = {
+        id: 'kickoff',
+        role: 'user',
+        content: 'Finish this while my phone is locked',
+        createdAt,
+      };
+      const previous = chat({
+        status: 'running',
+        activeTurnId: 'long-turn',
+        lastMessagePreview: getMessageText(kickoff),
+        messages: [kickoff],
+      });
+      const tail = { ...boundedChat(chat().messages, 130), status };
+
+      const recovered = resolveEquivalentChat(previous, tail);
+
+      expect(recovered.status).toBe(status);
+      expect(recovered.messages).toEqual([kickoff, ...tail.messages]);
+      expect(recovered.lastMessagePreview).toBe('Existing answer');
+      expect(resolveEquivalentChat(recovered, tail)).toBe(recovered);
+
+      const laterTail = boundedChat(
+        [
+          { id: 'answer', role: 'assistant', content: 'Existing answer, finished', createdAt },
+          { id: 'final', role: 'assistant', content: 'Final result', createdAt },
+        ],
+        131,
+      );
+      const refreshed = resolveEquivalentChat(recovered, laterTail);
+      expect(refreshed.messages).toEqual([kickoff, ...laterTail.messages]);
+      expect(refreshed.lastMessagePreview).toBe('Final result');
+    },
+  );
+
+  it('does not append an older bounded tail behind a newer user turn', () => {
+    const currentUser: Chat['messages'][number] = {
+      id: 'current-user',
+      role: 'user',
+      content: 'A newer request',
+      createdAt,
+    };
+    const previous = boundedChat([...chat().messages, currentUser], 131);
+    const stale = boundedChat(chat().messages, 130);
+
+    const first = resolveEquivalentChat(previous, stale);
+    const second = resolveEquivalentChat(first, stale);
+
+    expect(first.messages).toEqual(previous.messages);
+    expect(second.messages).toEqual(previous.messages);
+    expect(first.lastMessagePreview).toBe('A newer request');
+    expect(second.lastMessagePreview).toBe('A newer request');
+  });
+
+  it('does not move an unchanged bounded answer behind an optimistic follow-up', () => {
+    const stale = boundedChat(chat().messages, 130);
+    const previous: Chat = {
+      ...stale,
+      status: 'running',
+      lastMessagePreview: 'New follow-up',
+      messages: [
+        ...stale.messages,
+        { id: 'local-user-new', role: 'user', content: 'New follow-up', createdAt },
+      ],
+    };
+
+    const resolved = resolveEquivalentChat(previous, stale);
+
+    expect(resolved).toBe(previous);
+    expect(resolved.messages.at(-1)?.id).toBe('local-user-new');
+  });
+
+  it('preserves recovered history when a bounded snapshot replaces one user with a newer one', () => {
+    const kickoff: Chat['messages'][number] = {
+      id: 'kickoff',
+      role: 'user',
+      content: 'Original task',
+      createdAt,
+    };
+    const previous = {
+      ...boundedChat(chat().messages, 130),
+      messages: [kickoff, ...chat().messages],
+    };
+    const next = boundedChat(
+      [
+        ...chat().messages,
+        { id: 'follow-up', role: 'user', content: 'Newer task', createdAt },
+        { id: 'follow-up-answer', role: 'assistant', content: 'Newer answer', createdAt },
+      ],
+      132,
+    );
+
+    const recovered = resolveEquivalentChat(previous, next);
+
+    expect(recovered.messages).toEqual([kickoff, ...next.messages]);
+    expect(resolveEquivalentChat(recovered, next)).toBe(recovered);
   });
 
   it('replaces local reasoning with the server reasoning message without duplication', () => {

@@ -41,7 +41,7 @@ function preserveRecentUserTurnTranscript(previous: Chat, next: Chat): Chat {
 
   const previousUserCount = countUserMessages(previous.messages);
   const nextUserCount = countUserMessages(next.messages);
-  if (nextUserCount >= previousUserCount) {
+  if (nextUserCount >= previousUserCount && !next.acpSnapshot?.messageCollection?.truncated) {
     return next;
   }
 
@@ -50,13 +50,34 @@ function preserveRecentUserTurnTranscript(previous: Chat, next: Chat): Chat {
   const nextUserIndex = latestUser
     ? next.messages.findIndex((message) => messagesShareTranscriptIdentity(latestUser, message))
     : -1;
-  if (nextUserIndex < 0 || nextUserIndex === next.messages.length - 1) {
+  if (nextUserIndex < 0) {
+    return reconcileMissingUserTurn(previous, next);
+  }
+  if (nextUserIndex === next.messages.length - 1) {
     return withPreviousTranscript(previous, next);
   }
 
   // Bounded bridge snapshots are authoritative tails. Keep hydrated history ahead of the
   // latest user turn, but let the snapshot supply that turn and its completed response.
   return mergeBoundedTranscriptTail(previous, next, latestUserIndex);
+}
+
+function reconcileMissingUserTurn(previous: Chat, next: Chat): Chat {
+  const collection = next.acpSnapshot?.messageCollection;
+  if (collection?.truncated) {
+    const previousRevision = previous.acpSnapshot?.messageCollection?.revision;
+    if (
+      previousRevision !== undefined &&
+      (collection.revision < previousRevision ||
+        (collection.revision === previousRevision && previous.messages.at(-1)?.role === 'user'))
+    ) {
+      return previous;
+    }
+    // Long turns can evict their kickoff from the bounded snapshot. Its absence does not make
+    // the recovered response stale; retain known history ahead of the authoritative tail.
+    return mergeBoundedTranscriptTail(previous, next, previous.messages.length);
+  }
+  return withPreviousTranscript(previous, next);
 }
 
 function findLatestUserMessageIndex(messages: ChatMessage[]): number {

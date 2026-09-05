@@ -109,6 +109,10 @@ struct PromptControl {
     succeed: bool,
     #[serde(default)]
     hold: bool,
+    #[serde(default)]
+    hold_before_chunks: bool,
+    #[serde(default)]
+    separate_messages: bool,
     message_id: String,
 }
 
@@ -248,15 +252,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             wait_for_release(&control_path, &format!("tool-{index}.")).await?;
                         }
                     }
-                    for chunk in &control.chunks {
+                    if control.hold_before_chunks {
+                        wait_for_release(&control_path, "").await?;
+                    }
+                    for (index, chunk) in control.chunks.iter().enumerate() {
                         if control.delay_ms > 0 {
                             sleep(Duration::from_millis(control.delay_ms)).await;
                         }
                         connection.send_notification(SessionNotification::new(
                             request.session_id.clone(),
                             SessionUpdate::AgentMessageChunk(
-                                ContentChunk::new(chunk.clone().into())
-                                    .message_id(MessageId::new(control.message_id.clone())),
+                                ContentChunk::new(chunk.clone().into()).message_id(MessageId::new(
+                                    if control.separate_messages {
+                                        format!("{}-{index}", control.message_id)
+                                    } else {
+                                        control.message_id.clone()
+                                    },
+                                )),
                             ),
                         ))?;
                     }

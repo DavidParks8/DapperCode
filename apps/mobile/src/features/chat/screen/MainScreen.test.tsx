@@ -16,6 +16,7 @@ import { AppState, FlatList, Pressable, StyleSheet, TextInput, View } from 'reac
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import type { HostBridgeApiClient } from '@bridge/client/client';
+import { applySnapshotToChat } from '@bridge/mapping/chatMapping';
 import {
   createActivityMessage,
   getMessageText,
@@ -5303,6 +5304,104 @@ function MainRouteShell() {
       ).toBeGreaterThan(0);
       expect(ws.acknowledgeSnapshotRecovery).toHaveBeenCalledWith(84);
       await unmount(tree);
+    });
+
+    it('restores an evicted-kickoff transcript after a long offline background turn', async () => {
+      const kickoff: Chat['messages'][number] = {
+        id: 'long-kickoff',
+        role: 'user',
+        content: 'Finish the task while my phone is locked',
+        createdAt: chat.createdAt,
+      };
+      const runningChat: Chat = {
+        ...chat,
+        status: 'running',
+        activeTurnId: 'turn-events',
+        messages: [kickoff],
+      };
+      const recoveredChat = applySnapshotToChat(chat, {
+        version: 2,
+        messages: Array.from({ length: 128 }, (_, index) => ({
+          id: `offline-answer-${index}`,
+          role: 'agent',
+          parts: [{ type: 'text', text: `Offline result ${index}` }],
+          truncated: false,
+        })),
+        tools: [],
+        messageCollection: { truncated: true, omittedCount: 1, revision: 129 },
+        plan: [],
+        usage: {},
+        config: [],
+        commands: [],
+        session: { agentId: 'codex', threadId, historyReconstruction: false },
+        active: { toolIds: [] },
+      });
+      const api = createApi();
+      let latestChat = runningChat;
+      let online = true;
+      (api.peekChat as jest.Mock).mockReturnValue(runningChat);
+      (api.getChat as jest.Mock).mockImplementation(() =>
+        online ? Promise.resolve(latestChat) : Promise.reject(new Error('Bridge disconnected')),
+      );
+      const { tree, store, ws } = await renderMain({ api });
+      const root = tree.root as Queryable;
+      try {
+        await emit(agUi({ type: 'RUN_STARTED', threadId, runId: 'long-run' }));
+        expect(store.get(activityAtom).tone).toBe('running');
+        expect(
+          root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent').length,
+        ).toBeGreaterThan(0);
+
+        await act(async () => {
+          appStateHandler?.('background');
+          online = false;
+          statusHandlers.forEach((handler) => handler(false));
+          jest.setSystemTime(Date.now() + 45 * 60_000);
+          latestChat = recoveredChat;
+          online = true;
+          appStateHandler?.('active');
+          statusHandlers.forEach((handler) => handler(true));
+        });
+        await emit({ method: 'bridge/connection/state', params: { status: 'connected' } });
+        // The missed stream has expired; recovery must use the snapshot, not replayed text.
+        for (const watermark of [300, 301]) {
+          await emit({
+            method: 'bridge/events/snapshotRequired',
+            params: { reason: 'replayTruncated', resumeAfterEventId: watermark },
+          });
+          await act(async () => {
+            for (let index = 0; index < 20; index += 1) {
+              await Promise.resolve();
+            }
+          });
+
+          expect(ws.acknowledgeSnapshotRecovery).toHaveBeenCalledWith(watermark);
+          expect(store.get(selectedChatAtom)?.status).toBe('complete');
+          expect(store.get(activeTurnIdAtom)).toBeNull();
+          expect(store.get(activityAtom)).toEqual({ tone: 'complete', title: 'Turn completed' });
+          expect(store.get(selectedChatAtom)?.messages).toEqual([
+            kickoff,
+            ...recoveredChat.messages,
+          ]);
+          expect(
+            transcript(tree).some(({ message }) => message.content === 'Offline result 127'),
+          ).toBe(true);
+          expect(
+            root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+          ).toHaveLength(0);
+          expect(
+            root.findAll((node) => node.props['accessibilityLabel'] === 'Send message').length,
+          ).toBeGreaterThan(0);
+          expect(
+            root.findAll((node) => node.props['accessibilityLabel'] === 'Message')[0]?.props[
+              'editable'
+            ],
+          ).not.toBe(false);
+          expect(hasWorkingStatus(root, hasText)).toBe(false);
+        }
+      } finally {
+        await unmount(tree);
+      }
     });
 
     it('recovers snapshots and covers reconnect, disconnect, status callbacks, and app state', async () => {

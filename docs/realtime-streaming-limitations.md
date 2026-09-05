@@ -31,6 +31,9 @@ ACP executable and writes the local manifest consumed by Rust.
 - Mobile requests `bridge/events/replay` after reconnect, buffers concurrent live notifications,
   and emits numbered events in contiguous order.
 - A stream change, replay eviction, or detected gap triggers ACP session snapshot convergence.
+- A bounded snapshot can omit the kickoff of a long turn. Mobile retains the cached transcript
+  prefix and merges the recovered tail instead of discarding new responses when that user message
+  is absent. Older snapshot revisions must not replace newer cached history.
 - Snapshot convergence is stream-wide: mobile freezes post-watermark delivery, expands its recovery
    set with `thread/loaded/list`, and refreshes every bridge-loaded or locally tracked thread plus
    queues, pending schedules, pending approvals, pending user inputs, and negotiated agent descriptors before it
