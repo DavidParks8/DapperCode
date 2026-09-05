@@ -14,7 +14,7 @@ import { agentRootThreadIdAtom, relatedAgentThreadsAtom } from '../../workspace/
 import { activityAtom, queueActionItemIdAtom, queueActionKindAtom } from '../state/composer';
 import { useSetAtom } from 'jotai';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { Chat } from '@bridge/types/types';
 import { OPENING_CHAT_ACTIVITY_TITLE } from '../helpers/helpers';
 import type {
@@ -25,6 +25,11 @@ import { agentThreadMenuVisibleAtom } from '../state/modals';
 import { openSubAgentAtom } from '@shell/navigation/actions';
 import { navigateRoot } from '@shell/navigation/routeNavigation';
 import { routes } from '@shell/navigation/routes';
+import {
+  getTranscriptBeforeCursor,
+  getTranscriptContinuationState,
+  mergeTranscriptPage,
+} from '../transcript/controllers/continuationController';
 
 export type MainScreenChatNavigationContext = MainScreenChatLoadPipelineContext &
   MainScreenChatLoadPipelineResult;
@@ -54,7 +59,6 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
     stopRequestedRef,
     stopSystemMessageLoggedRef,
     transcriptContinuationController,
-    transcriptContinuationState,
   } = context;
   // The controller object is rebuilt every render; only its actions are referentially stable.
   const { closePathModal: closeAttachmentPathModal } = attachmentController;
@@ -75,25 +79,61 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
   const setActivity = useSetAtom(activityAtom);
   const setAgentThreadMenuVisible = useSetAtom(agentThreadMenuVisibleAtom);
   const openSubAgent = useSetAtom(openSubAgentAtom);
+  const historyRequestRef = useRef<object | null>(null);
+  const selectedChatId = selectedChatIdRef.current;
+  useEffect(
+    () => () => {
+      historyRequestRef.current = null;
+    },
+    [api, selectedChatId],
+  );
 
   const handleLoadEarlier = useCallback(async () => {
     const chat = selectedChatRef.current;
-    if (!chat || transcriptContinuationState.loading) {
+    if (!chat || selectedChatIdRef.current !== chat.id || historyRequestRef.current) {
       return;
     }
+    const request = {};
+    historyRequestRef.current = request;
     setTranscriptContinuationState((previous) => ({ ...previous, loading: true, error: null }));
     const result = await transcriptContinuationController.loadEarlier(chat);
+    if (historyRequestRef.current !== request) {
+      return;
+    }
+    historyRequestRef.current = null;
     if (selectedChatIdRef.current !== chat.id) {
       return;
     }
-    if (result.kind === 'stale') {
-      setTranscriptContinuationState(result.state);
-      void loadChat(chat.id, { preserveRuntimeState: true });
-      return;
-    }
-    setSelectedChat((previous) => (previous?.id === chat.id ? result.chat : previous));
-    api.rememberChat(result.chat);
-    setTranscriptContinuationState(result.state);
+    setSelectedChat((previous) => {
+      if (!previous || previous.id !== chat.id) {
+        return previous;
+      }
+      const currentState = getTranscriptContinuationState(previous);
+      if (
+        previous.acpSnapshot?.continuation?.revision !== chat.acpSnapshot?.continuation?.revision ||
+        getTranscriptBeforeCursor(previous.acpSnapshot) !==
+          getTranscriptBeforeCursor(chat.acpSnapshot)
+      ) {
+        setTranscriptContinuationState(currentState);
+        return previous;
+      }
+      if (result.kind === 'stale') {
+        setTranscriptContinuationState(currentState);
+        void loadChat(chat.id, { preserveRuntimeState: true });
+        return previous;
+      }
+      if (result.kind !== 'page') {
+        setTranscriptContinuationState({
+          ...currentState,
+          error: result.kind === 'error' ? result.error : null,
+        });
+        return previous;
+      }
+      const merged = mergeTranscriptPage(previous, result.page);
+      api.rememberChat(merged);
+      setTranscriptContinuationState(getTranscriptContinuationState(merged));
+      return merged;
+    });
   }, [
     api,
     loadChat,
@@ -102,11 +142,11 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
     setSelectedChat,
     setTranscriptContinuationState,
     transcriptContinuationController,
-    transcriptContinuationState.loading,
   ]);
 
   const openChatThread = useCallback(
     (id: string, optimisticChat?: Chat | null) => {
+      historyRequestRef.current = null;
       const isSameChat = chatIdRef.current === id;
       const providedSnapshot = optimisticChat && optimisticChat.id === id ? optimisticChat : null;
       const providedHydratedSnapshot =
@@ -114,6 +154,11 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
       const cachedChat = providedHydratedSnapshot ?? api.peekChat(id);
       const optimisticSnapshot = cachedChat ?? providedSnapshot ?? api.peekChatShell(id);
       const hasHydratedSnapshot = Boolean(cachedChat);
+      setTranscriptContinuationState(
+        optimisticSnapshot
+          ? getTranscriptContinuationState(optimisticSnapshot)
+          : { loading: false, error: null, exhausted: true, unavailableCount: 0 },
+      );
 
       if (isSameChat) {
         setSelectedChatId(id);
@@ -199,6 +244,7 @@ export function useMainScreenChatNavigation(context: MainScreenChatNavigationCon
       setSelectedChatId,
       setSending,
       setStoppingTurn,
+      setTranscriptContinuationState,
       setUserInputDrafts,
       setUserInputError,
       stopRequestedRef,

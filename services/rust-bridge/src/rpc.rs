@@ -146,6 +146,15 @@ mod tests {
         ))
         .expect("v2 contract fixture parses");
         assert_eq!(manifest["protocolVersion"], crate::BRIDGE_PROTOCOL_VERSION);
+        let missing = &manifest["fixtures"]["threadReadNotFound"];
+        let error = crate::thread_not_found_error(
+            missing["data"]["threadId"]
+                .as_str()
+                .expect("missing thread ID"),
+        );
+        assert_eq!(missing["code"], error.code);
+        assert_eq!(missing["message"], error.message);
+        assert_eq!(missing["data"], error.data.unwrap());
         assert_eq!(manifest["fixtures"]["capabilities"]["agUiEvents"], true);
         assert_eq!(
             manifest["fixtures"]["capabilities"]["preferredAgentId"],

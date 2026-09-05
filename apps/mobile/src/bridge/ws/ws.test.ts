@@ -3,7 +3,20 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { requireTestValue } from '@shared/testing/requireTestValue';
-import { BridgeProtocolVersionError, HostBridgeWsClient, RpcRequestError } from '@bridge/ws/ws';
+import {
+  BridgeProtocolVersionError,
+  HostBridgeWsClient as BridgeClient,
+  RpcRequestError,
+} from '@bridge/ws/ws';
+
+const clients = new Set<BridgeClient>();
+
+class HostBridgeWsClient extends BridgeClient {
+  constructor(...args: ConstructorParameters<typeof BridgeClient>) {
+    super(...args);
+    clients.add(this);
+  }
+}
 
 interface ContractManifest {
   protocolVersion: number;
@@ -82,6 +95,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const client of clients) {
+    client.disconnect();
+  }
+  clients.clear();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   delete (global as any).WebSocket;
 });

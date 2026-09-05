@@ -49,6 +49,9 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
         }
         if (this.socket === socket) {
           this.socket = null;
+          this.replayGeneration += 1;
+          this.replayInFlight = null;
+          this.clearReplayRetry();
           this.clearConnectionStableTimer();
           this.emitStatus(false);
           this.rejectAllPending(new Error('Bridge websocket closed'));
@@ -74,6 +77,9 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
         }
         if (this.socket === socket) {
           this.socket = null;
+          this.replayGeneration += 1;
+          this.replayInFlight = null;
+          this.clearReplayRetry();
           socket.close();
           this.clearConnectionStableTimer();
           this.emitStatus(false);
@@ -276,6 +282,8 @@ export abstract class HostBridgeWsClientSocketTransportLayer extends HostBridgeW
       this.drainPendingEvents();
       if (this.hasPendingGap()) {
         this.scheduleReplay();
+      } else {
+        this.clearReplayRetry();
       }
     }
   }

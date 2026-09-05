@@ -17,9 +17,8 @@ export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClie
     this.recoveryWatermark = null;
     this.awaitingFreshRecoveryBaseline = false;
     this.drainPendingEvents();
-    if (this.hasPendingGap()) {
-      this.scheduleReplay();
-    }
+    // A reconnect while awaiting the snapshot may have missed a silent tail.
+    this.scheduleReplay();
     return true;
   }
   connect(): void {
@@ -37,6 +36,7 @@ export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClie
     this.connectGeneration += 1;
     this.replayGeneration += 1;
     this.replayInFlight = null;
+    this.clearReplayRetry();
     this.pendingEvents.clear();
     this.recoveryWatermark = 0;
     this.awaitingFreshRecoveryBaseline = true;
@@ -114,6 +114,7 @@ export abstract class HostBridgeWsClientConnectionLayer extends HostBridgeWsClie
     }
     this.replayGeneration += 1;
     this.replayInFlight = null;
+    this.clearReplayRetry();
     const pendingSocket = this.pendingSocket;
     this.pendingSocket = null;
     const socket = this.socket;

@@ -12,38 +12,81 @@ import type { ReplayEventsResponse } from '@bridge/ws/types';
 
 export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridgeWsClientSocketTransportLayer {
   protected scheduleReplay(): void {
-    if (!this.replaySupported) {
+    if (
+      !this.replaySupported ||
+      this.protocolError ||
+      (this.recoveryWatermark !== null && !this.awaitingFreshRecoveryBaseline)
+    ) {
       return;
     }
-    if (this.replayInFlight) {
+    if (this.replayInFlight || this.replayRetryTimer !== null) {
       return;
     }
     if (!this.connected || !this.socket || this.socket.readyState !== 1) {
       return;
     }
     const generation = this.replayGeneration;
+    const startingEventId = this.lastSeenEventId;
     let replayCompleted = false;
     const replayPromise = this.replayMissedEvents(generation)
       .then(() => {
         replayCompleted = true;
       })
       .catch(() => {
-        // Keep buffered events for retry on the next live event or reconnect.
+        // Preserve the gap and retry even if the connected socket stays silent.
       })
       .finally(() => {
         if (this.replayInFlight !== replayPromise) {
           return;
         }
         this.replayInFlight = null;
-        if (!replayCompleted || generation !== this.replayGeneration) {
+        if (generation !== this.replayGeneration) {
+          return;
+        }
+        if (!replayCompleted) {
+          this.scheduleReplayRetry();
           return;
         }
         this.drainPendingEvents();
         if (this.hasPendingGap()) {
-          this.scheduleReplay();
+          if (this.lastSeenEventId > startingEventId) {
+            this.clearReplayRetry();
+            this.scheduleReplay();
+          } else {
+            this.scheduleReplayRetry();
+          }
+        } else {
+          this.clearReplayRetry();
         }
       });
     this.replayInFlight = replayPromise;
+  }
+  private scheduleReplayRetry(): void {
+    if (
+      this.replayRetryTimer !== null ||
+      !this.replaySupported ||
+      this.protocolError ||
+      !this.connected ||
+      !this.socket ||
+      this.socket.readyState !== 1
+    ) {
+      return;
+    }
+    // Match reconnect backoff: 500ms doubling to 5s, plus up to 249ms jitter.
+    const delay =
+      Math.min(5000, 500 * 2 ** this.replayRetryAttempts++) + Math.floor(Math.random() * 250);
+    const generation = this.replayGeneration;
+    const socket = this.socket;
+    const timer = setTimeout(() => {
+      if (this.replayRetryTimer !== timer) {
+        return;
+      }
+      this.replayRetryTimer = null;
+      if (generation === this.replayGeneration && socket === this.socket) {
+        this.scheduleReplay();
+      }
+    }, delay);
+    this.replayRetryTimer = timer;
   }
   protected classifyReplayRequestError(error: unknown): 'unsupported' | 'fatal' {
     return isRpcRequestError(error) && error.code === -32601 ? 'unsupported' : 'fatal';
@@ -106,8 +149,12 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
           limit: 200,
         });
       } catch (error) {
+        if (generation !== this.replayGeneration) {
+          return;
+        }
         if (this.classifyReplayRequestError(error) === 'unsupported') {
           this.replaySupported = false;
+          this.clearReplayRetry();
           return;
         }
         throw error;
@@ -189,6 +236,7 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
     const lastDeliveredEventId = this.lastSeenEventId;
     const resumeAfterEventId = latestEventId ?? 0;
     this.replayGeneration += 1;
+    this.clearReplayRetry();
     if (reason === 'streamChanged') {
       this.pendingEvents.clear();
     } else {
@@ -231,6 +279,9 @@ export abstract class HostBridgeWsClientReplayAndOrderingLayer extends HostBridg
       this.protocolError = error;
       this.shouldReconnect = false;
       this.connectGeneration += 1;
+      this.replayGeneration += 1;
+      this.replayInFlight = null;
+      this.clearReplayRetry();
       this.rejectAllPending(error);
       this.socket?.close();
       return 'unsupported';

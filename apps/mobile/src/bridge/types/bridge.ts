@@ -226,3 +226,7 @@ export interface BridgeSnapshotRequiredParams {
   earliestEventId: number | null;
   latestEventId: number | null;
 }
+export interface BridgeThreadNotFoundErrorData {
+  error: 'thread_not_found';
+  threadId: string;
+}

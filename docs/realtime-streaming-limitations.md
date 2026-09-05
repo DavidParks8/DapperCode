@@ -29,16 +29,30 @@ ACP executable and writes the local manifest consumed by Rust.
 - `protocolVersion` and the per-process `streamId` let mobile distinguish a reconnect from a bridge
   restart.
 - Mobile requests `bridge/events/replay` after reconnect, buffers concurrent live notifications,
-  and emits numbered events in contiguous order.
+  and emits numbered events in contiguous order. Failed replay requests retry with bounded backoff
+  even if the socket receives no new events; disconnects and stream changes cancel stale retries.
 - A stream change, replay eviction, or detected gap triggers ACP session snapshot convergence.
 - A bounded snapshot can omit the kickoff of a long turn. Mobile retains the cached transcript
   prefix and merges the recovered tail instead of discarding new responses when that user message
   is absent. Older snapshot revisions must not replace newer cached history.
+- Earlier-history responses merge into the current transcript only while their selection, revision,
+  and cursor remain valid. They cannot restore an older turn status or replace newer message content.
+- Snapshot comparisons include tool status and structured content, agent configuration, and history
+  metadata, so a metadata-only refresh is not discarded just because the displayed text is unchanged.
 - Snapshot convergence is stream-wide: mobile freezes post-watermark delivery, expands its recovery
    set with `thread/loaded/list`, and refreshes every bridge-loaded or locally tracked thread plus
    queues, pending schedules, pending approvals, pending user inputs, and negotiated agent descriptors before it
    acknowledges the watermark. A failed refresh keeps the barrier in place and retries without a
    partial acknowledgement.
+- A cached thread deleted while mobile was offline does not block all surviving streams. A failed
+  `thread/read` returns `-32004` with `data: { "error": "thread_not_found", "threadId": "..." }`
+  when the existing retirement fence records a successfully completed deletion, even if the agent
+  cannot list sessions or becomes unavailable. Pending, cancelled, or rolled-back retirements do not
+  qualify. Otherwise, the thread must be absent from both bridge runtime/index and a complete
+  authoritative agent session listing. Missing/corrupt local indexes, unavailable agents, and failed,
+  unsupported, or incomplete listings alone are not deletion evidence. Mobile retires confirmed missing
+  threads with the same cache/runtime tombstones as `thread/deleted`, closes a deleted selection, and acknowledges only
+  after every surviving snapshot and auxiliary read succeeds. Unloaded valid history is retained.
 
 Historical threads that are neither loaded by the bridge nor tracked by mobile are not loaded only
 because replay history was evicted. They have no live state in the current event stream and remain

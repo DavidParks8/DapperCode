@@ -1,4 +1,5 @@
 import type { HostBridgeApiClient } from '@bridge/client/client';
+import { isThreadNotFoundError } from '@bridge/client/clientChatCloneAndRetryInternals';
 import type {
   BridgeCapabilities,
   BridgeThreadQueueState,
@@ -42,6 +43,7 @@ export interface ReplayRecoverySnapshot {
   approvals: PendingApproval[];
   userInputs: PendingUserInputRequest[];
   threads: ReplayRecoveryThreadSnapshot[];
+  missingThreadIds: string[];
 }
 
 export function collectReplayRecoveryThreadIds(
@@ -136,18 +138,32 @@ export async function fetchReplayRecoverySnapshot(
     userInputs.map((request) => request.threadId),
   ]).filter((threadId) => !excludedThreadIds?.has(threadId));
 
-  const threads = await mapWithConcurrency(
+  const results = await mapWithConcurrency(
     threadIds,
     REPLAY_RECOVERY_CONCURRENCY,
     async (threadId) => {
       const [chat, queue, schedules] = await Promise.all([
-        api.getChat(threadId, { forceRefresh: true }),
+        api.getChat(threadId, { forceRefresh: true }).catch((error: unknown) => {
+          if (!isThreadNotFoundError(error, threadId)) {
+            throw error;
+          }
+          return null;
+        }),
         api.readThreadQueue(threadId),
         api.readThreadSchedules(threadId),
       ]);
-      return { chat, queue, schedules };
+      return chat ? { chat, queue, schedules } : threadId;
     },
     signal,
   );
-  return { capabilities, approvals, userInputs, threads };
+  const threads: ReplayRecoveryThreadSnapshot[] = [];
+  const missingThreadIds: string[] = [];
+  for (const result of results) {
+    if (typeof result === 'string') {
+      missingThreadIds.push(result);
+    } else {
+      threads.push(result);
+    }
+  }
+  return { capabilities, approvals, userInputs, threads, missingThreadIds };
 }

@@ -1,5 +1,6 @@
 import type { HostBridgeApiClient } from '@bridge/client/client';
 import type { BridgeCapabilities, Chat } from '@bridge/types/types';
+import { RpcRequestError } from '@bridge/ws/errors';
 import {
   collectReplayRecoveryThreadIds,
   fetchReplayRecoverySnapshot,
@@ -101,6 +102,55 @@ describe('replay recovery controller', () => {
     expect(api.getChat.mock.calls.length - failedAttemptCalls).toBe(5);
     expect(api.readThreadQueue.mock.calls.length - failedAttemptCalls).toBe(5);
     expect(api.readThreadSchedules.mock.calls.length - failedAttemptCalls).toBe(5);
+  });
+
+  it('recovers surviving and unloaded history alongside authoritatively missing cached threads', async () => {
+    const api = createApi();
+    api.getChat.mockImplementation((threadId) =>
+      threadId === 'deleted'
+        ? Promise.reject(
+            new RpcRequestError('thread/read', -32004, 'Thread not found', {
+              error: 'thread_not_found',
+              threadId,
+            }),
+          )
+        : Promise.resolve(chat(threadId)),
+    );
+    const result = await fetchReplayRecoverySnapshot(api, ['deleted', 'unloaded-history']);
+    expect(result).toMatchObject({ missingThreadIds: ['deleted'] });
+    expect(result.threads.map(({ chat: value }) => value.id)).toEqual([
+      'unloaded-history',
+      'selected',
+      'background-b',
+      'loaded-new',
+      'background-a',
+    ]);
+  });
+
+  it.each([
+    new Error('unknown ACP session deleted'),
+    new RpcRequestError('thread/read', -32000, 'Thread not found'),
+    new RpcRequestError('thread/read', -32004, 'Thread not found'),
+    new RpcRequestError('thread/read', -32004, 'Thread not found', {
+      error: 'thread_not_found',
+      threadId: 'another-thread',
+    }),
+  ])('never interprets an unconfirmed read failure as deletion (%s)', async (error) => {
+    const api = createApi();
+    api.getChat.mockRejectedValue(error);
+    await expect(fetchReplayRecoverySnapshot(api, ['deleted'])).rejects.toBe(error);
+  });
+
+  it('does not hide a transient auxiliary read failure behind a missing thread', async () => {
+    const api = createApi();
+    api.getChat.mockRejectedValue(
+      new RpcRequestError('thread/read', -32004, 'Thread not found', {
+        error: 'thread_not_found',
+        threadId: 'selected',
+      }),
+    );
+    api.readThreadQueue.mockRejectedValue(new Error('queue unavailable'));
+    await expect(fetchReplayRecoverySnapshot(api, [])).rejects.toThrow('queue unavailable');
   });
 
   it.each([201, REPLAY_RECOVERY_MAX_LOADED_THREADS])(

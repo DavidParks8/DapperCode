@@ -1,6 +1,11 @@
 import { isRpcRequestError, type RpcRequestError } from '@bridge/ws/ws';
 import { readString, toRecord } from '@bridge/mapping/chatMapping';
-import type { Chat, ChatSummary, ModelOption } from '@bridge/types/types';
+import type {
+  BridgeThreadNotFoundErrorData,
+  Chat,
+  ChatSummary,
+  ModelOption,
+} from '@bridge/types/types';
 import type {
   TurnInputLocalImage,
   TurnInputMention,
@@ -142,12 +147,24 @@ export function isTransientThreadReadError(error: unknown): boolean {
   if (!isRpcRequestError(error) || error.code !== -32603) {
     return false;
   }
+
   const message = error.message.toLowerCase();
   return (
     message.includes('failed to read thread') &&
     message.includes('thread-store internal error') &&
     message.includes('rollout') &&
     message.includes('is empty')
+  );
+}
+
+export function isThreadNotFoundError(error: unknown, threadId: string): boolean {
+  if (!isRpcRequestError(error) || error.method !== 'thread/read' || error.code !== -32004) {
+    return false;
+  }
+  const data = toRecord(error.data);
+  return (
+    data?.['error'] === ('thread_not_found' satisfies BridgeThreadNotFoundErrorData['error']) &&
+    data['threadId'] === threadId
   );
 }
 

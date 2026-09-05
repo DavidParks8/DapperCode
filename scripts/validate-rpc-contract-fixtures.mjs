@@ -112,6 +112,12 @@ for (const { code, name } of manifest.errors) {
 }
 
 const fixtures = manifest.fixtures;
+if (
+  fixtures.threadReadNotFound.code !== -32004 ||
+  fixtures.threadReadNotFound.data.error !== 'thread_not_found' ||
+  typeof fixtures.threadReadNotFound.data.threadId !== 'string'
+)
+  fail('authoritative thread/read not-found fixture');
 if (fixtures.capabilities.protocolVersion !== manifest.protocolVersion)
   fail('capability fixture version');
 if (fixtures.operationalStatus.replay.entries > fixtures.operationalStatus.replay.capacity)

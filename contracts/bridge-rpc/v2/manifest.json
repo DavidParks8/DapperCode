@@ -103,6 +103,11 @@
     { "code": -32005, "name": "overloaded" }
   ],
   "fixtures": {
+    "threadReadNotFound": {
+      "code": -32004,
+      "message": "Thread not found",
+      "data": { "error": "thread_not_found", "threadId": "agent-alpha:deleted-session" }
+    },
     "capabilities": {
       "protocolVersion": 2,
       "streamId": "00000000-0000-4000-8000-000000000001",

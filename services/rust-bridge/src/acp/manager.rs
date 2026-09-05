@@ -2777,6 +2777,27 @@ impl AgentManager {
         self.read_known_session_from(connection, &session_id).await
     }
 
+    pub(crate) async fn thread_is_authoritatively_absent(&self, thread_id: &str) -> bool {
+        let Ok((identity, session_id, connection)) = self.route_thread(thread_id) else {
+            return false;
+        };
+        let operation_lock = self.session_operation_lock(thread_id).await;
+        let _operation = operation_lock.lock().await;
+        if connection.session(&session_id).await.is_some()
+            || self.session_index.lock().await.entries.iter().any(|entry| {
+                entry.agent_id == identity.agent_id
+                    && entry.acp_session_id == identity.acp_session_id
+            })
+            || !connection.negotiated().supports_session_list()
+        {
+            return false;
+        }
+        // A missing local index entry alone is not deletion evidence (e.g. failed startup IO).
+        Self::authoritative_session_ids(connection)
+            .await
+            .is_ok_and(|sessions| !sessions.contains(&identity.acp_session_id))
+    }
+
     async fn apply_agent_message_journal(&self, snapshot: &mut SessionSnapshot) {
         let entries = self
             .agent_message_journal
@@ -5893,8 +5914,21 @@ mod tests {
         supports_close: bool,
         observed: mpsc::UnboundedSender<String>,
     ) -> (AcpConnection, NegotiatedInitialize) {
-        let mut session_capabilities =
-            SessionCapabilities::new().list(SessionListCapabilities::new());
+        deleting_connection_with_catalog(agent_id, supports_delete, supports_close, true, observed)
+            .await
+    }
+
+    async fn deleting_connection_with_catalog(
+        agent_id: &str,
+        supports_delete: bool,
+        supports_close: bool,
+        supports_list: bool,
+        observed: mpsc::UnboundedSender<String>,
+    ) -> (AcpConnection, NegotiatedInitialize) {
+        let mut session_capabilities = SessionCapabilities::new();
+        if supports_list {
+            session_capabilities = session_capabilities.list(SessionListCapabilities::new());
+        }
         if supports_delete {
             session_capabilities = session_capabilities.delete(SessionDeleteCapabilities::new());
         }
@@ -5905,6 +5939,8 @@ mod tests {
         let listed_agent = agent_id.to_string();
         let delete_agent = agent_id.to_string();
         let close_agent = agent_id.to_string();
+        let deleted = Arc::new(AtomicBool::new(false));
+        let listed_deleted = deleted.clone();
         let agent = Agent
             .builder()
             .on_receive_request(
@@ -5918,10 +5954,12 @@ mod tests {
             )
             .on_receive_request(
                 async move |_request: ListSessionsRequest, responder, _| {
-                    responder.respond(ListSessionsResponse::new(vec![SessionInfo::new(
-                        format!("{listed_agent}-listed"),
-                        "/tmp",
-                    )]))
+                    let sessions = if listed_deleted.load(Ordering::SeqCst) {
+                        Vec::new()
+                    } else {
+                        vec![SessionInfo::new(format!("{listed_agent}-listed"), "/tmp")]
+                    };
+                    responder.respond(ListSessionsResponse::new(sessions))
                 },
                 agent_client_protocol::on_receive_request!(),
             )
@@ -5931,6 +5969,7 @@ mod tests {
                     async move |request: DeleteSessionRequest, responder, _| {
                         let _ =
                             observed.send(format!("delete:{delete_agent}:{}", request.session_id));
+                        deleted.store(true, Ordering::SeqCst);
                         responder.respond(DeleteSessionResponse::new())
                     }
                 },
@@ -8347,6 +8386,147 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deleted_read_uses_retirement_tombstones_without_a_working_catalog() {
+        async fn read_reply(
+            backend: &Arc<crate::runtime_backend::RuntimeBackend>,
+            client_id: u64,
+            replies: &mut crate::client_outbox::ClientOutboxReceiver,
+            thread_id: &str,
+            request_id: u64,
+        ) -> serde_json::Value {
+            backend
+                .forward_request(
+                    client_id,
+                    serde_json::json!(request_id),
+                    "thread/read",
+                    Some(serde_json::json!({ "threadId": thread_id })),
+                    None,
+                )
+                .await
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    let frame = replies.recv().await.unwrap();
+                    let reply: serde_json::Value =
+                        serde_json::from_str(frame.to_text().unwrap()).unwrap();
+                    if reply["id"] == request_id {
+                        break reply;
+                    }
+                }
+            })
+            .await
+            .unwrap()
+        }
+
+        for supports_list in [false, true] {
+            let directory = std::env::current_dir()
+                .unwrap()
+                .join(format!(".deleted-read-tombstones-{}", uuid::Uuid::new_v4(),));
+            std::fs::create_dir_all(&directory).unwrap();
+            let (observed_tx, _observed_rx) = mpsc::unbounded_channel();
+            let connection = deleting_connection_with_catalog(
+                "delete-agent",
+                true,
+                false,
+                supports_list,
+                observed_tx,
+            )
+            .await;
+            let agent_connection = connection.0.clone();
+            let manager = Arc::new(
+                AgentManager::from_start_results(
+                    "delete-agent".into(),
+                    vec![(manifest("delete-agent", "Delete"), Ok(connection))],
+                )
+                .await
+                .unwrap(),
+            );
+            let hub = Arc::new(crate::client_hub::ClientHub::new());
+            let journal = Arc::new(
+                crate::retirement_journal::ThreadRetirementJournal::load(
+                    directory.join("thread-retirements.json"),
+                )
+                .await
+                .unwrap(),
+            );
+            let backend = crate::runtime_backend::RuntimeBackend::from_manager_for_test(
+                manager.clone(),
+                hub.clone(),
+                journal,
+            )
+            .await;
+            let queue =
+                crate::bridge_protocol::BridgeQueueService::new(backend.clone(), hub.clone());
+            let scheduler = crate::scheduled_prompts::ScheduledPromptService::start_paused(
+                directory.join("scheduled-prompts.json"),
+                Arc::downgrade(&queue),
+                hub.clone(),
+            )
+            .await
+            .unwrap();
+            backend
+                .attach_thread_lifecycle(Arc::downgrade(&queue), Arc::downgrade(&scheduler))
+                .await
+                .unwrap();
+            let (outbox, mut replies) = crate::client_outbox::client_outbox(32);
+            let client_id = hub
+                .add_client_with_metadata(
+                    outbox,
+                    crate::client_hub::ClientConnectionMetadata::default(),
+                )
+                .await;
+            backend.register_client(client_id);
+            let thread_id = AgentSessionId::new("delete-agent", "delete-agent-listed")
+                .unwrap()
+                .encode();
+
+            // A pending or rolled-back retirement is not confirmed deletion, even if reads fail.
+            let lease = queue
+                .begin_retirement_fence(std::slice::from_ref(&thread_id))
+                .await
+                .unwrap();
+            let pending = read_reply(&backend, client_id, &mut replies, &thread_id, 1).await;
+            drop(lease);
+            let cancelled = read_reply(&backend, client_id, &mut replies, &thread_id, 2).await;
+            let lease = queue
+                .begin_retirement_fence(std::slice::from_ref(&thread_id))
+                .await
+                .unwrap();
+            lease.finish().await;
+            let rolled_back = read_reply(&backend, client_id, &mut replies, &thread_id, 3).await;
+
+            backend
+                .request_internal(
+                    "thread/delete",
+                    Some(serde_json::json!({ "threadId": thread_id })),
+                )
+                .await
+                .unwrap();
+            if supports_list {
+                agent_connection.shutdown().await.unwrap();
+            }
+            assert!(!manager.thread_is_authoritatively_absent(&thread_id).await);
+            let deleted = read_reply(&backend, client_id, &mut replies, &thread_id, 4).await;
+            scheduler.shutdown().await;
+            backend.shutdown().await;
+            std::fs::remove_dir_all(directory).unwrap();
+            for reply in [pending, cancelled, rolled_back] {
+                assert_eq!(reply["error"]["code"], -32601);
+            }
+            assert_eq!(
+                deleted["error"]["code"], -32004,
+                "supports_list={supports_list}"
+            );
+            assert_eq!(
+                deleted["error"]["data"],
+                serde_json::json!({
+                    "error": "thread_not_found", "threadId": thread_id,
+                })
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn manager_delete_removes_the_durable_entry_and_stops_listing_the_session() {
         let (observed_tx, mut observed_rx) = mpsc::unbounded_channel();
         let connection = deleting_connection("delete-agent", true, false, observed_tx).await;
@@ -8357,6 +8537,22 @@ mod tests {
         .await
         .unwrap();
         let identity = AgentSessionId::new("delete-agent", "delete-agent-listed").unwrap();
+        // Missing local index data must not delete valid, unloaded agent history.
+        assert!(
+            !manager
+                .thread_is_authoritatively_absent(&identity.encode())
+                .await
+        );
+        assert!(!manager.thread_is_authoritatively_absent("invalid-id").await);
+        assert!(
+            !manager
+                .thread_is_authoritatively_absent(
+                    &AgentSessionId::new("unavailable-agent", "session")
+                        .unwrap()
+                        .encode()
+                )
+                .await
+        );
         manager
             .session_index
             .lock()
@@ -8381,6 +8577,8 @@ mod tests {
         );
         assert!(manager.session_index.lock().await.entries.is_empty());
         assert!(manager.loaded_session_ids().await.is_empty());
+        assert!(manager.read_session(&thread_id).await.is_err());
+        assert!(manager.thread_is_authoritatively_absent(&thread_id).await);
         manager.shutdown().await;
     }
 
@@ -11209,6 +11407,11 @@ mod tests {
                 )
                 .on_receive_request(
                     async move |request: ListSessionsRequest, responder, _| {
+                        if mode == 3 {
+                            return responder.respond_with_error(
+                                    agent_client_protocol::Error::internal_error(),
+                                );
+                        }
                         let page = request.cursor.as_deref().unwrap_or("first");
                         let response = match mode {
                             0 => ListSessionsResponse::new(Vec::new())
@@ -11237,12 +11440,26 @@ mod tests {
                 .0
         }
 
-        for mode in 0..3 {
+        for mode in 0..4 {
             let connection = listing_connection(mode).await;
             assert!(AgentManager::authoritative_session_ids(&connection)
                 .await
                 .is_err());
-            let _ = connection.shutdown().await;
+            let negotiated = connection.negotiated().clone();
+            let manager = AgentManager::from_start_results(
+                "listing".into(),
+                vec![(manifest("listing", "Listing"), Ok((connection, negotiated)))],
+            )
+            .await
+            .unwrap();
+            assert!(
+                !manager
+                    .thread_is_authoritatively_absent(
+                        &AgentSessionId::new("listing", "missing").unwrap().encode()
+                    )
+                    .await
+            );
+            manager.shutdown().await;
         }
     }
 

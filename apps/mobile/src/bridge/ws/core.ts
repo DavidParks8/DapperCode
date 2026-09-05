@@ -47,6 +47,8 @@ export abstract class HostBridgeWsClientCore {
   protected lastSeenEventId = 0;
   protected replaySupported = true;
   protected replayInFlight: Promise<void> | null = null;
+  protected replayRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  protected replayRetryAttempts = 0;
   protected replayGeneration = 0;
   protected recoveryWatermark: number | null = null;
   protected awaitingFreshRecoveryBaseline = false;
@@ -69,6 +71,13 @@ export abstract class HostBridgeWsClientCore {
       clearTimeout(this.connectionStableTimer);
       this.connectionStableTimer = null;
     }
+  }
+  protected clearReplayRetry(): void {
+    if (this.replayRetryTimer !== null) {
+      clearTimeout(this.replayRetryTimer);
+      this.replayRetryTimer = null;
+    }
+    this.replayRetryAttempts = 0;
   }
   public abstract get isConnected(): boolean;
   public abstract get bridgeProtocolError(): BridgeProtocolVersionError | null;

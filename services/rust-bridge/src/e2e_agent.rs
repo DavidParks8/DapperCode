@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     env,
     path::{Path, PathBuf},
     sync::Arc,
@@ -8,10 +9,11 @@ use std::{
 use agent_client_protocol::{
     on_receive_notification, on_receive_request,
     schema::v1::{
-        AgentCapabilities, CancelNotification, ContentChunk, InitializeRequest, InitializeResponse,
-        ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-        MessageId, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-        ResumeSessionRequest, ResumeSessionResponse, SessionCapabilities, SessionInfo,
+        AgentCapabilities, CancelNotification, ContentChunk, DeleteSessionRequest,
+        DeleteSessionResponse, InitializeRequest, InitializeResponse, ListSessionsRequest,
+        ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, MessageId,
+        NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse, ResumeSessionRequest,
+        ResumeSessionResponse, SessionCapabilities, SessionDeleteCapabilities, SessionInfo,
         SessionListCapabilities, SessionNotification, SessionResumeCapabilities, SessionUpdate,
         StopReason,
     },
@@ -21,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    sync::RwLock,
     time::{sleep, Instant},
 };
 
@@ -133,6 +136,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let control_path = required_path(CONTROL_ENV)?;
     let scenario: Arc<Scenario> =
         Arc::new(serde_json::from_slice(&fs::read(&scenario_path).await?)?);
+    let deleted_sessions = Arc::new(RwLock::new(HashSet::<String>::new()));
 
     let stdin = futures_util::stream::try_unfold(
         BufReader::new(tokio::io::stdin()).lines(),
@@ -159,6 +163,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .session_capabilities(
                         SessionCapabilities::new()
                             .list(SessionListCapabilities::new())
+                            .delete(SessionDeleteCapabilities::new())
                             .resume(SessionResumeCapabilities::new()),
                     );
                 let mut response = InitializeResponse::new(request.protocol_version)
@@ -182,11 +187,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .on_receive_request(
             {
                 let scenario = Arc::clone(&scenario);
+                let deleted_sessions = Arc::clone(&deleted_sessions);
                 async move |_request: ListSessionsRequest, responder, _| {
+                    let deleted = deleted_sessions.read().await;
                     responder.respond(ListSessionsResponse::new(
                         scenario
                             .chats
                             .iter()
+                            .filter(|chat| !deleted.contains(&chat.id))
                             .map(|chat| {
                                 let mut info = SessionInfo::new(
                                     chat.id.clone(),
@@ -210,7 +218,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .on_receive_request(
             {
                 let scenario = Arc::clone(&scenario);
+                let deleted_sessions = Arc::clone(&deleted_sessions);
                 async move |request: LoadSessionRequest, responder, connection| {
+                    if deleted_sessions
+                        .read()
+                        .await
+                        .contains(request.session_id.0.as_ref())
+                    {
+                        return responder
+                            .respond_with_error(agent_client_protocol::Error::invalid_params());
+                    }
                     replay_chat(&scenario, request.session_id.0.as_ref(), &connection).await?;
                     responder.respond(LoadSessionResponse::new())
                 }
@@ -220,7 +237,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .on_receive_request(
             {
                 let scenario = Arc::clone(&scenario);
+                let deleted_sessions = Arc::clone(&deleted_sessions);
                 async move |request: ResumeSessionRequest, responder, connection| {
+                    if deleted_sessions
+                        .read()
+                        .await
+                        .contains(request.session_id.0.as_ref())
+                    {
+                        return responder
+                            .respond_with_error(agent_client_protocol::Error::invalid_params());
+                    }
                     replay_chat(&scenario, request.session_id.0.as_ref(), &connection).await?;
                     responder.respond(ResumeSessionResponse::new())
                 }
@@ -230,6 +256,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .on_receive_request(
             async move |_request: NewSessionRequest, responder, _| {
                 responder.respond(NewSessionResponse::new("e2e-new-session"))
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: DeleteSessionRequest, responder, _| {
+                deleted_sessions
+                    .write()
+                    .await
+                    .insert(request.session_id.to_string());
+                responder.respond(DeleteSessionResponse::new())
             },
             on_receive_request!(),
         )

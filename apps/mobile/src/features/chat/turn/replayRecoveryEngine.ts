@@ -29,6 +29,7 @@ import {
 } from './controllers/replayRecoveryController';
 import { getTranscriptContinuationState } from '../transcript/controllers/continuationController';
 import { resolveEquivalentChat } from '../state/chatState';
+import { startNewChatAtom } from '@shell/navigation/actions';
 import type {
   MainScreenComposerSubmitActionsContext,
   MainScreenComposerSubmitActionsResult,
@@ -55,6 +56,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
     chatIdRef,
     chatPlanSnapshotsRef,
     deletedThreadIdsRef,
+    forgetThreadRuntimeState,
     mergeChatWithPendingOptimisticMessages,
     pendingOptimisticQueuedMessagesRef,
     pendingOptimisticUserMessagesRef,
@@ -85,6 +87,13 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
   const installReplayRecoverySnapshot = useCallback(
     (snapshot: ReplayRecoverySnapshot, guard: ReplayRecoveryInstallGuard) => {
+      for (const threadId of snapshot.missingThreadIds) {
+        api.forgetChat(threadId);
+        forgetThreadRuntimeState(threadId);
+      }
+      if (snapshot.missingThreadIds.some((threadId) => threadId === chatIdRef.current)) {
+        store.set(startNewChatAtom, { keepDrawerOpen: true });
+      }
       const approvalsByThread = new Map(
         snapshot.approvals.map((approval) => [approval.threadId, approval] as const),
       );
@@ -221,6 +230,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
       chatIdRef,
       chatPlanSnapshotsRef,
       deletedThreadIdsRef,
+      forgetThreadRuntimeState,
       mergeChatWithPendingOptimisticMessages,
       readThreadContextUsage,
       readThreadSessionTokenTotals,

@@ -98,6 +98,14 @@ pub(crate) type ThreadRetirementAdmission = tokio::sync::OwnedRwLockReadGuard<()
 pub(crate) type ThreadRetirementAdmissionBarrier = tokio::sync::OwnedRwLockWriteGuard<()>;
 
 impl ThreadRetirementFence {
+    pub(crate) fn is_deleted(&self, thread_id: &str) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .deleted
+            .contains(thread_id)
+    }
+
     pub(crate) async fn admit(&self, thread_id: &str) -> Result<ThreadRetirementAdmission, String> {
         self.admit_threads(&[thread_id]).await
     }
@@ -9093,6 +9101,24 @@ mod tests {
                 .unwrap_err(),
             "scheduled prompt submission ID must use the reserved prefix"
         );
+    }
+
+    #[tokio::test]
+    async fn deleted_fence_requires_confirmation_and_survives_later_rollback() {
+        let fence = Arc::new(ThreadRetirementFence::default());
+        let thread_ids = vec!["thread".to_string()];
+        let cancelled = fence.begin(&thread_ids).await;
+        assert!(!fence.is_deleted("thread"));
+        drop(cancelled);
+        assert!(!fence.is_deleted("thread"));
+        fence.begin(&thread_ids).await.finish().await;
+        assert!(!fence.is_deleted("thread"));
+        let overlapping = fence.begin(&thread_ids).await;
+        fence.begin(&thread_ids).await.finish_deleted().await;
+        assert!(fence.is_deleted("thread"));
+        drop(overlapping);
+        assert!(fence.is_deleted("thread"));
+        assert!(!fence.is_deleted("unrelated"));
     }
 
     #[tokio::test]

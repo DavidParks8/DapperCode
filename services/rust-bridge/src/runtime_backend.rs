@@ -2251,8 +2251,14 @@ impl RuntimeBackend {
         params: Option<Value>,
         permits: Option<InFlightRequestPermits>,
     ) -> Result<(), String> {
+        let read_thread_id = (method == "thread/read")
+            .then(|| {
+                params
+                    .as_ref()
+                    .and_then(|params| read_string(params.get("threadId")))
+            })
+            .flatten();
         let result = self.request_for_client(client_id, method, params).await;
-        drop(permits);
         if result.as_ref().map_err(String::as_str) == Err("client request cancelled")
             || result.as_ref().map_err(String::as_str) == Err("client disconnected")
         {
@@ -2260,11 +2266,43 @@ impl RuntimeBackend {
         }
         let payload = match result {
             Ok(result) => json!({ "id": client_request_id, "result": result }),
-            Err(message) => json!({
-                "id": client_request_id,
-                "error": { "code": -32601, "message": message }
-            }),
+            Err(message) => {
+                let error = if let Some(thread_id) =
+                    read_thread_id.filter(|id| !id.trim().is_empty())
+                {
+                    let absent = self
+                        .client_requests
+                        .run_with(client_id, |_| async {
+                            let deleted = self
+                                .thread_lifecycle
+                                .lock()
+                                .await
+                                .as_ref()
+                                .and_then(|services| services.queue.upgrade())
+                                .is_some_and(|queue| queue.retirement_fence.is_deleted(&thread_id));
+                            deleted
+                                || self
+                                    .manager
+                                    .thread_is_authoritatively_absent(&thread_id)
+                                    .await
+                        })
+                        .await
+                        .unwrap_or(false);
+                    if absent {
+                        thread_not_found_error(&thread_id)
+                    } else {
+                        BridgeError::method_not_found(&message)
+                    }
+                } else {
+                    BridgeError::method_not_found(&message)
+                };
+                json!({
+                    "id": client_request_id,
+                    "error": { "code": error.code, "message": error.message, "data": error.data }
+                })
+            }
         };
+        drop(permits);
         self.hub.send_json(client_id, payload).await;
         Ok(())
     }

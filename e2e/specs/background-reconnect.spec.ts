@@ -2,10 +2,11 @@ import type { Page } from '@playwright/test';
 
 import { selectors } from '../fixtures/selectors.ts';
 import { expect, test } from '../fixtures/test.ts';
-import { E2E_THREADS, FIXED_NOW_MS } from '../harness/scenario.ts';
+import { E2E_THREADS, FIXED_NOW_MS, scenarioThreadId } from '../harness/scenario.ts';
 import type { RealBridge } from '../harness/realBridge.ts';
 
 const kickoff = 'Complete the long task while this phone is locked.';
+const deletedThreadId = scenarioThreadId('deleted-while-offline');
 const chunks = [
   'Offline answer begins. ',
   ...Array.from({ length: 2_100 }, (_, index) => `Offline progress ${index}.`),
@@ -14,7 +15,7 @@ const chunks = [
 
 interface Snapshot {
   active: { runId?: string | null };
-  messages: Array<{ role: string; parts: unknown[] }>;
+  messages: Array<{ id: string; role: string; parts: unknown[] }>;
   messageCollection: { truncated: boolean; omittedCount: number };
 }
 
@@ -23,7 +24,7 @@ interface EventFrame {
   params?: { event?: { type?: string; delta?: string } };
 }
 
-test('same-session transcript recovers after background and offline replay overflow', async ({
+test('same-session transcript recovers after offline replay overflow and a cached chat deletion', async ({
   createApp,
   page,
 }, testInfo) => {
@@ -36,6 +37,8 @@ test('same-session transcript recovers after background and offline replay overf
   let liveTextDeltasAfterDisconnect = 0;
   let finalAnswerDeltasAfterDisconnect = 0;
   let boundedSnapshotsReceived = 0;
+  let deletedThreadConfirmedMissing = false;
+  const observedUserMessages = new Map<string, unknown[]>();
   page.on('websocket', (socket) => {
     if (new URL(socket.url()).pathname !== '/rpc') return;
     opened += 1;
@@ -46,8 +49,20 @@ test('same-session transcript recovers after background and offline replay overf
       received += 1;
       const frame = JSON.parse(String(payload)) as EventFrame & {
         eventId?: number;
-        result?: { events?: EventFrame[]; thread?: { acpSnapshot?: Snapshot } };
+        result?: {
+          events?: EventFrame[];
+          thread?: { acpSnapshot?: Snapshot };
+          entries?: Array<{ message?: Snapshot['messages'][number] }>;
+        };
+        error?: { code?: number; data?: { error?: string; threadId?: string } };
       };
+      if (
+        frame.error?.code === -32004 &&
+        frame.error.data?.error === 'thread_not_found' &&
+        frame.error.data.threadId === deletedThreadId
+      ) {
+        deletedThreadConfirmedMissing = true;
+      }
       if (typeof frame.eventId === 'number') lastEventId = Math.max(lastEventId, frame.eventId);
       for (const event of [frame, ...(frame.result?.events ?? [])]) {
         if (
@@ -62,6 +77,14 @@ test('same-session transcript recovers after background and offline replay overf
         }
       }
       const snapshot = frame.result?.thread?.acpSnapshot;
+      for (const message of [
+        ...(snapshot?.messages ?? []),
+        ...(Array.isArray(frame.result?.entries)
+          ? frame.result.entries.flatMap((entry) => (entry.message ? [entry.message] : []))
+          : []),
+      ]) {
+        if (message.role === 'user') observedUserMessages.set(message.id, message.parts);
+      }
       if (snapshot?.messageCollection.truncated && snapshot.messageCollection.omittedCount > 0) {
         boundedSnapshotsReceived += 1;
       }
@@ -69,15 +92,32 @@ test('same-session transcript recovers after background and offline replay overf
   });
   await page.clock.setSystemTime(FIXED_NOW_MS);
   const app = await createApp({
-    chatId: E2E_THREADS.layout,
-    scenario: { chats: [{ id: 'thread-layout', title: 'Background recovery', messages: [] }] },
+    chatId: deletedThreadId,
+    scenario: {
+      chats: [
+        { id: 'thread-layout', title: 'Background recovery', messages: [] },
+        {
+          id: 'deleted-while-offline',
+          title: 'Previously opened chat',
+          messages: [{ role: 'assistant', text: 'Cached before disconnect' }],
+        },
+      ],
+    },
   });
+  await expect(
+    selectors.assistantMessages(page).filter({ hasText: 'Cached before disconnect' }),
+  ).toBeVisible();
+  await app.openDrawer();
+  await selectors.drawerChatRow(page, E2E_THREADS.layout).click();
+  await expect
+    .poll(() => new URL(page.url()).pathname.endsWith(`/chats/${E2E_THREADS.layout}`))
+    .toBe(true);
+  await expect(selectors.assistantMessages(page)).toHaveCount(0);
   const route = page.url();
   const timeOrigin = await page.evaluate(() => performance.timeOrigin);
   const prompt = await app.bridge.prepareAssistantTurn({
-    messageId: 'offline-answer',
-    chunks,
-    separateMessages: true,
+    messageId: 'initial-turn',
+    chunks: [],
   });
   let disconnectedCursor = 0;
   let disconnectedFrames = 0;
@@ -110,6 +150,20 @@ test('same-session transcript recovers after background and offline replay overf
       FIXED_NOW_MS + 45 * 60_000,
     );
     await prompt.release();
+    await expect.poll(async () => (await readSnapshot(app.bridge)).active.runId == null).toBe(true);
+    // A second client deletes the cached chat and continues working while the phone stays offline.
+    await app.bridge.request('thread/delete', { threadId: deletedThreadId });
+    const offlineWork = await app.bridge.prepareAssistantTurn({
+      messageId: 'offline-answer',
+      chunks,
+      separateMessages: true,
+    });
+    await app.bridge.request('turn/start', {
+      threadId: E2E_THREADS.layout,
+      input: [{ type: 'text', text: 'Continue the background work.', text_elements: [] }],
+    });
+    await offlineWork.waitForStart();
+    await offlineWork.release();
   });
 
   await test.step('missed-output', async () => {
@@ -160,6 +214,7 @@ test('same-session transcript recovers after background and offline replay overf
         selectors.assistantMessages(page).filter({ hasText: 'Offline answer complete.' }),
       ).toBeInViewport();
       await expectSettled(page);
+      await expect.poll(() => deletedThreadConfirmedMissing).toBe(true);
       await expect(selectors.scrollRailBars(page)).toHaveCount(1);
       await expectKickoffRetained(page);
       expect(textDeltasAfterDisconnect).toBeLessThan(chunks.length);
@@ -177,6 +232,7 @@ test('same-session transcript recovers after background and offline replay overf
           liveTextDeltasAfterDisconnect,
           finalAnswerDeltasAfterDisconnect,
           boundedSnapshotsReceived,
+          deletedThreadConfirmedMissing,
           sameRoute: page.url() === route,
           sameDocument: (await page.evaluate(() => performance.timeOrigin)) === timeOrigin,
           assistantCount: await selectors.assistantMessages(page).count(),
@@ -223,12 +279,11 @@ test('same-session transcript recovers after background and offline replay overf
     await followup.waitForStart();
     await expect(selectors.composerStopSlot(page)).toBeVisible();
     await expect(selectors.runningGlyph(page)).toBeVisible();
-    await followup.release();
+    await Promise.all([
+      expect(selectors.activityEvent(page)).toHaveAttribute('aria-label', /^Turn completed(?:,|$)/),
+      followup.release(),
+    ]);
     await expectSettled(page);
-    await expect(selectors.activityEvent(page)).toHaveAttribute(
-      'aria-label',
-      /^Turn completed(?:,|$)/,
-    );
     await expect(
       selectors.assistantMessages(page).filter({ hasText: 'Follow-up completed after reconnect.' }),
     ).toBeInViewport();
@@ -247,7 +302,13 @@ test('same-session transcript recovers after background and offline replay overf
           scrollRailBars: await selectors
             .scrollRailBars(page)
             .evaluateAll((bars) => bars.map((element) => element.getAttribute('data-testid'))),
-          renderedUsers: await selectors.userMessages(page).allTextContents(),
+          renderedUsers: await selectors.userMessages(page).evaluateAll((elements) =>
+            elements.map((element) => ({
+              id: element.getAttribute('data-testid'),
+              text: element.textContent,
+            })),
+          ),
+          observedUserMessages: [...observedUserMessages].map(([id, parts]) => ({ id, parts })),
           activity: await selectors.activityEvent(page).allTextContents(),
           stopCount: await selectors.composerStopSlot(page).count(),
           sendCount: await selectors.composerSend(page).count(),
@@ -260,6 +321,9 @@ test('same-session transcript recovers after background and offline replay overf
     expect(liveTextDeltasAfterDisconnect).toBeGreaterThan(0);
     expect(page.url()).toBe(route);
     expect(await page.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
+    await app.openDrawer();
+    await expect(selectors.drawerChatRow(page, deletedThreadId)).toHaveCount(0);
+    await expect(selectors.drawerChatRow(page, E2E_THREADS.layout)).toBeVisible();
   });
 });
 

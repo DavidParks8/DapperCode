@@ -32,6 +32,7 @@ import type {
   ChatSummary,
 } from '@bridge/types/types';
 import type { HostBridgeWsClient } from '@bridge/ws/ws';
+import { RpcRequestError } from '@bridge/ws/errors';
 import { ChatMessage } from '../message/ChatMessage';
 import type { ChatMessageProps } from '../message/types';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
@@ -6410,6 +6411,171 @@ function MainRouteShell() {
       expect(text(harness.tree.root as Queryable, 'Recovered queued message')).toBe(true);
       expect(harness.ws.acknowledgeSnapshotRecovery).toHaveBeenCalledTimes(1);
       expect(harness.ws.acknowledgeSnapshotRecovery).toHaveBeenCalledWith(44);
+      harness.unmount();
+    });
+
+    it.each(['selected', 'background'] as const)(
+      'recovers after an offline %s deletion whose notification was evicted',
+      async (selection) => {
+        const deleted: Chat = {
+          ...baseChat,
+          id: 'offline-deleted',
+          title: 'Deleted history',
+          status: 'running',
+          activeTurnId: 'deleted-turn',
+        };
+        const surviving: Chat = {
+          ...baseChat,
+          status: 'running',
+          activeTurnId: 'surviving-turn',
+        };
+        const selected = selection === 'selected' ? deleted : surviving;
+        const api = createApi({ chat: selected });
+        const harness = await renderMain({ api, chat: selected });
+        const root = harness.tree.root as Queryable;
+        requireTestValue(api['peekChats'], 'cached history').mockReturnValue([deleted, surviving]);
+        expect(hasWorkingStatus(root, text)).toBe(true);
+        await harness.setConnected(false);
+        requireTestValue(api['listLoadedChatIds'], 'loaded history').mockResolvedValue([
+          surviving.id,
+        ]);
+        requireTestValue(api['getChat'], 'thread read').mockImplementation((threadId: string) =>
+          threadId === deleted.id
+            ? Promise.reject(
+                new RpcRequestError('thread/read', -32004, 'Thread not found', {
+                  error: 'thread_not_found',
+                  threadId,
+                }),
+              )
+            : Promise.resolve(surviving),
+        );
+        await harness.setConnected(true);
+        await harness.emit({
+          method: 'bridge/events/snapshotRequired',
+          params: { reason: 'replayTruncated', resumeAfterEventId: 49 },
+        });
+        await settleRecovery();
+        expect(harness.ws.acknowledgeSnapshotRecovery).toHaveBeenCalledTimes(1);
+        expect(harness.ws.acknowledgeSnapshotRecovery).toHaveBeenCalledWith(49);
+        expect(api['forgetChat']).toHaveBeenCalledWith(deleted.id);
+        expect(harness.store.get(threadRuntimeSnapshotsAtom)[deleted.id]).toBeUndefined();
+        expect(harness.store.get(liveAssistantByThreadAtom)[deleted.id]).toBeUndefined();
+        if (selection === 'selected') {
+          expect(harness.store.get(selectedChatAtom)).toBeNull();
+          expect(hasWorkingStatus(root, text)).toBe(false);
+          expect(
+            root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+          ).toHaveLength(0);
+          expect(input(root).props['editable']).not.toBe(false);
+          await act(async () => {
+            harness.ref.current?.openChat(surviving.id);
+          });
+          await settleRecovery();
+          await act(async () => {
+            jest.advanceTimersByTime(400);
+          });
+          await settleRecovery();
+        }
+        expect(harness.store.get(selectedChatAtom)?.id).toBe(surviving.id);
+        expect(hasWorkingStatus(root, text)).toBe(true);
+        expect(
+          root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+        ).not.toHaveLength(0);
+        const settled: Chat = {
+          ...surviving,
+          status: 'complete',
+          activeTurnId: null,
+          messages: [
+            ...surviving.messages,
+            {
+              id: 'surviving-answer',
+              role: 'assistant',
+              content: 'Surviving reply',
+              createdAt: now,
+            },
+          ],
+        };
+        requireTestValue(api['getChat'], 'thread read').mockResolvedValue(settled);
+        await harness.emit({
+          method: 'bridge/agui.event',
+          params: {
+            threadId: surviving.id,
+            runId: 'surviving-run',
+            sourceTurnId: 'surviving-turn',
+            event: { type: 'RUN_FINISHED', threadId: surviving.id, runId: 'surviving-run' },
+          },
+        });
+        await settleRecovery();
+        expect(hasWorkingStatus(root, text)).toBe(false);
+        expect(
+          root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+        ).toHaveLength(0);
+        requireTestValue(api['getChat'], 'thread read').mockClear();
+        // Even a stale catalog entry and late runtime event cannot resurrect the retired thread.
+        await harness.emit(
+          runtimeEvent('thread/tokenUsage/updated', {
+            threadId: deleted.id,
+            totalTokens: 20,
+            modelContextWindow: 100,
+          }),
+        );
+        await harness.emit({
+          method: 'bridge/events/snapshotRequired',
+          params: { reason: 'replayTruncated', resumeAfterEventId: 50 },
+        });
+        await settleRecovery();
+        expect(harness.ws.acknowledgeSnapshotRecovery).toHaveBeenLastCalledWith(50);
+        expect(api['getChat']).not.toHaveBeenCalledWith(deleted.id, expect.anything());
+        expect(harness.store.get(threadRuntimeSnapshotsAtom)[deleted.id]).toBeUndefined();
+        expect(harness.store.get(selectedChatAtom)?.status).toBe('complete');
+        expect(transcript(root).some(({ message }) => message.content === 'Surviving reply')).toBe(
+          true,
+        );
+        expect(hasWorkingStatus(root, text)).toBe(false);
+        expect(
+          root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+        ).toHaveLength(0);
+        expect(input(root).props['editable']).not.toBe(false);
+        harness.unmount();
+      },
+    );
+
+    it('keeps missing-thread retirement atomic when a surviving read transiently fails', async () => {
+      const api = createApi();
+      const harness = await renderMain({ api, chat: baseChat });
+      requireTestValue(api['listLoadedChatIds'], 'loaded history').mockResolvedValue([
+        'gone',
+        'retry',
+      ]);
+      let failed = true;
+      requireTestValue(api['getChat'], 'thread read').mockImplementation((threadId: string) => {
+        if (threadId === 'gone') {
+          return Promise.reject(
+            new RpcRequestError('thread/read', -32004, 'Thread not found', {
+              error: 'thread_not_found',
+              threadId,
+            }),
+          );
+        }
+        if (threadId === 'retry' && failed) {
+          return Promise.reject(new Error('agent unavailable'));
+        }
+        return Promise.resolve({ ...baseChat, id: threadId });
+      });
+      await harness.emit({
+        method: 'bridge/events/snapshotRequired',
+        params: { reason: 'replayTruncated', resumeAfterEventId: 51 },
+      });
+      await settleRecovery();
+      expect(harness.ws.acknowledgeSnapshotRecovery).not.toHaveBeenCalled();
+      expect(api['forgetChat']).not.toHaveBeenCalled();
+      failed = false;
+      await act(async () => {
+        jest.advanceTimersByTime(1_000);
+      });
+      await settleRecovery();
+      expect(api['forgetChat']).toHaveBeenCalledWith('gone');
+      expect(harness.ws.acknowledgeSnapshotRecovery).toHaveBeenCalledTimes(1);
       harness.unmount();
     });
 

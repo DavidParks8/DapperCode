@@ -1,5 +1,23 @@
 use crate::*;
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct BridgeThreadNotFoundErrorData<'a> {
+    pub(super) error: &'static str,
+    pub(super) thread_id: &'a str,
+}
+
+pub(super) fn thread_not_found_error(thread_id: &str) -> BridgeError {
+    BridgeError {
+        code: -32004,
+        message: "Thread not found".to_string(),
+        data: Some(json!(BridgeThreadNotFoundErrorData {
+            error: "thread_not_found",
+            thread_id,
+        })),
+    }
+}
+
 pub(super) struct InFlightRequestPermits {
     pub(super) _client: OwnedSemaphorePermit,
     pub(super) _global: OwnedSemaphorePermit,

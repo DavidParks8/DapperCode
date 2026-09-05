@@ -4,6 +4,7 @@ import type { Chat } from '@bridge/types/types';
 import {
   TranscriptContinuationController,
   getTranscriptContinuationState,
+  mergeTranscriptPage,
 } from './continuationController';
 
 function snapshot(): RawAcpSnapshot {
@@ -62,6 +63,19 @@ function page(overrides: Partial<SnapshotPageResponse>): SnapshotPageResponse {
   };
 }
 
+async function loadEarlier(controller: TranscriptContinuationController, current: Chat) {
+  const result = await controller.loadEarlier(current);
+  const merged = result.kind === 'page' ? mergeTranscriptPage(current, result.page) : current;
+  return {
+    ...result,
+    chat: merged,
+    state: {
+      ...getTranscriptContinuationState(merged),
+      error: result.kind === 'error' ? result.error : null,
+    },
+  };
+}
+
 describe('TranscriptContinuationController', () => {
   it('merges pages chronologically until exhaustion and deduplicates repeated entries', async () => {
     const readSnapshotPage = jest
@@ -115,17 +129,17 @@ describe('TranscriptContinuationController', () => {
       );
     const controller = new TranscriptContinuationController({ readSnapshotPage });
 
-    const first = await controller.loadEarlier(chat());
-    expect(first.kind).toBe('merged');
-    if (first.kind !== 'merged') {
+    const first = await loadEarlier(controller, chat());
+    expect(first.kind).toBe('page');
+    if (first.kind !== 'page') {
       return;
     }
     expect(first.chat.acpSnapshot?.timeline?.map((entry) => entry.sequence)).toEqual([2, 3]);
     expect(first.state.exhausted).toBe(false);
 
-    const second = await controller.loadEarlier(first.chat);
-    expect(second.kind).toBe('merged');
-    if (second.kind !== 'merged') {
+    const second = await loadEarlier(controller, first.chat);
+    expect(second.kind).toBe('page');
+    if (second.kind !== 'page') {
       return;
     }
     expect(second.chat.acpSnapshot?.timeline?.map((entry) => entry.sequence)).toEqual([1, 2, 3]);
@@ -186,9 +200,9 @@ describe('TranscriptContinuationController', () => {
       .mockResolvedValueOnce(page({ unavailableCount: 1 }));
     const controller = new TranscriptContinuationController({ readSnapshotPage });
 
-    const first = await controller.loadEarlier(recovered);
-    expect(first.kind).toBe('merged');
-    if (first.kind !== 'merged') {
+    const first = await loadEarlier(controller, recovered);
+    expect(first.kind).toBe('page');
+    if (first.kind !== 'page') {
       throw new Error('Expected an earlier history page');
     }
     expect(first.chat.messages.filter(({ role }) => role !== 'system').map(({ id }) => id)).toEqual(
@@ -196,9 +210,9 @@ describe('TranscriptContinuationController', () => {
     );
     expect(first.state.exhausted).toBe(false);
 
-    const second = await controller.loadEarlier(first.chat);
-    expect(second.kind).toBe('merged');
-    if (second.kind !== 'merged') {
+    const second = await loadEarlier(controller, first.chat);
+    expect(second.kind).toBe('page');
+    if (second.kind !== 'page') {
       throw new Error('Expected the final history boundary');
     }
     expect(
@@ -218,9 +232,9 @@ describe('TranscriptContinuationController', () => {
         page({ entries: [{ sequence: 2, kind: 'reasoning', canonicalId: 'reasoning' }] }),
       );
     const controller = new TranscriptContinuationController({ readSnapshotPage });
-    const first = await controller.loadEarlier(chat());
+    const first = await loadEarlier(controller, chat());
     expect(first.state.error).toBe('offline');
-    const retry = await controller.loadEarlier(chat());
+    const retry = await loadEarlier(controller, chat());
     expect(retry.state.error).toBeNull();
     expect(readSnapshotPage).toHaveBeenCalledTimes(2);
   });
@@ -230,5 +244,34 @@ describe('TranscriptContinuationController', () => {
       readSnapshotPage: jest.fn().mockResolvedValue(page({ revision: 8 })),
     });
     await expect(controller.loadEarlier(chat())).resolves.toMatchObject({ kind: 'stale' });
+  });
+
+  it('does not replace canonical content with overlapping older page entries', async () => {
+    const current = applySnapshotToChat(chat(), snapshot());
+    const controller = new TranscriptContinuationController({
+      readSnapshotPage: jest.fn().mockResolvedValue(
+        page({
+          entries: [
+            {
+              sequence: 3,
+              kind: 'message',
+              canonicalId: 'newest',
+              message: {
+                id: 'newest',
+                role: 'agent',
+                parts: [{ type: 'text', text: 'stale partial response' }],
+                truncated: false,
+              },
+            },
+          ],
+        }),
+      ),
+    });
+    const result = await loadEarlier(controller, current);
+    expect(result.chat.messages.find(({ id }) => id === 'newest')).toBe(
+      current.messages.find(({ id }) => id === 'newest'),
+    );
+    expect(result.chat.acpSnapshot?.messages).toEqual(snapshot().messages);
+    expect(result.state.exhausted).toBe(true);
   });
 });

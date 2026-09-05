@@ -1,5 +1,5 @@
-import { getSubAgentMeta } from '@bridge/messages';
 import type { Chat, ChatMessage, ChatSummary } from '@bridge/types/types';
+import { toRecord } from '@shared/runtimeValidation';
 
 const CHAT_SUMMARY_IDENTITY_FIELDS = [
   'id',
@@ -8,6 +8,7 @@ const CHAT_SUMMARY_IDENTITY_FIELDS = [
   'createdAt',
   'updatedAt',
   'statusUpdatedAt',
+  'timestampsSynthesized',
   'lastMessagePreview',
   'cwd',
   'lastError',
@@ -62,9 +63,22 @@ export function areChatsEquivalent(previous: Chat | null, next: Chat | null): bo
     areChatPlansEquivalent(previous.latestPlan, next.latestPlan) &&
     areChatPlansEquivalent(previous.latestTurnPlan, next.latestTurnPlan) &&
     previous.latestTurnStatus === next.latestTurnStatus &&
+    areChatRuntimeFieldsEquivalent(previous, next) &&
     areContextUsagesEquivalent(previous.acpUsage, next.acpUsage) &&
     areTokenTotalsEquivalent(previous.tokenTotals, next.tokenTotals) &&
-    areChatMessagesEquivalent(previous.messages, next.messages)
+    areChatMessagesEquivalent(previous.messages, next.messages) &&
+    // Snapshot revisions/cursors and raw payloads drive subsequent replay and history merges.
+    areChatPayloadsEquivalent(previous.acpSnapshot, next.acpSnapshot)
+  );
+}
+
+function areChatRuntimeFieldsEquivalent(previous: Chat, next: Chat): boolean {
+  return (
+    previous.activeTurnId === next.activeTurnId &&
+    previous.acpMode === next.acpMode &&
+    areChatPayloadsEquivalent(previous.acpActive, next.acpActive) &&
+    areChatPayloadsEquivalent(previous.acpConfig, next.acpConfig) &&
+    areChatPayloadsEquivalent(previous.acpCommands, next.acpCommands)
   );
 }
 
@@ -169,10 +183,14 @@ function areChatMessagesEquivalent(previous: ChatMessage[], next: ChatMessage[])
     if (!left || !right) {
       return false;
     }
+    if (left === right) {
+      continue;
+    }
+    const { usage: leftUsage, ...leftPayload } = left;
+    const { usage: rightUsage, ...rightPayload } = right;
     if (
-      !areChatMessageFieldsEquivalent(left, right) ||
-      !areActivityTypesEquivalent(left, right) ||
-      !areChatMessageSubAgentMetaEquivalent(getSubAgentMeta(left), getSubAgentMeta(right))
+      !areMessageUsagesEquivalent(leftUsage, rightUsage) ||
+      !areChatPayloadsEquivalent(leftPayload, rightPayload)
     ) {
       return false;
     }
@@ -181,24 +199,23 @@ function areChatMessagesEquivalent(previous: ChatMessage[], next: ChatMessage[])
   return true;
 }
 
-function areChatMessageFieldsEquivalent(left: ChatMessage, right: ChatMessage): boolean {
+function areChatPayloadsEquivalent(previous: unknown, next: unknown): boolean {
   return (
-    left.id === right.id &&
-    left.role === right.role &&
-    JSON.stringify(left.content) === JSON.stringify(right.content) &&
-    left.createdAt === right.createdAt &&
-    left.completedAt === right.completedAt &&
-    left.pending === right.pending &&
-    areMessageUsagesEquivalent(left.usage, right.usage)
+    previous === next ||
+    JSON.stringify(previous, sortedPayloadKeys) === JSON.stringify(next, sortedPayloadKeys)
   );
 }
 
-function areActivityTypesEquivalent(left: ChatMessage, right: ChatMessage): boolean {
-  return (
-    left.role !== 'activity' ||
-    right.role !== 'activity' ||
-    left.activityType === right.activityType
-  );
+function sortedPayloadKeys(_key: string, value: unknown): unknown {
+  const record = toRecord(value);
+  // JSON objects are unordered; arrays (parts, tool calls, timeline entries) are not.
+  return record
+    ? Object.fromEntries(
+        Object.keys(record)
+          .sort()
+          .map((key) => [key, record[key]]),
+      )
+    : value;
 }
 
 function areMessageUsagesEquivalent(
@@ -251,38 +268,4 @@ function areTokenTotalsEquivalent(
     previous.cachedWriteTokens === next.cachedWriteTokens &&
     previous.totalTokens === next.totalTokens
   );
-}
-
-function areChatMessageSubAgentMetaEquivalent(
-  previous: ReturnType<typeof getSubAgentMeta>,
-  next: ReturnType<typeof getSubAgentMeta>,
-): boolean {
-  if (previous === next) {
-    return true;
-  }
-  if (!previous || !next) {
-    return !previous && !next;
-  }
-  if (
-    previous.tool !== next.tool ||
-    previous.prompt !== next.prompt ||
-    previous.senderThreadId !== next.senderThreadId ||
-    previous.agentStatus !== next.agentStatus
-  ) {
-    return false;
-  }
-
-  const previousReceiverThreadIds = previous.receiverThreadIds ?? [];
-  const nextReceiverThreadIds = next.receiverThreadIds ?? [];
-  if (previousReceiverThreadIds.length !== nextReceiverThreadIds.length) {
-    return false;
-  }
-
-  for (let index = 0; index < previousReceiverThreadIds.length; index += 1) {
-    if (previousReceiverThreadIds[index] !== nextReceiverThreadIds[index]) {
-      return false;
-    }
-  }
-
-  return true;
 }
