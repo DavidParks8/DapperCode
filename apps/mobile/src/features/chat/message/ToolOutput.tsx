@@ -13,7 +13,7 @@ import {
 } from './syntaxHighlight';
 import { createToolCardStyles } from './toolCardStyles';
 import type { ToolInvocation, ToolInvocationDiff } from './toolInvocationModel';
-import { compactToolDiff } from './toolInvocationPresentation';
+import { compactToolDiff, formatChangedLineCount } from './toolInvocationPresentation';
 import { useHorizontalOverflow } from '@shared/ui/useHorizontalOverflow';
 import { SelectableOutput } from './SelectableOutput/SelectableOutput';
 import {
@@ -338,10 +338,6 @@ function ToolDiffBlock({
       ) : null}
     </View>
   );
-}
-
-function formatChangedLineCount(count: number, kind: 'added' | 'removed'): string {
-  return `${String(count)} ${count === 1 ? 'line' : 'lines'} ${kind}`;
 }
 
 function locationsNotRepeatedInHeader(

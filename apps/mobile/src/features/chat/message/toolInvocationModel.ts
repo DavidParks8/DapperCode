@@ -134,7 +134,10 @@ function resolveInvocationMetaFields(meta: ChatToolMeta | null): {
   isError: boolean;
   truncated: boolean;
 } {
-  const kind = meta?.kind ?? 'other';
+  const kind =
+    meta?.kind === 'other' && /^(?:functions\.)?apply_patch$/i.test(meta.title.trim())
+      ? 'edit'
+      : (meta?.kind ?? 'other');
   const status = meta?.status ?? 'completed';
   return {
     kind,
@@ -437,7 +440,7 @@ function suppressRenderedLocationLines(suppressedLines: Set<string>, value: unkn
   }
 }
 
-function normalizeLocationPath(path: string): string {
+export function normalizeLocationPath(path: string): string {
   return path
     .trim()
     .replace(/^\.\//, '')
@@ -449,8 +452,7 @@ function dedupeDiffs(diffs: ToolInvocationDiff[]): ToolInvocationDiff[] {
   const latestByPath = new Map<string, ToolInvocationDiff>();
   for (const diff of diffs) {
     const key = normalizeLocationPath(diff.path);
-    // Structured tool updates append, so the latest complete before/after payload owns each path.
-    latestByPath.delete(key);
+    // Replace revisions without moving files that are already visible in the live summary.
     latestByPath.set(key, diff);
   }
   return [...latestByPath.values()];

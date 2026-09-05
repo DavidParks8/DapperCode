@@ -121,6 +121,24 @@ await app.bridge.streamAssistantTurn({
 });
 ```
 
+For live tool state, pass `toolSteps` containing typed ACP `tool_call` / `tool_call_update`
+notifications and an optional `whilePaused` callback on each step. The fixture sends that update,
+then holds until the callback finishes before sending the next update. Each hold is bounded to 30
+seconds; failed observations release all remaining holds during cleanup. Tool steps run before
+assistant chunks and the optional final `whileRunning` callback.
+
+`patch-progress.spec.ts` exercises pending → running → revised same-file counts → a second long
+path → status-only completion, plus a failed edit with missing/oversized diff counts. Both viewport
+projects verify that per-file rows remain visible while details are collapsed, paths stay in stable
+order without duplicates, counts and accessible labels agree, and rows do not overlap or escape the
+transcript. It also verifies settled shimmer/stop/composer state and preservation through a page
+reload from the real bridge snapshot. Running and settled screenshots use `testInfo.outputPath`
+(`patch-running.png`, `patch-settled.png`, `patch-before-failure.png`, `patch-failed.png`).
+
+Run just this regression with `pnpm run e2e -- patch-progress.spec.ts`. When using the
+`local-e2e-validation` skill, execute that command through its scripted runner rather than manually
+orchestrating services.
+
 ## How parallel safety works
 
 Nothing in the suite uses a fixed port or a shared mutable path.

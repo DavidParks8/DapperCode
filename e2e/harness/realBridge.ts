@@ -16,6 +16,7 @@ import {
 const START_TIMEOUT_MS = 30_000;
 const RPC_TIMEOUT_MS = 15_000;
 const SHUTDOWN_TIMEOUT_MS = 20_000;
+const HOLD_TIMEOUT_MS = 30_000;
 
 export interface RealBridgeOptions {
   readonly scenario?: Scenario | ScenarioOverrides;
@@ -25,9 +26,34 @@ export interface StreamAssistantTurnOptions {
   readonly threadId: string;
   readonly messageId?: string;
   readonly chunks: readonly string[];
+  readonly toolSteps?: readonly ToolStep[];
   readonly delayMs?: number;
   readonly succeed?: boolean;
   readonly whileRunning?: () => Promise<void>;
+}
+
+interface ToolFields {
+  readonly toolCallId: string;
+  readonly title?: string;
+  readonly kind?: 'edit' | 'other';
+  readonly status?: 'pending' | 'in_progress' | 'completed' | 'failed';
+  readonly content?: readonly {
+    readonly type: 'diff';
+    readonly path: string;
+    readonly oldText: string | null;
+    readonly newText: string;
+  }[];
+  readonly locations?: readonly { readonly path: string; readonly line?: number }[];
+}
+
+export interface ToolStep {
+  readonly update: ToolFields &
+    (
+      | { readonly sessionUpdate: 'tool_call'; readonly title: string }
+      | { readonly sessionUpdate: 'tool_call_update' }
+    );
+  /** The typed ACP agent holds after this notification until the observation finishes (30s max). */
+  readonly whilePaused?: () => Promise<void>;
 }
 
 export interface RealBridge {
@@ -186,13 +212,38 @@ export async function startRealBridge(options: RealBridgeOptions = {}): Promise<
         const messageId = streamOptions.messageId ?? `e2e-message-${randomUUID()}`;
         const holdingPath = replaceExtension(controlPath, 'holding');
         const releasePath = replaceExtension(controlPath, 'release');
+        const toolSteps = streamOptions.toolSteps ?? [];
+        const checkpoints = toolSteps.flatMap((step, index) =>
+          step.whilePaused
+            ? [
+                {
+                  holding: replaceExtension(controlPath, `tool-${String(index)}.holding`),
+                  release: replaceExtension(controlPath, `tool-${String(index)}.release`),
+                  observe: step.whilePaused,
+                },
+              ]
+            : [],
+        );
+        if (streamOptions.whileRunning) {
+          checkpoints.push({
+            holding: holdingPath,
+            release: releasePath,
+            observe: streamOptions.whileRunning,
+          });
+        }
         await Promise.all([
-          rm(holdingPath, { force: true }),
-          rm(releasePath, { force: true }),
+          ...checkpoints.flatMap(({ holding, release }) => [
+            rm(holding, { force: true }),
+            rm(release, { force: true }),
+          ]),
           writeFile(
             controlPath,
             JSON.stringify({
               chunks: streamOptions.chunks,
+              toolSteps: toolSteps.map((step) => ({
+                update: step.update,
+                hold: Boolean(step.whilePaused),
+              })),
               delayMs: streamOptions.delayMs ?? 0,
               succeed: streamOptions.succeed ?? true,
               hold: Boolean(streamOptions.whileRunning),
@@ -212,8 +263,10 @@ export async function startRealBridge(options: RealBridgeOptions = {}): Promise<
             socket,
             streamOptions.threadId,
             streamOptions.succeed ?? true,
-            RPC_TIMEOUT_MS,
+            RPC_TIMEOUT_MS + checkpoints.length * HOLD_TIMEOUT_MS,
           );
+          // Observations may still be running when a transport failure rejects the terminal wait.
+          void terminal.promise.catch(() => {});
           try {
             await sendRpc(socket, 'turn/start', {
               threadId: streamOptions.threadId,
@@ -221,14 +274,18 @@ export async function startRealBridge(options: RealBridgeOptions = {}): Promise<
               cwd: workspaceDir,
               approvalPolicy: 'untrusted',
             });
-            if (streamOptions.whileRunning) {
-              await waitForFile(holdingPath, RPC_TIMEOUT_MS);
-              await streamOptions.whileRunning();
-              await writeFile(releasePath, 'release', { mode: 0o600 });
+            for (const checkpoint of checkpoints) {
+              await waitForFile(checkpoint.holding, RPC_TIMEOUT_MS);
+              await checkpoint.observe();
+              await writeFile(checkpoint.release, 'release', { mode: 0o600 });
             }
             await terminal.promise;
           } finally {
             terminal.cancel();
+            // A failed assertion must not strand the ACP agent at this or a later hold point.
+            await Promise.all(
+              checkpoints.map(({ release }) => writeFile(release, 'release', { mode: 0o600 })),
+            );
           }
         } finally {
           await closeSocket(socket);
