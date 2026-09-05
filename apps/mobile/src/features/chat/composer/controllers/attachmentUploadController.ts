@@ -2,7 +2,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
 import type { HostBridgeApiClient } from '@bridge/client/client';
@@ -15,6 +15,15 @@ export const ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
 export const ATTACHMENT_MAX_LABEL = '20 MB';
 const IMAGE_MAX_DIMENSION = 2048;
 const IMAGE_COMPRESSION = 0.8;
+
+export interface PastedImage {
+  uri: string;
+  width: number;
+  height: number;
+  fileName?: string;
+  fileSize?: number;
+  scopeKey: string;
+}
 
 export interface PreparedAttachment {
   id: string;
@@ -44,20 +53,57 @@ export function retainFailedPreparedAttachment(
 export function useAttachmentUploadController({
   api,
   chat,
+  scopeKey,
   addImage,
   addMention,
   setError,
 }: {
   api: AttachmentApi;
   chat: Chat | null;
+  scopeKey: string;
   addImage: (rawPath: string) => boolean;
   addMention: (rawPath: string) => boolean;
   setError: React.Dispatch<React.SetStateAction<string | null>>;
 }) {
   const [pickerBusy, setPickerBusy] = useState(false);
+  const [pasteBusy, setNativePasteBusy] = useState(false);
+  const [preparing, setPreparing] = useState(0);
   const [preparedAttachments, setPreparedAttachments] = useState<PreparedAttachment[]>([]);
   const pickerInProgressRef = useRef(false);
-  const uploading = preparedAttachments.some((attachment) => attachment.status === 'uploading');
+  const generationRef = useRef(0);
+  const scopeRef = useRef(scopeKey);
+  scopeRef.current = scopeKey;
+  const uploadsRef = useRef(new Map<string, symbol>());
+  const generation = generationRef.current;
+  const isCurrent = useCallback(
+    () => generation === generationRef.current && scopeKey === scopeRef.current,
+    [generation, scopeKey],
+  );
+  const clearUploads = useCallback(() => {
+    generationRef.current += 1;
+    uploadsRef.current.clear();
+    pickerInProgressRef.current = false;
+    setPickerBusy(false);
+    setNativePasteBusy(false);
+    setPreparing(0);
+    setPreparedAttachments([]);
+  }, []);
+
+  useLayoutEffect(() => {
+    return () => {
+      generationRef.current += 1;
+    };
+  }, [scopeKey]);
+
+  const removePreparedAttachment = useCallback((id: string) => {
+    uploadsRef.current.delete(id);
+    setPreparedAttachments((current) => current.filter((entry) => entry.id !== id));
+  }, []);
+  const uploading =
+    pickerBusy ||
+    pasteBusy ||
+    preparing > 0 ||
+    preparedAttachments.some((attachment) => attachment.status === 'uploading');
 
   const upload = useCallback(
     async ({
@@ -66,21 +112,32 @@ export function useAttachmentUploadController({
       mimeType,
       kind,
       knownSize,
+      onPrepared,
     }: {
       uri: string;
       fileName?: string;
       mimeType?: string;
       kind: 'file' | 'image';
       knownSize?: number;
+      onPrepared?: () => void;
     }) => {
+      if (!isCurrent()) {
+        return;
+      }
       const normalizedUri = normalizeAttachmentPath(uri);
       if (!normalizedUri) {
         setError('Unable to read attachment from this device');
         return;
       }
-      let preparedId: string | null = null;
+      const preparedId = `${kind}:${normalizedUri}`;
+      const token = Symbol();
+      uploadsRef.current.set(preparedId, token);
+      const isActive = () => isCurrent() && uploadsRef.current.get(preparedId) === token;
       try {
         const info = await FileSystem.getInfoAsync(normalizedUri);
+        if (!isActive()) {
+          return;
+        }
         if (!info.exists || info.isDirectory) {
           throw new Error('Unable to read attachment from this device');
         }
@@ -92,7 +149,6 @@ export function useAttachmentUploadController({
         if (sizeError) {
           throw new Error(sizeError);
         }
-        preparedId = `${kind}:${normalizedUri}`;
         const prepared: PreparedAttachment = {
           id: preparedId,
           uri: normalizedUri,
@@ -106,6 +162,7 @@ export function useAttachmentUploadController({
           ...current.filter((entry) => entry.id !== prepared.id),
           prepared,
         ]);
+        onPrepared?.();
         const uploaded = await api.uploadAttachment({
           uri: normalizedUri,
           fileName,
@@ -113,27 +170,43 @@ export function useAttachmentUploadController({
           threadId: chat?.id,
           kind,
         });
+        if (!isActive()) {
+          return;
+        }
         if (uploaded.kind === 'image') {
           addImage(uploaded.path);
         } else {
           addMention(uploaded.path);
         }
         setPreparedAttachments((current) => current.filter((entry) => entry.id !== preparedId));
+        uploadsRef.current.delete(preparedId);
         setError(null);
       } catch (error) {
-        const failedId = preparedId;
-        if (failedId) {
-          setPreparedAttachments((current) => retainFailedPreparedAttachment(current, failedId));
+        if (!isActive()) {
+          return;
         }
+        uploadsRef.current.delete(preparedId);
+        setPreparedAttachments((current) => retainFailedPreparedAttachment(current, preparedId));
         setError((error as Error).message);
       }
     },
-    [addImage, addMention, api, chat?.id, setError],
+    [addImage, addMention, api, chat?.id, isCurrent, setError],
   );
 
   const retryFailedUploads = useCallback(() => {
+    if (!isCurrent()) {
+      return;
+    }
     const failed = preparedAttachments.filter((attachment) => attachment.status === 'failed');
     for (const attachment of failed) {
+      if (uploadsRef.current.has(attachment.id)) {
+        continue;
+      }
+      setPreparedAttachments((current) =>
+        current.map((entry) =>
+          entry.id === attachment.id ? { ...entry, status: 'uploading' } : entry,
+        ),
+      );
       void upload({
         uri: attachment.uri,
         fileName: attachment.fileName,
@@ -142,11 +215,87 @@ export function useAttachmentUploadController({
         knownSize: attachment.sizeBytes,
       });
     }
-  }, [preparedAttachments, upload]);
+  }, [isCurrent, preparedAttachments, upload]);
+
+  const prepareAndUploadImage = useCallback(
+    async (image: Omit<PastedImage, 'scopeKey'>, pasted = false, onPrepared?: () => void) => {
+      let prepared;
+      try {
+        try {
+          if (!isCurrent()) {
+            return;
+          }
+          prepared = await prepareImage(image.uri, image.width, image.height, image.fileSize);
+        } finally {
+          // Only native paste transfers ownership of its source temp file to us.
+          if (pasted) {
+            await FileSystem.deleteAsync(image.uri, { idempotent: true }).catch(() => undefined);
+          }
+        }
+        if (!isCurrent()) {
+          return;
+        }
+        await upload({
+          uri: prepared.uri,
+          fileName: toJpegFileName(image.fileName ?? 'image.jpg'),
+          mimeType: 'image/jpeg',
+          kind: 'image',
+          onPrepared,
+        });
+      } catch (error) {
+        if (isCurrent()) {
+          setError((error as Error).message);
+        }
+      }
+    },
+    [isCurrent, setError, upload],
+  );
+
+  const pasteImage = useCallback(
+    async (image: PastedImage): Promise<void> => {
+      if (!isCurrent() || image.scopeKey !== scopeKey) {
+        await FileSystem.deleteAsync(image.uri, { idempotent: true }).catch(() => undefined);
+        return;
+      }
+      setPreparing((current) => current + 1);
+      setError(null);
+      let preparing = true;
+      const finishPreparing = () => {
+        if (preparing && isCurrent()) {
+          setPreparing((current) => current - 1);
+        }
+        preparing = false;
+      };
+      try {
+        await prepareAndUploadImage(image, true, finishPreparing);
+      } finally {
+        finishPreparing();
+      }
+    },
+    [isCurrent, prepareAndUploadImage, scopeKey, setError],
+  );
+
+  const setPasteBusy = useCallback(
+    (event: { busy: boolean; scopeKey: string }) => {
+      if (isCurrent() && event.scopeKey === scopeKey) {
+        setNativePasteBusy(event.busy);
+      }
+    },
+    [isCurrent, scopeKey],
+  );
+
+  const pasteError = useCallback(
+    (event: { message: string; scopeKey: string }) => {
+      if (isCurrent() && event.scopeKey === scopeKey) {
+        setError(event.message);
+      }
+    },
+    [isCurrent, scopeKey, setError],
+  );
 
   const runPicker = useCallback(
     async (picker: () => Promise<void>) => {
-      if (pickerInProgressRef.current) {
+      if (!isCurrent() || pickerInProgressRef.current) {
         return;
       }
       pickerInProgressRef.current = true;
@@ -154,13 +303,17 @@ export function useAttachmentUploadController({
       try {
         await picker();
       } catch (error) {
-        setError((error as Error).message);
+        if (isCurrent()) {
+          setError((error as Error).message);
+        }
       } finally {
-        pickerInProgressRef.current = false;
-        setPickerBusy(false);
+        if (isCurrent()) {
+          pickerInProgressRef.current = false;
+          setPickerBusy(false);
+        }
       }
     },
-    [setError],
+    [isCurrent, setError],
   );
 
   const pickFile = useCallback(
@@ -171,6 +324,9 @@ export function useAttachmentUploadController({
           copyToCacheDirectory: true,
           multiple: false,
         });
+        if (!isCurrent()) {
+          return;
+        }
         const file = result.canceled ? null : result.assets[0];
         if (file) {
           const sizeError = typeof file.size === 'number' ? attachmentSizeError(file.size) : null;
@@ -187,7 +343,7 @@ export function useAttachmentUploadController({
           });
         }
       }),
-    [runPicker, setError, upload],
+    [isCurrent, runPicker, setError, upload],
   );
 
   const pickImage = useCallback(
@@ -195,6 +351,9 @@ export function useAttachmentUploadController({
       runPicker(async () => {
         if (Platform.OS !== 'ios') {
           const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (!isCurrent()) {
+            return;
+          }
           if (!permission.granted) {
             setError('Photo library permission is required to attach images');
             return;
@@ -206,24 +365,24 @@ export function useAttachmentUploadController({
           base64: false,
           allowsMultipleSelection: false,
         });
+        if (!isCurrent()) {
+          return;
+        }
         const image = result.canceled ? null : result.assets[0];
         if (image) {
-          const prepared = await prepareImage(image.uri, image.width, image.height, image.fileSize);
-          await upload({
-            uri: prepared.uri,
-            fileName: toJpegFileName(image.fileName ?? 'image.jpg'),
-            mimeType: 'image/jpeg',
-            kind: 'image',
-          });
+          await prepareAndUploadImage({ ...image, fileName: image.fileName ?? 'image.jpg' });
         }
       }),
-    [runPicker, setError, upload],
+    [isCurrent, prepareAndUploadImage, runPicker, setError],
   );
 
   const captureImage = useCallback(
     () =>
       runPicker(async () => {
         const permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (!isCurrent()) {
+          return;
+        }
         if (!permission.granted) {
           setError('Camera permission is required to take a photo');
           return;
@@ -234,29 +393,31 @@ export function useAttachmentUploadController({
           base64: false,
           allowsEditing: false,
         });
+        if (!isCurrent()) {
+          return;
+        }
         const image = result.canceled ? null : result.assets[0];
         if (image) {
-          const prepared = await prepareImage(image.uri, image.width, image.height, image.fileSize);
-          await upload({
-            uri: prepared.uri,
-            fileName: toJpegFileName(image.fileName ?? 'camera-photo.jpg'),
-            mimeType: 'image/jpeg',
-            kind: 'image',
-          });
+          await prepareAndUploadImage({ ...image, fileName: image.fileName ?? 'camera-photo.jpg' });
         }
       }),
-    [runPicker, setError, upload],
+    [isCurrent, prepareAndUploadImage, runPicker, setError],
   );
 
   return {
     captureImage,
-    pickerBusy,
+    clearUploads,
+    pasteImage,
+    pasteBusy,
+    setPasteBusy,
+    pasteError,
+    pickerBusy: pickerBusy || preparing > 0,
     pickerInProgressRef,
     pickFile,
     pickImage,
     preparedAttachments,
     retryFailedUploads,
-    setPreparedAttachments,
+    removePreparedAttachment,
     uploading,
   };
 }

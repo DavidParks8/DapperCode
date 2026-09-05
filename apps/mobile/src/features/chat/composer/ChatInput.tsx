@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import { resolveComposerBottomSpacing } from './inputLayout';
+import { ComposerPasteView, type ComposerPasteViewProps } from './ComposerPasteView';
 import { createChatInputStyles } from './inputStyles';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { useAppTheme } from '@shared/theme';
@@ -35,10 +36,15 @@ interface ChatInputProps {
   onSubmit: () => void;
   onStop?: () => void;
   onAttachPress: () => void;
+  pasteScopeKey?: string;
+  onPasteImage?: ComposerPasteViewProps['onPasteImage'];
+  onPasteBusy?: ComposerPasteViewProps['onPasteBusy'];
+  onPasteError?: ComposerPasteViewProps['onPasteError'];
   attachDisabled?: boolean;
   attachments?: Array<{ id: string; label: string }>;
   onRemoveAttachment?: (id: string) => void;
   isLoading: boolean;
+  isUploading?: boolean;
   submitLabel?: string;
   submitHint?: string;
   submitDisabled?: boolean;
@@ -117,6 +123,7 @@ interface ChatInputActionButtonProps {
   canSend: boolean;
   canStop: boolean;
   isLoading: boolean;
+  isUploading: boolean;
   isStopping: boolean;
   hitSlop: ReturnType<typeof computeHitSlop>;
   pressRetentionOffset: number;
@@ -141,12 +148,13 @@ function resolveChatInputActionState({
   canSend,
   canStop,
   isLoading,
+  isUploading,
   isStopping,
   label,
   hint,
 }: Pick<
   ChatInputActionButtonProps,
-  'canSend' | 'canStop' | 'isLoading' | 'isStopping' | 'label' | 'hint'
+  'canSend' | 'canStop' | 'isLoading' | 'isUploading' | 'isStopping' | 'label' | 'hint'
 >): ChatInputActionState {
   if (canStop && !canSend) {
     return {
@@ -163,7 +171,11 @@ function resolveChatInputActionState({
   const busy = isLoading && !canSend;
   return {
     accessibilityHint: hint,
-    accessibilityLabel: busy ? 'Agent is responding' : label,
+    accessibilityLabel: busy
+      ? isUploading
+        ? 'Preparing attachment'
+        : 'Agent is responding'
+      : label,
     busy,
     enabled: canSend,
     kind: 'send',
@@ -214,6 +226,7 @@ function ChatInputActionButton({
   canSend,
   canStop,
   isLoading,
+  isUploading,
   isStopping,
   hitSlop,
   pressRetentionOffset,
@@ -227,6 +240,7 @@ function ChatInputActionButton({
     canSend,
     canStop,
     isLoading,
+    isUploading,
     isStopping,
     label,
     hint,
@@ -454,7 +468,14 @@ export function ChatInput(props: ChatInputProps) {
                   color={attachDisabled ? colors.textMuted : colors.textPrimary}
                 />
               </Pressable>
-              <View style={styles.inputWrapper}>
+              <ComposerPasteView
+                style={styles.inputWrapper}
+                enabled={!attachDisabled && Boolean(props.onPasteImage)}
+                scopeKey={props.pasteScopeKey ?? ''}
+                onPasteImage={props.onPasteImage}
+                onPasteBusy={props.onPasteBusy}
+                onPasteError={props.onPasteError}
+              >
                 <Text
                   pointerEvents="none"
                   accessibilityElementsHidden
@@ -507,7 +528,7 @@ export function ChatInput(props: ChatInputProps) {
                     }
                   }}
                 />
-              </View>
+              </ComposerPasteView>
             </View>
           </GlassSurface>
 
@@ -517,6 +538,7 @@ export function ChatInput(props: ChatInputProps) {
             canSend={canSend}
             canStop={canStop}
             isLoading={isLoading}
+            isUploading={props.isUploading ?? false}
             isStopping={isStopping}
             hitSlop={actionButtonHitSlop}
             pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}

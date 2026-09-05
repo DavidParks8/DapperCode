@@ -325,6 +325,7 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
   const attachmentController = useAttachmentController({
     api,
     chat: selectedChat,
+    scopeKey: context.draftController.snapshot().scopeKey,
     draft,
     setError,
   });

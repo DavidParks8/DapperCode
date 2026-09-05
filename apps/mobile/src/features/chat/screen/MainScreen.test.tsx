@@ -1,6 +1,7 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import { ComposerPasteView, type ComposerPasteViewProps } from '../composer/ComposerPasteView';
 import * as ImagePicker from 'expo-image-picker';
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 jest.mock('expo-router/react-navigation', () => ({ usePreventRemove: jest.fn() }));
@@ -91,6 +92,7 @@ jest.mock('expo-file-system/legacy', () => ({
   readAsStringAsync: jest.fn().mockRejectedValue(new Error('missing')),
   writeAsStringAsync: jest.fn().mockResolvedValue(undefined),
   getInfoAsync: jest.fn(),
+  deleteAsync: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn() }));
 jest.mock('expo-image-picker', () => ({
@@ -3597,6 +3599,83 @@ function MainRouteShell() {
       });
       expect(store.get(defaultStartCwdAtom)).toBe('/workspace/destination/repo');
 
+      act(() => tree.unmount());
+    });
+
+    it('pastes a photo without the attachment menu and blocks send until the upload settles', async () => {
+      const api = createApi();
+      let finishUpload!: (value: { kind: 'image'; path: string }) => void;
+      (api.uploadAttachment as jest.Mock).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishUpload = resolve;
+          }),
+      );
+      const { tree } = await renderMain({ api, defaultStartCwd: '/workspace' });
+      const root = rootOf(tree);
+      await act(async () => {
+        textInput(root, 'Message').props.onChangeText('Explain this photo');
+        await flush();
+      });
+      const paste = () =>
+        tree.root.findByType(ComposerPasteView).props as unknown as ComposerPasteViewProps;
+      const scopeKey = paste().scopeKey;
+      await act(async () => {
+        paste().onPasteBusy?.({ nativeEvent: { scopeKey, busy: true } });
+        await flush();
+      });
+      expect(byLabel(root, 'Preparing attachment').props['accessibilityState']).toMatchObject({
+        disabled: true,
+      });
+      expect(byLabel(root, 'Add attachment').props['accessibilityState']).toMatchObject({
+        disabled: true,
+      });
+      await act(async () => {
+        paste().onPasteImage?.({
+          nativeEvent: {
+            scopeKey,
+            uri: 'file:///paste/photo.png',
+            width: 1200,
+            height: 900,
+            fileName: 'photo.png',
+            fileSize: 1024,
+          },
+        });
+        paste().onPasteBusy?.({ nativeEvent: { scopeKey, busy: false } });
+        await flush();
+      });
+      expect(api.uploadAttachment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          uri: 'file:///prepared.jpg',
+          kind: 'image',
+          mimeType: 'image/jpeg',
+        }),
+      );
+      expect(textInput(root, 'Message').props['value']).toBe('Explain this photo');
+      expect(byLabel(root, 'Preparing attachment').props['accessibilityState']).toMatchObject({
+        disabled: true,
+      });
+      await press(byLabel(root, 'Preparing attachment'));
+      expect(api.sendChatMessageIdempotent).not.toHaveBeenCalled();
+      expect(DocumentPicker.getDocumentAsync).not.toHaveBeenCalled();
+      await act(async () => {
+        finishUpload({ kind: 'image', path: '/workspace/pasted-photo.jpg' });
+        await flush();
+      });
+      expect(byLabel(root, 'image · pasted-photo.jpg, remove attachment')).toBeDefined();
+      expect(byLabel(root, 'Send message').props['accessibilityState']).toMatchObject({
+        disabled: false,
+      });
+      expect(byLabel(root, 'Add attachment').props['accessibilityState']).toMatchObject({
+        disabled: false,
+      });
+      await press(byLabel(root, 'Send message'));
+      expect(api.sendChatMessageIdempotent).toHaveBeenCalledWith(
+        'thread-created',
+        expect.objectContaining({ localImages: [{ path: '/workspace/pasted-photo.jpg' }] }),
+        expect.any(String),
+        expect.any(Object),
+      );
       act(() => tree.unmount());
     });
 

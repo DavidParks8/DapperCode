@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Keyboard } from 'react-native';
 
 import type { HostBridgeApiClient } from '@bridge/client/client';
@@ -12,7 +12,7 @@ import {
   toMentionInput,
   toPathBasename,
 } from '../../helpers/helpers';
-import { useAttachmentUploadController } from './attachmentUploadController';
+import { type PastedImage, useAttachmentUploadController } from './attachmentUploadController';
 
 export {
   ATTACHMENT_MAX_BYTES,
@@ -20,7 +20,7 @@ export {
   attachmentSizeError,
   retainFailedPreparedAttachment,
 } from './attachmentUploadController';
-export type { PreparedAttachment } from './attachmentUploadController';
+export type { PastedImage, PreparedAttachment } from './attachmentUploadController';
 
 type AttachmentApi = Pick<HostBridgeApiClient, 'uploadAttachment'>;
 
@@ -42,6 +42,10 @@ export interface AttachmentController {
   pendingMentionPaths: string[];
   pendingLocalImagePaths: string[];
   pickerBusy: boolean;
+  pasteBusy: boolean;
+  pasteImage: (image: PastedImage) => Promise<void>;
+  setPasteBusy: (event: { busy: boolean; scopeKey: string }) => void;
+  pasteError: (event: { message: string; scopeKey: string }) => void;
   uploading: boolean;
   hasFailedUploads: boolean;
   composerAttachments: ComposerAttachmentChip[];
@@ -65,11 +69,13 @@ export interface AttachmentController {
 export function useAttachmentController({
   api,
   chat,
+  scopeKey = chat?.id ?? 'new',
   draft,
   setError,
 }: {
   api: AttachmentApi;
   chat: Chat | null;
+  scopeKey?: string;
   draft: string;
   setError: React.Dispatch<React.SetStateAction<string | null>>;
 }): AttachmentController {
@@ -114,15 +120,20 @@ export function useAttachmentController({
 
   const {
     captureImage,
+    clearUploads,
+    pasteImage,
+    pasteBusy,
+    setPasteBusy,
+    pasteError,
     pickerBusy,
     pickerInProgressRef,
     pickFile,
     pickImage,
     preparedAttachments,
     retryFailedUploads,
-    setPreparedAttachments,
+    removePreparedAttachment,
     uploading,
-  } = useAttachmentUploadController({ api, chat, addImage, addMention, setError });
+  } = useAttachmentUploadController({ api, chat, scopeKey, addImage, addMention, setError });
 
   const openPathModal = useCallback(() => {
     if (pickerInProgressRef.current) {
@@ -187,13 +198,20 @@ export function useAttachmentController({
   }, []);
 
   const clear = useCallback(() => {
+    clearUploads();
+    setPendingAction(null);
+    submissionPendingRef.current = false;
+    skipNextDraftReconcileRef.current = false;
     setAttachmentModalVisible(false);
     setAttachmentMenuVisible(false);
     setAttachmentPathDraft('');
     setPendingMentionPaths([]);
     setPendingLocalImagePaths([]);
-    setPreparedAttachments([]);
-  }, [setPreparedAttachments]);
+  }, [clearUploads]);
+
+  useLayoutEffect(() => {
+    clear();
+  }, [clear, scopeKey]);
 
   const composerAttachments = useMemo(
     () => [
@@ -217,6 +235,10 @@ export function useAttachmentController({
     pendingMentionPaths,
     pendingLocalImagePaths,
     pickerBusy,
+    pasteImage,
+    pasteBusy,
+    setPasteBusy,
+    pasteError,
     uploading,
     hasFailedUploads: preparedAttachments.some((attachment) => attachment.status === 'failed'),
     composerAttachments,
@@ -240,9 +262,7 @@ export function useAttachmentController({
     },
     removeComposerAttachment: (id) => {
       if (id.startsWith('prepared:')) {
-        setPreparedAttachments((current) =>
-          current.filter((entry) => entry.id !== id.slice('prepared:'.length)),
-        );
+        removePreparedAttachment(id.slice('prepared:'.length));
       } else if (id.startsWith('file:')) {
         setPendingMentionPaths((current) => current.filter((path) => path !== id.slice(5)));
       } else if (id.startsWith('image:')) {
@@ -254,6 +274,7 @@ export function useAttachmentController({
     },
     retryFailedUploads,
     clearPending: () => {
+      clearUploads();
       setPendingMentionPaths([]);
       setPendingLocalImagePaths([]);
     },
