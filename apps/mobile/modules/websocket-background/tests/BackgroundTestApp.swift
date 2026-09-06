@@ -69,6 +69,9 @@ final class BackgroundTestApp: UIResponder, UIApplicationDelegate {
   func applicationDidBecomeActive(_ application: UIApplication) {
     guard !isBackgroundHost else { return }
     let app = application as! ObservedApplication
+    if cycle == 1 && backgroundStart != nil {
+      check(app.tasks.count == 1, "rapid return retains the native task until foreground")
+    }
     subscriber.applicationDidBecomeActive(app)
     if !ready {
       testFaults(app)
@@ -114,7 +117,7 @@ final class BackgroundTestApp: UIResponder, UIApplicationDelegate {
     }
     schedule(after: 6) { [self] in
       check(app.applicationState == .background && app.tasks.count == 1, "app still executes in background at six seconds")
-      print("NATIVE_SIX_SECONDS elapsed=\(ProcessInfo.processInfo.systemUptime - backgroundStart!)")
+      print("NATIVE_SIX_SECONDS_\(cycle) elapsed=\(ProcessInfo.processInfo.systemUptime - backgroundStart!)")
     }
     schedule(after: 10) { [self] in
       check(app.applicationState == .background && app.tasks.count == 1, "ten-second callback executes while background task is held")

@@ -175,11 +175,14 @@ export default async function scenario(e2e) {
     await e2e.phase('rapid-return', async () => {
       await e2e.run('xcrun', ['simctl', 'launch', simulator, hostBundle, '--background-host']);
       await e2e.waitForLog(nativeApp.label, /NATIVE_BACKGROUND_1/);
-      await e2e.waitForLog(nativeApp.label, /NATIVE_SIX_SECONDS/, { timeoutMs: 9_000 });
-      await e2e.check('main queue still runs beyond the ordinary short suspension window', () =>
-        nativeApp.isRunning(),
-      );
-      await e2e.run('xcrun', ['simctl', 'launch', simulator, bundle]);
+      // Drive the return without waiting for a background timer. Deliberately observe it late;
+      // the native fixture, not host log delivery, measures the actual six-to-ten-second window.
+      await Promise.all([
+        new Promise((resolve) => setTimeout(resolve, 6_000)).then(() =>
+          e2e.run('xcrun', ['simctl', 'launch', simulator, bundle]),
+        ),
+        new Promise((resolve) => setTimeout(resolve, 11_000)),
+      ]);
       await e2e.waitForLog(nativeApp.label, /NATIVE_FOREGROUND_1/);
       await e2e.check('return before ten seconds releases the budget', () => nativeApp.isRunning());
     });
@@ -187,6 +190,10 @@ export default async function scenario(e2e) {
     await e2e.phase('deadline', async () => {
       await e2e.run('xcrun', ['simctl', 'launch', simulator, hostBundle, '--background-host']);
       await e2e.waitForLog(nativeApp.label, /NATIVE_BACKGROUND_2/);
+      await e2e.waitForLog(nativeApp.label, /NATIVE_SIX_SECONDS_2/);
+      await e2e.check('main queue still runs beyond the ordinary short suspension window', () =>
+        nativeApp.isRunning(),
+      );
       await e2e.waitForLog(nativeApp.label, /NATIVE_TEN_SECONDS/, { timeoutMs: 12_000 });
       const deadline = await e2e.waitForLog(nativeApp.label, /NATIVE_DEADLINE elapsed=([\d.]+)/, {
         timeoutMs: 5_000,

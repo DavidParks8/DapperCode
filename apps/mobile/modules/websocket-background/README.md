@@ -30,6 +30,10 @@ cleans a unique run root. The scenario compiles the production subscriber agains
 installed Expo subscriber base and real UIKit, checks Expo's autolinking/provider output,
 and creates/deletes its own simulator and two minimal fixture apps. Switching between
 those apps produces real background and foreground events, without Appium or a user bridge.
+The runner schedules the rapid return after six seconds without waiting for a background
+timer to fire. It deliberately waits eleven seconds before observing the result to cover
+slow log consumers, while the native fixture still requires the actual foreground transition
+to occur before ten seconds and the background task to remain held until that transition.
 
 Checks cover execution at six seconds and return before ten, a ten-second run-loop callback
 before the twelve-second budget release, foreground cleanup, duplicate notifications,
