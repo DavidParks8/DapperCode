@@ -290,7 +290,7 @@ export function applyMessagesSnapshot(
     ...current,
     messages: kept,
     messageIndexById: indexMessages(kept),
-    authoritativeSnapshot: true,
+    snapshotMessageIds: kept.map((message) => message.id),
     runByMessageId: Object.fromEntries(nextMessages.map((message) => [message.id, runId])),
     terminalMessageIds: nextMessages.map((message) => message.id),
     subagentToolCallIds: snapshotSubagentIds,

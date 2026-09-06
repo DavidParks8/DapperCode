@@ -1,5 +1,8 @@
 import type { Chat } from '@bridge/types/types';
 import { createAgUiThreadMessageState } from '@bridge/agui/agUiMessages';
+import { MAX_MESSAGES_PER_THREAD } from '@bridge/agui/agUiMessagesState';
+import { updateAgUiLiveAssistantMessages } from '@bridge/agui/agUi';
+import { EventType } from '@ag-ui/core';
 import { createActivityMessage, SUBAGENT_ACTIVITY_TYPE } from '@bridge/messages';
 import { projectTranscript } from './projectionController';
 
@@ -28,6 +31,157 @@ function liveState(
 }
 
 describe('transcriptProjectionController', () => {
+  it('applies an empty snapshot without letting it erase a later prompt during streaming', () => {
+    const snapshot = liveState([]);
+    snapshot.snapshotMessageIds = [];
+    const base = {
+      chat,
+      parentChat: null,
+      showToolCalls: true,
+      threadStatuses: new Map<string, Chat['status']>(),
+    };
+    expect(projectTranscript({ ...base, liveMessageState: snapshot }).messages).toEqual([]);
+
+    const nextUser = {
+      id: 'next-user',
+      role: 'user' as const,
+      content: 'Next prompt',
+      createdAt: '',
+    };
+    snapshot.messages = [
+      { id: 'next-answer', role: 'assistant', content: 'Answer', createdAt: '' },
+    ];
+    expect(
+      projectTranscript({
+        ...base,
+        chat: { ...chat, messages: [nextUser] },
+        liveMessageState: snapshot,
+      }).messages.map(({ id }) => id),
+    ).toEqual(['next-user', 'next-answer']);
+  });
+
+  it.each([3, MAX_MESSAGES_PER_THREAD + 1])(
+    'keeps a follow-up before %s new tools when resuming with the previous turn snapshot',
+    (toolCount) => {
+      const firstUser = {
+        id: 'first-user',
+        role: 'user' as const,
+        content: 'First prompt',
+        createdAt: '',
+      };
+      const firstAnswer = {
+        id: 'first-answer',
+        role: 'assistant' as const,
+        content: 'First answer',
+        createdAt: '',
+      };
+      const secondUser = {
+        id: 'second-user',
+        role: 'user' as const,
+        content: 'Second prompt',
+        createdAt: '',
+      };
+      let state = updateAgUiLiveAssistantMessages(
+        {},
+        {
+          threadId: chat.id,
+          runId: 'first-run',
+          event: { type: EventType.RUN_STARTED, threadId: chat.id, runId: 'first-run' },
+        },
+      );
+      for (const message of [firstUser, firstAnswer]) {
+        state = updateAgUiLiveAssistantMessages(state, {
+          threadId: chat.id,
+          runId: 'first-run',
+          event: {
+            type: EventType.TEXT_MESSAGE_CHUNK,
+            messageId: message.id,
+            role: message.role,
+            delta: message.content,
+          },
+        });
+      }
+      state = updateAgUiLiveAssistantMessages(state, {
+        threadId: chat.id,
+        runId: 'first-run',
+        event: { type: EventType.RUN_FINISHED, threadId: chat.id, runId: 'first-run' },
+      });
+      expect(state[chat.id]?.terminalMessageIds).toEqual(['first-user', 'first-answer']);
+      state = updateAgUiLiveAssistantMessages(state, {
+        threadId: chat.id,
+        runId: 'first-run',
+        event: {
+          type: EventType.MESSAGES_SNAPSHOT,
+          messages: [firstUser, firstAnswer],
+        },
+      });
+      const base = {
+        chat: {
+          ...chat,
+          parentThreadId: undefined,
+          messages: [firstUser, firstAnswer, secondUser],
+        },
+        parentChat: null,
+        showToolCalls: true,
+        threadStatuses: new Map<string, Chat['status']>(),
+      };
+      const ids = () =>
+        projectTranscript({ ...base, liveMessageState: state[chat.id] }).messages.map(
+          (message) => message.id,
+        );
+      expect(ids()).toEqual(['first-user', 'first-answer', 'second-user']);
+
+      // The screen resumes with the previous terminal snapshot still installed. The new
+      // kickoff happened while suspended, and tool events now arrive before the next snapshot.
+      for (let index = 0; index < toolCount; index += 1) {
+        state = updateAgUiLiveAssistantMessages(state, {
+          threadId: chat.id,
+          runId: 'second-run',
+          event: {
+            type: EventType.TOOL_CALL_START,
+            toolCallId: `tool-${String(index)}`,
+            toolCallName: 'Read file',
+          },
+        });
+        expect(ids()).toEqual([
+          'first-user',
+          'first-answer',
+          'second-user',
+          ...Array.from({ length: index + 1 }, (_, tool) => `tool-call:tool-${String(tool)}`).slice(
+            -MAX_MESSAGES_PER_THREAD,
+          ),
+        ]);
+      }
+      state = updateAgUiLiveAssistantMessages(state, {
+        threadId: chat.id,
+        runId: 'second-run',
+        event: {
+          type: EventType.TEXT_MESSAGE_CHUNK,
+          messageId: 'second-answer',
+          role: 'assistant',
+          delta: 'Second answer',
+        },
+      });
+      const completedIds = [
+        'first-user',
+        'first-answer',
+        'second-user',
+        ...Array.from({ length: toolCount }, (_, tool) => `tool-call:tool-${String(tool)}`).slice(
+          -(MAX_MESSAGES_PER_THREAD - 1),
+        ),
+        'second-answer',
+      ];
+      expect(ids()).toEqual(completedIds);
+      state = updateAgUiLiveAssistantMessages(state, {
+        threadId: chat.id,
+        runId: 'second-run',
+        event: { type: EventType.RUN_FINISHED, threadId: chat.id, runId: 'second-run' },
+      });
+      expect(ids()).toEqual(completedIds);
+      expect(state[chat.id]?.snapshotMessageIds).toEqual(['first-user', 'first-answer']);
+    },
+  );
+
   it.each([false, true])(
     'matches a replayed prompt to its reconstructed answer (authoritative=%s) without hiding a repeated follow-up',
     (authoritativeSnapshot) => {
@@ -44,7 +198,7 @@ describe('transcriptProjectionController', () => {
         createdAt: '',
       };
       const state = liveState([user, answer], { terminal: [user.id, answer.id] });
-      state.authoritativeSnapshot = authoritativeSnapshot;
+      state.snapshotMessageIds = authoritativeSnapshot ? state.messages.map(({ id }) => id) : null;
       state.runByMessageId = { [user.id]: 'turn-1', [answer.id]: 'turn-1' };
       const base = {
         chat: {
@@ -435,7 +589,7 @@ describe('transcriptProjectionController', () => {
       { id: 'reason', role: 'reasoning', content: 'Thinking', createdAt: 'two' },
       { id: 'answer', role: 'assistant', content: 'Answer', createdAt: 'three' },
     ]);
-    snapshot.authoritativeSnapshot = true;
+    snapshot.snapshotMessageIds = snapshot.messages.map(({ id }) => id);
     const projection = projectTranscript({
       chat: {
         ...chat,
@@ -490,7 +644,7 @@ describe('transcriptProjectionController', () => {
       },
     ];
     const snapshot = liveState([...parentMessages.slice(0, 2), ...childMessages]);
-    snapshot.authoritativeSnapshot = true;
+    snapshot.snapshotMessageIds = snapshot.messages.map(({ id }) => id);
 
     const projection = projectTranscript({
       chat: { ...chat, messages: childMessages },
@@ -517,7 +671,7 @@ describe('transcriptProjectionController', () => {
       { id: 'current-reasoning', role: 'reasoning', content: 'Thinking', createdAt: 'four' },
       { id: 'current-answer', role: 'assistant', content: 'Answer', createdAt: 'five' },
     ]);
-    snapshot.authoritativeSnapshot = true;
+    snapshot.snapshotMessageIds = snapshot.messages.map(({ id }) => id);
 
     const projection = projectTranscript({
       chat: {

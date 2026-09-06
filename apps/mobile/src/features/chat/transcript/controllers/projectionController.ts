@@ -19,6 +19,7 @@ export interface TranscriptProjection {
 interface TranscriptProjectionBase {
   messages: ChatMessage[];
   liveMessages: ChatMessage[];
+  snapshotMessageIds: Set<string> | null;
   replacedMessageIds: Set<string>;
   hiddenInheritedMessageCount: number;
 }
@@ -45,9 +46,21 @@ export function projectTranscript({
     threadStatuses,
     liveMessageState,
   });
-  const messagesWithSnapshot = liveMessageState?.authoritativeSnapshot
-    ? applyAuthoritativeSnapshot(base.messages, base.liveMessages, base.replacedMessageIds, now)
-    : base.messages;
+  const snapshotMessageIds = base.snapshotMessageIds;
+  const snapshotMessages = base.liveMessages.filter((message) =>
+    snapshotMessageIds?.has(message.id),
+  );
+  const messagesWithSnapshot =
+    snapshotMessages.length > 0 ||
+    (snapshotMessageIds?.size === 0 && base.liveMessages.length === 0)
+      ? applyAuthoritativeSnapshot(
+          base.messages,
+          // Later live events do not extend an older snapshot's ordering authority.
+          snapshotMessages,
+          base.replacedMessageIds,
+          now,
+        )
+      : base.messages;
   const messages = mergeLiveMessages(
     messagesWithSnapshot,
     base.liveMessages,
@@ -97,13 +110,20 @@ function buildTranscriptProjectionBase({
   const messages = dedupeTransientUserMessages(
     syncVisibleSubAgentStatuses(inheritedMessages.messages, threadStatuses),
   );
+  const snapshotMessageIds = liveMessageState?.snapshotMessageIds
+    ? new Set(liveMessageState.snapshotMessageIds)
+    : null;
   const rawLiveMessages = (liveMessageState?.messages ?? []).map((message) => {
     const reconstructed = findReconstructedUserMessage(messages, message, liveMessageState);
+    if (reconstructed && snapshotMessageIds?.delete(message.id)) {
+      snapshotMessageIds.add(reconstructed.id);
+    }
     return reconstructed ? { ...message, id: reconstructed.id } : message;
   });
 
   return {
     messages,
+    snapshotMessageIds,
     liveMessages: parentMessages
       ? trimInheritedParentMessages(parentMessages, rawLiveMessages, chat.id).messages
       : rawLiveMessages,

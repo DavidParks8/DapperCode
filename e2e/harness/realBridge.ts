@@ -74,6 +74,7 @@ export interface RealBridge {
     readonly chunks: readonly string[];
     readonly messageId: string;
     readonly separateMessages?: boolean;
+    readonly toolSteps?: readonly ToolStep[];
   }): Promise<{ waitForStart(): Promise<void>; release(): Promise<void> }>;
   streamAssistantTurn(options: StreamAssistantTurnOptions): Promise<void>;
   close(): Promise<void>;
@@ -224,16 +225,55 @@ export async function startRealBridge(options: RealBridgeOptions = {}): Promise<
       async prepareAssistantTurn(promptOptions) {
         const holdingPath = replaceExtension(controlPath, 'holding');
         const releasePath = replaceExtension(controlPath, 'release');
+        const checkpoints = (promptOptions.toolSteps ?? []).flatMap((step, index) =>
+          step.whilePaused
+            ? [
+                {
+                  holding: replaceExtension(controlPath, `tool-${String(index)}.holding`),
+                  release: replaceExtension(controlPath, `tool-${String(index)}.release`),
+                  observe: step.whilePaused,
+                },
+              ]
+            : [],
+        );
         await Promise.all([
           rm(holdingPath, { force: true }),
           rm(releasePath, { force: true }),
-          writeFile(controlPath, JSON.stringify({ ...promptOptions, holdBeforeChunks: true }), {
-            mode: 0o600,
-          }),
+          ...checkpoints.flatMap(({ holding, release }) => [
+            rm(holding, { force: true }),
+            rm(release, { force: true }),
+          ]),
+          writeFile(
+            controlPath,
+            JSON.stringify({
+              ...promptOptions,
+              toolSteps: promptOptions.toolSteps?.map((step) => ({
+                update: step.update,
+                hold: Boolean(step.whilePaused),
+              })),
+              holdBeforeChunks: true,
+            }),
+            { mode: 0o600 },
+          ),
         ]);
         return {
-          waitForStart: () => waitForFile(holdingPath, RPC_TIMEOUT_MS),
-          release: () => writeFile(releasePath, 'release', { mode: 0o600 }),
+          waitForStart: () => waitForFile(checkpoints[0]?.holding ?? holdingPath, RPC_TIMEOUT_MS),
+          async release() {
+            try {
+              for (const checkpoint of checkpoints) {
+                await waitForFile(checkpoint.holding, RPC_TIMEOUT_MS);
+                await checkpoint.observe();
+                await writeFile(checkpoint.release, 'release', { mode: 0o600 });
+              }
+              await waitForFile(holdingPath, RPC_TIMEOUT_MS);
+            } finally {
+              await Promise.all(
+                [...checkpoints.map(({ release }) => release), releasePath].map((release) =>
+                  writeFile(release, 'release', { mode: 0o600 }),
+                ),
+              );
+            }
+          },
         };
       },
       async streamAssistantTurn(streamOptions) {
