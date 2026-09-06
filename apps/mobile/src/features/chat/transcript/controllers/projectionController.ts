@@ -50,6 +50,16 @@ export function projectTranscript({
   const snapshotMessages = base.liveMessages.filter((message) =>
     snapshotMessageIds?.has(message.id),
   );
+  const snapshotRunId = liveMessageState?.snapshotMessageIds
+    ?.map((id) => liveMessageState.runByMessageId[id])
+    .find((runId) => runId !== undefined);
+  const snapshotPredatesLiveRun = Boolean(
+    snapshotRunId &&
+    liveMessageState?.messages.some((message) => {
+      const runId = liveMessageState.runByMessageId[message.id];
+      return runId && runId !== snapshotRunId;
+    }),
+  );
   const messagesWithSnapshot =
     snapshotMessages.length > 0 ||
     (snapshotMessageIds?.size === 0 && base.liveMessages.length === 0)
@@ -59,6 +69,7 @@ export function projectTranscript({
           snapshotMessages,
           base.replacedMessageIds,
           now,
+          snapshotPredatesLiveRun,
         )
       : base.messages;
   const messages = mergeLiveMessages(
@@ -151,6 +162,7 @@ function applyAuthoritativeSnapshot(
   liveMessages: ChatMessage[],
   replacedMessageIds: Set<string>,
   now: () => string,
+  snapshotPredatesLiveRun: boolean,
 ): ChatMessage[] {
   const projectedMessages = projectAuthoritativeLiveMessages(
     messages,
@@ -167,7 +179,7 @@ function applyAuthoritativeSnapshot(
       coverage.lastCoveredIndex,
     )
   ) {
-    return prependPersistedMessagesAheadOfSnapshot(messages, projectedMessages, liveIds);
+    return mergeUnanchoredSnapshot(messages, projectedMessages, snapshotPredatesLiveRun);
   }
 
   return buildAuthoritativeMergedMessages(
@@ -231,27 +243,49 @@ function shouldKeepPersistedMessagesAheadOfSnapshot(
   return lastCoveredIndex < 0 && projectedMessages.length > 0 && messages.length > 0;
 }
 
-function prependPersistedMessagesAheadOfSnapshot(
+function mergeUnanchoredSnapshot(
   messages: ChatMessage[],
   projectedMessages: ChatMessage[],
-  liveIds: ReadonlySet<string>,
+  snapshotPredatesLiveRun: boolean,
 ): ChatMessage[] {
-  // The snapshot shares nothing with what we already have, so it describes a
-  // later segment of the conversation rather than the whole of it -- an agent
-  // that resumes a thread snapshots only the turn it just ran. Treating it as
-  // the entire transcript erases every earlier turn the moment a follow-up is
-  // sent, so the known history is kept ahead of it.
-  const snapshotSignatures = new Set(
-    projectedMessages.map((message) => buildTranscriptSignature(message)),
-  );
-  const leadingMessages = messages.filter(
-    (message) =>
-      !liveIds.has(message.id) && !snapshotSignatures.has(buildTranscriptSignature(message)),
-  );
-  return [...leadingMessages, ...projectedMessages];
+  const signatures = messages.map(buildTranscriptSignature);
+  const snapshotSignatures = projectedMessages.map(buildTranscriptSignature);
+  let overlapStart = messages.length;
+  let overlapLength = 0;
+  for (let start = 0; start < messages.length; start += 1) {
+    let length = 0;
+    while (
+      length < snapshotSignatures.length &&
+      signatures[start + length] === snapshotSignatures[length]
+    ) {
+      length += 1;
+    }
+    // Only a later run proves a matching interior segment is old history, not a new
+    // repeated turn. A suffix overlap also covers an optimistic prompt's server echo.
+    if (
+      length > overlapLength &&
+      (start + length === messages.length ||
+        (snapshotPredatesLiveRun && length >= 2 && length === snapshotSignatures.length))
+    ) {
+      overlapStart = start;
+      overlapLength = length;
+    }
+  }
+  return [
+    ...messages.slice(0, overlapStart),
+    ...projectedMessages,
+    ...messages.slice(overlapStart + overlapLength),
+  ];
 }
 
 function buildTranscriptSignature(message: ChatMessage): string {
+  if (
+    (message.role !== 'user' && message.role !== 'assistant') ||
+    message.toolMeta ||
+    (message.role === 'assistant' && message.toolCalls?.length)
+  ) {
+    return `${message.role}\u0000${message.id}`;
+  }
   return `${message.role}\u0000${getMessageText(message).trim()}`;
 }
 
