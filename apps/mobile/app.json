@@ -14,9 +14,7 @@
         "ITSAppUsesNonExemptEncryption": false,
         "NSSupportsLiveActivities": true,
         "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": false,
-          "NSAllowsArbitraryLoadsInWebContent": true,
-          "NSAllowsLocalNetworking": true
+          "NSAllowsArbitraryLoads": true
         }
       },
       "entitlements": {
@@ -85,7 +83,8 @@
           "enablePushNotifications": false,
           "frequentUpdates": false
         }
-      ]
+      ],
+      "./plugins/withIosBridgeTransportSecurity"
     ],
     "extra": {
       "eas": {
