@@ -4,12 +4,18 @@ import {
   getMessageText,
   getSubAgentMeta,
   isUnlinkedSubAgentActivity,
+  isTransientUserMessage,
   preserveKnownSubAgentThreadLink,
 } from '@bridge/messages';
-import { partsMatchMessageContent } from '@bridge/agui/agUiContent';
 import { filterReasoningMessages, normalizeChatMessageMatchContent } from '../../helpers/helpers';
 import { trimInheritedParentMessages } from '../../agents/transcript';
+import { getMessageToolCallId } from '../../message/toolInvocationModel';
 import { getVisibleTranscriptMessages, syncVisibleSubAgentStatuses } from '../messages';
+import {
+  applyAuthoritativeSnapshot,
+  carriesToolActivity,
+  getSnapshotRunRelation,
+} from './snapshotProjection';
 
 export interface TranscriptProjection {
   messages: ChatMessage[];
@@ -50,15 +56,10 @@ export function projectTranscript({
   const snapshotMessages = base.liveMessages.filter((message) =>
     snapshotMessageIds?.has(message.id),
   );
-  const snapshotRunId = liveMessageState?.snapshotMessageIds
-    ?.map((id) => liveMessageState.runByMessageId[id])
-    .find((runId) => runId !== undefined);
-  const snapshotPredatesLiveRun = Boolean(
-    snapshotRunId &&
-    liveMessageState?.messages.some((message) => {
-      const runId = liveMessageState.runByMessageId[message.id];
-      return runId && runId !== snapshotRunId;
-    }),
+  const snapshotWindowTruncated = Boolean(
+    liveMessageState?.snapshotMessageIds?.some(
+      (id) => !liveMessageState.messages.some((message) => message.id === id),
+    ),
   );
   const messagesWithSnapshot =
     snapshotMessages.length > 0 ||
@@ -69,32 +70,26 @@ export function projectTranscript({
           snapshotMessages,
           base.replacedMessageIds,
           now,
-          snapshotPredatesLiveRun,
+          getSnapshotRunRelation(liveMessageState, chat),
+          snapshotWindowTruncated,
         )
-      : base.messages;
+      : { messages: base.messages, aliases: new Map<string, string>() };
   const messages = mergeLiveMessages(
-    messagesWithSnapshot,
+    messagesWithSnapshot.messages,
     base.liveMessages,
     base.replacedMessageIds,
     liveMessageState,
     now,
+    chat,
+    messagesWithSnapshot.aliases,
   );
 
   return {
-    messages: messages.filter((message) => !isUnlinkedSubAgentActivity(message)),
+    messages: messages.filter(
+      (message) => !base.replacedMessageIds.has(message.id) && !isUnlinkedSubAgentActivity(message),
+    ),
     hiddenInheritedMessageCount: base.hiddenInheritedMessageCount,
   };
-}
-
-/**
- * A tool invocation is worth showing the moment it starts, before it has any
- * output, so a message that only carries tool activity is not empty.
- */
-function carriesToolActivity(message: ChatMessage): boolean {
-  if (message.toolMeta) {
-    return true;
-  }
-  return message.role === 'assistant' && (message.toolCalls?.length ?? 0) > 0;
 }
 
 function buildTranscriptProjectionBase({
@@ -157,173 +152,36 @@ function getProjectedParentMessages(
   return getVisibleTranscriptMessages(filterReasoningMessages(parentChat.messages), showToolCalls);
 }
 
-function applyAuthoritativeSnapshot(
-  messages: ChatMessage[],
-  liveMessages: ChatMessage[],
-  replacedMessageIds: Set<string>,
-  now: () => string,
-  snapshotPredatesLiveRun: boolean,
-): ChatMessage[] {
-  const projectedMessages = projectAuthoritativeLiveMessages(
-    messages,
-    liveMessages,
-    replacedMessageIds,
-    now,
-  );
-  const liveIds = new Set(liveMessages.map((message) => message.id));
-  const coverage = getAuthoritativeSnapshotCoverage(messages, liveIds);
-  if (
-    shouldKeepPersistedMessagesAheadOfSnapshot(
-      messages,
-      projectedMessages,
-      coverage.lastCoveredIndex,
-    )
-  ) {
-    return mergeUnanchoredSnapshot(messages, projectedMessages, snapshotPredatesLiveRun);
-  }
-
-  return buildAuthoritativeMergedMessages(
-    messages,
-    projectedMessages,
-    coverage,
-    liveIds,
-    replacedMessageIds,
-  );
-}
-
-function projectAuthoritativeLiveMessages(
-  messages: ChatMessage[],
-  liveMessages: ChatMessage[],
-  replacedMessageIds: Set<string>,
-  now: () => string,
-): ChatMessage[] {
-  const persistedById = new Map(messages.map((message) => [message.id, message]));
-  return liveMessages
-    .filter(
-      (message) => !replacedMessageIds.has(message.id) && hasVisibleLiveMessageContent(message),
-    )
-    .map((message) => {
-      const persisted = persistedById.get(message.id);
-      const parts = persisted?.parts ?? message.parts;
-      return {
-        ...message,
-        createdAt: persisted?.createdAt || message.createdAt || now(),
-        // A live event never reports what the turn cost, so the persisted copy stays the only
-        // source of the per-response usage the transcript reports.
-        usage: message.usage ?? persisted?.usage ?? null,
-        // Ordered parts win over `content` when rendering, so drop them when
-        // they no longer describe the authoritative snapshot text.
-        parts: partsMatchMessageContent(parts, message.content) ? parts : undefined,
-      };
-    });
-}
-
-function hasVisibleLiveMessageContent(message: ChatMessage): boolean {
-  return Boolean(getMessageText(message).trim() || carriesToolActivity(message));
-}
-
-function getAuthoritativeSnapshotCoverage(
-  messages: ChatMessage[],
-  liveIds: ReadonlySet<string>,
-): { firstCoveredIndex: number; lastCoveredIndex: number } {
-  return {
-    firstCoveredIndex: messages.findIndex((message) => liveIds.has(message.id)),
-    lastCoveredIndex: messages.reduce(
-      (last, message, index) => (liveIds.has(message.id) ? index : last),
-      -1,
-    ),
-  };
-}
-
-function shouldKeepPersistedMessagesAheadOfSnapshot(
-  messages: ChatMessage[],
-  projectedMessages: ChatMessage[],
-  lastCoveredIndex: number,
-): boolean {
-  return lastCoveredIndex < 0 && projectedMessages.length > 0 && messages.length > 0;
-}
-
-function mergeUnanchoredSnapshot(
-  messages: ChatMessage[],
-  projectedMessages: ChatMessage[],
-  snapshotPredatesLiveRun: boolean,
-): ChatMessage[] {
-  const signatures = messages.map(buildTranscriptSignature);
-  const snapshotSignatures = projectedMessages.map(buildTranscriptSignature);
-  let overlapStart = messages.length;
-  let overlapLength = 0;
-  for (let start = 0; start < messages.length; start += 1) {
-    let length = 0;
-    while (
-      length < snapshotSignatures.length &&
-      signatures[start + length] === snapshotSignatures[length]
-    ) {
-      length += 1;
-    }
-    // Only a later run proves a matching interior segment is old history, not a new
-    // repeated turn. A suffix overlap also covers an optimistic prompt's server echo.
-    if (
-      length > overlapLength &&
-      (start + length === messages.length ||
-        (snapshotPredatesLiveRun && length >= 2 && length === snapshotSignatures.length))
-    ) {
-      overlapStart = start;
-      overlapLength = length;
-    }
-  }
-  return [
-    ...messages.slice(0, overlapStart),
-    ...projectedMessages,
-    ...messages.slice(overlapStart + overlapLength),
-  ];
-}
-
-function buildTranscriptSignature(message: ChatMessage): string {
-  if (
-    (message.role !== 'user' && message.role !== 'assistant') ||
-    message.toolMeta ||
-    (message.role === 'assistant' && message.toolCalls?.length)
-  ) {
-    return `${message.role}\u0000${message.id}`;
-  }
-  return `${message.role}\u0000${getMessageText(message).trim()}`;
-}
-
-function buildAuthoritativeMergedMessages(
-  messages: ChatMessage[],
-  projectedMessages: ChatMessage[],
-  coverage: { firstCoveredIndex: number; lastCoveredIndex: number },
-  liveIds: ReadonlySet<string>,
-  replacedMessageIds: ReadonlySet<string>,
-): ChatMessage[] {
-  const leadingMessages =
-    coverage.firstCoveredIndex >= 0
-      ? messages
-          .slice(0, coverage.firstCoveredIndex)
-          .filter((message) => !replacedMessageIds.has(message.id))
-      : [];
-  const trailingMessages =
-    coverage.lastCoveredIndex >= 0
-      ? messages.slice(coverage.lastCoveredIndex + 1).filter((message) => !liveIds.has(message.id))
-      : [];
-  return [...leadingMessages, ...projectedMessages, ...trailingMessages];
-}
-
 function mergeLiveMessages(
   messages: ChatMessage[],
   liveMessages: ChatMessage[],
   replacedMessageIds: ReadonlySet<string>,
   liveMessageState: AgUiThreadMessageState | null | undefined,
   now: () => string,
+  chat: Chat,
+  aliases: ReadonlyMap<string, string>,
 ): ChatMessage[] {
   let nextMessages = messages;
-  for (const liveMessage of liveMessages) {
+  const anchors = liveMessages.map((message) => {
+    const persisted = findPersistedLiveMessage(messages, message, aliases);
+    if (persisted) {
+      return persisted.id;
+    }
+    const toolCallId = getMessageToolCallId(message);
+    return toolCallId
+      ? messages.find((candidate) => getMessageToolCallId(candidate) === toolCallId)?.id
+      : undefined;
+  });
+  for (const [index, liveMessage] of liveMessages.entries()) {
     nextMessages = mergeLiveMessage(
       nextMessages,
       liveMessage,
       replacedMessageIds,
       liveMessageState,
       now,
+      chat,
+      anchors.slice(index + 1).find((id) => id !== undefined),
+      aliases,
     );
   }
   return nextMessages;
@@ -335,20 +193,47 @@ function mergeLiveMessage(
   replacedMessageIds: ReadonlySet<string>,
   liveMessageState: AgUiThreadMessageState | null | undefined,
   now: () => string,
+  chat: Chat,
+  followingMessageId: string | undefined,
+  aliases: ReadonlyMap<string, string>,
 ): ChatMessage[] {
   const liveText = getMessageText(liveMessage).trim();
   if ((!liveText && !carriesToolActivity(liveMessage)) || replacedMessageIds.has(liveMessage.id)) {
     return messages;
   }
 
-  const persistedMessage = findPersistedLiveMessage(messages, liveMessage);
+  const persistedMessage = findPersistedLiveMessage(messages, liveMessage, aliases);
   if (!persistedMessage) {
+    const replacedId = liveMessageState?.replacesMessageIdByMessageId[liveMessage.id];
+    return insertLiveMessage(
+      messages,
+      liveMessage,
+      followingMessageId,
+      replacedId ? (aliases.get(replacedId) ?? replacedId) : undefined,
+      now,
+    );
+  }
+
+  function insertLiveMessage(
+    messages: ChatMessage[],
+    message: ChatMessage,
+    followingId: string | undefined,
+    replacedId: string | undefined,
+    now: () => string,
+  ): ChatMessage[] {
+    const replacedIndex = messages.findIndex((candidate) => candidate.id === replacedId);
+    const followingIndex = messages.findIndex((candidate) => candidate.id === followingId);
+    const index =
+      replacedIndex >= 0 ? replacedIndex : followingIndex >= 0 ? followingIndex : messages.length;
+    const replaced = messages[replacedIndex];
     return [
-      ...messages,
+      ...messages.slice(0, index),
       {
-        ...liveMessage,
-        createdAt: liveMessage.createdAt || now(),
+        ...message,
+        createdAt: replaced?.createdAt || message.createdAt || now(),
+        usage: message.usage ?? replaced?.usage ?? null,
       },
+      ...messages.slice(index + (replacedIndex >= 0 ? 1 : 0)),
     ];
   }
 
@@ -357,6 +242,7 @@ function mergeLiveMessage(
     liveMessage,
     liveText,
     liveMessageState,
+    chat,
   );
   // Discovery can add the child link in a shorter status-only activity. Metadata must not inherit
   // the text merge's protection against shorter, potentially stale message content.
@@ -410,11 +296,13 @@ function findReconstructedUserMessage(
 function findPersistedLiveMessage(
   messages: ChatMessage[],
   liveMessage: ChatMessage,
+  aliases?: ReadonlyMap<string, string>,
 ): ChatMessage | undefined {
   const exactPersistedMessage = messages.find(
     (message) =>
       message.role === liveMessage.role &&
-      (message.id === liveMessage.id || liveMessage.id.endsWith(`::item::${message.id}`)),
+      (message.id === (aliases?.get(liveMessage.id) ?? liveMessage.id) ||
+        liveMessage.id.endsWith(`::item::${message.id}`)),
   );
   if (exactPersistedMessage) {
     return exactPersistedMessage;
@@ -441,12 +329,27 @@ function shouldReplacePersistedLiveMessage(
   liveMessage: ChatMessage,
   liveText: string,
   liveMessageState: AgUiThreadMessageState | null | undefined,
+  chat: Chat,
 ): boolean {
   const persistedText = getMessageText(persistedMessage).trim();
   const liveExtendsPersisted = liveText.startsWith(persistedText);
   const persistedExtendsLive = persistedText.startsWith(liveText);
+  const terminal = liveMessageState?.terminalMessageIds.includes(liveMessage.id);
+  const afterSnapshot =
+    liveMessageState?.snapshotMessageIds != null &&
+    !liveMessageState.snapshotMessageIds.includes(liveMessage.id);
+  const snapshot = chat.acpSnapshot;
+  const settledPersistedMessage =
+    snapshot &&
+    !chat.historyRecoveryError &&
+    !snapshot.active.runId &&
+    !snapshot.session.historyReconstruction &&
+    snapshot.messages.some((message) => message.id === persistedMessage.id);
+  // An end event settles the stream, not the last cached read. Preserve its unseen suffix
+  // until a settled authoritative read actually includes this response.
+  const keepCompletedProgress = afterSnapshot && liveExtendsPersisted && !settledPersistedMessage;
   return (
-    !liveMessageState?.terminalMessageIds.includes(liveMessage.id) &&
+    (!terminal || keepCompletedProgress) &&
     liveMessage.role !== 'user' &&
     liveText !== persistedText &&
     (liveExtendsPersisted || !persistedExtendsLive)
@@ -550,11 +453,4 @@ function dedupeTransientUserMessages(messages: ChatMessage[]): ChatMessage[] {
         normalizeChatMessageMatchContent(getMessageText(neighbor)) === content,
     );
   });
-}
-
-function isTransientUserMessage(message: ChatMessage): boolean {
-  return (
-    message.role === 'user' &&
-    (message.id.startsWith('msg-') || message.id.startsWith('local-user-'))
-  );
 }

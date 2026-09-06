@@ -62,6 +62,13 @@ export function getMessageText(message: unknown): string {
   return typeof message.content === 'string' ? message.content : '';
 }
 
+export function isTransientUserMessage(message: ChatMessage): boolean {
+  return (
+    message.role === 'user' &&
+    (message.id.startsWith('msg-') || message.id.startsWith('local-user-'))
+  );
+}
+
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item: unknown) => typeof item === 'string');
 }

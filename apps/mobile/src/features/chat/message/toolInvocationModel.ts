@@ -91,7 +91,7 @@ export function buildToolInvocations(messages: ChatMessage[]): ToolInvocation[] 
 
   for (const message of messages) {
     const meta = message.toolMeta;
-    const callId = meta?.toolCallId ?? toolCallIdOf(message);
+    const callId = getMessageToolCallId(message);
     if (callId) {
       const draft = draftFor(callId);
       if (meta) {
@@ -257,7 +257,10 @@ function parseTimestamp(value: string | undefined): number | null {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-function toolCallIdOf(message: ChatMessage): string | null {
+export function getMessageToolCallId(message: ChatMessage): string | null {
+  if (message.toolMeta) {
+    return message.toolMeta.toolCallId;
+  }
   if (message.role === 'tool') {
     return message.toolCallId || null;
   }
