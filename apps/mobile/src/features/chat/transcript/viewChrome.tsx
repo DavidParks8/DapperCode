@@ -60,12 +60,11 @@ export function renderHistoryRecovery(
         testID="chat-history-recovery"
         onPress={onRetry}
         accessibilityRole="button"
-        accessibilityLabel="Retry loading chat history"
+        accessibilityLabel="Fast forwarding"
+        accessibilityHint="Chat history is catching up automatically. Double tap to retry now."
         style={{ minHeight: 48, justifyContent: 'center' }}
       >
-        <Text style={styles.inlineChoiceHint} accessibilityRole="alert">
-          Chat history could not be restored. Retrying automatically. Tap to retry now.
-        </Text>
+        <Text style={styles.inlineChoiceHint}>Fast forwarding...</Text>
       </Pressable>
     </>
   );

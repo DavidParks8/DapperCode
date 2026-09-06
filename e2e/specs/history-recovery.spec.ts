@@ -101,7 +101,7 @@ test('incomplete history survives foreground and chat navigation, then recovers 
 
   await test.step('background completion with unavailable history', async () => {
     await visibility(page, 'hidden');
-    await expect.poll(() => opened - closed).toBe(0);
+    await expect.poll(() => opened - closed, { timeout: 15_000 }).toBe(0);
     const cursor = lastEventId;
     await page.clock.setSystemTime(FIXED_NOW_MS + 25 * 60_000);
     await turn.release();
@@ -132,6 +132,11 @@ test('incomplete history survives foreground and chat navigation, then recovers 
     await visibility(page, 'visible');
     await expect.poll(() => emptyReads).toBeGreaterThan(0);
     await expect(selectors.historyRecovery(page)).toBeVisible();
+    await expect(selectors.historyRecovery(page)).toHaveText('Fast forwarding...');
+    await expect(
+      page.getByText('Chat history could not be restored', { exact: false }),
+    ).toHaveCount(0);
+    await expect(selectors.historyRecovery(page).getByRole('alert')).toHaveCount(0);
     await expect(selectors.userMessages(page)).toContainText(kickoff);
     await settled(page);
     expect(answerDeliveredInSnapshot).toBe(false);
@@ -159,9 +164,9 @@ test('incomplete history survives foreground and chat navigation, then recovers 
         })
         .toBe(true);
     }
-    const screenshot = testInfo.outputPath('recoverable-history-error.png');
+    const screenshot = testInfo.outputPath('fast-forwarding-history.png');
     await page.screenshot({ path: screenshot });
-    await testInfo.attach('recoverable-history-error', {
+    await testInfo.attach('fast-forwarding-history', {
       path: screenshot,
       contentType: 'image/png',
     });
@@ -199,7 +204,7 @@ test('incomplete history survives foreground and chat navigation, then recovers 
       selectors.assistantMessages(page).filter({ hasText: 'The recovered chat is still usable.' }),
     ).toHaveCount(1);
     await visibility(page, 'hidden');
-    await expect.poll(() => opened - closed).toBe(0);
+    await expect.poll(() => opened - closed, { timeout: 15_000 }).toBe(0);
     await visibility(page, 'visible');
     await expect.poll(() => opened - closed).toBe(1);
     await expect(selectors.userMessages(page)).toContainText([

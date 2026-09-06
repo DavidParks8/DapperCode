@@ -85,7 +85,7 @@ test('keeps a second prompt ahead of tool output when returning during the turn'
         whilePaused: async () => {
           if (index === 0) {
             await test.step('unlock before the second turn finishes', async () => {
-              await expect.poll(() => opened === closed).toBe(true);
+              await expect.poll(() => opened === closed, { timeout: 15_000 }).toBe(true);
               expect(await page.evaluate(() => document.visibilityState)).toBe('hidden');
               await setVisibility(page, 'visible');
               await expect.poll(() => opened - closed).toBe(1);
@@ -113,7 +113,7 @@ test('keeps a second prompt ahead of tool output when returning during the turn'
       await expectSettled(page);
       await expectPromptBeforeOutput(page);
       await setVisibility(page, 'hidden');
-      await expect.poll(() => opened === closed).toBe(true);
+      await expect.poll(() => opened === closed, { timeout: 15_000 }).toBe(true);
       await setVisibility(page, 'visible');
       await expect.poll(() => opened - closed).toBe(1);
       await expectPromptBeforeOutput(page);

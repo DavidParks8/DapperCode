@@ -448,7 +448,7 @@ describe('SubAgentDetailView starting state', () => {
     expect(getChat).toHaveBeenCalledTimes(2);
     expect(textContent(tree.root as Queryable)).not.toContain('Background refresh failed');
     expect(textContent(tree.root as Queryable)).toContain('Existing transcript');
-    expect(countByLabel(tree, 'Retry loading chat history')).toBeGreaterThan(0);
+    expect(countByLabel(tree, 'Fast forwarding')).toBeGreaterThan(0);
     act(() => tree.unmount());
   });
 
@@ -473,7 +473,7 @@ describe('SubAgentDetailView starting state', () => {
       tree = rendered.tree;
       act(() => rendered.store.set(bridgeConnectedAtom, true));
       const button = (tree.root as Queryable).findAll(
-        (node) => node.props['accessibilityLabel'] === 'Retry loading chat history',
+        (node) => node.props['accessibilityLabel'] === 'Fast forwarding',
       )[0];
       expect(button).toBeDefined();
       const onPress = button?.props['onPress'];
@@ -484,12 +484,12 @@ describe('SubAgentDetailView starting state', () => {
         onPress();
       });
       expect(getChat).toHaveBeenCalledTimes(2);
-      expect(countByLabel(tree, 'Retry loading chat history')).toBeGreaterThan(0);
+      expect(countByLabel(tree, 'Fast forwarding')).toBeGreaterThan(0);
       await act(async () => {
         await jest.advanceTimersByTimeAsync(5_000);
       });
       expect(getChat).toHaveBeenCalledTimes(3);
-      expect(countByLabel(tree, 'Retry loading chat history')).toBe(0);
+      expect(countByLabel(tree, 'Fast forwarding')).toBe(0);
       act(() => tree!.unmount());
       tree = undefined;
       await act(async () => {

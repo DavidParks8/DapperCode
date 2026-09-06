@@ -3,6 +3,8 @@ import { AppState, type AppStateStatus } from 'react-native';
 import type { HostBridgeWsClient } from '@bridge/ws/ws';
 import { isUserPresentAppState } from '@shell/session/appVisibility';
 
+const BACKGROUND_DISCONNECT_GRACE_MS = 10_000;
+
 interface AppStateSource {
   currentState: AppStateStatus;
   addEventListener(
@@ -12,22 +14,44 @@ interface AppStateSource {
 }
 
 export function bindAppWebSocketLifecycle(
-  ws: HostBridgeWsClient,
+  ws: Pick<HostBridgeWsClient, 'connect' | 'disconnect'>,
   appState: AppStateSource = AppState,
 ): () => void {
+  let currentState = appState.currentState;
+  let disconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  const cancelDisconnect = () => {
+    if (disconnectTimer !== null) {
+      clearTimeout(disconnectTimer);
+      disconnectTimer = null;
+    }
+  };
   const syncConnection = (state: AppStateStatus) => {
+    const wasUserPresent = isUserPresentAppState(currentState);
+    currentState = state;
     if (isUserPresentAppState(state)) {
+      cancelDisconnect();
       ws.connect();
       return;
     }
-    ws.disconnect();
+    if (wasUserPresent) {
+      disconnectTimer = setTimeout(() => {
+        disconnectTimer = null;
+        ws.disconnect();
+      }, BACKGROUND_DISCONNECT_GRACE_MS);
+    }
   };
 
-  syncConnection(appState.currentState);
+  if (isUserPresentAppState(currentState)) {
+    ws.connect();
+  } else {
+    ws.disconnect();
+  }
+
   const subscription = appState.addEventListener('change', syncConnection);
 
   return () => {
     subscription.remove();
+    cancelDisconnect();
     ws.disconnect();
   };
 }

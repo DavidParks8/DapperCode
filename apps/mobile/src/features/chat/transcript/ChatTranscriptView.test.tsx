@@ -203,7 +203,7 @@ describe('ChatTranscriptView activity event', () => {
     jest.useRealTimers();
   });
 
-  it('renders a retry action independently of settled turn activity and clears it on recovery', () => {
+  it('shows fast forwarding without an error alert while history catches up, then clears it', () => {
     const retry = jest.fn();
     const tree = render({ chat, onLoadEarlier: retry });
     expect(tree.root.findAllByProps({ testID: 'chat-history-recovery' })).toHaveLength(0);
@@ -212,9 +212,19 @@ describe('ChatTranscriptView activity event', () => {
       onLoadEarlier: retry,
     });
     const button = tree.root.findAllByProps({
-      accessibilityLabel: 'Retry loading chat history',
+      accessibilityLabel: 'Fast forwarding',
     })[0];
     expect(button).toBeDefined();
+    expect(findText(tree.root, 'Fast forwarding...')).toBeDefined();
+    expect(tree.root.findAllByProps({ accessibilityRole: 'alert' })).toHaveLength(0);
+    expect(
+      tree.root.findAll((node) =>
+        node.children.some(
+          (child) =>
+            typeof child === 'string' && child.includes('Chat history could not be restored'),
+        ),
+      ),
+    ).toHaveLength(0);
     act(() => button!.props.onPress());
     expect(retry).toHaveBeenCalledTimes(1);
     expect(tree.root.findAllByProps({ testID: 'atom-glyph' })).toHaveLength(0);

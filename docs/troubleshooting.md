@@ -134,7 +134,7 @@ The Expo script reads the bridge host from the central `config.json`, falling ba
 
 Keep the phone connected to the same bridge on its private network. The app preserves the
 last-known transcript and title while history is being recovered, including when switching chats.
-If it displays **Chat history could not be restored**, leave the chat open for automatic retry or
+If it displays **Fast forwarding...**, leave the chat open for automatic retry or
 tap the notice to retry immediately. History recovery is separate from turn status: a completed
 turn should not show a Stop action merely because messages have not finished loading.
 

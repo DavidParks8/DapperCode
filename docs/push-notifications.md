@@ -112,8 +112,13 @@ not sent. Approval notifications never include reply content.
   phones. The Expo notification handler also suppresses a foreground/inactive
   delivery as a fallback for connection and lifecycle races.
 - **Backgrounded but not quit / killed:** the app reports background before its
-  normal disconnect attempt. Pushes remain enabled even if the WebSocket stays
-  connected, and the OS delivers and displays them.
+  normal disconnect attempt, then keeps the connection for a 10-second grace
+  period. Returning during that window cancels the disconnect. The native iOS
+  app requests bounded background execution so the grace period can run while
+  locked; the OS can still expire or deny that time. Pushes remain enabled
+  during the grace period even though the WebSocket stays connected, and the OS
+  delivers and displays them. After a longer absence, automatic history recovery
+  shows "Fast forwarding..." rather than an immediate restore-error alert.
 - Tapping a notification opens the app and navigates to the relevant thread.
 - **Approval notifications carry Approve / Deny action buttons** (iOS notification
   category `approval`). The approval push includes the `approvalId`; tapping a
