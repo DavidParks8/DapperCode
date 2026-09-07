@@ -43,6 +43,67 @@ function createClient() {
 }
 
 describe('history recovery through the shared client cache', () => {
+  it('does not mistake an optimistic first prompt for missing server history', async () => {
+    const { client, request } = createClient();
+    request.mockResolvedValueOnce({ thread: { id: threadId, acpSnapshot: snapshot([]) } });
+    const empty = await client.getChat(threadId);
+    client.rememberChat({
+      ...empty,
+      status: 'running',
+      messages: [{ id: 'msg-first', role: 'user', content: prompt, createdAt: empty.createdAt }],
+    });
+    request.mockResolvedValue({ thread: { id: threadId, acpSnapshot: snapshot([]) } });
+    const pending = await client.getChat(threadId);
+    expect(pending.messages.map(getMessageText)).toEqual([prompt]);
+    expect(pending.historyRecoveryError).toBeNull();
+
+    request.mockResolvedValue({ thread: { id: threadId, acpSnapshot: snapshot([assistant]) } });
+    const finished = await client.getChat(threadId);
+    expect(finished.messages.map(getMessageText)).toEqual([prompt, answer]);
+    expect(finished.historyRecoveryError).toBeNull();
+
+    client.rememberChat({
+      ...finished,
+      status: 'running',
+      messages: [
+        ...finished.messages,
+        { id: 'msg-followup', role: 'user', content: prompt, createdAt: empty.createdAt },
+      ],
+    });
+    request.mockResolvedValue({
+      thread: { id: threadId, acpSnapshot: snapshot([user, assistant]) },
+    });
+    const followup = await client.getChat(threadId);
+    expect(followup.messages.map(getMessageText)).toEqual([prompt, answer, prompt]);
+    expect(followup.historyRecoveryError).toBeNull();
+
+    request.mockResolvedValue({ thread: { id: threadId, acpSnapshot: snapshot([user]) } });
+    const incomplete = await client.getChat(threadId);
+    expect(incomplete.messages.map(getMessageText)).toEqual([prompt, answer, prompt]);
+    expect(incomplete.historyRecoveryError).toBeTruthy();
+
+    request.mockResolvedValue({
+      thread: {
+        id: threadId,
+        acpSnapshot: snapshot([
+          user,
+          assistant,
+          { ...user, id: 'second-user' },
+          { ...assistant, id: 'second-answer' },
+        ]),
+      },
+    });
+    const recovered = await client.getChat(threadId);
+    expect(recovered.messages.map(getMessageText)).toEqual([prompt, answer, prompt, answer]);
+    expect(recovered.messages.map(({ id }) => id)).toEqual([
+      'user',
+      'answer',
+      'second-user',
+      'second-answer',
+    ]);
+    expect(recovered.historyRecoveryError).toBeNull();
+  });
+
   it('preserves the sent message and derived title through incomplete reads and reopening', async () => {
     const { client, request } = createClient();
     request.mockResolvedValueOnce({

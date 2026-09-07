@@ -103,7 +103,11 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   } = context;
 
   const store = useStore();
-  const interrupted = useAtomValue(interruptedChatCreationAtom);
+  const pendingCreation = useAtomValue(interruptedChatCreationAtom);
+  const creating = useAtomValue(creatingAtom);
+  const sending = useAtomValue(sendingAtom);
+  // A durable retry identity also exists during a normal send; it is not a recovered draft.
+  const interrupted = creating || sending ? null : pendingCreation;
   const theme = useAppTheme();
   const { height: windowHeight } = useWindowDimensions();
   const styles = useMemo(() => createStyles(theme), [theme]);

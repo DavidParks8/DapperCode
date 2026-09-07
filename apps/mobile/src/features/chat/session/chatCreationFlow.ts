@@ -32,6 +32,7 @@ import {
   submissionScopeKey,
 } from '../turn/controllers/submissionController';
 import { shouldAutoEnablePlanModeFromChat } from '../helpers/helpers';
+import { resolveAcceptedTurnChat } from '../turn/acceptedTurnState';
 import type {
   MainScreenAgentThreadEventBootstrapContext,
   MainScreenAgentThreadEventBootstrapResult,
@@ -335,8 +336,17 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
         },
         onTurnStarted: registerTurnStarted,
       });
-      const resolvedUpdated = mergeChatWithPendingOptimisticMessages(updated);
-      await consumeRecoveredCreation(store, bridgeProfileId, optimisticChatId, resolvedUpdated);
+      const resolveUpdated = () =>
+        resolveAcceptedTurnChat(
+          {
+            result: { chat: updated, turnId: updated.activeTurnId ?? null },
+            mergeChatWithPendingOptimisticMessages,
+          },
+          selectedChatRef.current?.id === updated.id ? selectedChatRef.current : null,
+        ) ?? updated;
+      await consumeRecoveredCreation(store, bridgeProfileId, optimisticChatId, resolveUpdated());
+      // Completion can arrive while the durable handoff is saving. Do not reinstall its old read.
+      const resolvedUpdated = resolveUpdated();
       const autoEnabledPlan = shouldAutoEnablePlanModeFromChat(resolvedUpdated, supportsPlanMode);
       const isStillVisible = tracker.isVisible();
       if (autoEnabledPlan && isStillVisible) {

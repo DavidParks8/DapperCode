@@ -2325,6 +2325,9 @@ function MainRouteShell() {
       });
       expect(api.sendChatMessageIdempotent).not.toHaveBeenCalled();
 
+      expect(store.get(errorAtom)).toBeNull();
+      expect(messageInput(root).props['value']).toBe('');
+
       await act(async () => {
         wsStatusHandler?.(true);
         await Promise.resolve();
@@ -2336,6 +2339,112 @@ function MainRouteShell() {
       });
       expect(api.sendChatMessageIdempotent).toHaveBeenCalled();
       act(() => tree.unmount());
+    });
+
+    it('keeps a completed first response when pending-creation persistence finishes late', async () => {
+      const user = {
+        id: 'first-user',
+        role: 'user' as const,
+        content: 'Finish the first task',
+        createdAt: chat.createdAt,
+      };
+      const running: Chat = {
+        ...chat,
+        id: 'thread-created',
+        status: 'running',
+        activeTurnId: 'first-turn',
+        messages: [user],
+      };
+      const completed: Chat = {
+        ...running,
+        status: 'complete',
+        activeTurnId: null,
+        messages: [
+          user,
+          {
+            id: 'first-answer',
+            role: 'assistant',
+            content: 'The first task is complete',
+            createdAt: chat.createdAt,
+          },
+        ],
+      };
+      const api = createApi();
+      jest.mocked(api.sendChatMessageIdempotent).mockResolvedValue(running);
+      jest.mocked(api.getChat).mockResolvedValue(completed);
+      const { tree, store } = await renderMain({ api });
+      const root = tree.root as Queryable;
+      const completionWrite = createDeferred<void>();
+      jest.mocked(FileSystem.writeAsStringAsync).mockImplementation((path, value) => {
+        if (path.endsWith('/snapshots.json') && JSON.parse(value).selectedChatId === running.id) {
+          return completionWrite.promise;
+        }
+        return Promise.resolve();
+      });
+      act(() => messageInput(root).props.onChangeText(user.content));
+      let sendPromise: Promise<void> | undefined;
+      await act(async () => {
+        sendPromise = (
+          root.findAll((candidate) => candidate.props['accessibilityLabel'] === 'Send message')[0]
+            ?.props.onPress as () => Promise<void>
+        )();
+        for (let index = 0; index < 20; index += 1) {
+          await Promise.resolve();
+        }
+      });
+      expect(api.sendChatMessageIdempotent).toHaveBeenCalled();
+      await emitWs({
+        method: 'bridge/agui.event',
+        params: {
+          threadId: running.id,
+          runId: 'first-run',
+          sourceTurnId: 'first-turn',
+          event: { type: 'RUN_FINISHED', threadId: running.id, runId: 'first-run' },
+        },
+      });
+      expect(store.get(selectedChatAtom)?.status).toBe('complete');
+      expect(store.get(selectedChatAtom)?.messages.map(getMessageText)).toEqual([
+        user.content,
+        'The first task is complete',
+      ]);
+      const handoffStates: Array<{ status: Chat['status']; messages: string[] }> = [];
+      const unsubscribe = store.sub(selectedChatAtom, () => {
+        const current = store.get(selectedChatAtom);
+        if (current) {
+          handoffStates.push({
+            status: current.status,
+            messages: current.messages.map(getMessageText),
+          });
+        }
+      });
+      await act(async () => {
+        completionWrite.resolve();
+        await sendPromise;
+      });
+      unsubscribe();
+      for (const state of handoffStates) {
+        expect(state).toEqual({
+          status: 'complete',
+          messages: [user.content, 'The first task is complete'],
+        });
+      }
+      expect(store.get(selectedChatAtom)?.messages.map(getMessageText)).toEqual([
+        user.content,
+        'The first task is complete',
+      ]);
+      expect(store.get(selectedChatAtom)?.status).toBe('complete');
+      expect(store.get(selectedChatAtom)?.historyRecoveryError).toBeFalsy();
+      expect(store.get(activeTurnIdAtom)).toBeNull();
+      expect(store.get(activityAtom).tone).not.toBe('running');
+      expect(
+        root.findAll((candidate) => candidate.props['accessibilityLabel'] === 'Stop agent'),
+      ).toHaveLength(0);
+      expect(messageInput(root).props['editable']).not.toBe(false);
+      expect(messageInput(root).props['value']).toBe('');
+      expect(store.get(errorAtom)).toBeNull();
+      expect(store.get(interruptedChatCreationAtom)).toBeNull();
+      act(() => tree.unmount());
+      jest.mocked(FileSystem.writeAsStringAsync).mockResolvedValue(undefined);
     });
 
     it('keeps first-turn activity isolated when replay recovery overlaps creation', async () => {

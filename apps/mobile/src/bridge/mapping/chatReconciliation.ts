@@ -1,4 +1,4 @@
-import { getAgentMessageMeta, getMessageText } from '@bridge/messages';
+import { getAgentMessageMeta, getMessageText, isTransientUserMessage } from '@bridge/messages';
 import type { Chat, ChatMessage } from '@bridge/types/types';
 
 const LOCAL_TRANSCRIPT_MESSAGE_PREFIXES = [
@@ -9,7 +9,10 @@ const LOCAL_TRANSCRIPT_MESSAGE_PREFIXES = [
 
 export function reconcileChatTranscript(previous: Chat, next: Chat): Chat {
   // Merge client-only entries first so later stale-transcript protection cannot discard them.
-  const withLocalTranscript = preserveLocalTranscript(previous, next);
+  const withLocalTranscript = preserveLocalTranscript(
+    previous,
+    preserveUnconfirmedUserMessages(previous, next),
+  );
   return preserveRecentUserTurnTranscript(previous, withLocalTranscript);
 }
 
@@ -20,18 +23,51 @@ export function isChatHistoryIncomplete(previous: Chat | null, next: Chat): bool
   if (!previous || previous.id !== next.id || next.acpSnapshot?.messageCollection?.truncated) {
     return false;
   }
-  const latestUserIndex = findLatestUserMessageIndex(previous.messages);
-  if (latestUserIndex < 0 && next.messages.length > 0) {
+  const knownMessages = previous.messages.filter(
+    (message) =>
+      (message.role === 'user' || message.role === 'assistant') &&
+      !isLocalTranscriptMessage(message) &&
+      !isTransientUserMessage(message),
+  );
+  const latestUserIndex = findLatestUserMessageIndex(knownMessages);
+  if (
+    latestUserIndex < 0 &&
+    next.messages.length > 0 &&
+    !previous.messages.some(isTransientUserMessage)
+  ) {
     return false;
   }
-  const knownMessages = previous.messages
-    .slice(Math.max(0, latestUserIndex))
-    .filter(
-      (message) =>
-        (message.role === 'user' || message.role === 'assistant') &&
-        !isLocalTranscriptMessage(message),
+  const knownTurn = knownMessages.slice(Math.max(0, latestUserIndex));
+  return findRepresentedMessageIndexes(knownTurn, next.messages).size < knownTurn.length;
+}
+
+function preserveUnconfirmedUserMessages(previous: Chat, next: Chat): Chat {
+  if (
+    previous.id !== next.id ||
+    next.acpSnapshot?.messageCollection?.truncated ||
+    !previous.messages.some(isTransientUserMessage)
+  ) {
+    return next;
+  }
+  let messages = next.messages;
+  let cursor = 0;
+  // Unsynced prompts are local entries, not evidence of lost history. Keep them between their
+  // known neighbours until the server echoes them, without holding back new assistant output.
+  for (const message of previous.messages) {
+    const represented = messages.findIndex(
+      (candidate, index) => index >= cursor && messagesShareTranscriptIdentity(message, candidate),
     );
-  return findRepresentedMessageIndexes(knownMessages, next.messages).size < knownMessages.length;
+    if (represented >= 0) {
+      cursor = represented + 1;
+    } else if (isTransientUserMessage(message)) {
+      if (messages === next.messages) {
+        messages = [...messages];
+      }
+      messages.splice(cursor, 0, message);
+      cursor += 1;
+    }
+  }
+  return messages === next.messages ? next : { ...next, messages };
 }
 
 function preserveRecentUserTurnTranscript(previous: Chat, next: Chat): Chat {

@@ -79,7 +79,7 @@ export function applyPendingAcceptedTurn(
 }
 
 export function resolveAcceptedTurnChat(
-  args: AcceptedTurnStateArgs,
+  args: Pick<AcceptedTurnStateArgs, 'result' | 'mergeChatWithPendingOptimisticMessages'>,
   currentChat: Chat | null,
 ): Chat | null {
   if (currentChat?.status === 'complete' || currentChat?.status === 'error') {
