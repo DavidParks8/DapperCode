@@ -20,30 +20,15 @@ import {
   buildOptimisticGoalBridgeUiSurface,
 } from '../helpers/helpers';
 import type { MainScreenSendMessageHandlerContext } from './sendMessageHandler';
+import { isPendingChatId } from '@shell/session/interruptedChatCreation';
 import type { ComposerSubmission } from './controllers/submissionController';
 import type { ThreadRuntimeSnapshot } from '../state/runtime';
-import type { SendMessageOptions } from './sendMessage';
+import type { BeginSendMessageSubmissionArgs, SendMessageOptions } from './sendMessage';
 import {
   applyPendingAcceptedTurn,
   registerAcceptedTurn,
   resolveAcceptedTurnChat,
 } from './acceptedTurnState';
-
-export type PrepareSendMessageRequestArgs = {
-  rawContent: string;
-  options?: SendMessageOptions;
-  selectedChatId: string | null;
-};
-export type BeginSendMessageSubmissionArgs = {
-  rawContent: string;
-  options?: SendMessageOptions;
-  selectedCollaborationMode: CollaborationMode;
-  selectedChat?: Chat | null;
-  pendingMentionPaths: string[];
-  pendingLocalImagePaths: string[];
-  submissionController: MainScreenSendMessageHandlerContext['submissionController'];
-  draftController: MainScreenSendMessageHandlerContext['draftController'];
-};
 export type GoalSurfaceStateArgs = {
   targetChatId: string;
   supportsGoal: boolean;
@@ -198,11 +183,16 @@ export type RunSendMessageTurnArgs = {
   setShowDelayedGenericRunningActivity: (value: boolean) => void;
   suppressPlanModeAutoEnable: boolean;
   handleTurnFailure: MainScreenSendMessageHandlerContext['handleTurnFailure'];
+  consumeInterruptedChatCreation: (chat: Chat | null) => Promise<void>;
 };
 
-export function prepareSendMessageRequest(args: PrepareSendMessageRequestArgs) {
+export function prepareSendMessageRequest(args: {
+  rawContent: string;
+  options?: SendMessageOptions;
+  selectedChatId: string | null;
+}) {
   const content = args.rawContent.trim();
-  if (!args.selectedChatId || !content) {
+  if (!args.selectedChatId || isPendingChatId(args.selectedChatId) || !content) {
     return null;
   }
   return {
@@ -235,6 +225,9 @@ export function beginSendMessageSubmission(args: BeginSendMessageSubmissionArgs)
           mentions: turnMentions.map((mention) => mention.path),
           localImages: turnLocalImages.map((image) => image.path),
         },
+        args.interruptedSubmissionId,
+        args.inheritClearedDraftsFromSubmissionId,
+        args.inheritedClearedDraftEntries,
       ),
   };
 }
@@ -528,11 +521,13 @@ export const finalizeSuccessfulSubmission = (
     | 'attachmentController'
     | 'submissionController'
     | 'submission'
+    | 'draftController'
     | 'setError'
   >,
   isStillSelectedForResult: boolean,
 ) => {
   if (args.shouldClearComposer) {
+    args.draftController.commitSubmissionClear(args.submission);
     args.attachmentController.finishSubmission(isStillSelectedForResult);
   }
   args.submissionController.succeed(args.submission);

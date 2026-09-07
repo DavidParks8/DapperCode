@@ -2,20 +2,74 @@ import { errorAtom, pendingApprovalAtom, pendingUserInputRequestAtom } from '../
 import { queueActionItemIdAtom, queueActionKindAtom } from '../state/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
-import type { BridgeQueuedMessage } from '@bridge/types/types';
+import type { BridgeQueuedMessage, Chat } from '@bridge/types/types';
 import type {
   MainScreenSendMessageHandlerContext,
   MainScreenSendMessageHandlerResult,
 } from '../turn/sendMessageHandler';
+import { interruptedChatCreationAtom } from '@shell/state/chat/atoms';
+import { interruptedCreationRetryId } from '@shell/session/interruptedChatCreation';
+import type { InterruptedChatCreation } from '@shell/session/interruptedChatCreation';
+import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
+import { submissionScopeKey } from '../turn/controllers/submissionController';
 
 export type MainScreenComposerSubmitActionsContext = MainScreenSendMessageHandlerContext &
   MainScreenSendMessageHandlerResult;
+
+function linkedInterruptedSubmissionId(options: {
+  interrupted: InterruptedChatCreation | null;
+  threadId: string | undefined;
+  content: string;
+  pendingMentionPaths: string[];
+  pendingLocalImagePaths: string[];
+  sameProfile: boolean;
+  selectedChat: Chat | null | undefined;
+}): string | undefined {
+  if (!options.interrupted || options.interrupted.createdChatId !== options.threadId) {
+    return undefined;
+  }
+  return interruptedCreationRetryId(
+    options.interrupted,
+    options.content,
+    options.pendingMentionPaths,
+    options.pendingLocalImagePaths,
+    options.sameProfile,
+    options.selectedChat?.agentId ?? null,
+    options.selectedChat?.cwd ?? null,
+  );
+}
+
+function interruptedClearedDraftEntries(
+  interrupted: InterruptedChatCreation | null,
+  threadId: string | undefined,
+  profileId: string,
+): Array<{ scopeKey: string; draft: string }> | undefined {
+  if (!interrupted || !threadId || interrupted.createdChatId !== threadId) {
+    return undefined;
+  }
+  return [
+    {
+      scopeKey: submissionScopeKey({ profileId, threadId: null }),
+      draft: interrupted.originalDraft ?? interrupted.draft,
+    },
+  ];
+}
+
+function interruptedPredecessorId(
+  interrupted: InterruptedChatCreation | null,
+  threadId: string | undefined,
+): string | undefined {
+  return interrupted && threadId && interrupted.createdChatId === threadId
+    ? interrupted.submissionId
+    : undefined;
+}
 
 export function useMainScreenComposerSubmitActions(
   context: MainScreenComposerSubmitActionsContext,
 ) {
   const {
     bumpRunWatchdog,
+    bridgeProfileId,
     cacheThreadQueueState,
     creatingRef,
     draftController,
@@ -38,6 +92,8 @@ export function useMainScreenComposerSubmitActions(
   } = context;
   const pendingApproval = useAtomValue(pendingApprovalAtom);
   const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
+  const interrupted = useAtomValue(interruptedChatCreationAtom);
+  const activeBridgeProfileId = useAtomValue(activeBridgeProfileAtom)?.id ?? null;
   const setError = useSetAtom(errorAtom);
   const queueActionItemId = useAtomValue(queueActionItemIdAtom);
   const setQueueActionItemId = useSetAtom(queueActionItemIdAtom);
@@ -106,10 +162,25 @@ export function useMainScreenComposerSubmitActions(
       return;
     }
 
-    const submission = submissionController.begin(draftSnapshot, {
-      mentions: pendingMentionPaths,
-      localImages: pendingLocalImagePaths,
+    const interruptedSubmissionId = linkedInterruptedSubmissionId({
+      interrupted,
+      threadId,
+      content,
+      pendingMentionPaths,
+      pendingLocalImagePaths,
+      sameProfile: activeBridgeProfileId === bridgeProfileId,
+      selectedChat,
     });
+    const submission = submissionController.begin(
+      draftSnapshot,
+      {
+        mentions: pendingMentionPaths,
+        localImages: pendingLocalImagePaths,
+      },
+      interruptedSubmissionId,
+      interruptedPredecessorId(interrupted, threadId),
+      interruptedClearedDraftEntries(interrupted, threadId, bridgeProfileId),
+    );
     await sendMessageContent(content, { allowSlashCommands: false, submission });
   }, [
     draftController,
@@ -127,7 +198,11 @@ export function useMainScreenComposerSubmitActions(
     pendingMentionPaths,
     pendingLocalImagePaths,
     uploadingAttachment,
+    selectedChat,
     hasFailedAttachmentUploads,
+    activeBridgeProfileId,
+    bridgeProfileId,
+    interrupted,
     queueActionItemId,
   ]);
 

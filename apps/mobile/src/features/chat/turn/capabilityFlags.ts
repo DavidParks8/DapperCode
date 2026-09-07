@@ -27,6 +27,8 @@ import { activityAtom, queueActionItemIdAtom, queueActionKindAtom } from '../sta
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { AgentId } from '@bridge/types/types';
+import { interruptedChatCreationAtom } from '@shell/state/chat/atoms';
+import { discardInterruptedChatCreationAtom } from '@shell/state/chat/actions';
 import { normalizeWorkspacePath } from '../helpers/helpers';
 import type {
   MainScreenModelCatalogStateContext,
@@ -52,6 +54,7 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
     agentThreadsRequestRef,
     api,
     attachmentController,
+    bridgeProfileId,
     clearExternalStatusFullSync,
     clearRunWatchdog,
     hadCommandRef,
@@ -72,6 +75,8 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
   } = context;
   // The controller object is rebuilt every render; only its actions are referentially stable.
   const { clear: clearAttachments } = attachmentController;
+  const interruptedChatCreation = useAtomValue(interruptedChatCreationAtom);
+  const discardInterruptedChatCreation = useSetAtom(discardInterruptedChatCreationAtom);
   const setError = useSetAtom(errorAtom);
   const setPendingApproval = useSetAtom(pendingApprovalAtom);
   const setPendingUserInputRequest = useSetAtom(pendingUserInputRequestAtom);
@@ -107,6 +112,12 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
   const resetComposerState = useCallback(
     (requestedAgentId?: AgentId) => {
       const nextAgentId = requestedAgentId ?? selectedNewAgentId;
+      if (interruptedChatCreation) {
+        discardInterruptedChatCreation({
+          expectedPendingChatId: interruptedChatCreation.pendingChatId,
+          profileId: bridgeProfileId,
+        });
+      }
       clearExternalStatusFullSync();
       loadChatRequestRef.current += 1;
       agentThreadsRequestRef.current += 1;
@@ -163,9 +174,12 @@ export function useMainScreenCapabilityFlags(context: MainScreenCapabilityFlagsC
       agentThreadsRefreshTimerRef,
       agentThreadsRequestRef,
       clearAttachments,
+      bridgeProfileId,
       clearExternalStatusFullSync,
       clearRunWatchdog,
+      discardInterruptedChatCreation,
       hadCommandRef,
+      interruptedChatCreation,
       loadChatRequestRef,
       openingChatStartedAtRef,
       reasoningSummaryRef,

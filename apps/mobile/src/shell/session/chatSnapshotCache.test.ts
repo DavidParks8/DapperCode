@@ -46,6 +46,30 @@ function deferred<T>() {
 }
 
 describe('chatSnapshotCache', () => {
+  it('keeps only the selected interrupted placeholder until an explicit handoff', () => {
+    const oldPending = chat('pending-old');
+    const selectedPending = chat('pending-selected');
+    const real = chat('v1.YWdlbnQ.c2Vzc2lvbg');
+    const raw = {
+      ...createEmptyChatSnapshotCache('profile-a'),
+      selectedChatId: selectedPending.id,
+      entries: [oldPending, selectedPending].map((value) => ({
+        chat: value,
+        cachedAt: value.createdAt,
+        lastAccessedAt: value.createdAt,
+      })),
+    };
+    const parsed = parseChatSnapshotCache(
+      JSON.stringify(raw),
+      'profile-a',
+      Date.parse('2026-07-18T00:00:00.000Z'),
+    );
+    expect(parsed.entries.map(({ chat }) => chat.id)).toEqual([selectedPending.id]);
+    const progressed = updateChatSnapshotCache(parsed, real.id, real);
+    expect(progressed.selectedChatId).toBe(real.id);
+    expect(progressed.entries.map(({ chat }) => chat.id)).toEqual([real.id, selectedPending.id]);
+  });
+
   it('round trips exact-version snapshots for one profile', () => {
     const typedChat = chat('thread-1');
     requireTestValue(typedChat.messages[0], 'indexed test value').parts = [

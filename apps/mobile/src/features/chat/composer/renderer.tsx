@@ -16,6 +16,7 @@ import { ChatInput } from './ChatInput';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { motion } from '@shared/theme';
+import { isPendingChatId } from '@shell/session/interruptedChatCreation';
 import { QueuedMessageDockView } from './QueuedMessageDockView';
 import { ScheduledPromptDock } from '../workflow/ScheduledPromptDock';
 import type {
@@ -44,6 +45,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     dismissBridgeUiSurface,
     draft,
     editingQueuedMessage,
+    draftController,
     handleBridgeUiAction,
     handleCancelQueuedMessage,
     handleCancelQueuedMessageEdit,
@@ -66,7 +68,6 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     selectedChat,
     selectedScheduledPrompts,
     selectedThreadRuntimeSnapshot,
-    setDraft,
     showBridgeRecoveryBanner,
     showQueuedMessageDock,
     showSlashSuggestions,
@@ -92,12 +93,15 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     setComposerHeight((previous) => (previous === nextHeight ? previous : nextHeight));
   };
   const submitDisabled =
+    isPendingChatId(selectedChat?.id) ||
     context.uploadingAttachment ||
     context.hasFailedAttachmentUploads ||
     queueActionKind === 'editStart' ||
     queueActionKind === 'editCommit' ||
     queueActionKind === 'editCancel';
   const pasteDisabled = editingQueuedMessage || queueActionKind === 'editStart';
+  const showStopButton =
+    !isPendingChatId(selectedChat?.id) && (isTurnLoading || isTurnLikelyRunning || stoppingTurn);
 
   const renderComposer = (overlay: boolean) => (
     <View
@@ -152,16 +156,16 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         showSlashSuggestions={showSlashSuggestions}
         slashSuggestions={slashSuggestions}
         slashSuggestionsMaxHeight={slashSuggestionsMaxHeight}
-        setDraft={setDraft}
+        setDraft={draftController.editDraft}
         styles={styles}
       />
       <ChatInput
         value={draft}
-        onChangeText={setDraft}
+        onChangeText={draftController.editDraft}
         onFocus={handleComposerFocus}
         onSubmit={() => void handleSubmit()}
         onStop={() => handleStopTurn()}
-        showStopButton={isTurnLoading || isTurnLikelyRunning || stoppingTurn}
+        showStopButton={showStopButton}
         isStopping={stoppingTurn}
         onAttachPress={openAttachmentMenu}
         pasteScopeKey={attachmentController.pasteScopeKey}

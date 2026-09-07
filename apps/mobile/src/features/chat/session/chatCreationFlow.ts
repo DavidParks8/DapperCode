@@ -15,6 +15,16 @@ import {
   selectedEffortAtom,
 } from '../state/models';
 import { activityAtom } from '../state/composer';
+import { interruptedChatCreationAtom } from '@shell/state/chat/atoms';
+import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
+import { interruptedCreationRetryId } from '@shell/session/interruptedChatCreation';
+import type { InterruptedChatCreation } from '@shell/session/interruptedChatCreation';
+import type { Chat } from '@bridge/types/types';
+import {
+  consumeInterruptedChatCreationAtom,
+  linkInterruptedChatCreationAtom,
+  persistPendingChatCreationAtom,
+} from '@shell/state/chat/actions';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -38,6 +48,76 @@ import {
 
 export type MainScreenChatCreationFlowContext = MainScreenAgentThreadEventBootstrapContext &
   MainScreenAgentThreadEventBootstrapResult;
+
+async function consumeRecoveredCreation(
+  store: MainScreenChatCreationFlowContext['store'],
+  profileId: string,
+  pendingChatId: string,
+  replacement: Chat,
+): Promise<void> {
+  const interrupted = store.get(interruptedChatCreationAtom);
+  if (!interrupted || interrupted.pendingChatId !== pendingChatId) {
+    return;
+  }
+  await store.set(consumeInterruptedChatCreationAtom, {
+    expectedPendingChatId: interrupted.pendingChatId,
+    profileId,
+    replacement,
+  });
+}
+
+function pendingChatIdFor(interrupted: InterruptedChatCreation | null): string | undefined {
+  return interrupted?.pendingChatId;
+}
+
+function clearSubmissionComposer(
+  draftController: MainScreenChatCreationFlowContext['draftController'],
+  submissionController: MainScreenChatCreationFlowContext['submissionController'],
+  submission: ComposerSubmission,
+): void {
+  const clearedRevision = draftController.clearForSubmission({
+    scopeKey: submission.scopeKey,
+    value: submission.draft,
+    revision: submission.draftRevision,
+  });
+  if (clearedRevision !== null) {
+    submissionController.markCleared(submission, submission.scopeKey, clearedRevision);
+  }
+}
+
+function interruptedRetryId(options: {
+  store: MainScreenChatCreationFlowContext['store'];
+  bridgeProfileId: string;
+  content: string;
+  pendingMentionPaths: string[];
+  pendingLocalImagePaths: string[];
+  activeAgentId: string | null;
+  preferredAgentId: string | null;
+  preferredStartCwd: string | null;
+}): { interrupted: InterruptedChatCreation | null; submissionId: string | undefined } {
+  const interrupted = options.store.get(interruptedChatCreationAtom);
+  return {
+    interrupted,
+    submissionId: interruptedCreationRetryId(
+      interrupted,
+      options.content,
+      options.pendingMentionPaths,
+      options.pendingLocalImagePaths,
+      options.store.get(activeBridgeProfileAtom)?.id === options.bridgeProfileId,
+      options.activeAgentId ?? options.preferredAgentId,
+      options.preferredStartCwd,
+    ),
+  };
+}
+
+function createDraftContent(
+  draftController: MainScreenChatCreationFlowContext['draftController'],
+): { draftSnapshot: ReturnType<typeof draftController.snapshot>; content: string } | null {
+  const draftSnapshot = draftController.snapshot();
+  const content = draftSnapshot.value.trim();
+  return !draftController.restoring && content ? { draftSnapshot, content } : null;
+}
+
 export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlowContext) {
   const {
     activeAgentId,
@@ -71,6 +151,7 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
     setSelectedChatId,
     supportsPlanMode,
     stopRequestedRef,
+    store,
     submissionController,
     turnExecutionController,
   } = context;
@@ -88,6 +169,8 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
   const selectedAcpModeId = useAtomValue(selectedAcpModeIdAtom);
   const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
   const setActivity = useSetAtom(activityAtom);
+  const linkInterruptedChatCreation = useSetAtom(linkInterruptedChatCreationAtom);
+  const persistPendingChatCreation = useSetAtom(persistPendingChatCreationAtom);
   const [pendingRestoredSubmission, setPendingRestoredSubmission] = useState<{
     submission: Pick<ComposerSubmission, 'draft' | 'mentions' | 'localImages'>;
     scopeKey: string;
@@ -111,16 +194,26 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
   }, [draftSnapshot, pendingRestoredSubmission, restorePending, setDraft]);
 
   const createChat = useCallback(async () => {
-    const draftSnapshot = draftController.snapshot();
-    const content = draftSnapshot.value.trim();
-    if (!content) {
+    const preparedDraft = createDraftContent(draftController);
+    if (!preparedDraft) {
       return;
     }
+    const { content, draftSnapshot } = preparedDraft;
 
     if (await handleSlashCommand(content)) {
       setDraft('');
       return;
     }
+    const { interrupted, submissionId: interruptedSubmissionId } = interruptedRetryId({
+      store,
+      bridgeProfileId,
+      content,
+      pendingMentionPaths,
+      pendingLocalImagePaths,
+      activeAgentId,
+      preferredAgentId,
+      preferredStartCwd,
+    });
 
     const {
       submission,
@@ -137,12 +230,13 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
       preferredStartCwd,
       activeAgentId,
       preferredAgentId,
+      bridgeProfileId,
       submissionController,
+      interruptedSubmissionId,
     });
 
     attachmentController.beginSubmission();
-    setDraft('');
-    submissionController.markCleared(submission, draftController.snapshot().revision);
+    clearSubmissionComposer(draftController, submissionController, submission);
     showOptimisticChatIfNeeded({
       selectedChatIdRef,
       selectedChatRef,
@@ -168,6 +262,29 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
         setResolvingUserInput,
         setActivity,
       });
+      await persistPendingChatCreation({
+        profileId: bridgeProfileId,
+        pendingChat: optimisticChat,
+        replacePendingChatId: pendingChatIdFor(interrupted),
+      });
+      const onCreated = createOnChatCreatedHandler({
+        tracker,
+        activeAgentId,
+        selectedCollaborationMode,
+        onLastUsedThreadSettingsChange,
+        queueOptimisticUserMessage,
+        optimisticMessage,
+        selectedChatIdRef,
+        optimisticChatId,
+        preserveModelSelectionForChat,
+        setSelectedChatId,
+        selectedChatRef,
+        setSelectedChat,
+        scrollToBottomReliable,
+        setActivity,
+        bumpRunWatchdog,
+        content,
+      });
       const updated = await turnExecutionController.createAndStart({
         submissionId: submission.id,
         create: {
@@ -191,27 +308,35 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
           approvalPolicy: activeApprovalPolicy,
           collaborationMode: selectedCollaborationMode,
         }),
-        onCreated: createOnChatCreatedHandler({
-          tracker,
-          activeAgentId,
-          selectedCollaborationMode,
-          onLastUsedThreadSettingsChange,
-          queueOptimisticUserMessage,
-          optimisticMessage,
-          selectedChatIdRef,
-          optimisticChatId,
-          preserveModelSelectionForChat,
-          setSelectedChatId,
-          selectedChatRef,
-          setSelectedChat,
-          scrollToBottomReliable,
-          setActivity,
-          bumpRunWatchdog,
-          content,
-        }),
+        onCreated: async (created) => {
+          const createdScopeKey = submissionScopeKey({
+            profileId: bridgeProfileId,
+            threadId: created.id,
+          });
+          draftController.transferScopeDraft(
+            submissionScopeKey({
+              profileId: bridgeProfileId,
+              threadId: optimisticChatId,
+            }),
+            createdScopeKey,
+          );
+          submission.scopeKey = createdScopeKey;
+          onCreated(created);
+          const linked = await linkInterruptedChatCreation({
+            profileId: bridgeProfileId,
+            expectedPendingChatId: optimisticChatId,
+            replacePendingChatId: interrupted?.pendingChatId,
+            createdChat: created,
+            pendingChat: optimisticChat,
+          });
+          if (!linked) {
+            throw new Error('Unable to persist pending chat recovery.');
+          }
+        },
         onTurnStarted: registerTurnStarted,
       });
       const resolvedUpdated = mergeChatWithPendingOptimisticMessages(updated);
+      await consumeRecoveredCreation(store, bridgeProfileId, optimisticChatId, resolvedUpdated);
       const autoEnabledPlan = shouldAutoEnablePlanModeFromChat(resolvedUpdated, supportsPlanMode);
       const isStillVisible = tracker.isVisible();
       if (autoEnabledPlan && isStillVisible) {
@@ -224,6 +349,7 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
         activeServiceTier,
       );
       submissionController.succeed(submission);
+      draftController.commitSubmissionClear(submission);
       if (!isStillVisible) {
         attachmentController.finishSubmission(false);
       }
@@ -284,11 +410,13 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
     handleSlashCommand,
     pendingMentionPaths,
     pendingLocalImagePaths,
+    persistPendingChatCreation,
     preserveModelSelectionForChat,
     preferredStartCwd,
     selectedCollaborationMode,
     registerTurnStarted,
     handleTurnFailure,
+    linkInterruptedChatCreation,
     discardOptimisticUserMessage,
     bumpRunWatchdog,
     clearRunWatchdog,
@@ -317,6 +445,7 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
     setUserInputDrafts,
     setUserInputError,
     stopRequestedRef,
+    store,
     submissionController,
     supportsPlanMode,
   ]);

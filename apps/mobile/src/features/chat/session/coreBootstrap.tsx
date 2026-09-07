@@ -32,6 +32,12 @@ import {
 } from '../transcript/controllers/continuationController';
 import type { MainScreenBaseContext } from '../screen/useBaseContext';
 import { useMountTimestampRef } from '../screen/useMountTimestampRef';
+import { interruptedChatCreationAtom } from '@shell/state/chat/atoms';
+import { consumeInterruptedChatCreationAtom } from '@shell/state/chat/actions';
+import { submissionScopeKey } from '../turn/controllers/submissionController';
+
+const INTERRUPTED_CHAT_NOTICE =
+  'An interrupted chat was recovered as a draft. Review the text and reattach any files before retrying.';
 
 export type MainScreenCoreBootstrapContext = MainScreenBaseContext;
 
@@ -97,6 +103,7 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   } = context;
 
   const store = useStore();
+  const interrupted = useAtomValue(interruptedChatCreationAtom);
   const theme = useAppTheme();
   const { height: windowHeight } = useWindowDimensions();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -145,7 +152,7 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
     didSeedRef,
     initialPendingSnapshot,
     pendingOpenChatId,
-    preferredAgentId,
+    preferredAgentId: interrupted?.agentId ?? preferredAgentId,
     store,
   });
   const selectedChat = useAtomValue(selectedChatAtom);
@@ -161,12 +168,52 @@ export function useMainScreenCoreBootstrap(context: MainScreenCoreBootstrapConte
   const openingChatStartedAtRef = useMountTimestampRef(
     !initialPendingSnapshot && Boolean(pendingOpenChatId),
   );
+  const draftRecovery = useMemo(() => {
+    const recoveryChatId = interrupted?.createdChatId ?? null;
+    if (!interrupted || selectedChatId !== recoveryChatId) {
+      return undefined;
+    }
+    return {
+      draft: interrupted.draft,
+      sourceScopeKey: submissionScopeKey({
+        profileId: bridgeProfileId,
+        threadId: interrupted.pendingChatId,
+      }),
+      targetScopeKey: submissionScopeKey({
+        profileId: bridgeProfileId,
+        threadId: recoveryChatId,
+      }),
+      consumeOnEdit: !interrupted.createdChatId,
+      savedDraftReplacesOriginal: Boolean(interrupted.createdChatId),
+      onConsumed: async () => {
+        await store.set(consumeInterruptedChatCreationAtom, {
+          expectedPendingChatId: interrupted.pendingChatId,
+          profileId: bridgeProfileId,
+          replacement:
+            interrupted.createdChatId && selectedChat?.id === interrupted.createdChatId
+              ? selectedChat
+              : undefined,
+          requirePersistence: true,
+        });
+      },
+    };
+  }, [bridgeProfileId, interrupted, selectedChat, selectedChatId, store]);
   const draftController = useDraftController(
     bridgeProfileId,
     selectedChatId,
     undefined,
     reportPersistenceError,
+    undefined,
+    draftRecovery,
   );
+  useEffect(() => {
+    setError((current) => {
+      if (interrupted && selectedChatId === (interrupted.createdChatId ?? null)) {
+        return current ?? INTERRUPTED_CHAT_NOTICE;
+      }
+      return current === INTERRUPTED_CHAT_NOTICE ? null : current;
+    });
+  }, [interrupted, selectedChatId, setError]);
   const { draft, setDraft } = draftController;
   const streamingTextRef = useRef<string | null>(null);
   const setStreamingText = useCallback(

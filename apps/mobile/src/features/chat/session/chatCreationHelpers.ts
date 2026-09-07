@@ -39,7 +39,9 @@ export function buildOptimisticChatSetup(params: {
   preferredStartCwd: string | null;
   activeAgentId: string | null;
   preferredAgentId: string | null;
+  bridgeProfileId: string;
   submissionController: MainScreenChatCreationFlowContext['submissionController'];
+  interruptedSubmissionId?: string;
 }): OptimisticChatSetup {
   const {
     draftSnapshot,
@@ -49,14 +51,18 @@ export function buildOptimisticChatSetup(params: {
     preferredStartCwd,
     activeAgentId,
     preferredAgentId,
+    bridgeProfileId,
     submissionController,
   } = params;
   const turnMentions = pendingMentionPaths.map((path) => toMentionInput(path, preferredStartCwd));
   const turnLocalImages = pendingLocalImagePaths.map((path) => ({ path }));
-  const submission = submissionController.begin(draftSnapshot, {
+  const attachments = {
     mentions: pendingMentionPaths,
     localImages: pendingLocalImagePaths,
-  });
+  };
+  const submission = params.interruptedSubmissionId
+    ? submissionController.begin(draftSnapshot, attachments, params.interruptedSubmissionId)
+    : submissionController.begin(draftSnapshot, attachments);
   const optimisticMessage: ChatTranscriptMessage = {
     id: `msg-${Date.now()}`,
     role: 'user',
@@ -65,6 +71,7 @@ export function buildOptimisticChatSetup(params: {
   };
   const optimisticChatId = `pending-${submission.id}`;
   const optimisticCreatedAt = new Date().toISOString();
+  const effectiveAgentId = activeAgentId ?? preferredAgentId;
   return {
     content,
     submission,
@@ -82,7 +89,15 @@ export function buildOptimisticChatSetup(params: {
       statusUpdatedAt: optimisticCreatedAt,
       lastMessagePreview: content.slice(0, 50),
       cwd: preferredStartCwd ?? '',
-      agentId: activeAgentId ?? preferredAgentId ?? 'unknown',
+      agentId: effectiveAgentId ?? 'unknown',
+      localPendingCreation: {
+        profileId: bridgeProfileId,
+        draft: draftSnapshot.value,
+        originalDraft: draftSnapshot.value,
+        hadAttachments: turnMentions.length > 0 || turnLocalImages.length > 0,
+        agentId: effectiveAgentId,
+        cwd: preferredStartCwd,
+      },
       messages: [optimisticMessage],
     },
   };

@@ -79,9 +79,22 @@ import type { HostBridgeApiClient } from '@bridge/client/client';
 import type { HostBridgeWsClient } from '@bridge/ws/ws';
 import { requestApprovalPolicySyncAtom } from '@shell/state/approvalPolicy';
 import { approvalModeAtom } from '@shell/state/appState/settings';
-import { chatSnapshotCacheAtom } from '@shell/state/chat/atoms';
+import {
+  activeChatAtom,
+  chatSnapshotCacheAtom,
+  interruptedChatCreationAtom,
+  selectedChatIdAtom,
+} from '@shell/state/chat/atoms';
+import {
+  createEmptyChatSnapshotCache,
+  updateChatSnapshotCache,
+  loadChatSnapshotCache,
+  saveChatSnapshotCache,
+} from '@shell/session/chatSnapshotCache';
+import type { Chat } from '@bridge/types/types';
 import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
 import { useAppBridgeLifecycle } from '@shell/boot/useAppBridgeLifecycle';
+import { consumeInterruptedChatCreationAtom } from '@shell/state/chat/actions';
 
 function Harness() {
   useAppBridgeLifecycle();
@@ -97,6 +110,68 @@ describe('useAppBridgeLifecycle route gates', () => {
   afterEach(() => {
     jest.runOnlyPendingTimers();
     jest.useRealTimers();
+  });
+
+  it('keeps interrupted creation durable until its recovered draft is consumed', async () => {
+    const at = new Date().toISOString();
+    const pending: Chat = {
+      id: 'pending-recovery',
+      title: '',
+      status: 'running',
+      createdAt: at,
+      updatedAt: at,
+      statusUpdatedAt: at,
+      lastMessagePreview: 'Recover',
+      messages: [{ id: 'msg-recovery', role: 'user', content: 'Recover', createdAt: at }],
+    };
+    const cache = updateChatSnapshotCache(
+      createEmptyChatSnapshotCache('profile-1'),
+      pending.id,
+      pending,
+    );
+    jest.mocked(loadChatSnapshotCache).mockResolvedValueOnce(cache);
+    const api = {
+      primeChats: jest.fn().mockResolvedValue(undefined),
+      rememberChat: jest.fn(),
+      setApprovalPolicy: jest.fn().mockResolvedValue(undefined),
+    } as unknown as HostBridgeApiClient;
+    const ws = {
+      isConnected: true,
+      onStatus: jest.fn(() => jest.fn()),
+    } as unknown as HostBridgeWsClient;
+    const store = createBridgeTestStore({ api, ws });
+    router.replace('/profiles/profile-1/chats/new');
+    let tree: ReactTestRenderer | undefined;
+    await act(async () => {
+      tree = renderer.create(withAppStore(store, <Harness />));
+      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(1000);
+    });
+    expect(store.get(interruptedChatCreationAtom)?.draft).toBe('Recover');
+    expect(api.rememberChat).not.toHaveBeenCalled();
+    expect(saveChatSnapshotCache).not.toHaveBeenCalled();
+    expect(store.get(chatSnapshotCacheAtom)?.selectedChatId).toBe(pending.id);
+    const real = { ...pending, id: 'v1.YWdlbnQ.c2Vzc2lvbg' };
+    await act(async () => {
+      store.set(activeChatAtom, real);
+      store.set(selectedChatIdAtom, real.id);
+      await jest.advanceTimersByTimeAsync(1000);
+    });
+    expect(store.get(chatSnapshotCacheAtom)?.selectedChatId).toBe(pending.id);
+    expect(saveChatSnapshotCache).not.toHaveBeenCalled();
+    await act(async () => {
+      await store.set(consumeInterruptedChatCreationAtom, {
+        expectedPendingChatId: pending.id,
+        replacement: real,
+      });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(1000);
+    });
+    expect(store.get(chatSnapshotCacheAtom)?.selectedChatId).toBe(real.id);
+    expect(jest.mocked(saveChatSnapshotCache).mock.calls.at(-1)?.[0].selectedChatId).toBe(real.id);
+    act(() => tree?.unmount());
   });
 
   it('suppresses background work during connection and enables workspace/chat lifecycles by route', async () => {

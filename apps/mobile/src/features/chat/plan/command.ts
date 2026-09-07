@@ -25,6 +25,7 @@ import {
   shouldAutoEnablePlanModeFromChat,
 } from '../helpers/helpers';
 import type { MainScreenSlashCommandHandlerContext } from '../composer/slashCommandHandler';
+import type { ComposerSubmission } from '../turn/controllers/submissionController';
 
 export async function executePlanCommand(
   context: MainScreenSlashCommandHandlerContext,
@@ -115,6 +116,19 @@ export async function executePlanCommand(
       { ...draftController.snapshot(), value: argText },
       { mentions: [], localImages: [] },
     );
+
+  const clearPlanSubmission = (submission: ComposerSubmission) => {
+    const snapshot = draftController.snapshot();
+    const clearedRevision = draftController.clearForSubmission(snapshot);
+    if (clearedRevision !== null) {
+      submissionController.markCleared(
+        submission,
+        snapshot.scopeKey,
+        clearedRevision,
+        snapshot.value,
+      );
+    }
+  };
 
   const createPlanChat = (submissionId: string) =>
     turnExecutionController.create(
@@ -248,8 +262,7 @@ export async function executePlanCommand(
     const optimisticMessage = createOptimisticMessage();
     const visibility = createNewChatVisibility();
 
-    setDraft('');
-    submissionController.markCleared(planSubmission, draftController.snapshot().revision);
+    clearPlanSubmission(planSubmission);
     try {
       setCreating(true);
       resetPlanTurnState('Creating chat');
@@ -271,6 +284,7 @@ export async function executePlanCommand(
       const resolvedUpdated = mergeChatWithPendingOptimisticMessages(updated);
       finalizeNewChatPlanSuccess(created.id, resolvedUpdated, visibility.isVisible());
       submissionController.succeed(planSubmission);
+      draftController.commitSubmissionClear(planSubmission);
     } catch (err) {
       restoreFailedPlanDraft(planSubmission);
       const createdChatId = visibility.getCreatedChatId();
@@ -296,8 +310,7 @@ export async function executePlanCommand(
       setSending(true);
       resetPlanTurnState('Sending plan prompt', targetChatId);
       bumpRunWatchdog();
-      setDraft('');
-      submissionController.markCleared(planSubmission, draftController.snapshot().revision);
+      clearPlanSubmission(planSubmission);
       queueOptimisticUserMessage(targetChatId, optimisticMessage);
       setSelectedChat((prev) => {
         const baseChat =
@@ -359,6 +372,7 @@ export async function executePlanCommand(
         clearRunWatchdog();
       }
       submissionController.succeed(planSubmission);
+      draftController.commitSubmissionClear(planSubmission);
     } catch (err) {
       if (submissionController.fail(planSubmission, draftController.snapshot())) {
         setDraft(planSubmission.draft);

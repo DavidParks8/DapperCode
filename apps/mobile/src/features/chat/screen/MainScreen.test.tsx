@@ -46,18 +46,25 @@ import { defaultStartCwdAtom } from '@shell/state/appState/settings';
 import {
   gitChatAtom,
   mainOpeningChatIdAtom,
+  chatSnapshotCacheAtom,
   newChatRoutePendingAtom,
   pendingMainChatIdAtom,
 } from '@shell/state/chat/atoms';
 import { startNewChatAtom } from '@shell/navigation/actions';
+import { applyRestoredChatSnapshotAtom } from '@shell/state/chat/actions';
+import { interruptedChatCreationAtom } from '@shell/state/chat/atoms';
 import { pendingBrowserTargetUrlAtom } from '../../browser/state/browser';
 import { agentThreadMenuVisibleAtom } from '../state/modals';
 import { selectedChatAtom, selectedChatIdAtom } from '../state/session';
 import { threadRuntimeSnapshotsAtom } from '../state/runtime';
-import { activeTurnIdAtom } from '../state/turn';
-import { liveAssistantByThreadAtom } from '../state/turn';
+import { activeTurnIdAtom, errorAtom, liveAssistantByThreadAtom, sendingAtom } from '../state/turn';
 import { createAgUiThreadMessageState } from '@bridge/agui/agUiMessages';
 import { activityAtom } from '../state/composer';
+import { submissionScopeKey } from '../turn/controllers/submissionController';
+import {
+  createEmptyChatSnapshotCache,
+  updateChatSnapshotCache,
+} from '@shell/session/chatSnapshotCache';
 import {
   agentRootThreadIdAtom,
   favoriteWorkspacePathsAtom,
@@ -105,6 +112,14 @@ function hasWorkingStatus<T>(root: T, matcher: (root: T, value: string) => boole
   return WORKING_PHRASES.some((phrase) => matcher(root, phrase));
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: Object.assign(() => null, { glyphMap: {} }),
 }));
@@ -113,6 +128,7 @@ jest.mock('expo-file-system/legacy', () => ({
   documentDirectory: 'file:///documents/',
   readAsStringAsync: jest.fn().mockRejectedValue(new Error('missing')),
   writeAsStringAsync: jest.fn().mockResolvedValue(undefined),
+  makeDirectoryAsync: jest.fn().mockResolvedValue(undefined),
   getInfoAsync: jest.fn(),
   deleteAsync: jest.fn().mockResolvedValue(undefined),
 }));
@@ -481,6 +497,7 @@ function MainRouteShell() {
       connected?: boolean;
       pendingOpenChatId?: string | null;
       pendingOpenChatSnapshot?: Chat | null;
+      interruptedChat?: Chat;
     } = {},
   ): Promise<{
     tree: ReactTestRenderer;
@@ -495,6 +512,9 @@ function MainRouteShell() {
       pendingOpenChatId: options.pendingOpenChatId,
       pendingOpenChatSnapshot: options.pendingOpenChatSnapshot,
     });
+    if (options.interruptedChat) {
+      store.set(applyRestoredChatSnapshotAtom, options.interruptedChat);
+    }
     const ref = {
       get current(): MainScreenCommands | null {
         return store.get(mainScreenCommandsAtom);
@@ -570,6 +590,316 @@ function MainRouteShell() {
       expect(
         root.findAllByType(TextInput).some((node) => node.props['placeholder'] === 'Reply...'),
       ).toBe(true);
+      act(() => tree.unmount());
+    });
+
+    it('recovers an interrupted local creation as a draft and retries only on Send', async () => {
+      const interrupted: Chat = {
+        ...chat,
+        id: 'pending-submission-recovered',
+        status: 'running',
+        title: '',
+        cwd: '',
+        messages: [
+          {
+            id: 'msg-recovered',
+            role: 'user',
+            content: 'Recovered request',
+            createdAt: chat.createdAt,
+          },
+        ],
+      };
+      const completed: Chat = { ...chat, id: 'thread-created' };
+      const api = createApi({ loadedChat: completed });
+      const { tree, store } = await renderMain({ api, interruptedChat: interrupted });
+      const root = tree.root as Queryable;
+      expect(store.get(selectedChatIdAtom)).toBeNull();
+      expect(messageInput(root).props['value']).toBe('Recovered request');
+      expect(api.createChatIdempotent).not.toHaveBeenCalled();
+      expect(api.sendChatMessageIdempotent).not.toHaveBeenCalled();
+      expect(jest.mocked(api.getChat).mock.calls.some(([id]) => id === interrupted.id)).toBe(false);
+
+      await pressLabel(root, 'Send message');
+
+      expect(api.createChatIdempotent).toHaveBeenCalledWith(
+        expect.any(Object),
+        'submission-recovered',
+      );
+      expect(api.sendChatMessageIdempotent).toHaveBeenCalledWith(
+        'thread-created',
+        expect.objectContaining({ content: 'Recovered request' }),
+        'submission-recovered',
+        expect.any(Object),
+      );
+      expect(store.get(interruptedChatCreationAtom)).toBeNull();
+      expect(store.get(selectedChatIdAtom)).toBe('thread-created');
+      expect(hasText(root, 'Rendered answer')).toBe(true);
+      act(() => tree.unmount());
+    });
+
+    it('reuses the recovered submission after creation succeeds but its first send fails', async () => {
+      const interrupted: Chat = {
+        ...chat,
+        id: 'pending-submission-resume-send',
+        status: 'running',
+        title: '',
+        cwd: '',
+        messages: [
+          {
+            id: 'msg-resume-send',
+            role: 'user',
+            content: 'Retry after send failure',
+            createdAt: chat.createdAt,
+          },
+        ],
+      };
+      const created = { ...chat, id: 'thread-created', messages: [] };
+      const api = createApi({ loadedChat: created });
+      jest
+        .mocked(api.sendChatMessageIdempotent)
+        .mockRejectedValueOnce(new Error('create reply arrived, send reply did not'));
+      const { tree, store, ref } = await renderMain({ api, interruptedChat: interrupted });
+      const root = tree.root as Queryable;
+
+      await pressLabel(root, 'Send message');
+      expect(messageInput(root).props['value']).toBe('Retry after send failure');
+      expect(api.createChatIdempotent).toHaveBeenCalledWith(
+        expect.any(Object),
+        'submission-resume-send',
+      );
+      expect(api.sendChatMessageIdempotent).toHaveBeenCalledWith(
+        created.id,
+        expect.any(Object),
+        'submission-resume-send',
+        expect.any(Object),
+      );
+
+      jest.mocked(api.sendOrQueueChatMessage).mockResolvedValueOnce({
+        disposition: 'queued',
+        queue: {
+          ...emptyQueue,
+          threadId: created.id,
+          items: [
+            {
+              id: 'queued-recovery',
+              content: 'Retry after send failure',
+              createdAt: chat.createdAt,
+            },
+          ],
+        },
+        turnId: null,
+        chat: null,
+      });
+      await pressLabel(root, 'Send message');
+      expect(api.createChatIdempotent).toHaveBeenCalledTimes(1);
+      expect(api.sendOrQueueChatMessage).toHaveBeenCalledWith(
+        created.id,
+        expect.objectContaining({ content: 'Retry after send failure' }),
+        expect.objectContaining({ submissionId: 'submission-resume-send' }),
+      );
+      expect(store.get(interruptedChatCreationAtom)).toBeNull();
+      await act(async () => ref.current?.startNewChat());
+      expect(messageInput(root).props['value']).toBe('');
+      act(() => tree.unmount());
+    });
+
+    it('atomically replaces an attachment-bearing recovery with a new pending identity', async () => {
+      const interrupted: Chat = {
+        ...chat,
+        id: 'pending-submission-with-attachment',
+        status: 'running',
+        title: '',
+        localPendingCreation: {
+          draft: 'Retry attachment request',
+          hadAttachments: true,
+          agentId: 'codex',
+          cwd: '/workspace',
+        },
+        messages: [
+          {
+            id: 'msg-with-attachment',
+            role: 'user',
+            content: 'Retry attachment request\n[file: /workspace/report.txt]',
+            createdAt: chat.createdAt,
+          },
+        ],
+      };
+      const created = { ...chat, id: 'thread-created', messages: [] };
+      const api = createApi({ loadedChat: created });
+      const { tree, store } = await renderMain({ api, interruptedChat: interrupted });
+      const root = tree.root as Queryable;
+      await pressLabel(root, 'Send message');
+
+      const createSubmissionId = jest.mocked(api.createChatIdempotent).mock.calls[0]?.[1];
+      const sendSubmissionId = jest.mocked(api.sendChatMessageIdempotent).mock.calls[0]?.[2];
+      expect(createSubmissionId).toEqual(expect.any(String));
+      expect(createSubmissionId).not.toBe('submission-with-attachment');
+      expect(sendSubmissionId).toBe(createSubmissionId);
+      expect(store.get(interruptedChatCreationAtom)).toBeNull();
+      expect(
+        store.get(chatSnapshotCacheAtom)?.entries.some((entry) => entry.chat.id === interrupted.id),
+      ).toBe(false);
+      act(() => tree.unmount());
+    });
+
+    it('clears the original new-chat draft after an edited send-failure retry succeeds', async () => {
+      const interrupted: Chat = {
+        ...chat,
+        id: 'pending-edited-send-retry',
+        status: 'running',
+        title: '',
+        messages: [
+          {
+            id: 'msg-edited-send-retry',
+            role: 'user',
+            content: 'Original retry text',
+            createdAt: chat.createdAt,
+          },
+        ],
+      };
+      const created = { ...chat, id: 'thread-created', messages: [] };
+      const api = createApi({ loadedChat: created });
+      jest
+        .mocked(api.sendChatMessageIdempotent)
+        .mockRejectedValueOnce(new Error('first send failed'));
+      const { tree, ref } = await renderMain({ api, interruptedChat: interrupted });
+      const root = tree.root as Queryable;
+
+      await pressLabel(root, 'Send message');
+      act(() => messageInput(root).props.onChangeText('Edited retry text'));
+      await pressLabel(root, 'Send message');
+      await act(async () => ref.current?.startNewChat());
+      expect(messageInput(root).props['value']).toBe('');
+      act(() => tree.unmount());
+    });
+
+    it('clears the original new-chat draft after a restarted edited retry succeeds', async () => {
+      const newComposerScope = submissionScopeKey({ profileId: 'profile-1', threadId: null });
+      jest.mocked(FileSystem.readAsStringAsync).mockImplementation(async (path: string) => {
+        if (path.endsWith('/chat-drafts.json')) {
+          return JSON.stringify({
+            version: 2,
+            entries: { [newComposerScope]: 'Original retry text' },
+          });
+        }
+        throw new Error('missing');
+      });
+      const interrupted: Chat = {
+        ...chat,
+        id: 'pending-restarted-edited-retry',
+        status: 'running',
+        title: '',
+        localPendingCreation: {
+          profileId: 'profile-1',
+          draft: 'Edited once',
+          originalDraft: 'Original retry text',
+          hadAttachments: false,
+          agentId: 'codex',
+          cwd: '/workspace',
+          createdChatId: chat.id,
+        },
+        messages: [],
+      };
+      const api = createApi();
+      const { tree, ref, store } = await renderMain({ api, interruptedChat: interrupted });
+      store.set(
+        chatSnapshotCacheAtom,
+        updateChatSnapshotCache(
+          createEmptyChatSnapshotCache('profile-1'),
+          interrupted.id,
+          interrupted,
+        ),
+      );
+      const root = tree.root as Queryable;
+      act(() => messageInput(root).props.onChangeText('Edited twice'));
+      await pressLabel(root, 'Send message');
+      await act(async () => ref.current?.startNewChat());
+      expect(messageInput(root).props['value']).toBe('');
+      act(() => tree.unmount());
+    });
+
+    it('resumes a durably linked created thread after relaunch without creating again', async () => {
+      const created = { ...chat, id: 'thread-created', messages: [] };
+      const interrupted: Chat = {
+        ...chat,
+        id: 'pending-submission-linked',
+        status: 'running',
+        title: '',
+        cwd: '',
+        localPendingCreation: {
+          draft: 'Retry on the created thread',
+          hadAttachments: false,
+          agentId: 'codex',
+          cwd: '/workspace',
+          createdChatId: created.id,
+        },
+        messages: [
+          {
+            id: 'msg-linked',
+            role: 'user',
+            content: 'Retry on the created thread',
+            createdAt: chat.createdAt,
+          },
+        ],
+      };
+      const api = createApi({ loadedChat: created });
+      jest.mocked(api.sendOrQueueChatMessage).mockResolvedValueOnce({
+        disposition: 'queued',
+        queue: {
+          ...emptyQueue,
+          threadId: created.id,
+          items: [
+            {
+              id: 'queued-linked-recovery',
+              content: 'Retry on the created thread',
+              createdAt: chat.createdAt,
+            },
+          ],
+        },
+        turnId: null,
+        chat: null,
+      });
+      const { tree, store } = await renderMain({ api, interruptedChat: interrupted });
+      const root = tree.root as Queryable;
+
+      expect(store.get(selectedChatIdAtom)).toBe(created.id);
+      expect(store.get(interruptedChatCreationAtom)).toMatchObject({
+        submissionId: 'submission-linked',
+        createdChatId: created.id,
+      });
+      expect(messageInput(root).props['value']).toBe('Retry on the created thread');
+      await pressLabel(root, 'Send message');
+
+      expect(api.createChatIdempotent).not.toHaveBeenCalled();
+      expect(api.sendOrQueueChatMessage).toHaveBeenCalledWith(
+        created.id,
+        expect.objectContaining({ content: 'Retry on the created thread' }),
+        expect.objectContaining({ submissionId: 'submission-linked' }),
+      );
+      expect(store.get(interruptedChatCreationAtom)).toBeNull();
+      act(() => tree.unmount());
+    });
+
+    it('does not consume an interrupted creation when another chat sends successfully', async () => {
+      const api = createApi({ loadedChat: chat, cachedChat: chat });
+      const { tree, store } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      store.set(interruptedChatCreationAtom, {
+        submissionId: 'other-recovery',
+        pendingChatId: 'pending-other-recovery',
+        draft: 'Other recovery',
+        cwd: '/other',
+        agentId: 'codex',
+        hadAttachments: false,
+        createdChatId: 'thread-other',
+      });
+      const root = tree.root as Queryable;
+      act(() => messageInput(root).props.onChangeText('Send in this chat'));
+      await pressLabel(root, 'Send message');
+      expect(store.get(interruptedChatCreationAtom)?.pendingChatId).toBe('pending-other-recovery');
       act(() => tree.unmount());
     });
 
@@ -1192,7 +1522,7 @@ function MainRouteShell() {
       expect(api.startQueuedThreadMessageEdit).toHaveBeenCalledWith(chat.id, queuedMessage.id);
       expect(messageInput(root).props['value']).toBe('');
       expect(api.commitQueuedThreadMessageEdit).not.toHaveBeenCalled();
-      expect(api.sendOrQueueChatMessage).not.toHaveBeenCalled();
+      expect(api.sendChatMessageIdempotent).not.toHaveBeenCalled();
 
       await act(async () => {
         resolveEditStart?.({
@@ -1702,6 +2032,312 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
+    it('never loads the optimistic pending ID when the bridge reconnects during create', async () => {
+      let resolveCreate!: (chat: Chat) => void;
+      const createPending = new Promise<Chat>((resolve) => {
+        resolveCreate = resolve;
+      });
+      const created = { ...chat, id: 'thread-created', messages: [] };
+      const api = createApi();
+      api.createChatIdempotent = jest.fn().mockReturnValue(createPending);
+      const { tree, store } = await renderMain({ api });
+      const root = tree.root as Queryable;
+      act(() => messageInput(root).props.onChangeText('Reconnect during create'));
+      let sendPromise: Promise<void> | undefined;
+      await act(async () => {
+        sendPromise = (
+          root.findAll((candidate) => candidate.props['accessibilityLabel'] === 'Send message')[0]
+            ?.props.onPress as () => Promise<void>
+        )();
+        await Promise.resolve();
+      });
+      const pendingId = store.get(selectedChatIdAtom);
+      expect(pendingId).toMatch(/^pending-/);
+
+      await act(async () => {
+        wsStatusHandler?.(true);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(api.getChat).not.toHaveBeenCalledWith(pendingId);
+      expect(api.readThreadQueue).not.toHaveBeenCalledWith(pendingId);
+      expect(api.readThreadSchedules).not.toHaveBeenCalledWith(pendingId);
+
+      await act(async () => {
+        resolveCreate(created);
+        await sendPromise;
+      });
+      expect(api.sendChatMessageIdempotent).toHaveBeenCalledWith(
+        created.id,
+        expect.any(Object),
+        expect.any(String),
+        expect.any(Object),
+      );
+      act(() => tree.unmount());
+    });
+
+    it('blocks a second send and stop while the first chat is still being created', async () => {
+      let resolveCreate!: (chat: Chat) => void;
+      const createPending = new Promise<Chat>((resolve) => {
+        resolveCreate = resolve;
+      });
+      const created = { ...chat, id: 'thread-created', messages: [] };
+      const api = createApi();
+      api.createChatIdempotent = jest.fn().mockReturnValue(createPending);
+      const { tree } = await renderMain({ api });
+      const root = tree.root as Queryable;
+      act(() => messageInput(root).props.onChangeText('First request'));
+      let sendPromise: Promise<void> | undefined;
+      await act(async () => {
+        sendPromise = (
+          root.findAll((candidate) => candidate.props['accessibilityLabel'] === 'Send message')[0]
+            ?.props.onPress as () => Promise<void>
+        )();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      act(() => messageInput(root).props.onChangeText('Second request'));
+      const chatInput = root.findAll(
+        (node) => typeof node.props['onStop'] === 'function' && node.props['value'] !== undefined,
+      )[0]!;
+      await act(async () => {
+        (chatInput.props['onSubmit'] as () => void)();
+        (chatInput.props['onStop'] as () => void)();
+        await Promise.resolve();
+      });
+      expect(api.createChatIdempotent).toHaveBeenCalledTimes(1);
+      expect(api.sendChatMessageIdempotent).not.toHaveBeenCalled();
+      expect(api.interruptLatestTurn).not.toHaveBeenCalled();
+      expect(api.interruptTurn).not.toHaveBeenCalled();
+      expect(
+        root.findAll((node) => node.props['accessibilityLabel'] === 'Stop agent'),
+      ).toHaveLength(0);
+
+      await act(async () => {
+        resolveCreate(created);
+        await sendPromise;
+      });
+      expect(api.sendChatMessageIdempotent).toHaveBeenCalledTimes(1);
+      expect(messageInput(root).props['value']).toBe('Second request');
+      act(() => tree.unmount());
+    });
+
+    it('does not restore an accepted first prompt in the next new composer', async () => {
+      const api = createApi();
+      const { tree, ref } = await renderMain({ api });
+      const root = tree.root as Queryable;
+      act(() => messageInput(root).props.onChangeText('Accepted prompt'));
+      await pressLabel(root, 'Send message');
+      await act(async () => ref.current?.startNewChat());
+      expect(messageInput(root).props['value']).toBe('');
+      act(() => tree.unmount());
+    });
+
+    it('does not transfer another chat draft when a late create acknowledgement arrives', async () => {
+      let resolveCreate!: (created: Chat) => void;
+      const createPending = new Promise<Chat>((resolve) => {
+        resolveCreate = resolve;
+      });
+      const created = { ...chat, id: 'thread-created', messages: [] };
+      const api = createApi();
+      api.createChatIdempotent = jest.fn().mockReturnValue(createPending);
+      const { tree, ref } = await renderMain({ api });
+      const root = tree.root as Queryable;
+      act(() => messageInput(root).props.onChangeText('Create elsewhere'));
+      let sendPromise: Promise<void> | undefined;
+      await act(async () => {
+        sendPromise = (
+          root.findAll((candidate) => candidate.props['accessibilityLabel'] === 'Send message')[0]
+            ?.props.onPress as () => Promise<void>
+        )();
+        await Promise.resolve();
+      });
+      await act(async () => ref.current?.openChat(chat.id, chat));
+      act(() => messageInput(root).props.onChangeText('Keep chat B draft'));
+
+      await act(async () => {
+        resolveCreate(created);
+        await sendPromise;
+      });
+      expect(messageInput(root).props['value']).toBe('Keep chat B draft');
+      act(() => tree.unmount());
+    });
+
+    it('waits for changed linked-retry persistence without clearing newer edits', async () => {
+      const interrupted: Chat = {
+        ...chat,
+        id: 'pending-original-linked',
+        status: 'running',
+        title: '',
+        localPendingCreation: {
+          profileId: 'profile-1',
+          draft: 'Original recovery',
+          hadAttachments: false,
+          agentId: 'codex',
+          cwd: '/workspace',
+          createdChatId: chat.id,
+        },
+        messages: [
+          {
+            id: 'msg-original-linked',
+            role: 'user',
+            content: 'Original recovery',
+            createdAt: chat.createdAt,
+          },
+        ],
+      };
+      const replacementWrite = createDeferred<void>();
+      const api = createApi();
+      const { tree, store } = await renderMain({ api, interruptedChat: interrupted });
+      store.set(
+        chatSnapshotCacheAtom,
+        updateChatSnapshotCache(
+          createEmptyChatSnapshotCache('profile-1'),
+          interrupted.id,
+          interrupted,
+        ),
+      );
+      const root = tree.root as Queryable;
+      jest
+        .mocked(FileSystem.writeAsStringAsync)
+        .mockClear()
+        .mockImplementationOnce(() => replacementWrite.promise)
+        .mockResolvedValue(undefined);
+      act(() => messageInput(root).props.onChangeText('Changed recovery'));
+      let firstSend: Promise<void> | undefined;
+      await act(async () => {
+        firstSend = (
+          root.findAll((candidate) => candidate.props['accessibilityLabel'] === 'Send message')[0]
+            ?.props.onPress as () => Promise<void>
+        )();
+        await Promise.resolve();
+      });
+      act(() => messageInput(root).props.onChangeText('Newer draft'));
+      expect(api.sendChatMessageIdempotent).not.toHaveBeenCalled();
+
+      await act(async () => {
+        replacementWrite.resolve();
+        await firstSend;
+        for (let index = 0; index < 20; index += 1) {
+          await Promise.resolve();
+        }
+      });
+      const sentCalls = [
+        ...jest.mocked(api.sendChatMessageIdempotent).mock.calls,
+        ...jest.mocked(api.sendOrQueueChatMessage).mock.calls,
+      ];
+      expect(store.get(errorAtom)).toBeNull();
+      expect(sentCalls).toHaveLength(1);
+      expect(sentCalls[0]?.slice(0, 2)).toEqual([
+        chat.id,
+        expect.objectContaining({ content: 'Changed recovery' }),
+      ]);
+      expect(messageInput(root).props['value']).toBe('Newer draft');
+      act(() => tree.unmount());
+    });
+
+    it('does not mark the destination chat sending after navigating during retry persistence', async () => {
+      const interrupted: Chat = {
+        ...chat,
+        id: 'pending-navigation-linked',
+        status: 'running',
+        title: '',
+        localPendingCreation: {
+          profileId: 'profile-1',
+          draft: 'Original recovery',
+          hadAttachments: false,
+          agentId: 'codex',
+          cwd: '/workspace',
+          createdChatId: chat.id,
+        },
+        messages: [],
+      };
+      const replacementWrite = createDeferred<void>();
+      const api = createApi();
+      const { tree, store, ref } = await renderMain({ api, interruptedChat: interrupted });
+      store.set(
+        chatSnapshotCacheAtom,
+        updateChatSnapshotCache(
+          createEmptyChatSnapshotCache('profile-1'),
+          interrupted.id,
+          interrupted,
+        ),
+      );
+      const root = tree.root as Queryable;
+      jest
+        .mocked(FileSystem.writeAsStringAsync)
+        .mockClear()
+        .mockImplementationOnce(() => replacementWrite.promise)
+        .mockResolvedValue(undefined);
+      act(() => messageInput(root).props.onChangeText('Changed recovery'));
+      let sendPromise: Promise<void> | undefined;
+      await act(async () => {
+        sendPromise = (
+          root.findAll((candidate) => candidate.props['accessibilityLabel'] === 'Send message')[0]
+            ?.props.onPress as () => Promise<void>
+        )();
+        await Promise.resolve();
+      });
+      const destination = { ...chat, id: 'thread-destination', title: 'Destination' };
+      await act(async () => ref.current?.openChat(destination.id, destination));
+      act(() => messageInput(root).props.onChangeText('Destination draft'));
+
+      await act(async () => {
+        replacementWrite.resolve();
+        await sendPromise;
+        for (let index = 0; index < 20; index += 1) {
+          await Promise.resolve();
+        }
+      });
+      expect(messageInput(root).props['value']).toBe('Destination draft');
+      expect(store.get(sendingAtom)).toBe(false);
+      act(() => tree.unmount());
+    });
+
+    it('publishes the durable pending barrier before awaiting its link write', async () => {
+      const linkWrite = createDeferred<void>();
+      const api = createApi();
+      const { tree, store } = await renderMain({ api });
+      jest
+        .mocked(FileSystem.writeAsStringAsync)
+        .mockClear()
+        .mockResolvedValueOnce(undefined)
+        .mockImplementationOnce(() => linkWrite.promise)
+        .mockResolvedValue(undefined);
+      const root = tree.root as Queryable;
+      act(() => messageInput(root).props.onChangeText('Persist before send'));
+      let sendPromise: Promise<void> | undefined;
+      await act(async () => {
+        sendPromise = (
+          root.findAll((candidate) => candidate.props['accessibilityLabel'] === 'Send message')[0]
+            ?.props.onPress as () => Promise<void>
+        )();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const pendingId = store.get(interruptedChatCreationAtom)?.pendingChatId;
+      expect(pendingId).toMatch(/^pending-/);
+      expect(store.get(selectedChatIdAtom)).toBe('thread-created');
+      expect(store.get(interruptedChatCreationAtom)).toMatchObject({
+        pendingChatId: pendingId,
+        createdChatId: 'thread-created',
+      });
+      expect(api.sendChatMessageIdempotent).not.toHaveBeenCalled();
+
+      await act(async () => {
+        wsStatusHandler?.(true);
+        await Promise.resolve();
+      });
+      expect(api.getChat).not.toHaveBeenCalledWith(pendingId);
+      await act(async () => {
+        linkWrite.resolve();
+        await sendPromise;
+      });
+      expect(api.sendChatMessageIdempotent).toHaveBeenCalled();
+      act(() => tree.unmount());
+    });
+
     it('keeps first-turn activity isolated when replay recovery overlaps creation', async () => {
       let resolveSend!: (chat: Chat) => void;
       const sendPending = new Promise<Chat>((resolve) => {
@@ -1983,7 +2619,7 @@ function MainRouteShell() {
         kind: 'image',
         path: '/workspace/photo.jpg',
       });
-      const { tree } = await renderMain({ api });
+      const { tree, store } = await renderMain({ api });
       const root = tree.root as Queryable;
       await act(async () => deliverPhoto(tree));
       act(() => messageInput(root).props.onChangeText('Keep this draft'));
@@ -1993,6 +2629,7 @@ function MainRouteShell() {
       await act(async () => failRequest(new Error(`${method} failed`)));
 
       expect(messageInput(root).props['value']).toBe('Keep this draft');
+      expect(store.get(errorAtom)).toBe(`${method} failed`);
       expect(hasText(root, `${method} failed`)).toBe(true);
       expect(
         root.findAll(

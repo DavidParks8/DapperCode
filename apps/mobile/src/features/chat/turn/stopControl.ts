@@ -8,6 +8,7 @@ import {
 import { activityAtom, showDelayedGenericRunningActivityAtom } from '../state/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
+import { isPendingChatId } from '@shell/session/interruptedChatCreation';
 import type {
   MainScreenReasoningAndInterruptContext,
   MainScreenReasoningAndInterruptResult,
@@ -83,6 +84,11 @@ export function useMainScreenTurnStopControl(context: MainScreenTurnStopControlC
       return;
     }
 
+    const threadId = chatIdRef.current;
+    if (isPendingChatId(threadId)) {
+      return;
+    }
+
     stopRequestedRef.current = true;
     stopSystemMessageLoggedRef.current = false;
     setStoppingTurn(true);
@@ -92,7 +98,6 @@ export function useMainScreenTurnStopControl(context: MainScreenTurnStopControlC
       title: 'Stopping turn',
     });
 
-    const threadId = chatIdRef.current;
     const turnId = activeTurnIdRef.current;
     if (threadId && turnId) {
       void interruptActiveTurn(threadId, turnId);

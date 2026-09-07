@@ -143,6 +143,14 @@ If recovery continues to fail, inspect the bridge/agent diagnostics and record w
 followed a bridge restart or opening many other sessions. ACP history reconstruction must load the
 conversation; a successful resume alone does not prove that the agent replayed its messages.
 
+## App Closed While Creating a Chat
+
+If chat creation was interrupted before the phone received its result, the local placeholder is
+recovered into the new-chat composer as a draft, not reopened as an agent session. Review the
+recovered text and reattach files or images if needed, then press **Send**. Nothing is resent
+automatically. An unchanged text retry reuses the original submission ID so a lost creation reply
+does not create another chat or repeat an already accepted prompt.
+
 ## Agent Stops When the Phone Disconnects
 
 Disconnecting or locking the phone must not cancel an accepted turn. The desktop broker keeps its

@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { MessageSchema } from '@ag-ui/core';
 
 import type { Chat, ChatMessage, ChatMessagePart, ChatToolMeta } from '@bridge/types/types';
+import { isPendingChatId } from '@shell/session/interruptedChatCreation';
 
 export const CHAT_SNAPSHOT_CACHE_VERSION = 1;
 export const CHAT_SNAPSHOT_CACHE_MAX_ENTRIES = 20;
@@ -80,9 +81,12 @@ export function parseChatSnapshotCache(
     }
 
     const rawEntries: unknown[] = record['entries'];
+    const rawSelectedChatId =
+      typeof record['selectedChatId'] === 'string' ? record['selectedChatId'] : null;
     const entries = rawEntries
       .map(normalizeCacheEntry)
       .filter((entry): entry is ChatSnapshotCacheEntry => entry !== null)
+      .filter((entry) => !isPendingChatId(entry.chat.id) || entry.chat.id === rawSelectedChatId)
       .filter((entry) => now - Date.parse(entry.cachedAt) <= CHAT_SNAPSHOT_CACHE_MAX_AGE_MS)
       .sort((left, right) => right.lastAccessedAt.localeCompare(left.lastAccessedAt));
     const selectedChatId =
@@ -139,6 +143,23 @@ export function updateChatSnapshotCache(
     updatedAt: now,
     entries,
   });
+}
+
+export function removeChatSnapshotCacheEntry(
+  cache: ChatSnapshotCache,
+  chatId: string,
+  now = new Date().toISOString(),
+): ChatSnapshotCache {
+  const normalizedChatId = chatId.trim();
+  if (!normalizedChatId || !cache.entries.some((entry) => entry.chat.id === normalizedChatId)) {
+    return cache;
+  }
+  return {
+    ...cache,
+    selectedChatId: cache.selectedChatId === normalizedChatId ? null : cache.selectedChatId,
+    updatedAt: now,
+    entries: cache.entries.filter((entry) => entry.chat.id !== normalizedChatId),
+  };
 }
 
 export async function loadChatSnapshotCache(profileId: string): Promise<ChatSnapshotCache> {

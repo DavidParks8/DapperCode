@@ -25,7 +25,7 @@ export interface CreateAndStartTurnRequest {
   submissionId: string;
   create: CreateChatRequest;
   message: SendChatMessageRequest | ((chat: Chat) => SendChatMessageRequest);
-  onCreated?: (chat: Chat) => void;
+  onCreated?: (chat: Chat) => void | Promise<void>;
   onTurnStarted?: (threadId: string, turnId: string) => void;
 }
 
@@ -52,7 +52,7 @@ export class TurnExecutionController {
 
   async createAndStart(request: CreateAndStartTurnRequest): Promise<Chat> {
     const created = await this.create(request.create, request.submissionId);
-    request.onCreated?.(created);
+    await request.onCreated?.(created);
     const message =
       typeof request.message === 'function' ? request.message(created) : request.message;
     return this.send(created.id, message, request.submissionId, (turnId) =>

@@ -33,6 +33,7 @@ export type MainScreenUiActionHandlersContext = MainScreenApprovalAndUserInputRe
 function resolveUiActionFlags(options: {
   selectedChat: MainScreenUiActionHandlersContext['selectedChat'];
   openingChatId: MainScreenUiActionHandlersContext['openingChatId'];
+  restoringDraft?: boolean;
   sending: boolean;
   creating: boolean;
   uploadingAttachment: boolean;
@@ -43,7 +44,7 @@ function resolveUiActionFlags(options: {
 }) {
   const isTurnLoading = options.sending || options.creating;
   const isLoading = isTurnLoading || options.uploadingAttachment;
-  const isOpeningChat = Boolean(options.openingChatId);
+  const isOpeningChat = Boolean(options.openingChatId || options.restoringDraft);
   const shouldShowComposer = !isOpeningChat;
   const isTurnLikelyRunning =
     Boolean(options.activeTurnId) ||
@@ -115,6 +116,7 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
     cacheThreadPendingUserInputRequest,
     clearHeldActivity,
     createChat,
+    draftController,
     heldActivityTimeoutRef,
     onOpenGit,
     openingChatId,
@@ -234,6 +236,7 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
   } = resolveUiActionFlags({
     selectedChat,
     openingChatId,
+    restoringDraft: draftController.restoring,
     sending,
     creating,
     uploadingAttachment,
