@@ -64,20 +64,24 @@ export interface WorkspacePickerViewProps {
 
 function buildPathMenuItems(props: WorkspacePickerViewProps): WorkspacePickerMenuItem[] {
   const crumbs = toPathCrumbs(props.currentFolderPath);
-  const reachable = props.parentPath ? crumbs : crumbs.slice(0, 1);
-  return reachable.map((crumb) => ({
-    key: crumb.path,
-    label: crumb.name,
-    accessibilityLabel: crumb.depth === 0 ? undefined : `Go to ${crumb.name}`,
-    icon: crumb.depth === 0 ? 'folder-open' : 'folder',
-    indent: crumb.depth,
-    selected: crumb.depth === 0,
-    onPress: () => {
-      if (crumb.depth > 0) {
-        props.onBrowsePath(crumb.path);
-      }
-    },
-  }));
+  const currentCrumb = crumbs.at(-1);
+  const reachable = props.parentPath ? crumbs : currentCrumb ? [currentCrumb] : [];
+  return reachable.map((crumb) => {
+    const current = crumb === currentCrumb;
+    return {
+      key: crumb.path,
+      label: crumb.name,
+      accessibilityLabel: current ? undefined : `Go to ${crumb.name}`,
+      icon: current ? 'folder-open' : 'folder',
+      indent: crumb.depth,
+      selected: current,
+      onPress: () => {
+        if (!current) {
+          props.onBrowsePath(crumb.path);
+        }
+      },
+    };
+  });
 }
 
 function buildOverflowMenuItems(props: WorkspacePickerViewProps): WorkspacePickerMenuItem[] {

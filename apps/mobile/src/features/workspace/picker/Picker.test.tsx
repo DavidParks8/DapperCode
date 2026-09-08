@@ -148,6 +148,12 @@ describe('WorkspacePicker', () => {
     act(() => readOnPress(findPressableContainingText(root, 'notes').props)());
     expect(onBrowsePath).toHaveBeenCalledWith('/Users/davidparks/Code/notes');
     pressLabel(root, 'Code, current folder');
+    expect(
+      root
+        .findAll((node) => node.props['accessibilityRole'] === 'menuitem')
+        .map((node) => node.props['accessibilityLabel'])
+        .filter((label, index, labels) => labels.indexOf(label) === index),
+    ).toEqual(['Go to /', 'Go to Users', 'Go to davidparks', 'Code']);
     pressLabel(root, 'Go to davidparks');
     expect(onBrowsePath).toHaveBeenCalledWith('/Users/davidparks');
     const search = root
