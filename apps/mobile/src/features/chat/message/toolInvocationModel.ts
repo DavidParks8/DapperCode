@@ -1,5 +1,3 @@
-import type { Ionicons } from '@expo/vector-icons';
-
 import { getMessageText, getToolCallDisplayLines } from '@bridge/messages';
 import { renderAgUiCustomContent } from '@bridge/agui/agUiContent';
 import type { ChatMessage, ChatToolKind, ChatToolMeta, ChatToolStatus } from '@bridge/types/types';
@@ -49,23 +47,6 @@ export interface ToolInvocation {
   truncated: boolean;
   /** True while the invocation only has metadata, i.e. no output to expand. */
   empty: boolean;
-}
-
-const KIND_ICONS: Record<ChatToolKind, keyof typeof Ionicons.glyphMap> = {
-  read: 'document-text-outline',
-  edit: 'create-outline',
-  delete: 'trash-outline',
-  move: 'arrow-forward-outline',
-  search: 'search-outline',
-  execute: 'terminal-outline',
-  think: 'bulb-outline',
-  fetch: 'globe-outline',
-  switch_mode: 'swap-horizontal-outline',
-  other: 'construct-outline',
-};
-
-export function toolKindIcon(kind: ChatToolKind): keyof typeof Ionicons.glyphMap {
-  return KIND_ICONS[kind] ?? KIND_ICONS.other;
 }
 
 export function buildToolInvocations(messages: ChatMessage[]): ToolInvocation[] {

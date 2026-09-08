@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAtom } from 'jotai';
 import { memo, useCallback, useMemo } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
@@ -14,7 +14,8 @@ import { ToolHeaderShimmer } from './ToolHeaderShimmer';
 import { createToolCardStyles } from './toolCardStyles';
 import { ToolInvocationOutput } from './ToolOutput';
 import { ToolPatchFiles } from './ToolPatchFiles';
-import { toolKindIcon, type ToolInvocation } from './toolInvocationModel';
+import { resolveToolInvocationIcon } from './toolInvocationIcon';
+import type { ToolInvocation } from './toolInvocationModel';
 import {
   resolveToolInvocationHeader,
   type ToolInvocationHeader,
@@ -185,6 +186,23 @@ function ToolTrailing({
   );
 }
 
+function ToolLeadingIcon({ invocation }: { invocation: ToolInvocation }) {
+  const theme = useAppTheme();
+  const icon = resolveToolInvocationIcon(invocation);
+  const color = icon.tone === 'error' ? theme.colors.statusError : theme.colors.textMuted;
+  if (icon.family === 'material-community') {
+    return (
+      <MaterialCommunityIcons
+        {...decorativeAccessibilityProps}
+        name={icon.name}
+        size={14}
+        color={color}
+      />
+    );
+  }
+  return <Ionicons {...decorativeAccessibilityProps} name={icon.name} size={14} color={color} />;
+}
+
 function shouldAnimateToolInvocation(
   invocation: ToolInvocation,
   threadRunning: boolean,
@@ -279,12 +297,7 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
           ]}
           testID="tool-icon-toggle"
         >
-          <Ionicons
-            {...decorativeAccessibilityProps}
-            name={invocation.isError ? 'alert-circle-outline' : toolKindIcon(invocation.kind)}
-            size={14}
-            color={invocation.isError ? theme.colors.statusError : theme.colors.textMuted}
-          />
+          <ToolLeadingIcon invocation={invocation} />
         </Pressable>
         <View style={styles.rowContent}>
           <ToolHeaderText
