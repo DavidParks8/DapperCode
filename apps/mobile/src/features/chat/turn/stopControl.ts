@@ -1,10 +1,4 @@
-import {
-  activeTurnIdAtom,
-  creatingAtom,
-  errorAtom,
-  sendingAtom,
-  stoppingTurnAtom,
-} from '../state/turn';
+import { activeTurnIdAtom, errorAtom, sendingAtom, stoppingTurnAtom } from '../state/turn';
 import { activityAtom, showDelayedGenericRunningActivityAtom } from '../state/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
@@ -29,7 +23,6 @@ export function useMainScreenTurnStopControl(context: MainScreenTurnStopControlC
   } = context;
   const stoppingTurn = useAtomValue(stoppingTurnAtom);
   const setSending = useSetAtom(sendingAtom);
-  const setCreating = useSetAtom(creatingAtom);
   const setError = useSetAtom(errorAtom);
   const setActiveTurnId = useSetAtom(activeTurnIdAtom);
   const setStoppingTurn = useSetAtom(stoppingTurnAtom);
@@ -45,7 +38,6 @@ export function useMainScreenTurnStopControl(context: MainScreenTurnStopControlC
 
       const nowIso = new Date().toISOString();
       setSending(false);
-      setCreating(false);
       setActiveTurnId(turnId);
       setActivity({ tone: 'running', title: 'Working' });
       setShowDelayedGenericRunningActivity(true);
@@ -71,7 +63,6 @@ export function useMainScreenTurnStopControl(context: MainScreenTurnStopControlC
       interruptActiveTurn,
       setActiveTurnId,
       setActivity,
-      setCreating,
       setSelectedChat,
       setSending,
       setShowDelayedGenericRunningActivity,

@@ -2295,15 +2295,21 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
-    it('publishes the durable pending barrier before awaiting its link write', async () => {
+    it('keeps the recovery notice hidden while the first turn handoff is pending', async () => {
       const linkWrite = createDeferred<void>();
+      const consumeWrite = createDeferred<void>();
       const api = createApi();
       const { tree, store } = await renderMain({ api });
+      const observedErrors: Array<string | null> = [];
+      const unsubscribe = store.sub(errorAtom, () => {
+        observedErrors.push(store.get(errorAtom));
+      });
       jest
         .mocked(FileSystem.writeAsStringAsync)
         .mockClear()
         .mockResolvedValueOnce(undefined)
         .mockImplementationOnce(() => linkWrite.promise)
+        .mockImplementationOnce(() => consumeWrite.promise)
         .mockResolvedValue(undefined);
       const root = tree.root as Queryable;
       act(() => messageInput(root).props.onChangeText('Persist before send'));
@@ -2333,11 +2339,27 @@ function MainRouteShell() {
         await Promise.resolve();
       });
       expect(api.getChat).not.toHaveBeenCalledWith(pendingId);
+      jest
+        .mocked(api.sendChatMessageIdempotent)
+        .mockImplementationOnce(async (threadId, _request, _submissionId, options) => {
+          options?.onTurnStarted?.('turn-created');
+          return { ...chat, id: threadId, status: 'running', activeTurnId: 'turn-created' };
+        });
       await act(async () => {
         linkWrite.resolve();
-        await sendPromise;
+        for (let index = 0; index < 10; index += 1) {
+          await Promise.resolve();
+        }
       });
       expect(api.sendChatMessageIdempotent).toHaveBeenCalled();
+      expect(observedErrors).not.toContain(
+        'An interrupted chat was recovered as a draft. Review the text and reattach any files before retrying.',
+      );
+      await act(async () => {
+        consumeWrite.resolve();
+        await sendPromise;
+      });
+      unsubscribe();
       act(() => tree.unmount());
     });
 
