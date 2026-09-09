@@ -68,6 +68,10 @@ Open Tailscale and confirm it is connected:
 tailscale ip -4
 ```
 
+If the macOS tray started before Tailscale, leave DapperCode open. For an already configured
+workspace, it retries a stopped broker every five seconds and reconnects once the configured
+Tailscale address is available; restarting the tray is not required.
+
 Alternatively choose **Local network** and enter the desktop computer's LAN IPv4 address.
 
 ## Bridge Will Not Start
