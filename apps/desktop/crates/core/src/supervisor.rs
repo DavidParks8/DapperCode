@@ -118,7 +118,8 @@ impl BridgeSnapshot {
     }
 }
 
-// Preserve typed status validation even though migration only needs to know whether it succeeded.
+// Migration only checks whether /status deserializes, so these decoded fields are never read.
+// Keep them for Serde's schema validation; removing them would let malformed fields be ignored.
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -132,6 +133,7 @@ struct BridgeStatusResponse {
     operational: OperationalStatus,
 }
 
+// Serde validates lifecycle as a string even though migration never reads its decoded value.
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -139,6 +141,7 @@ struct AgentStatus {
     lifecycle: String,
 }
 
+// Serde validates recentErrors as an array even though migration never reads its entries.
 #[allow(dead_code)]
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
