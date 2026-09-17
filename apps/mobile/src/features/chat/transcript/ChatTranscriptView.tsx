@@ -26,7 +26,6 @@ import {
   CHAT_AUTO_LOAD_OLDER_TOP_THRESHOLD_PX,
   CHAT_JUMP_TO_LATEST_MIN_SCROLLABLE_PX,
   CHAT_MESSAGE_PAGE_SIZE,
-  LARGE_CHAT_MESSAGE_COUNT_THRESHOLD,
   findInlineChoiceSet,
   getInitialVisibleMessageStartIndex,
 } from '../helpers/helpers';
@@ -55,6 +54,7 @@ import {
   resolveListBatchingConfig,
   resolveRailRestingActiveIndex,
   resolveResetRailActiveIndex,
+  TranscriptItemSeparator,
 } from './viewChrome';
 import { useMessageTimestampReveal } from './useMessageTimestampReveal';
 import { useTranscriptAnimationVisibility } from './animationVisibility';
@@ -406,10 +406,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   }, [autoScrollStateRef, chat.id]);
   const messageListContentStyle = useMemo(
     () =>
-      // The list is inverted, so its content padding is flipped on screen: `paddingBottom` lands
-      // under the floating top chrome and `paddingTop` lands behind the composer. Feeding these
-      // the other way round left the oldest message permanently clipped by the header. The extra
-      // gutter keeps the oldest message from stopping flush against the chrome.
+      // Inverted padding: bottom clears the top chrome plus a gutter; top clears the composer.
       [
         styles.messageListContent,
         { paddingTop: bottomInset, paddingBottom: topInset + theme.spacing.lg },
@@ -417,10 +414,9 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     [bottomInset, styles.messageListContent, theme.spacing.lg, topInset],
   );
   const jumpToLatestHitSlop = useMemo(() => computeHitSlop(JUMP_TO_LATEST_VISIBLE_SIZE), []);
-  const isLargeChat = visibleMessages.length >= LARGE_CHAT_MESSAGE_COUNT_THRESHOLD;
-  const listBatchingConfig = useMemo(
-    () => resolveListBatchingConfig(displayMessages.length, isLargeChat),
-    [displayMessages.length, isLargeChat],
+  const listBatchingConfig = resolveListBatchingConfig(
+    displayMessages.length,
+    visibleMessages.length,
   );
   const activityPresentation = useCollapsibleActivity(activity);
   const listExtraData = useMemo(
@@ -485,7 +481,10 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           keyExtractor={transcriptDisplayItemKey}
           renderItem={renderMessageItem}
           ListHeaderComponent={activityEvent}
+          ListHeaderComponentStyle={styles.messageListHeader}
           ListFooterComponent={historyBoundary}
+          ListFooterComponentStyle={styles.messageListFooter}
+          ItemSeparatorComponent={TranscriptItemSeparator}
           style={styles.messageList}
           contentContainerStyle={messageListContentStyle}
           // Preserving the first response cell while it grows shifts this inverted list's activity
@@ -526,9 +525,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           onLayout={(event) => {
             const nextViewportHeight = event.nativeEvent.layout.height;
             viewportHeightRef.current = nextViewportHeight;
-            setViewportHeight((current) =>
-              current === nextViewportHeight ? current : nextViewportHeight,
-            );
+            setViewportHeight(nextViewportHeight);
             railJumpControllerRef.current?.notifyLayoutProgress();
             hideJumpToLatestWhenContentFits();
             maybeAutoLoadOlderMessages(true);

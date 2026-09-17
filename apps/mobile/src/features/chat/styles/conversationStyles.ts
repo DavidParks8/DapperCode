@@ -120,8 +120,9 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
       padding: theme.spacing.lg,
       paddingTop: theme.spacing.lg,
       paddingBottom: theme.spacing.xl,
-      gap: theme.spacing.xl,
     },
+    messageListHeader: { paddingBottom: theme.spacing.xl },
+    messageListFooter: { paddingTop: theme.spacing.xl },
     chatMessageBlock: { gap: theme.spacing.sm },
     inlineChoiceOptions: { marginLeft: theme.spacing.sm, gap: theme.spacing.xs },
     inlineChoiceOptionButton: {
