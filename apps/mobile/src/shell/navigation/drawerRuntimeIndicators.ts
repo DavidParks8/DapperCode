@@ -1,6 +1,5 @@
 import type { ChatSummary, RpcNotification } from '@bridge/types/types';
 import { parseAgUiEventNotification, type AgUiEventEnvelope } from '@bridge/agui/agUi';
-import type { ChatWorkspaceSection } from '@shell/navigation/chatThreadTree';
 import { EventType } from '@ag-ui/core';
 
 export interface DrawerRunIndicator {
@@ -52,31 +51,12 @@ const DRAWER_HEARTBEAT_METHODS = new Set([
 ]);
 const DRAWER_TERMINAL_METHODS = new Set(['bridge/approval.resolved', 'bridge/userInput.resolved']);
 
-export function countDrawerRunningChats(
-  chats: ChatSummary[],
-  indicators: DrawerRunIndicatorMap,
-  now = Date.now(),
-): number {
-  return chats.reduce(
-    (count, chat) => count + (isDrawerChatRunning(chat, indicators, now) ? 1 : 0),
-    0,
-  );
-}
-
 export function isDrawerChatRunning(
   chat: ChatSummary,
   indicators: DrawerRunIndicatorMap,
   now = Date.now(),
 ): boolean {
   return chat.status === 'running' || isDrawerRunIndicatorActive(indicators[chat.id], now);
-}
-
-export function isDrawerWorkspaceSectionRunning(
-  section: ChatWorkspaceSection,
-  indicators: DrawerRunIndicatorMap,
-  now = Date.now(),
-): boolean {
-  return section.data.some((row) => isDrawerChatRunning(row.chat, indicators, now));
 }
 
 export function reconcileDrawerRunIndicatorsWithChats(

@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { AccessibilityInfo, Platform } from 'react-native';
+import { Platform } from 'react-native';
 
 /**
  * Semantic tactile feedback actions the product speaks in. Screens should reach for one of
@@ -43,20 +43,6 @@ async function runHaptic(action: () => Promise<void>): Promise<void> {
     }
     throw error;
   }
-}
-
-/**
- * Reports the user's Reduce Motion preference. This exists for callers that pair a haptic with
- * an *animation* and want to skip the animation half; it must never be used to suppress the
- * haptic itself. Apple's Taptic Engine is not classified as "motion" by Reduce Motion, and
- * there is no dedicated "reduce haptics" accessibility signal in React Native today, so
- * `feedback` below always fires regardless of this preference.
- */
-export async function isReduceMotionPreferred(): Promise<boolean> {
-  if (typeof AccessibilityInfo.isReduceMotionEnabled !== 'function') {
-    return false;
-  }
-  return AccessibilityInfo.isReduceMotionEnabled();
 }
 
 /**

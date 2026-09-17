@@ -1,12 +1,11 @@
 import * as StoreReview from 'expo-store-review';
-import { Linking, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import type * as StoreReviewModule from '@shell/storeReview';
 
 import {
   AUTO_STORE_REVIEW_THRESHOLD_MS,
   createDefaultAutoStoreReviewState,
   isAutoStoreReviewEligible,
-  openAppStoreWriteReviewPage,
   parseAutoStoreReviewState,
   requestNativeStoreReview,
 } from '@shell/storeReview';
@@ -115,32 +114,5 @@ describe('storeReview helpers', () => {
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
     await expect(requestNativeStoreReview()).resolves.toBe(false);
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOs });
-  });
-
-  it('opens the deep link and falls back to the web review URL', async () => {
-    const originalAppStoreId = process.env['EXPO_PUBLIC_IOS_APP_STORE_ID'];
-    process.env['EXPO_PUBLIC_IOS_APP_STORE_ID'] = '1234567890';
-    jest.resetModules();
-    const isolated = jest.requireActual<typeof StoreReviewModule>('@shell/storeReview');
-    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
-    await expect(isolated.openAppStoreWriteReviewPage()).resolves.toBe(true);
-    expect(open).toHaveBeenLastCalledWith(expect.stringMatching(/^itms-apps:/));
-    open.mockRejectedValueOnce(new Error('unsupported')).mockResolvedValueOnce(undefined);
-    await expect(isolated.openAppStoreWriteReviewPage()).resolves.toBe(true);
-    expect(open).toHaveBeenLastCalledWith(expect.stringMatching(/^https:/));
-
-    const originalOs = Platform.OS;
-    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
-    await expect(isolated.openAppStoreWriteReviewPage()).resolves.toBe(false);
-    Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOs });
-    if (originalAppStoreId === undefined) {
-      delete process.env['EXPO_PUBLIC_IOS_APP_STORE_ID'];
-    } else {
-      process.env['EXPO_PUBLIC_IOS_APP_STORE_ID'] = originalAppStoreId;
-    }
-  });
-
-  it('hides the App Store review link until the fork owns a listing', async () => {
-    await expect(openAppStoreWriteReviewPage()).resolves.toBe(false);
   });
 });

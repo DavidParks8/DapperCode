@@ -1,15 +1,12 @@
 import type { ChatSummary, RpcNotification } from '@bridge/types/types';
 import {
-  countDrawerRunningChats,
   extractDrawerNotificationThreadId,
   extractDrawerStatusHint,
   isDrawerChatRunning,
-  isDrawerWorkspaceSectionRunning,
   reconcileDrawerRunIndicatorsWithChats,
   pruneStaleDrawerRunIndicators,
   updateDrawerRunIndicatorsForEvent,
 } from '@shell/navigation/drawerRuntimeIndicators';
-import type { ChatWorkspaceSection } from '@shell/navigation/chatThreadTree';
 
 function chat(id: string, partial: Partial<ChatSummary> = {}): ChatSummary {
   return {
@@ -56,25 +53,12 @@ function agUiEvent(
   return event('bridge/agui.event', { threadId, runId, sourceTurnId: 'turn', event: canonical });
 }
 
-function section(chats: ChatSummary[]): ChatWorkspaceSection {
-  return {
-    key: 'workspace',
-    title: 'workspace',
-    itemCount: chats.length,
-    data: chats.map((entry) => ({
-      chat: entry,
-      indentLevel: 0,
-      rootThreadId: entry.id,
-    })),
-  };
-}
-
 describe('drawerRuntimeIndicators', () => {
   it('keeps turn-start lifecycle indicators beyond the short heartbeat window', () => {
     const state = updateDrawerRunIndicatorsForEvent({}, agUiEvent('thr_1', 'RUN_STARTED'), 1000);
 
     expect(isDrawerChatRunning(chat('thr_1'), state, 25_000)).toBe(true);
-    expect(countDrawerRunningChats([chat('thr_1'), chat('thr_2')], state, 25_000)).toBe(1);
+    expect(isDrawerChatRunning(chat('thr_2'), state, 25_000)).toBe(false);
   });
 
   it('clears lifecycle indicators on turn completion', () => {
@@ -215,18 +199,8 @@ describe('drawerRuntimeIndicators', () => {
     expect(isDrawerChatRunning(chat('thr_1'), refreshed, 30_000)).toBe(true);
   });
 
-  it('marks a workspace section live when any chat inside it is live', () => {
-    const state = updateDrawerRunIndicatorsForEvent({}, agUiEvent('thr_live', 'RUN_STARTED'), 1000);
-
-    expect(
-      isDrawerWorkspaceSectionRunning(section([chat('thr_idle'), chat('thr_live')]), state, 25_000),
-    ).toBe(true);
-    expect(isDrawerWorkspaceSectionRunning(section([chat('thr_idle')]), state, 25_000)).toBe(false);
-  });
-
   it('uses chat running status without a live indicator', () => {
     expect(isDrawerChatRunning(chat('running', { status: 'running' }), {}, 1000)).toBe(true);
-    expect(countDrawerRunningChats([chat('running', { status: 'running' })], {}, 1000)).toBe(1);
   });
 
   it('prunes expired heartbeat and lifecycle indicators without copying active state', () => {

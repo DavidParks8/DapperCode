@@ -10,7 +10,7 @@ use dappercode_desktop_core::{
     discover_agent_executable, profile_id_for, resolve_bridge_host, setup_profile,
     validate_workspace, AppPaths, BridgeSnapshot, BridgeState,
     BridgeSupervisor as LegacyBridgeSupervisor, BrokerLifecycleAction, BrokerSupervisor, FileLease,
-    NetworkMode, Profile, RuntimePaths, SecretStore, SetupRequest,
+    NetworkMode, Profile, SecretStore, SetupRequest,
 };
 use serde::Serialize;
 
@@ -376,15 +376,8 @@ fn stop_all(paths: &AppPaths, secrets: &SecretStore) -> Result<StopAllResult> {
 }
 
 fn stop_legacy_bridges(paths: &AppPaths, secrets: &SecretStore) -> Result<()> {
-    let runtime = RuntimePaths::discover()?;
     for profile in paths.load_config()?.profiles {
-        let supervisor = LegacyBridgeSupervisor::new(
-            profile,
-            paths.clone(),
-            secrets.clone(),
-            runtime.clone(),
-            None,
-        );
+        let supervisor = LegacyBridgeSupervisor::new(profile, paths.clone(), secrets.clone());
         if supervisor.owns_running_process() {
             supervisor.stop()?;
         }

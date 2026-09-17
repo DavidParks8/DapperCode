@@ -266,17 +266,6 @@ impl BridgeRuntimeConfig {
             "bridgeToken": token,
         }))?)
     }
-
-    /// Stable fingerprint of the configuration a running bridge was started with, excluding the
-    /// token so that the digest can be recorded in a plain ownership record.
-    #[allow(dead_code)]
-    pub fn fingerprint_source(&self) -> String {
-        self.values
-            .iter()
-            .filter(|(key, _)| key.as_str() != "BRIDGE_AUTH_TOKEN")
-            .map(|(key, value)| format!("{key}={value}\n"))
-            .collect()
-    }
 }
 
 fn path_value(path: &Path) -> Result<String> {
@@ -502,7 +491,6 @@ mod tests {
             paths.attachments_dir(&profile.profile_id).to_str().unwrap()
         );
         assert!(!workspace.path().join(".env.secure").exists());
-        assert!(!config.fingerprint_source().contains("secret"));
     }
 
     #[test]
@@ -681,26 +669,6 @@ mod tests {
             };
             assert_eq!(config.local_base_url(), "http://127.0.0.1:8787");
         }
-    }
-
-    #[test]
-    fn fingerprint_is_stable_and_ordered() {
-        let workspace = tempdir().unwrap();
-        let data = tempdir().unwrap();
-        let paths = AppPaths::for_tests(data.path().to_path_buf());
-        let profile = profile("alpha-000000000001", workspace.path(), 18789);
-        paths.prepare_profile(&profile.profile_id).unwrap();
-        std::fs::write(paths.manifest_path(&profile.profile_id), b"{}").unwrap();
-
-        let config =
-            BridgeRuntimeConfig::from_profile(&profile, "secret", SecretBackend::Keychain, &paths)
-                .unwrap();
-        let fingerprint = config.fingerprint_source();
-
-        assert_eq!(config.secret_backend, SecretBackend::Keychain);
-        assert!(fingerprint.starts_with("ACP_AGENT_MANIFEST="));
-        assert!(fingerprint.contains("BRIDGE_PORT=18789\n"));
-        assert_eq!(fingerprint, config.fingerprint_source());
     }
 
     #[test]

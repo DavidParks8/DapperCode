@@ -11,7 +11,6 @@ jest.mock('@shared/feedback', () => ({
     warning: jest.fn().mockResolvedValue(undefined),
     destructive: jest.fn().mockResolvedValue(undefined),
   },
-  isReduceMotionPreferred: jest.fn().mockResolvedValue(false),
 }));
 import { router } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

@@ -77,18 +77,6 @@ export function formatLiveReasoningMessage(text: string): string {
   return ['• Reasoning', `  └ ${first}`, ...rest.map((line) => `    ${line}`)].join('\n');
 }
 
-export function formatTimelineSystemMessage(title: string, details: string[]): string {
-  const normalizedDetails = details
-    .flatMap((detail) => detail.split('\n'))
-    .map((line) => line.trimEnd())
-    .filter((line) => line.trim().length > 0);
-  const [first, ...rest] = normalizedDetails;
-  if (!first) {
-    return title;
-  }
-  return [title, `  └ ${first}`, ...rest.map((line) => `    ${line}`)].join('\n');
-}
-
 export function filterReasoningMessages(
   messages: ChatTranscriptMessage[],
 ): ChatTranscriptMessage[] {
@@ -197,16 +185,6 @@ function buildCompletedFileChangeLabel(item: Record<string, unknown> | null): st
   }
 
   return `File changes: ${toTickerSnippet(toFileChangeTargetLabel(firstPath), 40) ?? 'file'} +${String(changedPaths.length - 1)}`;
-}
-
-export function describeWebSearchToolEvent(
-  msg: Record<string, unknown> | null,
-): { eventType: string; detail: string } | null {
-  const query = toTickerSnippet(readString(msg?.['query']), 80);
-  return {
-    eventType: 'web_search.running',
-    detail: buildToolEventDetail(query ? `Web search: ${query}` : 'Web search', 'running'),
-  };
 }
 
 export function buildToolEventDetail(

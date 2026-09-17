@@ -1,11 +1,10 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as StoreReview from 'expo-store-review';
-import { Linking, Platform } from 'react-native';
+import { Platform } from 'react-native';
 
 export const AUTO_STORE_REVIEW_THRESHOLD_MS = 10 * 60 * 1000;
 
 const STORE_REVIEW_STATE_FILE = 'dappercode-store-review.json';
-const IOS_APP_STORE_ITEM_ID = process.env.EXPO_PUBLIC_IOS_APP_STORE_ID?.trim() || null;
 
 export type AutoStoreReviewState = {
   accumulatedForegroundMs: number;
@@ -80,27 +79,6 @@ export async function requestNativeStoreReview(): Promise<boolean> {
 
   await StoreReview.requestReview();
   return true;
-}
-
-export function canOpenAppStoreWriteReviewPage(): boolean {
-  return Platform.OS === 'ios' && IOS_APP_STORE_ITEM_ID !== null;
-}
-
-export async function openAppStoreWriteReviewPage(): Promise<boolean> {
-  const itemId = IOS_APP_STORE_ITEM_ID;
-  if (Platform.OS !== 'ios' || itemId === null) {
-    return false;
-  }
-
-  const webUrl = `https://apps.apple.com/app/id${itemId}?action=write-review`;
-  const deepLink = `itms-apps://itunes.apple.com/app/viewContentsUserReviews/id${itemId}?action=write-review`;
-  try {
-    await Linking.openURL(deepLink);
-    return true;
-  } catch {
-    await Linking.openURL(webUrl);
-    return true;
-  }
 }
 
 function getAutoStoreReviewStatePath(): string | null {

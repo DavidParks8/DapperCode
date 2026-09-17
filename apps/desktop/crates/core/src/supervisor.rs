@@ -1,36 +1,31 @@
 use std::{
-    fs::{self, OpenOptions},
-    io,
+    fs, io,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
     thread,
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 use crate::{
-    config::{BridgeRuntimeConfig, RuntimePaths},
-    platform::{detach_process, process_start_identity, request_process_stop, ProcessStopRequest},
+    config::BridgeRuntimeConfig,
+    platform::{process_start_identity, request_process_stop, ProcessStopRequest},
     secrets::SecretStore,
-    store::{atomic_private_write, remove_file_if_exists, AppPaths, FileLease, Profile},
+    store::{remove_file_if_exists, AppPaths, FileLease, Profile},
 };
 
 const STATUS_BODY_LIMIT_BYTES: u64 = 2 * 1024 * 1024;
-const START_TIMEOUT: Duration = Duration::from_secs(60);
 const STOP_TIMEOUT: Duration = Duration::from_secs(12);
 const OWNERSHIP_RECORD_VERSION: u32 = 2;
 
+/// Stops app-owned bridges left by the pre-broker desktop layout during migration.
 #[derive(Clone, Debug)]
 pub struct BridgeSupervisor {
     profile: Profile,
     paths: AppPaths,
     secrets: SecretStore,
-    runtime: RuntimePaths,
-    owner_pid: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -121,40 +116,10 @@ impl BridgeSnapshot {
             managed_process: false,
         }
     }
-
-    fn owned_config_error(error: &anyhow::Error) -> Self {
-        Self {
-            state: BridgeState::Inaccessible,
-            headline: "Bridge configuration unavailable".to_string(),
-            detail: format!(
-                "The owned bridge is still running, but stored configuration needs repair: {error}"
-            ),
-            url: None,
-            uptime_sec: None,
-            connected_clients: 0,
-            ready_agents: 0,
-            total_agents: 0,
-            recent_error_count: 0,
-            managed_process: true,
-        }
-    }
-
-    fn inaccessible(config: &BridgeRuntimeConfig, detail: String, managed_process: bool) -> Self {
-        Self {
-            state: BridgeState::Inaccessible,
-            headline: "Bridge access failed".to_string(),
-            detail,
-            url: Some(config.connect_url.clone()),
-            uptime_sec: None,
-            connected_clients: 0,
-            ready_agents: 0,
-            total_agents: 0,
-            recent_error_count: 0,
-            managed_process,
-        }
-    }
 }
 
+// Preserve typed status validation even though migration only needs to know whether it succeeded.
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BridgeStatusResponse {
@@ -167,12 +132,14 @@ struct BridgeStatusResponse {
     operational: OperationalStatus,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentStatus {
     lifecycle: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OperationalStatus {
@@ -194,164 +161,24 @@ struct ProcessOwnershipRecord {
 }
 
 impl BridgeSupervisor {
-    pub fn new(
-        profile: Profile,
-        paths: AppPaths,
-        secrets: SecretStore,
-        runtime: RuntimePaths,
-        owner_pid: Option<u32>,
-    ) -> Self {
+    pub fn new(profile: Profile, paths: AppPaths, secrets: SecretStore) -> Self {
         Self {
             profile,
             paths,
             secrets,
-            runtime,
-            owner_pid,
         }
     }
 
-    pub fn profile(&self) -> &Profile {
-        &self.profile
-    }
-
-    pub fn workspace(&self) -> &Path {
+    fn workspace(&self) -> &Path {
         &self.profile.workspace
     }
 
-    pub fn runtime_config(&self) -> Result<BridgeRuntimeConfig> {
+    fn runtime_config(&self) -> Result<BridgeRuntimeConfig> {
         let secret = self
             .secrets
             .get(&self.paths, &self.profile.profile_id)?
             .context("no stored bridge token for this workspace; run setup again")?;
         BridgeRuntimeConfig::from_profile(&self.profile, &secret.token, secret.backend, &self.paths)
-    }
-
-    pub fn snapshot(&self) -> BridgeSnapshot {
-        let config = match self.runtime_config() {
-            Ok(config) => config,
-            Err(error) if self.owns_running_process() => {
-                return BridgeSnapshot::owned_config_error(&error);
-            }
-            Err(error) => return BridgeSnapshot::error(error.to_string()),
-        };
-
-        let managed_process = self.owns_running_process();
-        if !self.probe_health(&config) {
-            if managed_process {
-                return BridgeSnapshot::inaccessible(
-                    &config,
-                    "The owned bridge process is running, but its health endpoint is temporarily unavailable."
-                        .to_string(),
-                    true,
-                );
-            }
-            return BridgeSnapshot::stopped(&config);
-        }
-
-        match self.fetch_status(&config) {
-            Ok(status) => self.project_status(&config, status),
-            Err(error) => BridgeSnapshot::inaccessible(
-                &config,
-                format!("A bridge is listening, but authenticated status failed: {error}"),
-                managed_process,
-            ),
-        }
-    }
-
-    pub fn start(&self) -> Result<BridgeSnapshot> {
-        let _lease = self.acquire_transition_lease()?;
-        self.start_locked()
-    }
-
-    fn start_locked(&self) -> Result<BridgeSnapshot> {
-        let config = self.runtime_config()?;
-        if self.owns_running_process() {
-            return Ok(BridgeSnapshot::inaccessible(
-                &config,
-                "The owned bridge process is already running; wait for health to recover or stop/restart it."
-                    .to_string(),
-                true,
-            ));
-        }
-        if self.fetch_status(&config).is_ok() {
-            return Ok(self.snapshot());
-        }
-        if self.probe_health(&config) {
-            bail!("a bridge is already listening, but authenticated status is unavailable");
-        }
-
-        let bridge_binary = self.resolve_bridge_binary()?;
-        self.clean_stale_ownership(&bridge_binary, &config)?;
-        let log_path = self.log_path();
-        let stdout = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)
-            .with_context(|| format!("failed to open {}", log_path.display()))?;
-        let stderr = stdout.try_clone()?;
-
-        let mut command = Command::new(&bridge_binary);
-        command
-            .current_dir(self.workspace())
-            .envs(config.values.iter())
-            .stdin(Stdio::null())
-            .stdout(Stdio::from(stdout))
-            .stderr(Stdio::from(stderr));
-        if let Some(owner_pid) = self.owner_pid {
-            // The bridge exits on its own when this process disappears, so a force-quit or crash of
-            // the desktop app cannot leave an authenticated bridge listening.
-            command.env("BRIDGE_OWNER_PID", owner_pid.to_string());
-        }
-        detach_process(&mut command);
-        let mut child = command.spawn().with_context(|| {
-            format!("failed to start bridge binary {}", bridge_binary.display())
-        })?;
-        let pid = child.id();
-        let ownership = match process_identity(
-            pid,
-            &bridge_binary,
-            self.workspace(),
-            &config_digest(&config),
-            self.owner_pid,
-        ) {
-            Ok(ownership) => ownership,
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(error).context("failed to establish bridge process ownership");
-            }
-        };
-        if let Err(error) = write_ownership_record(&self.ownership_path(), &ownership) {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = self.remove_ownership_if_matches(&ownership);
-            return Err(error).context("failed to publish bridge process ownership");
-        }
-        thread::spawn(move || {
-            let _ = child.wait();
-        });
-
-        let started_at = Instant::now();
-        while started_at.elapsed() < START_TIMEOUT {
-            if let Ok(status) = self.fetch_status(&config) {
-                return Ok(self.project_status(&config, status));
-            }
-            if !process_matches_ownership(&ownership) {
-                let _ = self.remove_ownership_if_matches(&ownership);
-                bail!(
-                    "bridge exited before becoming healthy; inspect {}",
-                    log_path.display()
-                );
-            }
-            thread::sleep(Duration::from_millis(350));
-        }
-
-        let _ = self.stop_owned_process(&ownership);
-        bail!(
-            "bridge did not become healthy within {} seconds; inspect {}",
-            START_TIMEOUT.as_secs(),
-            log_path.display()
-        )
     }
 
     pub fn stop(&self) -> Result<BridgeSnapshot> {
@@ -390,14 +217,6 @@ impl BridgeSupervisor {
         }
     }
 
-    pub fn restart(&self) -> Result<BridgeSnapshot> {
-        let _lease = self.acquire_transition_lease()?;
-        if read_ownership_record(&self.ownership_path())?.is_some() {
-            self.stop_locked()?;
-        }
-        self.start_locked()
-    }
-
     pub fn owns_running_process(&self) -> bool {
         let Ok(Some(ownership)) = read_ownership_record(&self.ownership_path()) else {
             return false;
@@ -406,10 +225,6 @@ impl BridgeSupervisor {
             .canonicalize()
             .is_ok_and(|workspace| ownership.workspace == workspace)
             && process_matches_ownership(&ownership)
-    }
-
-    pub fn log_path(&self) -> PathBuf {
-        self.paths.log_path(&self.profile.profile_id)
     }
 
     fn fetch_status(&self, config: &BridgeRuntimeConfig) -> Result<BridgeStatusResponse> {
@@ -429,69 +244,6 @@ impl BridgeSupervisor {
         serde_json::from_str(&body).context("bridge returned malformed status JSON")
     }
 
-    fn probe_health(&self, config: &BridgeRuntimeConfig) -> bool {
-        let url = format!("{}/health", config.local_base_url());
-        match http_agent().get(&url).call() {
-            Ok(_) => true,
-            Err(ureq::Error::StatusCode(503)) => true,
-            Err(_) => false,
-        }
-    }
-
-    fn project_status(
-        &self,
-        config: &BridgeRuntimeConfig,
-        status: BridgeStatusResponse,
-    ) -> BridgeSnapshot {
-        let ready_agents = status
-            .agents
-            .iter()
-            .filter(|agent| agent.lifecycle == "ready")
-            .count();
-        let state = match status.status.as_str() {
-            "ok" => BridgeState::Running,
-            "degraded" => BridgeState::Degraded,
-            "unhealthy" => BridgeState::Unhealthy,
-            _ => BridgeState::Error,
-        };
-        let headline = match state {
-            BridgeState::Running => "Bridge running",
-            BridgeState::Degraded => "Bridge degraded",
-            BridgeState::Unhealthy => "Bridge unhealthy",
-            _ => "Unknown bridge status",
-        }
-        .to_string();
-        let detail = format!(
-            "{} connected device{} · {}/{} agent{} ready",
-            status.connected_clients,
-            plural(status.connected_clients),
-            ready_agents,
-            status.agents.len(),
-            plural(status.agents.len())
-        );
-        BridgeSnapshot {
-            state,
-            headline,
-            detail,
-            url: Some(config.connect_url.clone()),
-            uptime_sec: Some(status.uptime_sec),
-            connected_clients: status.connected_clients,
-            ready_agents,
-            total_agents: status.agents.len(),
-            recent_error_count: status.operational.recent_errors.len(),
-            managed_process: self.owns_running_process(),
-        }
-    }
-
-    fn resolve_bridge_binary(&self) -> Result<PathBuf> {
-        let candidates = self.runtime.bridge_binary_candidates();
-        resolve_existing_executable(&candidates).ok_or_else(|| {
-            anyhow!(
-                "bridge binary is not installed; build it with 'pnpm run cargo build --locked --release --manifest-path services/rust-bridge/Cargo.toml' or reinstall DapperCode"
-            )
-        })
-    }
-
     fn ownership_path(&self) -> PathBuf {
         self.paths.ownership_path(&self.profile.profile_id)
     }
@@ -500,32 +252,9 @@ impl BridgeSupervisor {
         self.paths.transition_lock_path(&self.profile.profile_id)
     }
 
-    /// Each profile locks independently, so starting one worktree's bridge never blocks another's.
+    /// Preserve the old per-profile lock while stopping bridges from the previous layout.
     fn acquire_transition_lease(&self) -> Result<FileLease> {
         FileLease::acquire(&self.transition_lock_path())
-    }
-
-    fn clean_stale_ownership(
-        &self,
-        bridge_binary: &Path,
-        config: &BridgeRuntimeConfig,
-    ) -> Result<()> {
-        let Some(ownership) = read_ownership_record(&self.ownership_path())? else {
-            return Ok(());
-        };
-        if !process_matches_ownership(&ownership) {
-            self.remove_ownership_if_matches(&ownership)?;
-            return Ok(());
-        }
-        if !ownership_matches_expected(
-            &ownership,
-            bridge_binary,
-            self.workspace(),
-            &config_digest(config),
-        )? {
-            bail!("bridge configuration changed while the managed process was running; restore the original configuration before starting another bridge");
-        }
-        Ok(())
     }
 
     fn remove_ownership_if_matches(&self, expected: &ProcessOwnershipRecord) -> Result<()> {
@@ -575,26 +304,11 @@ impl BridgeSupervisor {
     }
 }
 
-fn plural(count: usize) -> &'static str {
-    if count == 1 {
-        ""
-    } else {
-        "s"
-    }
-}
-
 fn http_agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(1)))
         .build()
         .into()
-}
-
-fn resolve_existing_executable(candidates: &[PathBuf]) -> Option<PathBuf> {
-    candidates
-        .iter()
-        .find(|candidate| candidate.is_file())
-        .and_then(|candidate| candidate.canonicalize().ok())
 }
 
 fn read_ownership_record(path: &Path) -> Result<Option<ProcessOwnershipRecord>> {
@@ -621,10 +335,7 @@ fn read_ownership_record(path: &Path) -> Result<Option<ProcessOwnershipRecord>> 
     Ok(Some(record))
 }
 
-fn write_ownership_record(path: &Path, record: &ProcessOwnershipRecord) -> Result<()> {
-    atomic_private_write(path, &serde_json::to_vec_pretty(record)?)
-}
-
+#[cfg(test)]
 fn process_identity(
     pid: u32,
     expected_binary: &Path,
@@ -641,7 +352,7 @@ fn process_identity(
     );
     let process = system
         .process(sysinfo_pid)
-        .ok_or_else(|| anyhow!("bridge process {pid} no longer exists"))?;
+        .ok_or_else(|| anyhow::anyhow!("bridge process {pid} no longer exists"))?;
     let executable = process
         .exe()
         .context("bridge executable identity is unavailable")?
@@ -673,18 +384,6 @@ fn process_identity(
     })
 }
 
-fn ownership_matches_expected(
-    record: &ProcessOwnershipRecord,
-    expected_binary: &Path,
-    workspace: &Path,
-    config_sha256: &str,
-) -> Result<bool> {
-    Ok(record.version == OWNERSHIP_RECORD_VERSION
-        && record.executable == expected_binary.canonicalize()?
-        && record.workspace == workspace.canonicalize()?
-        && record.config_sha256 == config_sha256)
-}
-
 fn process_matches_ownership(record: &ProcessOwnershipRecord) -> bool {
     let mut system = System::new();
     let sysinfo_pid = Pid::from_u32(record.pid);
@@ -708,15 +407,6 @@ fn process_matches_ownership(record: &ProcessOwnershipRecord) -> bool {
         && workspace == record.workspace
 }
 
-/// Digest of everything the bridge was started with except the token, so the ownership record can
-/// detect configuration drift without ever containing a secret.
-fn config_digest(config: &BridgeRuntimeConfig) -> String {
-    format!(
-        "sha256:{:x}",
-        Sha256::digest(config.fingerprint_source().as_bytes())
-    )
-}
-
 fn valid_sha256_digest(value: &str) -> bool {
     value.len() == 71
         && value.starts_with("sha256:")
@@ -727,10 +417,17 @@ fn valid_sha256_digest(value: &str) -> bool {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use crate::store::ProfileAgent;
-    use std::sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
+    use crate::store::{atomic_private_write, ProfileAgent};
+    use anyhow::anyhow;
+    #[cfg(windows)]
+    use std::process::Stdio;
+    use std::{
+        fs::OpenOptions,
+        process::Command,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc, Arc,
+        },
     };
     use tempfile::tempdir;
 
@@ -738,6 +435,10 @@ mod tests {
 
     fn test_executable() -> PathBuf {
         std::env::current_exe().unwrap().canonicalize().unwrap()
+    }
+
+    fn write_ownership_record(path: &Path, record: &ProcessOwnershipRecord) -> Result<()> {
+        atomic_private_write(path, &serde_json::to_vec_pretty(record)?)
     }
 
     #[cfg(windows)]
@@ -799,19 +500,6 @@ mod tests {
     }
 
     #[test]
-    fn selects_the_first_existing_bridge_binary() {
-        let temp = tempdir().unwrap();
-        let missing = temp.path().join("missing");
-        let existing = temp.path().join("bridge");
-        fs::write(&existing, "binary").unwrap();
-
-        assert_eq!(
-            resolve_existing_executable(&[missing, existing.clone()]),
-            Some(existing.canonicalize().unwrap())
-        );
-    }
-
-    #[test]
     fn ownership_record_round_trips_privately_with_the_owner_pid() {
         let temp = tempdir().unwrap();
         let record_path = temp.path().join("process.json");
@@ -857,48 +545,26 @@ mod tests {
     }
 
     #[test]
-    fn ownership_requires_matching_workspace_binary_and_config() {
+    fn ownership_requires_matching_live_process_start_binary_and_workspace() {
         let temp = tempdir().unwrap();
         let binary = test_executable();
+        let workspace = std::env::current_dir().unwrap().canonicalize().unwrap();
         let digest = format!("sha256:{}", "a".repeat(64));
-        let mut record = record(&temp.path().canonicalize().unwrap());
-        record.executable = binary.clone();
+        let record =
+            process_identity(std::process::id(), &binary, &workspace, &digest, None).unwrap();
+        assert!(process_matches_ownership(&record));
 
-        assert!(ownership_matches_expected(&record, &binary, temp.path(), &digest).unwrap());
-        let other = format!("sha256:{}", "b".repeat(64));
-        assert!(!ownership_matches_expected(&record, &binary, temp.path(), &other).unwrap());
-
-        let mut wrong_start = record;
+        let mut wrong_start = record.clone();
         wrong_start.started_at_epoch_sec += 1;
         assert!(!process_matches_ownership(&wrong_start));
-    }
 
-    #[test]
-    fn config_digest_ignores_the_token() {
-        let workspace = tempdir().unwrap();
-        let data = tempdir().unwrap();
-        let paths = AppPaths::for_tests(data.path().to_path_buf());
-        let profile = profile(workspace.path(), 18787);
-        paths.prepare_profile(&profile.profile_id).unwrap();
-        fs::write(paths.manifest_path(&profile.profile_id), b"{}").unwrap();
+        let mut wrong_binary = record.clone();
+        wrong_binary.executable = temp.path().join("different-binary");
+        assert!(!process_matches_ownership(&wrong_binary));
 
-        let first = BridgeRuntimeConfig::from_profile(
-            &profile,
-            "first-token",
-            crate::secrets::SecretBackend::File,
-            &paths,
-        )
-        .unwrap();
-        let second = BridgeRuntimeConfig::from_profile(
-            &profile,
-            "second-token",
-            crate::secrets::SecretBackend::File,
-            &paths,
-        )
-        .unwrap();
-
-        assert_eq!(config_digest(&first), config_digest(&second));
-        assert!(valid_sha256_digest(&config_digest(&first)));
+        let mut wrong_workspace = record;
+        wrong_workspace.workspace = temp.path().canonicalize().unwrap();
+        assert!(!process_matches_ownership(&wrong_workspace));
     }
 
     #[test]
@@ -944,6 +610,32 @@ mod tests {
         let _beta = FileLease::acquire(&paths.transition_lock_path("beta-2")).unwrap();
     }
 
+    #[test]
+    fn migration_stop_waits_for_the_legacy_profile_transition_lease() {
+        let workspace = tempdir().unwrap();
+        let data = tempdir().unwrap();
+        let supervisor = supervisor_for(workspace.path(), data.path(), 18603, false);
+        let lease = FileLease::acquire(&supervisor.transition_lock_path()).unwrap();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        let stopping = thread::spawn(move || {
+            entered_tx.send(()).unwrap();
+            finished_tx.send(supervisor.stop()).unwrap();
+        });
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(finished_rx
+            .recv_timeout(Duration::from_millis(100))
+            .is_err());
+
+        drop(lease);
+        let error = finished_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .unwrap_err();
+        assert!(error.to_string().contains("no stored bridge token"));
+        stopping.join().unwrap();
+    }
+
     fn supervisor_for(
         workspace: &Path,
         data: &Path,
@@ -960,15 +652,7 @@ mod tests {
                 .set_for_tests(&paths, &profile.profile_id, "test-token")
                 .unwrap();
         }
-        BridgeSupervisor::new(
-            profile,
-            paths,
-            secrets,
-            RuntimePaths {
-                package_root: data.to_path_buf(),
-            },
-            None,
-        )
+        BridgeSupervisor::new(profile, paths, secrets)
     }
 
     #[test]
@@ -988,15 +672,10 @@ mod tests {
         let stopped = BridgeSnapshot::stopped_with_config_error(&failure);
         assert_eq!(stopped.state, BridgeState::Stopped);
         assert!(stopped.detail.contains("token missing"));
-
-        let owned = BridgeSnapshot::owned_config_error(&failure);
-        assert_eq!(owned.state, BridgeState::Inaccessible);
-        assert!(owned.managed_process);
-        assert!(owned.detail.contains("token missing"));
     }
 
     #[test]
-    fn snapshot_and_stop_use_the_configured_connect_url() {
+    fn stopped_snapshot_uses_the_configured_connect_url() {
         let workspace = tempdir().unwrap();
         let data = tempdir().unwrap();
         let supervisor = supervisor_for(workspace.path(), data.path(), 18601, true);
@@ -1005,11 +684,6 @@ mod tests {
         let stopped = BridgeSnapshot::stopped(&config);
         assert_eq!(stopped.state, BridgeState::Stopped);
         assert_eq!(stopped.url.as_deref(), Some("http://127.0.0.1:18601"));
-
-        let inaccessible = BridgeSnapshot::inaccessible(&config, "unreachable".to_string(), true);
-        assert_eq!(inaccessible.state, BridgeState::Inaccessible);
-        assert!(inaccessible.managed_process);
-        assert_eq!(inaccessible.detail, "unreachable");
     }
 
     #[test]
@@ -1021,10 +695,11 @@ mod tests {
         let error = supervisor.runtime_config().unwrap_err();
         assert!(error.to_string().contains("no stored bridge token"));
 
-        let snapshot = supervisor.snapshot();
-        assert_eq!(snapshot.state, BridgeState::Error);
-        assert!(!snapshot.managed_process);
-        assert!(supervisor.start().is_err());
+        assert!(supervisor
+            .stop()
+            .unwrap_err()
+            .to_string()
+            .contains("no stored bridge token"));
     }
 
     #[test]
@@ -1034,34 +709,7 @@ mod tests {
         let supervisor = supervisor_for(workspace.path(), data.path(), 18605, true);
 
         assert!(!supervisor.owns_running_process());
-        assert_eq!(supervisor.snapshot().state, BridgeState::Stopped);
         assert_eq!(supervisor.stop().unwrap().state, BridgeState::Stopped);
-        // Restarting an idle profile still fails, because no bridge binary is installed here.
-        assert!(supervisor.restart().is_err());
-    }
-
-    #[test]
-    fn starting_without_an_installed_bridge_binary_explains_how_to_build_it() {
-        let workspace = tempdir().unwrap();
-        let data = tempdir().unwrap();
-        let supervisor = supervisor_for(workspace.path(), data.path(), 18607, true);
-
-        let error = supervisor.start().unwrap_err();
-        assert!(error.to_string().contains("bridge binary is not installed"));
-        assert!(resolve_existing_executable(&[]).is_none());
-    }
-
-    #[test]
-    fn log_path_lives_in_the_profile_directory_not_the_workspace() {
-        let workspace = tempdir().unwrap();
-        let data = tempdir().unwrap();
-        let supervisor = supervisor_for(workspace.path(), data.path(), 18609, true);
-
-        let log_path = supervisor.log_path();
-        assert!(log_path.starts_with(data.path()));
-        assert!(!log_path.starts_with(workspace.path()));
-        assert_eq!(supervisor.workspace(), workspace.path());
-        assert_eq!(supervisor.profile().bridge_port, 18609);
     }
 
     #[test]
@@ -1095,30 +743,6 @@ mod tests {
         assert!(!valid_sha256_digest(&format!("sha256:{}", "z".repeat(64))));
         assert!(!valid_sha256_digest(&format!("sha1:{}", "a".repeat(64))));
         assert!(!valid_sha256_digest("sha256:abc"));
-    }
-
-    #[test]
-    fn ownership_comparison_rejects_a_different_binary_or_workspace() {
-        let temp = tempdir().unwrap();
-        let other = tempdir().unwrap();
-        let binary = test_executable();
-        let digest = format!("sha256:{}", "a".repeat(64));
-        let mut record = record(&temp.path().canonicalize().unwrap());
-        record.executable = binary.clone();
-
-        assert!(ownership_matches_expected(&record, &binary, temp.path(), &digest).unwrap());
-        assert!(!ownership_matches_expected(&record, &binary, other.path(), &digest).unwrap());
-
-        let different_binary = temp.path().join("different-binary");
-        fs::write(&different_binary, b"not the test executable").unwrap();
-        let different_binary = different_binary.canonicalize().unwrap();
-        assert!(
-            !ownership_matches_expected(&record, &different_binary, temp.path(), &digest).unwrap()
-        );
-
-        let mut old_version = record;
-        old_version.version = OWNERSHIP_RECORD_VERSION + 1;
-        assert!(!ownership_matches_expected(&old_version, &binary, temp.path(), &digest).unwrap());
     }
 
     #[test]
@@ -1161,81 +785,16 @@ mod tests {
     }
 
     #[test]
-    fn projects_every_reported_bridge_status() {
-        let workspace = tempdir().unwrap();
-        let data = tempdir().unwrap();
-        let supervisor = supervisor_for(workspace.path(), data.path(), 18617, true);
-        let config = supervisor.runtime_config().unwrap();
-
-        let cases = [
-            ("ok", BridgeState::Running, "Bridge running"),
-            ("degraded", BridgeState::Degraded, "Bridge degraded"),
-            ("unhealthy", BridgeState::Unhealthy, "Bridge unhealthy"),
-            ("surprising", BridgeState::Error, "Unknown bridge status"),
-        ];
-        for (status, expected_state, expected_headline) in cases {
-            let projected = supervisor.project_status(
-                &config,
-                BridgeStatusResponse {
-                    status: status.to_string(),
-                    uptime_sec: 61,
-                    connected_clients: 1,
-                    agents: vec![
-                        AgentStatus {
-                            lifecycle: "ready".to_string(),
-                        },
-                        AgentStatus {
-                            lifecycle: "starting".to_string(),
-                        },
-                    ],
-                    operational: OperationalStatus::default(),
-                },
-            );
-            assert_eq!(projected.state, expected_state);
-            assert_eq!(projected.headline, expected_headline);
-            assert_eq!(projected.ready_agents, 1);
-            assert_eq!(projected.total_agents, 2);
-            assert_eq!(projected.uptime_sec, Some(61));
-            assert_eq!(projected.detail, "1 connected device · 1/2 agents ready");
-        }
-    }
-
-    #[test]
-    fn pluralizes_only_counts_other_than_one() {
-        assert_eq!(plural(0), "s");
-        assert_eq!(plural(1), "");
-        assert_eq!(plural(2), "s");
-    }
-
-    #[test]
-    fn health_and_status_probes_fail_closed_when_nothing_is_listening() {
+    fn status_probe_fails_closed_when_nothing_is_listening() {
         let workspace = tempdir().unwrap();
         let data = tempdir().unwrap();
         let supervisor = supervisor_for(workspace.path(), data.path(), 18619, true);
         let config = supervisor.runtime_config().unwrap();
 
-        assert!(!supervisor.probe_health(&config));
         assert!(supervisor.fetch_status(&config).is_err());
     }
 
-    #[test]
-    fn stale_ownership_is_cleared_before_a_new_start() {
-        let workspace = tempdir().unwrap();
-        let data = tempdir().unwrap();
-        let supervisor = supervisor_for(workspace.path(), data.path(), 18621, true);
-        let config = supervisor.runtime_config().unwrap();
-        let binary = test_executable();
-
-        supervisor.clean_stale_ownership(&binary, &config).unwrap();
-
-        let mut dead = record(&workspace.path().canonicalize().unwrap());
-        dead.pid = u32::MAX - 1;
-        write_ownership_record(&supervisor.ownership_path(), &dead).unwrap();
-        supervisor.clean_stale_ownership(&binary, &config).unwrap();
-        assert!(!supervisor.ownership_path().exists());
-    }
-
-    /// Minimal stand-in for a running bridge, so health and authenticated status paths can be
+    /// Minimal stand-in for a running bridge, so authenticated status checks can be
     /// exercised without building a real bridge binary.
     struct FakeBridge {
         port: u16,
@@ -1257,16 +816,30 @@ mod tests {
                     match listener.accept() {
                         Ok((mut stream, _)) => {
                             stream.set_nonblocking(false).unwrap();
+                            stream
+                                .set_read_timeout(Some(Duration::from_secs(1)))
+                                .unwrap();
                             let mut reader = BufReader::new(stream.try_clone().unwrap());
                             let mut request_line = String::new();
                             if reader.read_line(&mut request_line).is_err() {
                                 continue;
                             }
-                            let body = if request_line.contains("/status") {
-                                status_body
-                            } else {
-                                "{}"
-                            };
+                            assert!(request_line.starts_with("GET /status "));
+                            let mut authorized = false;
+                            loop {
+                                let mut header = String::new();
+                                let bytes = reader.read_line(&mut header).unwrap();
+                                if bytes == 0 || header == "\r\n" {
+                                    break;
+                                }
+                                if let Some((name, value)) = header.split_once(':') {
+                                    if name.eq_ignore_ascii_case("authorization") {
+                                        authorized = value.trim() == "Bearer test-token";
+                                    }
+                                }
+                            }
+                            assert!(authorized, "legacy status requests must authenticate");
+                            let body = status_body;
                             let _ = write!(
                                 stream,
                                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -1294,7 +867,7 @@ mod tests {
         fn drop(&mut self) {
             self.shutdown.store(true, Ordering::Relaxed);
             if let Some(handle) = self.handle.take() {
-                let _ = handle.join();
+                handle.join().expect("authenticated status fixture");
             }
         }
     }
@@ -1309,20 +882,15 @@ mod tests {
         let supervisor = supervisor_for(workspace.path(), data.path(), bridge.port, true);
         let config = supervisor.runtime_config().unwrap();
 
-        assert!(supervisor.probe_health(&config));
         let status = supervisor.fetch_status(&config).unwrap();
         assert_eq!(status.status, "ok");
         assert_eq!(status.uptime_sec, 42);
-
-        let snapshot = supervisor.snapshot();
-        assert_eq!(snapshot.state, BridgeState::Running);
-        assert_eq!(snapshot.connected_clients, 1);
-        assert_eq!(snapshot.ready_agents, 1);
-        assert!(!snapshot.managed_process);
+        assert_eq!(status.connected_clients, 1);
+        assert_eq!(status.agents[0].lifecycle, "ready");
     }
 
     #[test]
-    fn an_unowned_bridge_on_the_configured_port_cannot_be_started_or_stopped() {
+    fn an_unowned_bridge_on_the_configured_port_cannot_be_stopped() {
         let workspace = tempdir().unwrap();
         let data = tempdir().unwrap();
         let bridge = FakeBridge::start(
@@ -1330,28 +898,32 @@ mod tests {
         );
         let supervisor = supervisor_for(workspace.path(), data.path(), bridge.port, true);
 
-        // Starting must not spawn a second bridge over one that is already answering.
-        assert_eq!(supervisor.start().unwrap().state, BridgeState::Running);
-
         let error = supervisor.stop().unwrap_err();
         assert!(error.to_string().contains("not owned by this app"));
+        assert!(!supervisor.ownership_path().exists());
+        assert!(supervisor
+            .fetch_status(&supervisor.runtime_config().unwrap())
+            .is_ok());
     }
 
     #[test]
-    fn a_listener_without_valid_status_is_reported_as_inaccessible() {
-        let workspace = tempdir().unwrap();
-        let data = tempdir().unwrap();
-        let bridge = FakeBridge::start("not json");
-        let supervisor = supervisor_for(workspace.path(), data.path(), bridge.port, true);
-
-        let snapshot = supervisor.snapshot();
-        assert_eq!(snapshot.state, BridgeState::Inaccessible);
-        assert!(snapshot.detail.contains("authenticated status failed"));
-
-        let error = supervisor.start().unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("authenticated status is unavailable"));
+    fn a_listener_without_a_valid_status_contract_is_not_treated_as_a_bridge() {
+        for body in [
+            "not json",
+            "{}",
+            r#"{"status":"ok","uptimeSec":"invalid","connectedClients":0}"#,
+        ] {
+            let workspace = tempdir().unwrap();
+            let data = tempdir().unwrap();
+            let bridge = FakeBridge::start(body);
+            let supervisor = supervisor_for(workspace.path(), data.path(), bridge.port, true);
+            let error = supervisor
+                .fetch_status(&supervisor.runtime_config().unwrap())
+                .unwrap_err();
+            assert!(error.to_string().contains("malformed status JSON"));
+            assert_eq!(supervisor.stop().unwrap().state, BridgeState::Stopped);
+            assert!(!supervisor.ownership_path().exists());
+        }
     }
 
     #[test]
@@ -1449,7 +1021,10 @@ mod tests {
             wait_for_windows_fixture_identity(child.id(), &executable, workspace.path(), &digest);
         write_ownership_record(&supervisor.ownership_path(), &ownership).unwrap();
 
-        supervisor.stop_owned_process(&ownership).unwrap();
+        assert!(supervisor.owns_running_process());
+        let stopped = supervisor.stop().unwrap();
+        assert_eq!(stopped.state, BridgeState::Stopped);
+        assert!(!stopped.managed_process);
         child.wait().unwrap();
 
         assert!(!process_matches_ownership(&ownership));
@@ -1458,39 +1033,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_matching_live_owner_passes_the_pre_start_ownership_check() {
-        let workspace = tempdir().unwrap();
-        let data = tempdir().unwrap();
-        let supervisor = supervisor_for(workspace.path(), data.path(), 18647, true);
-        let config = supervisor.runtime_config().unwrap();
-
-        let sleep_binary = PathBuf::from("/bin/sleep").canonicalize().unwrap();
-        let mut child = Command::new(&sleep_binary)
-            .arg("30")
-            .current_dir(workspace.path())
-            .spawn()
-            .unwrap();
-        let ownership = wait_for_identity(
-            child.id(),
-            &sleep_binary,
-            workspace.path(),
-            &config_digest(&config),
-        );
-        write_ownership_record(&supervisor.ownership_path(), &ownership).unwrap();
-
-        // The recorded configuration still matches, so the check passes and the record survives.
-        supervisor
-            .clean_stale_ownership(&sleep_binary, &config)
-            .unwrap();
-        assert!(supervisor.ownership_path().is_file());
-
-        supervisor.stop_owned_process(&ownership).unwrap();
-        let _ = child.wait();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_live_owned_process_keeps_reporting_when_its_configuration_breaks() {
+    fn a_live_owned_process_can_be_stopped_when_its_configuration_breaks() {
         let workspace = tempdir().unwrap();
         let data = tempdir().unwrap();
         let supervisor = supervisor_for(workspace.path(), data.path(), 18643, true);
@@ -1512,14 +1055,14 @@ mod tests {
                 .manifest_path(&supervisor.profile.profile_id),
         )
         .unwrap();
-        let snapshot = supervisor.snapshot();
-
-        assert_eq!(snapshot.state, BridgeState::Inaccessible);
-        assert!(snapshot.managed_process);
+        assert!(supervisor.owns_running_process());
+        let snapshot = supervisor.stop().unwrap();
+        assert_eq!(snapshot.state, BridgeState::Stopped);
+        assert!(!snapshot.managed_process);
         assert!(snapshot.detail.contains("needs repair"));
-
-        supervisor.stop_owned_process(&ownership).unwrap();
         let _ = child.wait();
+        assert!(!supervisor.owns_running_process());
+        assert!(!supervisor.ownership_path().exists());
     }
 
     #[cfg(unix)]
@@ -1563,65 +1106,15 @@ mod tests {
 
         assert!(supervisor.owns_running_process());
         assert!(process_matches_ownership(&ownership));
-        assert_eq!(supervisor.snapshot().state, BridgeState::Inaccessible);
-
-        supervisor.stop_owned_process(&ownership).unwrap();
+        let stopped = supervisor.stop().unwrap();
+        assert_eq!(stopped.state, BridgeState::Stopped);
+        assert_eq!(stopped.headline, "Bridge stopped");
+        assert!(!stopped.managed_process);
+        assert!(stopped.uptime_sec.is_none());
+        assert_eq!(stopped.connected_clients, 0);
         let _ = child.wait();
         assert!(!process_matches_ownership(&ownership));
         assert!(!supervisor.ownership_path().exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn restarting_a_live_bridge_stops_it_before_reporting_a_missing_binary() {
-        let workspace = tempdir().unwrap();
-        let data = tempdir().unwrap();
-        let supervisor = supervisor_for(workspace.path(), data.path(), 18633, true);
-
-        let sleep_binary = PathBuf::from("/bin/sleep").canonicalize().unwrap();
-        let mut child = Command::new(&sleep_binary)
-            .arg("30")
-            .current_dir(workspace.path())
-            .spawn()
-            .unwrap();
-        let digest = format!("sha256:{}", "a".repeat(64));
-        let ownership = wait_for_identity(child.id(), &sleep_binary, workspace.path(), &digest);
-        write_ownership_record(&supervisor.ownership_path(), &ownership).unwrap();
-
-        let error = supervisor.restart().unwrap_err();
-        let _ = child.wait();
-
-        assert!(error.to_string().contains("bridge binary is not installed"));
-        assert!(!process_matches_ownership(&ownership));
-        assert!(!supervisor.ownership_path().exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn configuration_drift_blocks_starting_a_second_bridge() {
-        let workspace = tempdir().unwrap();
-        let data = tempdir().unwrap();
-        let supervisor = supervisor_for(workspace.path(), data.path(), 18635, true);
-        let config = supervisor.runtime_config().unwrap();
-
-        let sleep_binary = PathBuf::from("/bin/sleep").canonicalize().unwrap();
-        let mut child = Command::new(&sleep_binary)
-            .arg("30")
-            .current_dir(workspace.path())
-            .spawn()
-            .unwrap();
-        let stale_digest = format!("sha256:{}", "b".repeat(64));
-        let ownership =
-            wait_for_identity(child.id(), &sleep_binary, workspace.path(), &stale_digest);
-        write_ownership_record(&supervisor.ownership_path(), &ownership).unwrap();
-
-        let error = supervisor
-            .clean_stale_ownership(&sleep_binary, &config)
-            .unwrap_err();
-        assert!(error.to_string().contains("configuration changed"));
-
-        supervisor.stop_owned_process(&ownership).unwrap();
-        let _ = child.wait();
     }
 
     #[cfg(unix)]
@@ -1681,7 +1174,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn live_owned_process_with_failed_health_cannot_start_again() {
+    fn migration_stop_preserves_profile_data_when_health_is_unavailable() {
         let workspace = tempdir().unwrap();
         let data = tempdir().unwrap();
         let paths = AppPaths::for_tests(data.path().to_path_buf());
@@ -1721,27 +1214,42 @@ mod tests {
             .expect("sleep process identity");
         let ownership_path = paths.ownership_path(&profile.profile_id);
         write_ownership_record(&ownership_path, &ownership).unwrap();
-        let before = fs::read(&ownership_path).unwrap();
-
-        let runtime = RuntimePaths {
-            package_root: workspace.path().to_path_buf(),
-        };
-        let supervisor =
-            BridgeSupervisor::new(profile, paths, secrets, runtime, Some(std::process::id()));
-        let snapshot = supervisor.snapshot();
-        assert_eq!(snapshot.state, BridgeState::Inaccessible);
-        assert!(snapshot.managed_process);
-
-        let start_result = supervisor.start().unwrap();
-        assert_eq!(start_result.state, BridgeState::Inaccessible);
-        assert!(start_result.managed_process);
-        assert_eq!(fs::read(&ownership_path).unwrap(), before);
+        paths
+            .update_config(|config| {
+                config.upsert(profile.clone());
+                Ok(())
+            })
+            .unwrap();
+        let config_before = fs::read(paths.config_path()).unwrap();
+        let manifest_path = paths.manifest_path(&profile.profile_id);
+        let manifest_before = fs::read(&manifest_path).unwrap();
+        let log_path = paths.log_path(&profile.profile_id);
+        fs::write(&log_path, b"preserved legacy log").unwrap();
+        let state_path = paths.state_dir(&profile.profile_id).join("state.json");
+        fs::write(&state_path, b"preserved session state").unwrap();
+        let supervisor = BridgeSupervisor::new(profile.clone(), paths.clone(), secrets.clone());
+        assert!(supervisor.owns_running_process());
         assert!(child.try_wait().unwrap().is_none());
 
         let stopped = supervisor.stop().unwrap();
         assert_eq!(stopped.state, BridgeState::Stopped);
+        assert!(!stopped.managed_process);
         let _ = child.wait();
+        assert!(!supervisor.owns_running_process());
         assert!(!ownership_path.exists());
+        assert_eq!(fs::read(paths.config_path()).unwrap(), config_before);
+        assert_eq!(fs::read(manifest_path).unwrap(), manifest_before);
+        assert_eq!(fs::read(log_path).unwrap(), b"preserved legacy log");
+        assert_eq!(fs::read(state_path).unwrap(), b"preserved session state");
+        assert_eq!(
+            secrets
+                .get(&paths, &profile.profile_id)
+                .unwrap()
+                .unwrap()
+                .token,
+            "test-token"
+        );
+        drop(FileLease::acquire(&paths.transition_lock_path(&profile.profile_id)).unwrap());
         drop(listener);
     }
 

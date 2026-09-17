@@ -20,20 +20,6 @@ export function lastUsedModelPreference(
   return preferences[agentModelPreferenceKey(normalizedAgentId)] ?? null;
 }
 
-export function withLastUsedModelPreference(
-  preferences: Record<string, ChatModelPreference>,
-  agentId: AgentId,
-  preference: Omit<ChatModelPreference, 'updatedAt'>,
-): Record<string, ChatModelPreference> {
-  return {
-    ...preferences,
-    [agentModelPreferenceKey(agentId)]: {
-      ...preference,
-      updatedAt: new Date().toISOString(),
-    },
-  };
-}
-
 export function normalizeModelId(value: string | null | undefined): string | null {
   if (typeof value !== 'string') {
     return null;
