@@ -302,6 +302,56 @@ function Find-GeneratedPackage {
     return $packages[0].FullName
 }
 
+function Complete-WindowsBundle {
+    param(
+        [Parameter(Mandatory = $true)][string]$Bundle,
+        [Parameter(Mandatory = $true)][string[]]$ArchitecturePackages,
+        $TestCertificate = $null
+    )
+
+    Invoke-Native $makeAppx @(
+        "bundle", "/d", $bundleInputDirectory, "/p", $Bundle, "/bv", $msixVersion, "/o"
+    )
+
+    if ($SigningMode -eq "Test") {
+        if (-not $TestCertificate) {
+            $TestCertificate = Get-TestSigningCertificate
+        }
+        foreach ($artifact in @($ArchitecturePackages) + @($Bundle)) {
+            Invoke-Native $signTool @(
+                "sign", "/fd", "SHA256", "/s", "My",
+                "/sha1", $TestCertificate.Thumbprint, $artifact
+            )
+        }
+        $publicCertificate = Join-Path $distDirectory "DapperCode-Signing.cer"
+        Export-Certificate -Cert $TestCertificate -FilePath $publicCertificate -Force |
+            Out-Null
+        if ($Operation -eq "Package") {
+            Write-Warning (
+                "The test certificate is not installed automatically. Installing this test-signed " +
+                "bundle requires a one-time elevated import into LocalMachine\TrustedPeople."
+            )
+        }
+        Write-InstallGuidance -Bundle $Bundle
+    }
+
+    if (-not $SkipInspection) {
+        $inspectionParameters = @{
+            BundlePath = $Bundle
+            SigningMode = $SigningMode
+            ExpectedIdentity = $packageIdentity
+            ExpectedPublisher = $publisher
+        }
+        if ($SigningMode -eq "Production") {
+            $inspectionParameters["SkipSignature"] = $true
+        }
+        & (Join-Path $PSScriptRoot "test-desktop-windows.ps1") @inspectionParameters
+        if ($LASTEXITCODE -ne 0) {
+            throw "Windows desktop package inspection failed with code $LASTEXITCODE."
+        }
+    }
+}
+
 if ($env:OS -ne "Windows_NT") {
     throw "The Windows desktop package must be built on Windows."
 }
@@ -397,39 +447,7 @@ if ($Operation -eq "Bundle") {
     Copy-Item $architecturePackages[0] (Join-Path $bundleInputDirectory "DapperCode-x64.msix")
     Copy-Item $architecturePackages[1] (Join-Path $bundleInputDirectory "DapperCode-arm64.msix")
     $bundle = Join-Path $distDirectory "DapperCode-$version-x64_arm64.msixbundle"
-    Invoke-Native $makeAppx @(
-        "bundle", "/d", $bundleInputDirectory, "/p", $bundle, "/bv", $msixVersion, "/o"
-    )
-
-    if ($SigningMode -eq "Test") {
-        $testCertificate = Get-TestSigningCertificate
-        foreach ($artifact in @($architecturePackages) + @($bundle)) {
-            Invoke-Native $signTool @(
-                "sign", "/fd", "SHA256", "/s", "My",
-                "/sha1", $testCertificate.Thumbprint, $artifact
-            )
-        }
-        $publicCertificate = Join-Path $distDirectory "DapperCode-Signing.cer"
-        Export-Certificate -Cert $testCertificate -FilePath $publicCertificate -Force |
-            Out-Null
-        Write-InstallGuidance -Bundle $bundle
-    }
-
-    if (-not $SkipInspection) {
-        $inspectionParameters = @{
-            BundlePath = $bundle
-            SigningMode = $SigningMode
-            ExpectedIdentity = $packageIdentity
-            ExpectedPublisher = $publisher
-        }
-        if ($SigningMode -eq "Production") {
-            $inspectionParameters["SkipSignature"] = $true
-        }
-        & (Join-Path $PSScriptRoot "test-desktop-windows.ps1") @inspectionParameters
-        if ($LASTEXITCODE -ne 0) {
-            throw "Windows desktop package inspection failed with code $LASTEXITCODE."
-        }
-    }
+    Complete-WindowsBundle -Bundle $bundle -ArchitecturePackages $architecturePackages
 
     Remove-Item $bundleInputDirectory -Recurse -Force
     Write-Host "Windows bundle: $bundle"
@@ -596,44 +614,8 @@ try {
     }
 
     $bundle = Join-Path $distDirectory "DapperCode-$version-x64_arm64.msixbundle"
-    Invoke-Native $makeAppx @(
-        "bundle", "/d", $bundleInputDirectory, "/p", $bundle, "/bv", $msixVersion, "/o"
-    )
-
-    if ($SigningMode -eq "Test") {
-        $artifactsToSign = @($architecturePackages) + @($bundle)
-        foreach ($artifact in $artifactsToSign) {
-            Invoke-Native $signTool @(
-                "sign", "/fd", "SHA256", "/s", "My",
-                "/sha1", $testCertificate.Thumbprint, $artifact
-            )
-        }
-
-        $publicCertificate = Join-Path $distDirectory "DapperCode-Signing.cer"
-        Export-Certificate -Cert $testCertificate -FilePath $publicCertificate -Force |
-            Out-Null
-        Write-Warning (
-            "The test certificate is not installed automatically. Installing this test-signed " +
-            "bundle requires a one-time elevated import into LocalMachine\TrustedPeople."
-        )
-        Write-InstallGuidance -Bundle $bundle
-    }
-
-    if (-not $SkipInspection) {
-        $inspectionParameters = @{
-            BundlePath = $bundle
-            SigningMode = $SigningMode
-            ExpectedIdentity = $packageIdentity
-            ExpectedPublisher = $publisher
-        }
-        if ($SigningMode -eq "Production") {
-            $inspectionParameters["SkipSignature"] = $true
-        }
-        & (Join-Path $PSScriptRoot "test-desktop-windows.ps1") @inspectionParameters
-        if ($LASTEXITCODE -ne 0) {
-            throw "Windows desktop package inspection failed with code $LASTEXITCODE."
-        }
-    }
+    Complete-WindowsBundle -Bundle $bundle -ArchitecturePackages $architecturePackages `
+        -TestCertificate $testCertificate
 
     Remove-Item (Join-Path $distDirectory "build") -Recurse -Force
     Remove-Item $bundleInputDirectory -Recurse -Force
@@ -641,6 +623,7 @@ try {
         Write-Host "Unsigned production Windows bundle: $bundle"
         Write-Host "Run the dedicated Production Sign operation only after tests pass."
     } else {
+        $publicCertificate = Join-Path $distDirectory "DapperCode-Signing.cer"
         Write-Host "Test-signed Windows bundle: $bundle"
         Write-Host "Public signing certificate: $publicCertificate"
     }

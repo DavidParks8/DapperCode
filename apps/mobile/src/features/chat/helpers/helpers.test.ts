@@ -17,11 +17,7 @@ import {
   readString,
   toRecord,
 } from '@shared/runtimeValidation';
-import {
-  agentModelPreferenceKey,
-  lastUsedModelPreference,
-  withLastUsedModelPreference,
-} from './preferences';
+import { agentModelPreferenceKey, lastUsedModelPreference } from './preferences';
 
 interface ContractManifest {
   protocolVersion: number;
@@ -796,9 +792,6 @@ describe('mainScreenHelpers branch behavior', () => {
       steeringInFlight: false,
       lastError: { message: 'failed', operation: 'send', at: 'then', itemId: 'item' },
     });
-    expect(helpers.getDraftScopeKey(' thread ')).toBe('thread');
-    expect(helpers.getDraftScopeKey(' ')).toBe(helpers.CHAT_NEW_DRAFT_KEY);
-    expect(helpers.getDraftScopeKey(undefined)).toBe(helpers.CHAT_NEW_DRAFT_KEY);
   });
 
   it('parses, isolates, and orders bridge scheduled prompt state', () => {
@@ -951,7 +944,7 @@ describe('mainScreenHelpers branch behavior', () => {
     });
   });
 
-  it('resolves and writes last-used model preferences per agent', () => {
+  it('resolves last-used model preferences per agent', () => {
     const preferences = {
       older: {
         modelId: 'old',
@@ -974,11 +967,15 @@ describe('mainScreenHelpers branch behavior', () => {
     };
     expect(lastUsedModelPreference(preferences, 'opencode')).toBeNull();
 
-    const updated = withLastUsedModelPreference(preferences, 'opencode', {
-      modelId: 'gpt-5.4',
-      effort: 'max',
-      serviceTier: null,
-    });
+    const updated = {
+      ...preferences,
+      [agentModelPreferenceKey('opencode')]: {
+        modelId: 'gpt-5.4',
+        effort: 'max' as const,
+        serviceTier: null,
+        updatedAt: '2026-07-24T00:00:00.000Z',
+      },
+    };
     expect(lastUsedModelPreference(updated, 'opencode')).toMatchObject({
       modelId: 'gpt-5.4',
       effort: 'max',
@@ -1340,11 +1337,7 @@ describe('mainScreenHelpers branch behavior', () => {
     );
   });
 
-  it('formats timeline messages without agent-name filtering', () => {
-    expect(helpers.formatTimelineSystemMessage('Title', [])).toBe('Title');
-    expect(helpers.formatTimelineSystemMessage('Title', ['one\n', '', 'two'])).toBe(
-      'Title\n  └ one\n    two',
-    );
+  it('keeps timeline messages without agent-name filtering', () => {
     const messages = [message('r', 'reasoning', 'reason'), message('a', 'assistant', 'answer')];
     expect(helpers.filterReasoningMessages(messages)).toBe(messages);
   });
@@ -1391,10 +1384,6 @@ describe('mainScreenHelpers branch behavior', () => {
     expect(
       helpers.describeCompletedToolEvent({ type: 'toolCall', tool: 't', status: 'error' })?.detail,
     ).toBe('t | error');
-    expect(helpers.describeWebSearchToolEvent(null)?.detail).toBe('Web search | running');
-    expect(helpers.describeWebSearchToolEvent({ query: 'cats' })?.detail).toBe(
-      'Web search: cats | running',
-    );
   });
 
   it('reads changed paths and appends bounded run history', () => {

@@ -241,14 +241,6 @@ impl BridgeRuntimeConfig {
         })
     }
 
-    pub fn local_base_url(&self) -> String {
-        let host = match self.host.as_str() {
-            "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
-            host => host,
-        };
-        format!("http://{}:{}", format_host(host), self.port)
-    }
-
     pub fn pairing_payload(&self, workspace_id: &str) -> Result<String> {
         Self::pairing_payload_for(&self.connect_url, workspace_id, &self.auth_token)
     }
@@ -265,17 +257,6 @@ impl BridgeRuntimeConfig {
             "bridgeUrl": connect_url,
             "bridgeToken": token,
         }))?)
-    }
-
-    /// Stable fingerprint of the configuration a running bridge was started with, excluding the
-    /// token so that the digest can be recorded in a plain ownership record.
-    #[allow(dead_code)]
-    pub fn fingerprint_source(&self) -> String {
-        self.values
-            .iter()
-            .filter(|(key, _)| key.as_str() != "BRIDGE_AUTH_TOKEN")
-            .map(|(key, value)| format!("{key}={value}\n"))
-            .collect()
     }
 }
 
@@ -502,7 +483,6 @@ mod tests {
             paths.attachments_dir(&profile.profile_id).to_str().unwrap()
         );
         assert!(!workspace.path().join(".env.secure").exists());
-        assert!(!config.fingerprint_source().contains("secret"));
     }
 
     #[test]
@@ -519,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn builds_ipv6_local_url_and_pairing_payload() {
+    fn builds_ipv6_pairing_payload() {
         let config = BridgeRuntimeConfig {
             values: BTreeMap::new(),
             host: "::1".to_string(),
@@ -529,7 +509,6 @@ mod tests {
             secret_backend: SecretBackend::Keychain,
         };
 
-        assert_eq!(config.local_base_url(), "http://[::1]:8787");
         let payload: serde_json::Value =
             serde_json::from_str(&config.pairing_payload("workspace-1").unwrap()).unwrap();
         assert_eq!(payload["type"], "dappercode-bridge-pair");
@@ -666,41 +645,6 @@ mod tests {
         .unwrap_err()
         .to_string()
         .contains("no longer installed"));
-    }
-
-    #[test]
-    fn collapses_wildcard_bind_hosts_to_loopback_for_local_probes() {
-        for host in ["0.0.0.0", "::", "[::]"] {
-            let config = BridgeRuntimeConfig {
-                values: BTreeMap::new(),
-                host: host.to_string(),
-                port: 8787,
-                connect_url: "http://example.invalid:8787/".to_string(),
-                auth_token: "secret".to_string(),
-                secret_backend: SecretBackend::File,
-            };
-            assert_eq!(config.local_base_url(), "http://127.0.0.1:8787");
-        }
-    }
-
-    #[test]
-    fn fingerprint_is_stable_and_ordered() {
-        let workspace = tempdir().unwrap();
-        let data = tempdir().unwrap();
-        let paths = AppPaths::for_tests(data.path().to_path_buf());
-        let profile = profile("alpha-000000000001", workspace.path(), 18789);
-        paths.prepare_profile(&profile.profile_id).unwrap();
-        std::fs::write(paths.manifest_path(&profile.profile_id), b"{}").unwrap();
-
-        let config =
-            BridgeRuntimeConfig::from_profile(&profile, "secret", SecretBackend::Keychain, &paths)
-                .unwrap();
-        let fingerprint = config.fingerprint_source();
-
-        assert_eq!(config.secret_backend, SecretBackend::Keychain);
-        assert!(fingerprint.starts_with("ACP_AGENT_MANIFEST="));
-        assert!(fingerprint.contains("BRIDGE_PORT=18789\n"));
-        assert_eq!(fingerprint, config.fingerprint_source());
     }
 
     #[test]

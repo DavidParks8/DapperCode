@@ -20,7 +20,6 @@ export interface ElementGeometry {
   readonly rect: Rect;
   /** True when the element renders at a non-zero size and is not hidden by styles. */
   readonly visible: boolean;
-  readonly overflowHiddenAncestor: Rect | null;
 }
 
 export function toRect(box: Box): Rect {
@@ -63,31 +62,13 @@ export async function readRects(targets: Locator): Promise<Rect[]> {
   return rects;
 }
 
-/**
- * Reads geometry plus the clipping ancestor, which is what makes it possible to distinguish
- * "off screen" from "clipped by a scroll container or glass surface".
- */
+/** Reads the element's rectangle and style-aware visibility. */
 export async function readGeometry(target: Locator): Promise<ElementGeometry> {
   await settleLayout(target.page());
   const measured = await target.evaluate((node) => {
     const element = node as HTMLElement;
     const rect = element.getBoundingClientRect();
     const style = window.getComputedStyle(element);
-
-    let clipper: HTMLElement | null = element.parentElement;
-    let clipRect: DOMRect | null = null;
-    while (clipper) {
-      const clipperStyle = window.getComputedStyle(clipper);
-      const clips =
-        clipperStyle.overflow !== 'visible' ||
-        clipperStyle.overflowX !== 'visible' ||
-        clipperStyle.overflowY !== 'visible';
-      if (clips) {
-        clipRect = clipper.getBoundingClientRect();
-        break;
-      }
-      clipper = clipper.parentElement;
-    }
 
     return {
       x: rect.x,
@@ -98,16 +79,12 @@ export async function readGeometry(target: Locator): Promise<ElementGeometry> {
         style.display === 'none' ||
         style.visibility === 'hidden' ||
         Number.parseFloat(style.opacity) === 0,
-      clip: clipRect
-        ? { x: clipRect.x, y: clipRect.y, width: clipRect.width, height: clipRect.height }
-        : null,
     };
   });
 
   return {
     rect: toRect(measured),
     visible: !measured.hidden && measured.width > 0 && measured.height > 0,
-    overflowHiddenAncestor: measured.clip ? toRect(measured.clip) : null,
   };
 }
 

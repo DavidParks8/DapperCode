@@ -1466,33 +1466,7 @@ pub(super) async fn cancel_thread_list_stream(
     }))
 }
 
-#[derive(Debug, Default)]
-pub(super) struct ThreadListStreamCancellation {
-    cancelled: AtomicBool,
-    notify: tokio::sync::Notify,
-}
-
-impl ThreadListStreamCancellation {
-    fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
-        self.notify.notify_waiters();
-    }
-
-    fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire)
-    }
-
-    async fn cancelled(&self) {
-        if self.is_cancelled() {
-            return;
-        }
-        let notified = self.notify.notified();
-        if self.is_cancelled() {
-            return;
-        }
-        notified.await;
-    }
-}
+pub(super) type ThreadListStreamCancellation = tokio_util::sync::CancellationToken;
 
 pub(super) async fn cancel_client_thread_list_streams(state: &Arc<AppState>, client_id: u64) {
     let owned = {
@@ -1869,11 +1843,10 @@ mod tests {
             ("1:b".to_string(), client_one_b.clone()),
             ("2:a".to_string(), client_two.clone()),
         ]);
-        let blocked = {
-            let cancellation = client_one_a.clone();
-            tokio::spawn(async move { cancellation.cancelled().await })
-        };
-        tokio::task::yield_now().await;
+        let waiting_cancellation = client_one_a.clone();
+        let blocked = waiting_cancellation.cancelled();
+        tokio::pin!(blocked);
+        assert!(futures_util::poll!(&mut blocked).is_pending());
 
         let owned = take_client_thread_list_streams(&mut streams, 1);
         assert_eq!(owned.len(), 2);
@@ -1882,14 +1855,15 @@ mod tests {
         }
         tokio::time::timeout(Duration::from_secs(1), blocked)
             .await
-            .expect("blocked request wakes")
-            .expect("waiter completes");
+            .expect("blocked request wakes");
         assert!(client_one_a.is_cancelled());
         assert!(client_one_b.is_cancelled());
         assert!(!client_two.is_cancelled());
         assert_eq!(streams.len(), 1);
         assert!(streams.contains_key("2:a"));
-        client_one_b.cancelled().await;
+        tokio::time::timeout(Duration::from_secs(1), client_one_b.cancelled())
+            .await
+            .expect("cancellation is visible to a later waiter");
 
         let remaining = take_client_thread_list_streams(&mut streams, 2);
         assert_eq!(remaining.len(), 1);

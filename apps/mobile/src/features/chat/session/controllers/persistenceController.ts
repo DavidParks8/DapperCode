@@ -1,4 +1,3 @@
-import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 
 import type { BridgeUiSurface } from '@bridge/types/types';
@@ -22,6 +21,7 @@ import {
   parseChatPlanSnapshots,
   parseWorkspaceFavoritePaths,
 } from '../../helpers/helpers';
+import { getProfileStorage } from '../../helpers/profileStorage';
 
 export type MainScreenStorage = ProfilePersistenceStorage;
 
@@ -40,36 +40,6 @@ export interface MainScreenPersistenceControllerOptions {
   onPersistenceError?: (error: ProfilePersistenceError) => void;
 }
 
-const fileStorage: MainScreenStorage = {
-  read: FileSystem.readAsStringAsync,
-  write: FileSystem.writeAsStringAsync,
-  exists: async (path) => (await FileSystem.getInfoAsync(path))?.exists === true,
-};
-
-interface WebStorageLike {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-}
-
-const webStorage: MainScreenStorage = {
-  read: (key) => {
-    const value = getWebStorage()?.getItem(key);
-    if (value === null || value === undefined) {
-      return Promise.reject(new Error('missing'));
-    }
-    return Promise.resolve(value);
-  },
-  write: (key, value) => {
-    const storage = getWebStorage();
-    if (!storage) {
-      return Promise.reject(new Error('Browser storage is unavailable.'));
-    }
-    storage.setItem(key, value);
-    return Promise.resolve();
-  },
-  exists: (key) => Promise.resolve(getWebStorage()?.getItem(key) != null),
-};
-
 type PersistedCollection =
   'modelPreferences' | 'planSnapshots' | 'bridgeUiSurfaces' | 'workspaceFavorites';
 
@@ -79,13 +49,6 @@ const RESOURCE_NAMES: Record<PersistedCollection, ProfilePersistenceResource> = 
   bridgeUiSurfaces: 'bridge UI surfaces',
   workspaceFavorites: 'workspace favorites',
 };
-
-function resolveStorage(
-  storage: MainScreenStorage | undefined,
-  platform: string,
-): MainScreenStorage {
-  return storage ?? (platform === 'web' ? webStorage : fileStorage);
-}
 
 function buildPersistencePaths(
   profileId: string,
@@ -134,7 +97,7 @@ export class MainScreenPersistenceController {
 
   constructor(options: MainScreenPersistenceControllerOptions) {
     const { profileId, storage, paths = {}, platform = Platform.OS, onPersistenceError } = options;
-    this.storage = resolveStorage(storage, platform);
+    this.storage = storage ?? getProfileStorage(platform);
     this.onPersistenceError = onPersistenceError;
     this.paths = buildPersistencePaths(profileId.trim(), platform, paths);
   }
@@ -257,15 +220,4 @@ export class MainScreenPersistenceController {
   private reportError(error: ProfilePersistenceError): void {
     this.onPersistenceError?.(error);
   }
-}
-
-function getWebStorage(): WebStorageLike | null {
-  if (typeof globalThis !== 'object' || globalThis === null) {
-    return null;
-  }
-  const storage = (globalThis as typeof globalThis & { localStorage?: Partial<WebStorageLike> })
-    .localStorage;
-  return storage && typeof storage.getItem === 'function' && typeof storage.setItem === 'function'
-    ? storage
-    : null;
 }

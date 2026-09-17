@@ -17,7 +17,7 @@ The bridge is private-network software. Never treat it as internet-safe by defau
 
 - `apps/desktop/src/main.rs`: Rust `dappercode` operator CLI and JSON contract
 - `apps/desktop/crates/core/src/setup.rs`: local ACP executable registration and secure config
-- `apps/desktop/crates/core/src/supervisor.rs`: locked process lifecycle and authenticated status
+- `apps/desktop/crates/core/src/broker_supervisor.rs`: locked broker lifecycle and authenticated status
 - `apps/desktop/crates/core/src/config.rs`: runtime/resource/config discovery
 - `apps/desktop/crates/broker`: authenticated broker and worker proxy
 - `apps/desktop/macos/DapperCodeApp.swift`: native SwiftUI/AppKit menu-bar shell

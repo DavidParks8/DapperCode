@@ -115,6 +115,65 @@ test('Windows signing keeps private keys outside artifacts and fails closed in p
   assert.match(setupOperations, /-Operation Sign/);
 });
 
+test('Package and Bundle share finalization without bypassing staging, signing, or inspection', () => {
+  const finalizer = buildScript.match(/^function Complete-WindowsBundle \{[\s\S]*?^\}/m)?.[0];
+  assert.ok(finalizer, 'Shared bundle finalization is missing');
+  assert.equal([...buildScript.matchAll(/^\s+Complete-WindowsBundle -Bundle /gm)].length, 2);
+  assert.equal([...buildScript.matchAll(/"bundle", "\/d"/g)].length, 1);
+
+  const bundleStart = buildScript.indexOf('if ($Operation -eq "Bundle")');
+  const packageStart = buildScript.indexOf('$preferredProject =');
+  const bundleMode = buildScript.slice(bundleStart, packageStart);
+  const packageMode = buildScript.slice(packageStart);
+  for (const mode of [bundleMode, packageMode]) {
+    assert.match(mode, /Copy-Item[\s\S]+Complete-WindowsBundle -Bundle \$bundle/);
+    assert.match(mode, /Complete-WindowsBundle[\s\S]+Remove-Item \$bundleInputDirectory/);
+    assert.doesNotMatch(mode, /Invoke-Native \$signTool|Export-Certificate|@inspectionParameters/);
+  }
+  assert.match(bundleMode, /Architecture package does not exist/);
+  assert.match(
+    packageMode,
+    /if \(\$SkipBundle\) \{[\s\S]+?return\s+\}[\s\S]+Complete-WindowsBundle/,
+  );
+  assert.match(
+    packageMode,
+    /\$testCertificate = Get-TestSigningCertificate[\s\S]+foreach \(\$targetArchitecture[\s\S]+Complete-WindowsBundle[\s\S]+-TestCertificate \$testCertificate/,
+  );
+  assert.match(finalizer, /if \(\$SigningMode -eq "Test"\) \{/);
+  assert.match(
+    finalizer,
+    /if \(-not \$TestCertificate\) \{\s+\$TestCertificate = Get-TestSigningCertificate/,
+  );
+  assert.match(finalizer, /foreach \(\$artifact in @\(\$ArchitecturePackages\) \+ @\(\$Bundle\)\)/);
+  assert.match(finalizer, /if \(\$Operation -eq "Package"\) \{\s+Write-Warning/);
+  assert.match(finalizer, /if \(-not \$SkipInspection\) \{/);
+  assert.match(
+    finalizer,
+    /if \(\$SigningMode -eq "Production"\) \{\s+\$inspectionParameters\["SkipSignature"\] = \$true/,
+  );
+  for (const field of ['BundlePath', 'SigningMode', 'ExpectedIdentity', 'ExpectedPublisher']) {
+    assert.match(finalizer, new RegExp(`\\b${field} = \\$`));
+  }
+  assert.match(
+    finalizer,
+    /if \(\$LASTEXITCODE -ne 0\) \{\s+throw "Windows desktop package inspection failed/,
+  );
+  const steps = [
+    '"bundle"',
+    '"sign"',
+    'Export-Certificate',
+    'Write-InstallGuidance',
+    'test-desktop-windows.ps1',
+  ];
+  const positions = steps.map((step) => finalizer.indexOf(step));
+  assert.ok(
+    positions.every(
+      (position, index) => position >= 0 && (index === 0 || position > positions[index - 1]),
+    ),
+  );
+  assert.doesNotMatch(finalizer, /Resolve-ProductionCertificate|DAPPERCODE_WINDOWS_CERTIFICATE_/);
+});
+
 test('production signing credentials are isolated from checkout, package managers, build, and tests', () => {
   const buildJob = workflowJob('desktop-windows');
   const packageJob = workflowJob('desktop-windows-package');

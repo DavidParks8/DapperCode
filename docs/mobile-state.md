@@ -75,6 +75,11 @@ error does not re-render settings consumers.
 
 One coordinator exists per store, resolved through a `WeakMap` keyed by the store.
 
+Chat drafts, submission retry identities, and MainScreen collections share the native-file and
+browser-local-storage adapters in `features/chat/helpers/profileStorage.ts`. Profile keys,
+serialization, write ordering, and recovery remain owned by their respective controllers; tests
+can still inject a `ProfilePersistenceStorage` implementation.
+
 ## Testing
 
 ```ts

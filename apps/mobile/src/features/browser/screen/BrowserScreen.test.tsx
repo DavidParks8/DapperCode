@@ -82,7 +82,6 @@ jest.mock('@shared/feedback', () => ({
     error: jest.fn().mockResolvedValue(undefined),
     destructive: jest.fn().mockResolvedValue(undefined),
   },
-  isReduceMotionPreferred: jest.fn().mockResolvedValue(false),
 }));
 
 const mockWebViewMethods = {

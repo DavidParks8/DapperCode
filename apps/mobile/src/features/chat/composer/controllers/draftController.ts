@@ -1,4 +1,3 @@
-import * as FileSystem from 'expo-file-system/legacy';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import { mergeRecoveredDraft } from '@shell/session/interruptedChatCreation';
@@ -11,6 +10,7 @@ import {
   getWebProfilePersistenceKey,
   parseChatDrafts,
 } from '../../helpers/helpers';
+import { getProfileStorage } from '../../helpers/profileStorage';
 import {
   submissionScopeKey,
   type SubmissionDraftSnapshot,
@@ -18,36 +18,7 @@ import {
 
 export type DraftStorage = ProfilePersistenceStorage;
 
-const fileDraftStorage: DraftStorage = {
-  read: FileSystem.readAsStringAsync,
-  write: FileSystem.writeAsStringAsync,
-  exists: async (path) => (await FileSystem.getInfoAsync(path))?.exists === true,
-};
 const EMPTY_RECOVERED_DRAFT = '\u0000dappercode-empty-draft';
-
-interface WebStorageLike {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-}
-
-const webDraftStorage: DraftStorage = {
-  read: (key) => {
-    const value = getWebStorage()?.getItem(key);
-    if (value == null) {
-      return Promise.reject(new Error('missing'));
-    }
-    return Promise.resolve(value);
-  },
-  write: (key, value) => {
-    const storage = getWebStorage();
-    if (!storage) {
-      return Promise.reject(new Error('Browser storage is unavailable.'));
-    }
-    storage.setItem(key, value);
-    return Promise.resolve();
-  },
-  exists: (key) => Promise.resolve(getWebStorage()?.getItem(key) != null),
-};
 
 export function updateDraftEntries(
   entries: Readonly<Record<string, string>>,
@@ -121,7 +92,7 @@ export function useDraftController(
   platform: string = Platform.OS,
   recovery?: DraftRecovery,
 ): DraftController {
-  const resolvedStorage = storage ?? (platform === 'web' ? webDraftStorage : fileDraftStorage);
+  const resolvedStorage = storage ?? getProfileStorage(platform);
   const scopeKey = submissionScopeKey({ profileId, threadId: chatId });
   const [draft, setDraftState] = useState(recovery?.draft ?? '');
   const [ownerKey, setOwnerKey] = useState(scopeKey);
@@ -465,15 +436,4 @@ export function useDraftController(
       [],
     ),
   };
-}
-
-function getWebStorage(): WebStorageLike | null {
-  if (typeof globalThis !== 'object' || globalThis === null) {
-    return null;
-  }
-  const storage = (globalThis as typeof globalThis & { localStorage?: Partial<WebStorageLike> })
-    .localStorage;
-  return storage && typeof storage.getItem === 'function' && typeof storage.setItem === 'function'
-    ? storage
-    : null;
 }

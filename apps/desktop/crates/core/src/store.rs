@@ -93,18 +93,6 @@ impl AppPaths {
         self.profile_dir(profile_id).join("bridge.log")
     }
 
-    pub fn runtime_dir(&self, profile_id: &str) -> PathBuf {
-        self.profile_dir(profile_id).join("runtime")
-    }
-
-    pub fn ownership_path(&self, profile_id: &str) -> PathBuf {
-        self.runtime_dir(profile_id).join("process.json")
-    }
-
-    pub fn transition_lock_path(&self, profile_id: &str) -> PathBuf {
-        self.runtime_dir(profile_id).join("transition.lock")
-    }
-
     pub fn broker_runtime_dir(&self) -> PathBuf {
         self.base.join("runtime").join("broker")
     }
@@ -133,7 +121,6 @@ impl AppPaths {
     pub fn prepare_profile(&self, profile_id: &str) -> Result<()> {
         for directory in [
             self.profile_dir(profile_id),
-            self.runtime_dir(profile_id),
             self.state_dir(profile_id),
             self.attachments_dir(profile_id),
         ] {
@@ -1036,7 +1023,7 @@ mod tests {
     }
 
     #[test]
-    fn prepares_every_profile_directory_privately() {
+    fn prepares_current_profile_directories_without_legacy_runtime() {
         let temp = tempdir().unwrap();
         let paths = AppPaths {
             base: temp.path().to_path_buf(),
@@ -1045,7 +1032,6 @@ mod tests {
 
         for directory in [
             paths.profile_dir("alpha-000000000001"),
-            paths.runtime_dir("alpha-000000000001"),
             paths.state_dir("alpha-000000000001"),
             paths.attachments_dir("alpha-000000000001"),
         ] {
@@ -1057,6 +1043,10 @@ mod tests {
                 assert_eq!(mode & 0o077, 0, "{} should be private", directory.display());
             }
         }
+        assert!(!paths
+            .profile_dir("alpha-000000000001")
+            .join("runtime")
+            .exists());
     }
 
     #[test]

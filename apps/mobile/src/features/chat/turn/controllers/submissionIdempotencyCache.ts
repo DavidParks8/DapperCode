@@ -1,4 +1,3 @@
-import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 
 import {
@@ -8,6 +7,7 @@ import {
   getChatSubmissionIdempotencyPath,
   getWebProfilePersistenceKey,
 } from '../../helpers/helpers';
+import { getProfileStorage } from '../../helpers/profileStorage';
 
 /**
  * Persists only `{ scopeKey, requestHash } -> submissionId` so a user-initiated retry after a
@@ -36,47 +36,6 @@ export const SUBMISSION_IDEMPOTENCY_LIMIT = 32;
 export const SUBMISSION_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
 const KEY_SEPARATOR = '\u0000';
-
-const fileStorage: SubmissionIdempotencyStorage = {
-  read: FileSystem.readAsStringAsync,
-  write: FileSystem.writeAsStringAsync,
-  exists: async (path) => (await FileSystem.getInfoAsync(path))?.exists === true,
-};
-
-interface WebStorageLike {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-}
-
-const webStorage: SubmissionIdempotencyStorage = {
-  read: (key) => {
-    const value = getWebStorage()?.getItem(key);
-    if (value == null) {
-      return Promise.reject(new Error('missing'));
-    }
-    return Promise.resolve(value);
-  },
-  write: (key, value) => {
-    const storage = getWebStorage();
-    if (!storage) {
-      return Promise.reject(new Error('Browser storage is unavailable.'));
-    }
-    storage.setItem(key, value);
-    return Promise.resolve();
-  },
-  exists: (key) => Promise.resolve(getWebStorage()?.getItem(key) != null),
-};
-
-function getWebStorage(): WebStorageLike | null {
-  if (typeof globalThis !== 'object' || globalThis === null) {
-    return null;
-  }
-  const storage = (globalThis as typeof globalThis & { localStorage?: Partial<WebStorageLike> })
-    .localStorage;
-  return storage && typeof storage.getItem === 'function' && typeof storage.setItem === 'function'
-    ? storage
-    : null;
-}
 
 /** A fast, deterministic, non-cryptographic 64-bit hash (two salted FNV-1a passes). Collisions
  * only ever cost a missed retry-id reuse, never data loss, so this favors speed and staying
@@ -206,7 +165,7 @@ export class SubmissionIdempotencyCache implements SubmissionIdempotencyStore {
       ttlMs,
       onPersistenceError,
     } = options;
-    this.storage = storage ?? (platform === 'web' ? webStorage : fileStorage);
+    this.storage = storage ?? getProfileStorage(platform);
     this.path =
       platform === 'web'
         ? getWebProfilePersistenceKey('submission-idempotency.v1', profileId)

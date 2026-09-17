@@ -16,7 +16,6 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
-fs2.workspace = true
 getrandom.workspace = true
 keyring.workspace = true
 libc.workspace = true
