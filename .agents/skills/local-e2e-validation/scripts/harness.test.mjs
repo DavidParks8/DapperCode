@@ -288,9 +288,16 @@ test('network probes cannot keep a resource lease open during cleanup', async ()
   try {
     const resource = `simulator:${harness.runId}`;
     const release = await harness.acquireLease(resource);
-    probe = connect({ host: '127.0.0.1', port: harness.leases.get(resource).port });
-    const closed = once(probe, 'close');
-    await once(probe, 'connect');
+    const lease = harness.leases.get(resource);
+    const accepted = once(lease.server, 'connection');
+    probe = connect({ host: '127.0.0.1', port: lease.port });
+    const closed = new Promise((resolve, reject) => {
+      probe.once('close', resolve);
+      probe.on('error', (error) => {
+        if (error.code !== 'ECONNRESET') reject(error);
+      });
+    });
+    await accepted;
     await release();
     await closed;
     assert.equal(harness.leases.size, 0);

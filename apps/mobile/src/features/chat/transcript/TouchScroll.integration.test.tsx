@@ -35,6 +35,12 @@ const runningChat = {
   lastMessagePreview: 'Streaming',
   messages: [
     {
+      id: 'prompt',
+      role: 'user',
+      content: 'Keep this response anchored',
+      createdAt: '2026-09-16T00:00:00.000Z',
+    },
+    {
       id: 'answer',
       role: 'assistant',
       content: 'Streaming',
@@ -165,7 +171,11 @@ describe('streaming scroll ownership', () => {
     for (const height of [1100, 1200, 1300]) {
       app.update({
         ...runningChat,
-        messages: [{ ...runningChat.messages[0]!, content: `Streaming ${String(height)}` }],
+        messages: runningChat.messages.map((message) =>
+          message.role === 'assistant'
+            ? { ...message, content: `Streaming ${String(height)}` }
+            : message,
+        ),
       });
       expect(app.tree.getByText(`Streaming ${String(height)}`)).toBeTruthy();
       fireEvent(app.list(), 'contentSizeChange', 390, height);
@@ -261,5 +271,31 @@ describe('streaming scroll ownership', () => {
       isUserInteracting: false,
       isMomentumScrolling: false,
     });
+  });
+
+  it('anchors native growth above the streaming response from touch-down until release', () => {
+    const app = setup();
+    app.scroll(12);
+    expect(app.list().props['maintainVisibleContentPosition']).toBeUndefined();
+    fireEvent(app.list(), 'touchStart');
+    expect(app.list().props['maintainVisibleContentPosition']).toEqual({ minIndexForVisible: 1 });
+    fireEvent(app.list(), 'scrollBeginDrag');
+    app.scroll(12);
+    fireEvent(app.list(), 'scrollEndDrag');
+    expect(app.list().props['maintainVisibleContentPosition']).toEqual({ minIndexForVisible: 1 });
+    fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
+    expect(app.list().props['maintainVisibleContentPosition']).toBeUndefined();
+  });
+
+  it('uses a zero-height history edge when an agent transcript has no user anchor', () => {
+    const app = setup();
+    app.update({
+      ...runningChat,
+      messages: runningChat.messages.filter((message) => message.role === 'assistant'),
+    });
+    fireEvent(app.list(), 'touchStart');
+    expect(app.list().props['maintainVisibleContentPosition']).toEqual({ minIndexForVisible: 1 });
+    expect(app.list().props['ListFooterComponent']).not.toBeNull();
+    expect(app.list().props['ListFooterComponentStyle']).toBeUndefined();
   });
 });

@@ -1263,7 +1263,7 @@ describe('ChatTranscriptView continuation', () => {
     act(() => list.props.onScrollEndDrag());
     expect(autoScrollStateRef.current.shouldStickToBottom).toBe(false);
     expect(getList(tree).props['maintainVisibleContentPosition']).toEqual({
-      minIndexForVisible: 0,
+      minIndexForVisible: 2,
     });
     expect(
       tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' }).length,

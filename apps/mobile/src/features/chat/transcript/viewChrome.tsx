@@ -27,6 +27,10 @@ import { TranscriptActivitySlot, type useCollapsibleActivity } from './Transcrip
 
 export const JUMP_TO_LATEST_VISIBLE_SIZE = { width: 48, height: 48 };
 
+export function TranscriptHistoryEdge() {
+  return <View collapsable={false} />;
+}
+
 // Keep spacing inside measured cells: a container gap makes virtual spacers underestimate lengths.
 export function TranscriptItemSeparator() {
   const theme = useAppTheme();

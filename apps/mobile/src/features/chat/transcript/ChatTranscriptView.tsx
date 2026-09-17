@@ -53,12 +53,14 @@ import {
   resolveListBatchingConfig,
   resolveRailRestingActiveIndex,
   resolveResetRailActiveIndex,
+  TranscriptHistoryEdge,
   TranscriptItemSeparator,
 } from './viewChrome';
 import { useMessageTimestampReveal } from './useMessageTimestampReveal';
 import { useTranscriptAnimationVisibility } from './animationVisibility';
 import {
-  PINNED_SCROLL_EPSILON_PX,
+  getMaintainedScrollPosition,
+  shouldRequestPinnedScroll,
   updateAutoScrollStickiness,
   useTranscriptScrollInteraction,
 } from './autoScroll';
@@ -393,10 +395,14 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     onReachStart: handleRailReachStart,
   });
   const timestampReveal = useMessageTimestampReveal(rail.gesture);
-  const scrollInteraction = useTranscriptScrollInteraction(chat.id, autoScrollStateRef, () => {
-    railJumpControllerRef.current?.cancel();
-    onScrollInteractionStart();
-  });
+  const { isInteracting, ...scrollInteraction } = useTranscriptScrollInteraction(
+    chat.id,
+    autoScrollStateRef,
+    () => {
+      railJumpControllerRef.current?.cancel();
+      onScrollInteractionStart();
+    },
+  );
 
   useEffect(() => {
     autoScrollStateRef.current.shouldStickToBottom = true;
@@ -489,14 +495,17 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           renderItem={renderMessageItem}
           ListHeaderComponent={activityEvent}
           ListHeaderComponentStyle={styles.messageListHeader}
-          ListFooterComponent={historyBoundary}
-          ListFooterComponentStyle={styles.messageListFooter}
+          ListFooterComponent={historyBoundary ?? TranscriptHistoryEdge}
+          ListFooterComponentStyle={historyBoundary ? styles.messageListFooter : undefined}
           ItemSeparatorComponent={TranscriptItemSeparator}
           style={styles.messageList}
           contentContainerStyle={messageListContentStyle}
-          // Preserving the first response cell while it grows shifts this inverted list's activity
-          // header toward the overlay composer. Preserve cells only after the user leaves latest.
-          maintainVisibleContentPosition={showJumpToLatest ? { minIndexForVisible: 0 } : undefined}
+          maintainVisibleContentPosition={getMaintainedScrollPosition(
+            displayMessages,
+            Boolean(activityEvent),
+            showJumpToLatest,
+            isInteracting,
+          )}
           inverted
           scrollEnabled={rail.scrollEnabled}
           showsVerticalScrollIndicator={false}
@@ -522,13 +531,8 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
             contentHeightRef.current = height;
             railJumpControllerRef.current?.notifyLayoutProgress();
             hideJumpToLatestWhenContentFits();
-            // At offset zero, another scrollToOffset(0) races Fabric's native position adjustment
-            // and can briefly paint a rapidly inserted tool row over the activity header.
-            if (
-              scrollOffsetYRef.current > PINNED_SCROLL_EPSILON_PX &&
-              !autoScrollStateRef.current.isUserInteracting &&
-              !autoScrollStateRef.current.isMomentumScrolling
-            ) {
+            // At zero, another scrollToOffset(0) races Fabric and paints new tool rows over activity.
+            if (shouldRequestPinnedScroll(autoScrollStateRef.current, scrollOffsetYRef.current)) {
               onPinnedAutoScroll(false);
             }
             maybeAutoLoadOlderMessages(true);

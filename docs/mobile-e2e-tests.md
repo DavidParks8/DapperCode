@@ -197,6 +197,9 @@ covers touch-down before dragging, stationary contact after a drag pauses, multi
 touch cancellation, momentum, and already-queued scroll callbacks. Incoming messages must not
 request a pinned scroll until touch and native scrolling have both ended. Releasing near latest
 permits following again; releasing in history keeps the jump-to-latest action available.
+Native position preservation anchors above the mutable response/tool rows at the latest user
+message (or the zero-height history edge when no user message exists). Anchoring the growing
+inverted response itself preserves its bottom edge, which still lets its text pan under a finger.
 
 Native verification is also required: during a real streaming turn, drag the transcript, pause
 without lifting the finger, and keep it stationary across several content updates. Measure a
