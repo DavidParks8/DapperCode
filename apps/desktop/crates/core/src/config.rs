@@ -241,14 +241,6 @@ impl BridgeRuntimeConfig {
         })
     }
 
-    pub fn local_base_url(&self) -> String {
-        let host = match self.host.as_str() {
-            "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
-            host => host,
-        };
-        format!("http://{}:{}", format_host(host), self.port)
-    }
-
     pub fn pairing_payload(&self, workspace_id: &str) -> Result<String> {
         Self::pairing_payload_for(&self.connect_url, workspace_id, &self.auth_token)
     }
@@ -507,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn builds_ipv6_local_url_and_pairing_payload() {
+    fn builds_ipv6_pairing_payload() {
         let config = BridgeRuntimeConfig {
             values: BTreeMap::new(),
             host: "::1".to_string(),
@@ -517,7 +509,6 @@ mod tests {
             secret_backend: SecretBackend::Keychain,
         };
 
-        assert_eq!(config.local_base_url(), "http://[::1]:8787");
         let payload: serde_json::Value =
             serde_json::from_str(&config.pairing_payload("workspace-1").unwrap()).unwrap();
         assert_eq!(payload["type"], "dappercode-bridge-pair");
@@ -654,21 +645,6 @@ mod tests {
         .unwrap_err()
         .to_string()
         .contains("no longer installed"));
-    }
-
-    #[test]
-    fn collapses_wildcard_bind_hosts_to_loopback_for_local_probes() {
-        for host in ["0.0.0.0", "::", "[::]"] {
-            let config = BridgeRuntimeConfig {
-                values: BTreeMap::new(),
-                host: host.to_string(),
-                port: 8787,
-                connect_url: "http://example.invalid:8787/".to_string(),
-                auth_token: "secret".to_string(),
-                secret_backend: SecretBackend::File,
-            };
-            assert_eq!(config.local_base_url(), "http://127.0.0.1:8787");
-        }
     }
 
     #[test]

@@ -8,9 +8,8 @@ mod platform;
 mod secrets;
 mod setup;
 mod store;
-mod supervisor;
 
-pub use broker_supervisor::{BrokerLifecycleAction, BrokerSupervisor};
+pub use broker_supervisor::{BridgeSnapshot, BridgeState, BrokerLifecycleAction, BrokerSupervisor};
 pub use config::{
     runtime_executable_available, validate_workspace, BridgeRuntimeConfig, RuntimePaths,
 };
@@ -27,4 +26,3 @@ pub use store::{
     profile_id_for, AppConfig, AppPaths, BrokerEndpoint, BrokerSettings, FileLease, Profile,
     ProfileAgent,
 };
-pub use supervisor::{BridgeSnapshot, BridgeState, BridgeSupervisor};

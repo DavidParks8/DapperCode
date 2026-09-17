@@ -19,13 +19,72 @@ use crate::{
     store::{
         atomic_private_write, remove_file_if_exists, AppPaths, BrokerSettings, FileLease, Profile,
     },
-    supervisor::{BridgeSnapshot, BridgeState},
 };
 
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 const START_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const STOP_TIMEOUT: Duration = Duration::from_secs(12);
 const OWNERSHIP_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BridgeState {
+    NeedsSetup,
+    Stopped,
+    Running,
+    Degraded,
+    Unhealthy,
+    Inaccessible,
+    Error,
+}
+
+#[derive(Clone, Debug)]
+pub struct BridgeSnapshot {
+    pub state: BridgeState,
+    pub headline: String,
+    pub detail: String,
+    pub url: Option<String>,
+    pub uptime_sec: Option<u64>,
+    pub connected_clients: usize,
+    pub ready_agents: usize,
+    pub total_agents: usize,
+    pub recent_error_count: usize,
+    pub managed_process: bool,
+}
+
+impl BridgeSnapshot {
+    pub fn needs_setup(workspace: &Path) -> Self {
+        Self {
+            state: BridgeState::NeedsSetup,
+            headline: "Setup required".to_string(),
+            detail: format!(
+                "Install an ACP agent and register {} with DapperCode.",
+                workspace.display()
+            ),
+            url: None,
+            uptime_sec: None,
+            connected_clients: 0,
+            ready_agents: 0,
+            total_agents: 0,
+            recent_error_count: 0,
+            managed_process: false,
+        }
+    }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        Self {
+            state: BridgeState::Error,
+            headline: "Bridge needs attention".to_string(),
+            detail: message.into(),
+            url: None,
+            uptime_sec: None,
+            connected_clients: 0,
+            ready_agents: 0,
+            total_agents: 0,
+            recent_error_count: 0,
+            managed_process: false,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct BrokerSupervisor {
@@ -756,6 +815,20 @@ mod tests {
     use std::io::{Read, Write};
 
     const BROKER_LIFECYCLE_CHILD: &str = "__broker_lifecycle_child";
+
+    #[test]
+    fn snapshot_constructors_describe_setup_and_errors() {
+        let workspace = tempfile::tempdir().unwrap();
+        let needs_setup = BridgeSnapshot::needs_setup(workspace.path());
+        assert_eq!(needs_setup.state, BridgeState::NeedsSetup);
+        assert!(needs_setup.detail.contains("DapperCode"));
+        assert!(needs_setup.url.is_none());
+        assert!(!needs_setup.managed_process);
+
+        let error = BridgeSnapshot::error("broken");
+        assert_eq!(error.state, BridgeState::Error);
+        assert_eq!(error.detail, "broken");
+    }
 
     fn test_supervisor(
         paths: &AppPaths,
