@@ -143,6 +143,20 @@ Run just this regression with `pnpm run e2e -- patch-progress.spec.ts`. When usi
 `local-e2e-validation` skill, execute that command through its scripted runner rather than manually
 orchestrating services.
 
+### Virtualized transcript scrolling
+
+`transcript-scroll.spec.ts` scrolls a long history in small increments through the production app
+and bridge on phone and tablet. It checks that newly mounted cells include their inter-row spacing
+in FlatList's measurements. Keep that spacing in `ItemSeparatorComponent`, not the content
+container's `gap`: virtual spacers represent multiple cells, and an external gap makes the scroll
+range change as those cells mount. Activity and history-boundary spacing belongs to their own
+header/footer containers.
+
+The transcript component regressions also count tool-row renders while rows enter and leave the
+viewport: completed tools must not repaint for visibility alone. Running tools still shimmer only
+while visible, including a pending tool that starts without changing its visible row identity.
+The web suite does not measure native iOS frame rate; use a device or simulator for that check.
+
 ## How parallel safety works
 
 Nothing in the suite uses a fixed port or a shared mutable path.

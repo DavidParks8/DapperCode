@@ -69,7 +69,12 @@ export function renderChatTranscriptItem({
           bridgeUrl={bridgeUrl}
           bridgeToken={bridgeToken}
           threadRunning={threadRunning}
-          animationVisible={animationVisible}
+          animationVisible={
+            threadRunning &&
+            item.invocation.status === 'in_progress' &&
+            !item.invocation.isError &&
+            animationVisible
+          }
         />
       </View>
     );
