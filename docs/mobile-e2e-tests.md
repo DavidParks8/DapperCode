@@ -175,3 +175,18 @@ The app runs under react-native-web here, so a few things differ from a device:
 - Attachment upload relies on native file handling and is not exercised.
 - Gesture-driven interactions should be driven through their labeled buttons rather than simulated
   drags.
+
+### Streaming touch anchoring
+
+`TouchScroll.integration.test.tsx` wires the transcript to its production scroll scheduler. It
+covers touch-down before dragging, stationary contact after a drag pauses, multiple fingers,
+touch cancellation, momentum, and already-queued scroll callbacks. Incoming messages must not
+request a pinned scroll until touch and native scrolling have both ended. Releasing near latest
+permits following again; releasing in history keeps the jump-to-latest action available.
+
+Native verification is also required: during a real streaming turn, drag the transcript, pause
+without lifting the finger, and keep it stationary across several content updates. Measure a
+visible text anchor before and during the hold, not just the scroll offset (an inverted list can
+move text when a cell grows without changing that offset). Verify no anchor movement during the
+stationary hold, then verify release, momentum, and jump-to-latest behavior. Web geometry and
+mocked native events alone do not establish that iOS preserves the on-screen anchor.

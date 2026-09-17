@@ -1,7 +1,6 @@
 import { memo, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
-  Keyboard,
   Platform,
   type ListRenderItem,
   type NativeScrollEvent,
@@ -58,7 +57,11 @@ import {
 } from './viewChrome';
 import { useMessageTimestampReveal } from './useMessageTimestampReveal';
 import { useTranscriptAnimationVisibility } from './animationVisibility';
-import { PINNED_SCROLL_EPSILON_PX, updateAutoScrollStickiness } from './autoScroll';
+import {
+  PINNED_SCROLL_EPSILON_PX,
+  updateAutoScrollStickiness,
+  useTranscriptScrollInteraction,
+} from './autoScroll';
 import { TranscriptRenderRoot } from './TranscriptRenderRoot';
 
 export interface ChatTranscriptViewProps {
@@ -390,6 +393,10 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     onReachStart: handleRailReachStart,
   });
   const timestampReveal = useMessageTimestampReveal(rail.gesture);
+  const scrollInteraction = useTranscriptScrollInteraction(chat.id, autoScrollStateRef, () => {
+    railJumpControllerRef.current?.cancel();
+    onScrollInteractionStart();
+  });
 
   useEffect(() => {
     autoScrollStateRef.current.shouldStickToBottom = true;
@@ -496,26 +503,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           showsVerticalScrollIndicator={false}
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           keyboardShouldPersistTaps="handled"
-          onScrollBeginDrag={() => {
-            railJumpControllerRef.current?.cancel();
-            onScrollInteractionStart();
-            Keyboard.dismiss();
-            autoScrollStateRef.current.isUserInteracting = true;
-            autoScrollStateRef.current.isMomentumScrolling = false;
-            autoScrollStateRef.current.shouldStickToBottom = false;
-          }}
-          onScrollEndDrag={() => {
-            if (!autoScrollStateRef.current.isMomentumScrolling) {
-              autoScrollStateRef.current.isUserInteracting = false;
-            }
-          }}
-          onMomentumScrollBegin={() => {
-            autoScrollStateRef.current.isMomentumScrolling = true;
-          }}
-          onMomentumScrollEnd={() => {
-            autoScrollStateRef.current.isUserInteracting = false;
-            autoScrollStateRef.current.isMomentumScrolling = false;
-          }}
+          {...scrollInteraction}
           onScroll={handleScroll}
           scrollEventThrottle={32}
           onViewableItemsChanged={onViewableItemsChanged}
@@ -539,7 +527,11 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
             hideJumpToLatestWhenContentFits();
             // At offset zero, another scrollToOffset(0) races Fabric's native position adjustment
             // and can briefly paint a rapidly inserted tool row over the activity header.
-            if (scrollOffsetYRef.current > PINNED_SCROLL_EPSILON_PX) {
+            if (
+              scrollOffsetYRef.current > PINNED_SCROLL_EPSILON_PX &&
+              !autoScrollStateRef.current.isUserInteracting &&
+              !autoScrollStateRef.current.isMomentumScrolling
+            ) {
               onPinnedAutoScroll(false);
             }
             maybeAutoLoadOlderMessages(true);
