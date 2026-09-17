@@ -47,7 +47,6 @@ import type {
 import { MainScreenView } from './View';
 import { ChatAnimationClockProvider } from '../animation/ChatAnimationClock';
 import { bridgeConnectedAtom } from '@shell/state/bridge/atoms';
-import { useSelectedTurnLiveActivity } from '../liveActivities/useSelectedTurnLiveActivity';
 
 export interface MainScreenHandle {
   openChat: (id: string, optimisticChat?: Chat | null) => void;
@@ -216,10 +215,6 @@ export function MainScreen() {
     ...uiActionHandlersContext,
     ...headerActivityViewModelResult,
   };
-  useSelectedTurnLiveActivity({
-    profileId: headerActivityViewModelContext.bridgeProfileId,
-    threadId: headerActivityViewModelContext.selectedChat?.id ?? null,
-  });
   const workflowQueueStateResult = useMainScreenWorkflowQueueState(headerActivityViewModelContext);
   const workflowQueueStateContext = {
     ...headerActivityViewModelContext,

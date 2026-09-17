@@ -12,15 +12,9 @@
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSSupportsLiveActivities": true,
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
         }
-      },
-      "entitlements": {
-        "com.apple.security.application-groups": [
-          "group.com.dappermagna.tethercode"
-        ]
       },
       "bundleIdentifier": "com.dappermagna.tethercode"
     },
@@ -75,15 +69,6 @@
       "expo-secure-store",
       "expo-notifications",
       "expo-router",
-      [
-        "expo-widgets",
-        {
-          "bundleIdentifier": "com.dappermagna.tethercode.widgets",
-          "groupIdentifier": "group.com.dappermagna.tethercode",
-          "enablePushNotifications": false,
-          "frequentUpdates": false
-        }
-      ],
       "./plugins/withIosBridgeTransportSecurity"
     ],
     "extra": {
