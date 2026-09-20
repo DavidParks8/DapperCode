@@ -1,15 +1,8 @@
-jest.mock('expo-file-system/legacy', () => ({
-  documentDirectory: 'file:///documents/',
-  makeDirectoryAsync: jest.fn().mockResolvedValue(undefined),
-  readAsStringAsync: jest.fn(),
-  writeAsStringAsync: jest.fn().mockResolvedValue(undefined),
-}));
-
 import type { Chat } from '@bridge/types/types';
 import { createTestStore } from '@shell/state/testing';
 import { createDefaultAppStateData } from '@shell/state/appState';
 import { appStateSnapshotAtom } from '@shell/state/appState/atoms';
-import * as FileSystem from 'expo-file-system/legacy';
+import { fileSystemMock as FileSystem } from '@shared/testing/expoFileSystemMock';
 import {
   createEmptyChatSnapshotCache,
   parseChatSnapshotCache,
@@ -324,7 +317,7 @@ it('does not publish a completed cache write into a newly active profile', async
   store.set(chatSnapshotCacheAtom, oldCache);
   store.set(applyRestoredChatSnapshotAtom, pending);
   let resolveWrite: (() => void) | undefined;
-  jest.mocked(FileSystem.writeAsStringAsync).mockImplementationOnce(
+  jest.mocked(FileSystem.write).mockImplementationOnce(
     () =>
       new Promise<void>((resolve) => {
         resolveWrite = resolve;
@@ -386,7 +379,7 @@ it('serializes replacement identities and publishes only the durable winner', as
   store.set(applyRestoredChatSnapshotAtom, pending);
   let resolveWrite: (() => void) | undefined;
   jest
-    .mocked(FileSystem.writeAsStringAsync)
+    .mocked(FileSystem.write)
     .mockClear()
     .mockImplementationOnce(
       () =>
@@ -422,7 +415,7 @@ it('serializes replacement identities and publishes only the durable winner', as
   await expect(first).resolves.toMatchObject({ pendingChatId: 'pending-first' });
   await expect(second).resolves.toBeNull();
   expect(store.get(interruptedChatCreationAtom)?.pendingChatId).toBe('pending-first');
-  expect(jest.mocked(FileSystem.writeAsStringAsync)).toHaveBeenCalledTimes(1);
+  expect(jest.mocked(FileSystem.write)).toHaveBeenCalledTimes(1);
 });
 
 it('does not publish a replacement identity until a failed write is retried', async () => {
@@ -452,7 +445,7 @@ it('does not publish a replacement identity until a failed write is retried', as
   );
   store.set(applyRestoredChatSnapshotAtom, pending);
   jest
-    .mocked(FileSystem.writeAsStringAsync)
+    .mocked(FileSystem.write)
     .mockClear()
     .mockRejectedValueOnce(new Error('disk full'))
     .mockResolvedValue(undefined);
@@ -507,7 +500,7 @@ it('does not let stale consumption erase an in-flight replacement identity', asy
   store.set(applyRestoredChatSnapshotAtom, pending);
   let resolveWrite: (() => void) | undefined;
   jest
-    .mocked(FileSystem.writeAsStringAsync)
+    .mocked(FileSystem.write)
     .mockClear()
     .mockImplementationOnce(
       () =>
@@ -540,7 +533,7 @@ it('does not let stale consumption erase an in-flight replacement identity', asy
   expect(store.get(chatSnapshotCacheAtom)?.entries.map((entry) => entry.chat.id)).toEqual([
     'pending-replacement',
   ]);
-  expect(jest.mocked(FileSystem.writeAsStringAsync)).toHaveBeenCalledTimes(1);
+  expect(jest.mocked(FileSystem.write)).toHaveBeenCalledTimes(1);
 });
 
 it('retries a failed discard with the current cache instead of erasing a newer pending chat', async () => {
@@ -577,7 +570,7 @@ it('retries a failed discard with the current cache instead of erasing a newer p
   );
   store.set(applyRestoredChatSnapshotAtom, original);
   jest
-    .mocked(FileSystem.writeAsStringAsync)
+    .mocked(FileSystem.write)
     .mockClear()
     .mockRejectedValueOnce(new Error('first discard write failed'))
     .mockResolvedValue(undefined);
@@ -594,7 +587,7 @@ it('retries a failed discard with the current cache instead of erasing a newer p
   });
   let resolveReplacementWrite: (() => void) | undefined;
   jest
-    .mocked(FileSystem.writeAsStringAsync)
+    .mocked(FileSystem.write)
     .mockImplementationOnce(
       () =>
         new Promise<void>((resolve) => {
@@ -620,7 +613,7 @@ it('retries a failed discard with the current cache instead of erasing a newer p
   for (let index = 0; index < 20; index += 1) {
     await Promise.resolve();
   }
-  const lastWrite = jest.mocked(FileSystem.writeAsStringAsync).mock.lastCall?.[1] ?? '';
+  const lastWrite = jest.mocked(FileSystem.write).mock.lastCall?.[1] ?? '';
   expect(lastWrite).toContain('pending-discard-winner');
   jest.useRealTimers();
 });

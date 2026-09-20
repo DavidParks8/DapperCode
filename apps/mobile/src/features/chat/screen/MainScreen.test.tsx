@@ -1,6 +1,6 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system/legacy';
+import { fileSystemMock as FileSystem } from '@shared/testing/expoFileSystemMock';
 import { ComposerPasteView, type ComposerPasteViewProps } from '../composer/ComposerPasteView';
 import * as ImagePicker from 'expo-image-picker';
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
@@ -117,14 +117,7 @@ jest.mock('@expo/vector-icons', () => ({
   Ionicons: Object.assign(() => null, { glyphMap: {} }),
 }));
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
-jest.mock('expo-file-system/legacy', () => ({
-  documentDirectory: 'file:///documents/',
-  readAsStringAsync: jest.fn().mockRejectedValue(new Error('missing')),
-  writeAsStringAsync: jest.fn().mockResolvedValue(undefined),
-  makeDirectoryAsync: jest.fn().mockResolvedValue(undefined),
-  getInfoAsync: jest.fn(),
-  deleteAsync: jest.fn().mockResolvedValue(undefined),
-}));
+
 jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn() }));
 jest.mock('expo-image-picker', () => ({
   requestMediaLibraryPermissionsAsync: jest.fn(),
@@ -768,7 +761,7 @@ function MainRouteShell() {
 
     it('clears the original new-chat draft after a restarted edited retry succeeds', async () => {
       const newComposerScope = submissionScopeKey({ profileId: 'profile-1', threadId: null });
-      jest.mocked(FileSystem.readAsStringAsync).mockImplementation(async (path: string) => {
+      jest.mocked(FileSystem.read).mockImplementation(async (path: string) => {
         if (path.endsWith('/chat-drafts.json')) {
           return JSON.stringify({
             version: 2,
@@ -1545,7 +1538,7 @@ function MainRouteShell() {
       'does not enter queued editing while a photo is %s',
       async (phase) => {
         const api = createApi();
-        (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({
+        (FileSystem.info as jest.Mock).mockResolvedValue({
           exists: true,
           isDirectory: false,
           size: 1024,
@@ -1627,7 +1620,7 @@ function MainRouteShell() {
       const scopeKey = pasteView(tree).scopeKey;
       await pressLabel(root, 'Edit queued message');
       expect(pasteView(tree).enabled).toBe(false);
-      (FileSystem.deleteAsync as jest.Mock).mockClear();
+      (FileSystem.deleteFile as jest.Mock).mockClear();
       await act(async () => {
         deliverPhoto(tree, scopeKey);
         pasteView(tree).onPasteBusy?.({ nativeEvent: { scopeKey, busy: true } });
@@ -1636,9 +1629,7 @@ function MainRouteShell() {
           queue: { ...emptyQueue, items: [queued], editingItemId: queued.id },
         });
       });
-      expect(FileSystem.deleteAsync).toHaveBeenCalledWith('file:///paste/photo.png', {
-        idempotent: true,
-      });
+      expect(FileSystem.deleteFile).toHaveBeenCalledWith('file:///paste/photo.png');
       expect(api.uploadAttachment).not.toHaveBeenCalled();
       expect(messageInput(root).props['value']).toBe('Queued draft');
       await pressLabel(root, 'Save queued message');
@@ -2193,7 +2184,7 @@ function MainRouteShell() {
       );
       const root = tree.root as Queryable;
       jest
-        .mocked(FileSystem.writeAsStringAsync)
+        .mocked(FileSystem.write)
         .mockClear()
         .mockImplementationOnce(() => replacementWrite.promise)
         .mockResolvedValue(undefined);
@@ -2259,7 +2250,7 @@ function MainRouteShell() {
       );
       const root = tree.root as Queryable;
       jest
-        .mocked(FileSystem.writeAsStringAsync)
+        .mocked(FileSystem.write)
         .mockClear()
         .mockImplementationOnce(() => replacementWrite.promise)
         .mockResolvedValue(undefined);
@@ -2298,7 +2289,7 @@ function MainRouteShell() {
         observedErrors.push(store.get(errorAtom));
       });
       jest
-        .mocked(FileSystem.writeAsStringAsync)
+        .mocked(FileSystem.write)
         .mockClear()
         .mockResolvedValueOnce(undefined)
         .mockImplementationOnce(() => linkWrite.promise)
@@ -2390,7 +2381,7 @@ function MainRouteShell() {
       const { tree, store } = await renderMain({ api });
       const root = tree.root as Queryable;
       const completionWrite = createDeferred<void>();
-      jest.mocked(FileSystem.writeAsStringAsync).mockImplementation((path, value) => {
+      jest.mocked(FileSystem.write).mockImplementation((path, value) => {
         if (path.endsWith('/snapshots.json') && JSON.parse(value).selectedChatId === running.id) {
           return completionWrite.promise;
         }
@@ -2459,7 +2450,7 @@ function MainRouteShell() {
       expect(store.get(errorAtom)).toBeNull();
       expect(store.get(interruptedChatCreationAtom)).toBeNull();
       act(() => tree.unmount());
-      jest.mocked(FileSystem.writeAsStringAsync).mockResolvedValue(undefined);
+      jest.mocked(FileSystem.write).mockResolvedValue(undefined);
     });
 
     it('keeps first-turn activity isolated when replay recovery overlaps creation', async () => {
@@ -2734,7 +2725,7 @@ function MainRouteShell() {
           failRequest = reject;
         }),
       );
-      (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({
+      (FileSystem.info as jest.Mock).mockResolvedValue({
         exists: true,
         isDirectory: false,
         size: 1024,
@@ -2785,16 +2776,14 @@ function MainRouteShell() {
       ).not.toHaveLength(0);
       await act(async () => ref.current?.startNewChat());
       expect(pasteView(tree).scopeKey).not.toBe(scopeKey);
-      (FileSystem.deleteAsync as jest.Mock).mockClear();
+      (FileSystem.deleteFile as jest.Mock).mockClear();
       await act(async () => {
         pasteView(tree).onPasteBusy?.({ nativeEvent: { scopeKey, busy: true } });
         pasteView(tree).onPasteError?.({ nativeEvent: { scopeKey, message: 'stale paste' } });
         deliverPhoto(tree, scopeKey);
       });
       expect(api.uploadAttachment).not.toHaveBeenCalled();
-      expect(FileSystem.deleteAsync).toHaveBeenCalledWith('file:///paste/photo.png', {
-        idempotent: true,
-      });
+      expect(FileSystem.deleteFile).toHaveBeenCalledWith('file:///paste/photo.png');
       expect(hasText(root, 'stale paste')).toBe(false);
       expect(
         root.findAll((node) => node.props['accessibilityLabel'] === 'Preparing attachment'),
@@ -2827,7 +2816,7 @@ function MainRouteShell() {
             failRequest = reject;
           }),
         );
-        (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({
+        (FileSystem.info as jest.Mock).mockResolvedValue({
           exists: true,
           isDirectory: false,
           size: 1024,
@@ -3477,8 +3466,8 @@ function MainRouteShell() {
   describe('MainScreen controls and modals', () => {
     beforeEach(() => {
       jest.useFakeTimers();
-      (FileSystem.readAsStringAsync as jest.Mock).mockRejectedValue(new Error('missing'));
-      (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({
+      (FileSystem.read as jest.Mock).mockRejectedValue(new Error('missing'));
+      (FileSystem.info as jest.Mock).mockResolvedValue({
         exists: true,
         isDirectory: false,
         size: 1024,
@@ -3509,7 +3498,7 @@ function MainRouteShell() {
 
     it('does not let stale Main hydration revert a newly saved workspace favorite', async () => {
       let resolveFavorites: ((raw: string) => void) | null = null;
-      (FileSystem.readAsStringAsync as jest.Mock).mockImplementation((path: string) => {
+      (FileSystem.read as jest.Mock).mockImplementation((path: string) => {
         if (path.endsWith('workspace-favorites.json')) {
           return new Promise<string>((resolve) => {
             resolveFavorites = resolve;
@@ -3531,7 +3520,7 @@ function MainRouteShell() {
         await flush();
       });
       expect(store.get(favoriteWorkspacePathsAtom)).toEqual(['/workspace/new']);
-      expect(FileSystem.writeAsStringAsync).toHaveBeenCalledWith(
+      expect(FileSystem.write).toHaveBeenCalledWith(
         expect.stringContaining('workspace-favorites.json'),
         JSON.stringify({ version: 1, paths: ['/workspace/new'] }),
       );
@@ -3642,7 +3631,7 @@ function MainRouteShell() {
     });
 
     it('uses the most recently persisted model for a new chat', async () => {
-      (FileSystem.readAsStringAsync as jest.Mock).mockImplementation((path: string) => {
+      (FileSystem.read as jest.Mock).mockImplementation((path: string) => {
         if (path.endsWith('chat-model-preferences.json')) {
           return Promise.resolve(
             JSON.stringify({
@@ -3689,7 +3678,7 @@ function MainRouteShell() {
     });
 
     it('keeps an unavailable remembered model legible without assuming effort support', async () => {
-      (FileSystem.readAsStringAsync as jest.Mock).mockImplementation((path: string) => {
+      (FileSystem.read as jest.Mock).mockImplementation((path: string) => {
         if (path.endsWith('chat-model-preferences.json')) {
           return Promise.resolve(
             JSON.stringify({
@@ -4302,7 +4291,7 @@ function MainRouteShell() {
 
     it('switches authoritative ACP values immediately and ignores late stale preferences', async () => {
       let resolvePreferences: ((value: string) => void) | null = null;
-      (FileSystem.readAsStringAsync as jest.Mock).mockImplementation((path: string) => {
+      (FileSystem.read as jest.Mock).mockImplementation((path: string) => {
         if (!path.endsWith('chat-model-preferences.json')) {
           return Promise.reject(new Error('missing'));
         }
@@ -7234,7 +7223,7 @@ function MainRouteShell() {
 
     it('keeps a live plan update authoritative over a slower persisted hydration', async () => {
       let resolvePersistedPlanRead: ((value: string) => void) | null = null;
-      (FileSystem.readAsStringAsync as jest.Mock).mockImplementation((path: string) => {
+      (FileSystem.read as jest.Mock).mockImplementation((path: string) => {
         // Only the profile-scoped plan snapshot file is held pending here; every
         // other persisted collection still resolves immediately as missing.
         if (path.includes('dappercode-profile-') && path.endsWith('chat-plan-snapshots.json')) {

@@ -1,9 +1,10 @@
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system/legacy';
+import { File } from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
+import { deleteFileIfPresent, readFileInfo } from '@shared/filesystem';
 
 import type { HostBridgeApiClient } from '@bridge/client/client';
 import type { Chat } from '@bridge/types/types';
@@ -155,11 +156,11 @@ export function useAttachmentUploadController({
       let preparedForRetry = retry === true;
       let retainForRetry = false;
       try {
-        const info = await FileSystem.getInfoAsync(normalizedUri);
+        const info = await readFileInfo(new File(normalizedUri));
         if (!isActive()) {
           return;
         }
-        if (!info.exists || info.isDirectory) {
+        if (!info.exists || typeof info.size !== 'number') {
           throw new Error('Unable to read attachment from this device');
         }
         const sizeBytes = knownSize ?? info.size;
@@ -457,8 +458,8 @@ export function useAttachmentUploadController({
 }
 
 async function prepareImage(uri: string, width: number, height: number, knownSize?: number) {
-  const sourceInfo = await FileSystem.getInfoAsync(uri);
-  if (!sourceInfo.exists || sourceInfo.isDirectory) {
+  const sourceInfo = await readFileInfo(new File(uri));
+  if (!sourceInfo.exists || typeof sourceInfo.size !== 'number') {
     throw new Error('Unable to read image');
   }
   const sourceSizeError = attachmentSizeError(knownSize ?? sourceInfo.size);
@@ -478,8 +479,8 @@ async function prepareImage(uri: string, width: number, height: number, knownSiz
     format: ImageManipulator.SaveFormat.JPEG,
   });
   try {
-    const info = await FileSystem.getInfoAsync(result.uri);
-    if (!info.exists || info.isDirectory) {
+    const info = await readFileInfo(new File(result.uri));
+    if (!info.exists || typeof info.size !== 'number') {
       throw new Error('Unable to prepare image');
     }
     const sizeError = attachmentSizeError(info.size);
@@ -495,7 +496,7 @@ async function prepareImage(uri: string, width: number, height: number, knownSiz
 
 async function deleteTemporaryImage(uri: string): Promise<void> {
   try {
-    await FileSystem.deleteAsync(uri, { idempotent: true });
+    await deleteFileIfPresent(new File(uri));
   } catch (error) {
     console.warn('Unable to remove temporary attachment image', error);
   }

@@ -1,6 +1,6 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import type { Chat } from '@bridge/types/types';
-import * as FileSystem from 'expo-file-system/legacy';
+import { fileSystemMock as FileSystem } from '@shared/testing/expoFileSystemMock';
 import {
   CHAT_SNAPSHOT_CACHE_MAX_BYTES,
   CHAT_SNAPSHOT_CACHE_MAX_ENTRIES,
@@ -446,16 +446,14 @@ describe('chatSnapshotCache', () => {
     const directoryStarted = deferred<void>();
     const directoryGate = deferred<void>();
     const deletionGate = deferred<void>();
-    const mkdir = jest.spyOn(FileSystem, 'makeDirectoryAsync').mockImplementation(async () => {
+    const mkdir = jest.spyOn(FileSystem, 'createDirectory').mockImplementation(async () => {
       directoryStarted.resolve();
       await directoryGate.promise;
     });
-    const write = jest
-      .spyOn(FileSystem, 'writeAsStringAsync')
-      .mockImplementation(async (filePath, raw) => {
-        files.set(filePath, raw);
-      });
-    const remove = jest.spyOn(FileSystem, 'deleteAsync').mockImplementation(async (filePath) => {
+    const write = jest.spyOn(FileSystem, 'write').mockImplementation(async (filePath, raw) => {
+      files.set(filePath, raw);
+    });
+    const remove = jest.spyOn(FileSystem, 'deleteFile').mockImplementation(async (filePath) => {
       await deletionGate.promise;
       files.delete(filePath);
     });
@@ -517,10 +515,10 @@ describe('chatSnapshotCache', () => {
       configurable: true,
       value: 'file:///documents/',
     });
-    const read = jest.spyOn(FileSystem, 'readAsStringAsync');
-    const mkdir = jest.spyOn(FileSystem, 'makeDirectoryAsync').mockResolvedValue(undefined);
-    const write = jest.spyOn(FileSystem, 'writeAsStringAsync').mockResolvedValue(undefined);
-    const remove = jest.spyOn(FileSystem, 'deleteAsync').mockResolvedValue(undefined);
+    const read = jest.spyOn(FileSystem, 'read');
+    const mkdir = jest.spyOn(FileSystem, 'createDirectory').mockResolvedValue(undefined);
+    const write = jest.spyOn(FileSystem, 'write').mockResolvedValue(undefined);
+    const remove = jest.spyOn(FileSystem, 'deleteFile').mockResolvedValue(undefined);
     const cache = updateChatSnapshotCache(
       createEmptyChatSnapshotCache('profile-a'),
       'one',
@@ -536,7 +534,7 @@ describe('chatSnapshotCache', () => {
     expect(mkdir).toHaveBeenCalledTimes(2);
     expect(write).toHaveBeenCalledTimes(2);
     await deleteChatSnapshotCache('profile-a');
-    expect(remove).toHaveBeenCalledWith(expect.stringContaining('profile-a'), { idempotent: true });
+    expect(remove).toHaveBeenCalledWith(expect.stringContaining('profile-a'));
     remove.mockRejectedValueOnce(new Error('missing'));
     await expect(deleteChatSnapshotCache('profile-a')).resolves.toBeUndefined();
     Object.defineProperty(FileSystem, 'documentDirectory', {

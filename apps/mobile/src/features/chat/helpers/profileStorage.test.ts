@@ -1,10 +1,4 @@
-jest.mock('expo-file-system/legacy', () => ({
-  readAsStringAsync: jest.fn().mockResolvedValue('native value'),
-  writeAsStringAsync: jest.fn().mockResolvedValue(undefined),
-  getInfoAsync: jest.fn(async (path: string) => ({ exists: path !== '/missing' })),
-}));
-
-import * as FileSystem from 'expo-file-system/legacy';
+import { fileSystemMock as FileSystem } from '@shared/testing/expoFileSystemMock';
 import { getProfileStorage } from './profileStorage';
 
 describe('profileStorage', () => {
@@ -20,6 +14,8 @@ describe('profileStorage', () => {
   });
 
   it('shares native adapters and delegates reads, writes, and existence checks', async () => {
+    FileSystem.read.mockResolvedValue('native value');
+    FileSystem.info.mockImplementation(async (path) => ({ exists: path !== '/missing' }));
     const storage = getProfileStorage('ios');
     expect(getProfileStorage('android')).toBe(storage);
     expect(getProfileStorage('web')).not.toBe(storage);
@@ -27,9 +23,9 @@ describe('profileStorage', () => {
     await storage.write('/profile', 'next');
     await expect(storage.exists?.('/profile')).resolves.toBe(true);
     await expect(storage.exists?.('/missing')).resolves.toBe(false);
-    expect(FileSystem.readAsStringAsync).toHaveBeenCalledWith('/profile');
-    expect(FileSystem.writeAsStringAsync).toHaveBeenCalledWith('/profile', 'next');
-    jest.mocked(FileSystem.getInfoAsync).mockRejectedValueOnce(new Error('stat failed'));
+    expect(FileSystem.read).toHaveBeenCalledWith('/profile');
+    expect(FileSystem.write).toHaveBeenCalledWith('/profile', 'next');
+    jest.mocked(FileSystem.info).mockRejectedValueOnce(new Error('stat failed'));
     await expect(storage.exists?.('/profile')).rejects.toThrow('stat failed');
   });
 

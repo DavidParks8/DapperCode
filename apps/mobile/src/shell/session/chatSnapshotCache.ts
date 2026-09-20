@@ -1,4 +1,6 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { File, Paths } from 'expo-file-system';
+import { Platform } from 'react-native';
+import { deleteFileIfPresent, ensureDirectory, writeFile } from '@shared/filesystem';
 import { MessageSchema } from '@ag-ui/core';
 
 import type { Chat, ChatMessage, ChatMessagePart, ChatToolMeta } from '@bridge/types/types';
@@ -168,7 +170,7 @@ export async function loadChatSnapshotCache(profileId: string): Promise<ChatSnap
     return createEmptyChatSnapshotCache(profileId);
   }
   try {
-    return parseChatSnapshotCache(await FileSystem.readAsStringAsync(path), profileId);
+    return parseChatSnapshotCache(await new File(path).text(), profileId);
   } catch {
     return createEmptyChatSnapshotCache(profileId);
   }
@@ -188,14 +190,14 @@ export function saveChatSnapshotCache(
       return;
     }
 
-    const directory = path.slice(0, path.lastIndexOf('/') + 1);
-    await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
+    const file = new File(path);
+    await ensureDirectory(file.parentDirectory);
     // A purge can arrive while directory creation is pending. Re-check at
     // the final point before writing so this stale save cannot recreate it.
     if (!isChatSnapshotCacheGenerationCurrent(cache.profileId, generation)) {
       return;
     }
-    await FileSystem.writeAsStringAsync(path, JSON.stringify(boundChatSnapshotCache(cache)));
+    await writeFile(file, JSON.stringify(boundChatSnapshotCache(cache)));
   });
 }
 
@@ -209,7 +211,7 @@ export function deleteChatSnapshotCache(profileId: string): Promise<void> {
   }
   return enqueueCacheOperation(path, async () => {
     try {
-      await FileSystem.deleteAsync(path, { idempotent: true });
+      await deleteFileIfPresent(new File(path));
     } catch {
       // Cache cleanup is best effort.
     }
@@ -218,12 +220,12 @@ export function deleteChatSnapshotCache(profileId: string): Promise<void> {
 
 export function getChatSnapshotCachePath(
   profileId: string,
-  base = FileSystem.documentDirectory,
+  base: string | null = Platform.OS === 'web' ? null : Paths.document.uri,
 ): string | null {
   if (typeof base !== 'string' || !base || !profileId.trim()) {
     return null;
   }
-  return `${base}dappercode-chat-cache/${encodeURIComponent(profileId)}/snapshots.json`;
+  return `${base.replace(/\/$/, '')}/dappercode-chat-cache/${encodeURIComponent(profileId)}/snapshots.json`;
 }
 
 function enqueueCacheOperation(path: string, operation: () => Promise<void>): Promise<void> {

@@ -1,13 +1,15 @@
 import * as StoreReview from 'expo-store-review';
 import { Platform } from 'react-native';
-import type * as StoreReviewModule from '@shell/storeReview';
+import { fileSystemMock } from '@shared/testing/expoFileSystemMock';
 
 import {
   AUTO_STORE_REVIEW_THRESHOLD_MS,
   createDefaultAutoStoreReviewState,
   isAutoStoreReviewEligible,
+  loadAutoStoreReviewState,
   parseAutoStoreReviewState,
   requestNativeStoreReview,
+  saveAutoStoreReviewState,
 } from '@shell/storeReview';
 
 describe('storeReview helpers', () => {
@@ -68,26 +70,15 @@ describe('storeReview helpers', () => {
   });
 
   it('loads, saves, and defaults file state', async () => {
-    const read = jest.fn();
-    const write = jest.fn().mockResolvedValue(undefined);
-    jest.resetModules();
-    jest.doMock('expo-file-system/legacy', () => ({
-      documentDirectory: 'file:///documents/',
-      readAsStringAsync: read,
-      writeAsStringAsync: write,
-    }));
-    let isolated!: typeof StoreReviewModule;
-    jest.isolateModules(() => {
-      isolated = jest.requireActual('@shell/storeReview');
-    });
+    const { read, write } = fileSystemMock;
     read.mockResolvedValueOnce(
       JSON.stringify({ accumulatedForegroundMs: 12, automaticRequestAt: null }),
     );
-    await expect(isolated.loadAutoStoreReviewState()).resolves.toEqual({
+    await expect(loadAutoStoreReviewState()).resolves.toEqual({
       accumulatedForegroundMs: 12,
       automaticRequestAt: null,
     });
-    await isolated.saveAutoStoreReviewState({
+    await saveAutoStoreReviewState({
       accumulatedForegroundMs: 20,
       automaticRequestAt: null,
     });
@@ -96,9 +87,7 @@ describe('storeReview helpers', () => {
       JSON.stringify({ accumulatedForegroundMs: 20, automaticRequestAt: null }),
     );
     read.mockRejectedValueOnce(new Error('missing'));
-    await expect(isolated.loadAutoStoreReviewState()).resolves.toEqual(
-      createDefaultAutoStoreReviewState(),
-    );
+    await expect(loadAutoStoreReviewState()).resolves.toEqual(createDefaultAutoStoreReviewState());
   });
 
   it('requests native review only when available on iOS', async () => {

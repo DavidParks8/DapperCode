@@ -1,4 +1,5 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { Paths } from 'expo-file-system';
+import { Platform } from 'react-native';
 import type {
   BridgeScheduledPrompt,
   BridgeThreadSchedulesState,
@@ -94,11 +95,11 @@ export function encodePersistenceProfileId(profileId: string | null | undefined)
 }
 
 function getDocumentPath(fileName: string): string | null {
-  const base = FileSystem.documentDirectory;
-  if (typeof base !== 'string' || base.trim().length === 0) {
+  if (Platform.OS === 'web') {
     return null;
   }
-  return `${base}${fileName}`;
+  // Profile filenames are already URI-encoded; File path segments would encode them again.
+  return `${Paths.document.uri}${fileName}`;
 }
 
 function getProfileDocumentPath(

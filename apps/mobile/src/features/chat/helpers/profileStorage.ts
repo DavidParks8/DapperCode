@@ -1,10 +1,11 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { File } from 'expo-file-system';
+import { readFileInfo, writeFile } from '@shared/filesystem';
 import type { ProfilePersistenceStorage } from './persistence';
 
 const fileStorage: ProfilePersistenceStorage = {
-  read: FileSystem.readAsStringAsync,
-  write: FileSystem.writeAsStringAsync,
-  exists: async (path) => (await FileSystem.getInfoAsync(path))?.exists === true,
+  read: async (path) => new File(path).text(),
+  write: async (path, value) => writeFile(new File(path), value),
+  exists: async (path) => (await readFileInfo(new File(path))).exists,
 };
 
 interface WebStorageLike {

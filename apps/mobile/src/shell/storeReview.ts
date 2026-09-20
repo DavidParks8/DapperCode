@@ -1,6 +1,7 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { File, Paths } from 'expo-file-system';
 import * as StoreReview from 'expo-store-review';
 import { Platform } from 'react-native';
+import { writeFile } from '@shared/filesystem';
 
 export const AUTO_STORE_REVIEW_THRESHOLD_MS = 10 * 60 * 1000;
 
@@ -44,7 +45,7 @@ export async function loadAutoStoreReviewState(): Promise<AutoStoreReviewState> 
   }
 
   try {
-    const raw = await FileSystem.readAsStringAsync(path);
+    const raw = await new File(path).text();
     return parseAutoStoreReviewState(raw);
   } catch {
     return createDefaultAutoStoreReviewState();
@@ -57,7 +58,7 @@ export async function saveAutoStoreReviewState(state: AutoStoreReviewState): Pro
     return;
   }
 
-  await FileSystem.writeAsStringAsync(path, JSON.stringify(state));
+  await writeFile(new File(path), JSON.stringify(state));
 }
 
 export function isAutoStoreReviewEligible(state: AutoStoreReviewState): boolean {
@@ -82,12 +83,11 @@ export async function requestNativeStoreReview(): Promise<boolean> {
 }
 
 function getAutoStoreReviewStatePath(): string | null {
-  const base = FileSystem.documentDirectory;
-  if (typeof base !== 'string' || base.trim().length === 0) {
+  if (Platform.OS === 'web') {
     return null;
   }
 
-  return `${base}${STORE_REVIEW_STATE_FILE}`;
+  return new File(Paths.document, STORE_REVIEW_STATE_FILE).uri;
 }
 
 function normalizeAccumulatedForegroundMs(value: unknown): number {

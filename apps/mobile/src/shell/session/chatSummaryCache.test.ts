@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { fileSystemMock as FileSystem } from '@shared/testing/expoFileSystemMock';
 
 import type { ChatSummary } from '@bridge/types/types';
 import {
@@ -207,18 +207,16 @@ describe('chatSummaryCache', () => {
       value: 'file:///documents/',
     });
     let stored: string | null = null;
-    jest.spyOn(FileSystem, 'makeDirectoryAsync').mockResolvedValue(undefined);
-    jest.spyOn(FileSystem, 'readAsStringAsync').mockImplementation(async () => {
+    jest.spyOn(FileSystem, 'createDirectory').mockResolvedValue(undefined);
+    jest.spyOn(FileSystem, 'read').mockImplementation(async () => {
       if (stored === null) {
         throw new Error('missing');
       }
       return stored;
     });
-    const write = jest
-      .spyOn(FileSystem, 'writeAsStringAsync')
-      .mockImplementation(async (_path, raw) => {
-        stored = raw;
-      });
+    const write = jest.spyOn(FileSystem, 'write').mockImplementation(async (_path, raw) => {
+      stored = raw;
+    });
 
     await Promise.all([
       persistChatSummaries('profile-a', [summary('one')]),
@@ -253,19 +251,17 @@ describe('chatSummaryCache', () => {
         value: 'file:///documents/',
       });
       let stored: string | null = null;
-      jest.spyOn(FileSystem, 'makeDirectoryAsync').mockResolvedValue(undefined);
-      jest.spyOn(FileSystem, 'readAsStringAsync').mockImplementation(async () => {
+      jest.spyOn(FileSystem, 'createDirectory').mockResolvedValue(undefined);
+      jest.spyOn(FileSystem, 'read').mockImplementation(async () => {
         if (stored === null) {
           throw new Error('missing');
         }
         return stored;
       });
-      const write = jest
-        .spyOn(FileSystem, 'writeAsStringAsync')
-        .mockImplementation(async (_path, raw) => {
-          stored = raw;
-        });
-      const del = jest.spyOn(FileSystem, 'deleteAsync').mockImplementation(async () => {
+      const write = jest.spyOn(FileSystem, 'write').mockImplementation(async (_path, raw) => {
+        stored = raw;
+      });
+      const del = jest.spyOn(FileSystem, 'deleteFile').mockImplementation(async () => {
         stored = null;
       });
       return {

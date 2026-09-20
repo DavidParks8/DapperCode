@@ -80,6 +80,14 @@ browser-local-storage adapters in `features/chat/helpers/profileStorage.ts`. Pro
 serialization, write ordering, and recovery remain owned by their respective controllers; tests
 can still inject a `ProfilePersistenceStorage` implementation.
 
+Native file persistence uses Expo's `File`, `Directory`, and `Paths` APIs. Existing document
+filenames, encoded profile keys, JSON versions, and cache directories remain unchanged; no data
+migration or reset is required. The adapters and serialized operation queues retain their
+asynchronous boundaries even though native file mutations are synchronous. Browser paths stay on
+local storage and never evaluate unsupported native `Paths` getters. The canonical native app-state
+document remains in SecureStore. Pass already-encoded profile paths to `File` as full URIs rather
+than separate path segments to avoid double-encoding their profile IDs.
+
 ## Testing
 
 ```ts
