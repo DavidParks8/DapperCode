@@ -45,7 +45,6 @@ final class ObservedApplication: UIApplication {
 
 final class BackgroundTestApp: UIResponder, UIApplicationDelegate {
   let isBackgroundHost = CommandLine.arguments.contains("--background-host")
-  var window: UIWindow?
   let subscriber = WebSocketBackgroundAppDelegateSubscriber()
   var ready = false
   var cycle = 0
@@ -59,16 +58,22 @@ final class BackgroundTestApp: UIResponder, UIApplicationDelegate {
     didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     setbuf(stdout, nil)
-    let window = UIWindow(frame: UIScreen.main.bounds)
-    window.rootViewController = UIViewController()
-    window.makeKeyAndVisible()
-    self.window = window
     return true
   }
 
-  func applicationDidBecomeActive(_ application: UIApplication) {
+  func application(
+    _ application: UIApplication,
+    configurationForConnecting connectingSceneSession: UISceneSession,
+    options: UIScene.ConnectionOptions
+  ) -> UISceneConfiguration {
+    let configuration = UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
+    configuration.delegateClass = BackgroundSceneDelegate.self
+    return configuration
+  }
+
+  func sceneDidBecomeActive() {
     guard !isBackgroundHost else { return }
-    let app = application as! ObservedApplication
+    let app = UIApplication.shared as! ObservedApplication
     if cycle == 1 && backgroundStart != nil {
       check(app.tasks.count == 1, "rapid return retains the native task until foreground")
     }
@@ -100,9 +105,9 @@ final class BackgroundTestApp: UIResponder, UIApplicationDelegate {
     }
   }
 
-  func applicationDidEnterBackground(_ application: UIApplication) {
+  func sceneDidEnterBackground() {
     guard !isBackgroundHost else { return }
-    let app = application as! ObservedApplication
+    let app = UIApplication.shared as! ObservedApplication
     cycle += 1
     backgroundStart = ProcessInfo.processInfo.systemUptime
     tenSecondCallbackRan = false
@@ -175,6 +180,27 @@ final class BackgroundTestApp: UIResponder, UIApplicationDelegate {
     subscriber.applicationWillTerminate(app)
     check(app.tasks.isEmpty && app.endings == endings + 3, "termination releases an outstanding task")
     subscriber.applicationDidBecomeActive(app)
+  }
+}
+
+@objc(BackgroundSceneDelegate)
+final class BackgroundSceneDelegate: UIResponder, UIWindowSceneDelegate {
+  var window: UIWindow?
+
+  func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+    guard let windowScene = scene as? UIWindowScene else { return }
+    let window = UIWindow(windowScene: windowScene)
+    window.rootViewController = UIViewController()
+    window.makeKeyAndVisible()
+    self.window = window
+  }
+
+  func sceneDidBecomeActive(_ scene: UIScene) {
+    (UIApplication.shared.delegate as! BackgroundTestApp).sceneDidBecomeActive()
+  }
+
+  func sceneWillResignActive(_ scene: UIScene) {
+    (UIApplication.shared.delegate as! BackgroundTestApp).sceneDidEnterBackground()
   }
 }
 

@@ -1,5 +1,19 @@
 # Troubleshooting
 
+## iOS 27 App Closes at Launch
+
+An iOS 27 crash containing `UIScene life cycle is required for apps built with this SDK`
+means UIKit rejected the native startup configuration before JavaScript could run. Updating
+Metro or restarting the bridge cannot fix it.
+
+DapperCode uses Expo 57.0.24's native scene lifecycle through
+`apps/mobile/plugins/withIosSceneLifecycle.js`. The prebuild plugin registers
+`EXExpoAppSceneDelegate` and leaves React Native startup to that scene delegate, while preserving
+Expo's deep-link and application-state forwarding. Regenerate and rebuild the native app after
+updating dependencies; a JavaScript-only update is insufficient. See
+[local iOS builds and launch validation](eas-builds.md#local-native-build-option-no-eas-cloud).
+Keep existing app data and bridge profiles; clearing them does not address this crash.
+
 ## macOS App Does Not Open
 
 Verify the bundle and launch it directly:

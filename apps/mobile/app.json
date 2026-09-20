@@ -69,6 +69,7 @@
       "expo-secure-store",
       "expo-notifications",
       "expo-router",
+      "./plugins/withIosSceneLifecycle",
       "./plugins/withIosBridgeTransportSecurity"
     ],
     "extra": {

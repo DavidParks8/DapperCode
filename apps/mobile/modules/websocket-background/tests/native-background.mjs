@@ -66,6 +66,11 @@ export default async function scenario(e2e) {
 <key>CFBundleVersion</key><string>1</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
 <key>UILaunchScreen</key><dict/>
+<key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/>
+<key>UISceneConfigurations</key><dict><key>UIWindowSceneSessionRoleApplication</key><array><dict>
+<key>UISceneConfigurationName</key><string>Default Configuration</string>
+<key>UISceneDelegateClassName</key><string>BackgroundSceneDelegate</string>
+</dict></array></dict></dict>
 </dict></plist>`,
       );
       const sdk = await e2e.run('xcrun', ['--sdk', 'iphonesimulator', '--show-sdk-path']);
@@ -148,18 +153,18 @@ export default async function scenario(e2e) {
         'create',
         e2e.runId,
         'com.apple.CoreSimulator.SimDeviceType.iPhone-17',
-        'com.apple.CoreSimulator.SimRuntime.iOS-26-5',
+        'com.apple.CoreSimulator.SimRuntime.iOS-27-0',
       ]);
       simulator = created.stdout.trim();
       await e2e.run('xcrun', ['simctl', 'boot', simulator]);
       await e2e.run('xcrun', ['simctl', 'bootstatus', simulator, '-b'], { timeoutMs: 300_000 });
-      await e2e.run('xcrun', ['simctl', 'install', simulator, app]);
+      await e2e.run('xcrun', ['simctl', 'install', simulator, app], { timeoutMs: 120_000 });
       await e2e.run('xcrun', [
         'simctl',
         'install',
         simulator,
         path.join(e2e.runtimeDir, 'BackgroundHost.app'),
-      ]);
+      ], { timeoutMs: 120_000 });
       nativeApp = await e2e.start(
         'xcrun',
         ['simctl', 'launch', '--console-pty', simulator, bundle],
@@ -174,13 +179,14 @@ export default async function scenario(e2e) {
 
     await e2e.phase('rapid-return', async () => {
       await e2e.run('xcrun', ['simctl', 'launch', simulator, hostBundle, '--background-host']);
+      const returnToApp = new Promise((resolve) => setTimeout(resolve, 7_500)).then(() =>
+        e2e.run('xcrun', ['simctl', 'launch', simulator, bundle]),
+      );
       await e2e.waitForLog(nativeApp.label, /NATIVE_BACKGROUND_1/);
       // Drive the return without waiting for a background timer. Deliberately observe it late;
       // the native fixture, not host log delivery, measures the actual six-to-ten-second window.
       await Promise.all([
-        new Promise((resolve) => setTimeout(resolve, 6_000)).then(() =>
-          e2e.run('xcrun', ['simctl', 'launch', simulator, bundle]),
-        ),
+        returnToApp,
         new Promise((resolve) => setTimeout(resolve, 11_000)),
       ]);
       await e2e.waitForLog(nativeApp.label, /NATIVE_FOREGROUND_1/);

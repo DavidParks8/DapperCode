@@ -3,20 +3,27 @@ import UniformTypeIdentifiers
 
 @main
 final class PasteTestApp: UIResponder, UIApplicationDelegate {
-  var window: UIWindow?
-
   func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-    let window = UIWindow(frame: UIScreen.main.bounds)
-    let controller = UIViewController()
-    window.rootViewController = controller
-    window.makeKeyAndVisible()
-    self.window = window
+    true
+  }
+
+  func application(
+    _ application: UIApplication,
+    configurationForConnecting connectingSceneSession: UISceneSession,
+    options: UIScene.ConnectionOptions
+  ) -> UISceneConfiguration {
+    let configuration = UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
+    configuration.delegateClass = PasteTestSceneDelegate.self
+    return configuration
+  }
+
+  func start(in view: UIView) {
     Task { @MainActor in
       do {
-        try await test(in: controller.view)
-        try await testTextJoining(in: controller.view)
-        try await testBatches(in: controller.view)
-        try await testLifecycle(in: controller.view)
+        try await test(in: view)
+        try await testTextJoining(in: view)
+        try await testBatches(in: view)
+        try await testLifecycle(in: view)
         print("COMPOSER_PASTE_NATIVE_PASS")
         exit(0)
       } catch {
@@ -24,7 +31,6 @@ final class PasteTestApp: UIResponder, UIApplicationDelegate {
         exit(1)
       }
     }
-    return true
   }
 
   func check(_ condition: Bool, _ message: String) throws {
@@ -40,7 +46,30 @@ final class PasteTestApp: UIResponder, UIApplicationDelegate {
     }
     throw NSError(domain: "Timed out waiting for paste", code: 1)
   }
+}
 
+@objc(PasteTestSceneDelegate)
+final class PasteTestSceneDelegate: UIResponder, UIWindowSceneDelegate {
+  var window: UIWindow?
+  private var started = false
+
+  func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+    guard let windowScene = scene as? UIWindowScene else { return }
+    let window = UIWindow(windowScene: windowScene)
+    let controller = UIViewController()
+    window.rootViewController = controller
+    window.makeKeyAndVisible()
+    self.window = window
+  }
+
+  func sceneDidBecomeActive(_ scene: UIScene) {
+    guard !started, let view = window?.rootViewController?.view else { return }
+    started = true
+    (UIApplication.shared.delegate as! PasteTestApp).start(in: view)
+  }
+}
+
+extension PasteTestApp {
   @MainActor
   func test(in parent: UIView) async throws {
     let input = UITextView(frame: CGRect(x: 20, y: 100, width: 300, height: 100))

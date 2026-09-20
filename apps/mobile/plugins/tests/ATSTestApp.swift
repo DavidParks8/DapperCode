@@ -2,13 +2,37 @@ import UIKit
 
 @main
 final class ATSTestApp: UIResponder, UIApplicationDelegate {
-  var window: UIWindow?
-
   func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-    let window = UIWindow(frame: UIScreen.main.bounds)
+    true
+  }
+
+  func application(
+    _ application: UIApplication,
+    configurationForConnecting connectingSceneSession: UISceneSession,
+    options: UIScene.ConnectionOptions
+  ) -> UISceneConfiguration {
+    let configuration = UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
+    configuration.delegateClass = ATSTestSceneDelegate.self
+    return configuration
+  }
+}
+
+@objc(ATSTestSceneDelegate)
+final class ATSTestSceneDelegate: UIResponder, UIWindowSceneDelegate {
+  var window: UIWindow?
+  private var started = false
+
+  func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+    guard let windowScene = scene as? UIWindowScene else { return }
+    let window = UIWindow(windowScene: windowScene)
     window.rootViewController = UIViewController()
     window.makeKeyAndVisible()
     self.window = window
+  }
+
+  func sceneDidBecomeActive(_ scene: UIScene) {
+    guard !started else { return }
+    started = true
     Task {
       var result: [String: Any]
       do {
@@ -42,6 +66,5 @@ final class ATSTestApp: UIResponder, UIApplicationDelegate {
       print("ATS_RESULT \(String(decoding: json, as: UTF8.self))")
       exit(0)
     }
-    return true
   }
 }

@@ -114,6 +114,17 @@ export default async function scenario(e2e) {
             CFBundleVersion: '1',
             CFBundleShortVersionString: '1.0',
             UILaunchScreen: {},
+            UIApplicationSceneManifest: {
+              UIApplicationSupportsMultipleScenes: false,
+              UISceneConfigurations: {
+                UIWindowSceneSessionRoleApplication: [
+                  {
+                    UISceneConfigurationName: 'Default Configuration',
+                    UISceneDelegateClassName: 'ATSTestSceneDelegate',
+                  },
+                ],
+              },
+            },
             NSAppTransportSecurity: policy,
           }),
         );
@@ -127,11 +138,11 @@ export default async function scenario(e2e) {
         'create',
         e2e.runId,
         'com.apple.CoreSimulator.SimDeviceType.iPhone-17',
-        'com.apple.CoreSimulator.SimRuntime.iOS-26-5',
+        'com.apple.CoreSimulator.SimRuntime.iOS-27-0',
       ]);
       simulator = created.stdout.trim();
       await e2e.expectMatch(
-        'run owns a distinct iOS 26.5 simulator',
+        'run owns a distinct iOS 27.0 simulator',
         simulator,
         /^[A-F0-9-]{36}$/i,
       );
@@ -144,7 +155,7 @@ export default async function scenario(e2e) {
           'install',
           simulator,
           path.join(e2e.runtimeDir, `${variant}.app`),
-        ]);
+        ], { timeoutMs: 120000 });
       }
     });
     await e2e.phase('baseline', async () => {

@@ -146,6 +146,58 @@ pnpm --filter @dappercode/mobile exec expo run:android
 
 For iOS local device/signed builds, Apple signing/tooling is still required.
 
+### Xcode 27 and native launch validation
+
+Use Xcode 27 and install its iOS 27 simulator runtime:
+
+```bash
+xcodebuild -version
+xcodebuild -downloadPlatform iOS -buildVersion 27.0 -architectureVariant arm64
+xcrun simctl list runtimes
+```
+
+The SDK 57 scene-lifecycle backport requires Expo 57.0.23 or newer; this project pins the
+57.0.24 patch line. `withIosSceneLifecycle` connects the standard generated AppDelegate to
+Expo's native scene delegate. It rejects unexpected startup code or a custom scene manifest
+rather than silently overwriting them. Review/remove this compatibility plugin when upgrading
+to SDK 58, which provides its own scene lifecycle.
+
+Build a standalone simulator release without reading local bridge credentials or starting Metro:
+
+```bash
+EXPO_NO_DOTENV=1 pnpm --filter @dappercode/mobile exec expo prebuild --platform ios
+EXPO_NO_DOTENV=1 xcodebuild \
+  -workspace apps/mobile/ios/DapperCode.xcworkspace \
+  -scheme DapperCode -configuration Release -sdk iphonesimulator \
+  -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath apps/mobile/ios/build \
+  CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES build
+```
+
+With Appium and its XCUITest driver installed, run the native launch regression from the repository
+root. Set `IOS_LAUNCH_APP` if the build output is somewhere other than
+`apps/mobile/ios/build/Build/Products/Release-iphonesimulator/DapperCode.app`:
+
+```bash
+node .agents/skills/local-e2e-validation/scripts/run.mjs \
+  --evidence /absolute/path/to/new-ios-launch-evidence.jsonl \
+  apps/mobile/plugins/tests/native-launch.mjs
+```
+
+The scenario uses a fresh iOS 27 simulator and a private copy of the signed release bundle with no
+Metro dependency. Keep Xcode's normal simulator signing enabled: disabling it breaks SecureStore's
+keychain access. It checks cold launch, onboarding interaction, a second cold launch,
+background/foreground recovery, and cold/warm deep links. It never uses
+a paired device or the user's app container or bridge. Appium's fixed ports are serialized with
+harness leases, and the scenario deletes only its own simulator when finished. Use
+`IOS_RUNTIME=com.apple.CoreSimulator.SimRuntime.iOS-26-5` for an older-runtime compatibility run
+before uninstalling that runtime.
+
+After verifying the replacement runtime, remove obsolete runtimes by their exact identifiers
+from `xcrun simctl runtime list`, using `xcrun simctl runtime delete <identifier>`. This removes
+the runtime image, not simulator app data. Do not use `simctl delete unavailable` to reclaim
+space unless you also intend to delete those simulators' data.
+
 ## iOS Distribution Reality
 
 Without a public App Store release, iOS distribution still requires Apple provisioning paths:

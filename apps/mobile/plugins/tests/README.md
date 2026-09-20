@@ -1,6 +1,6 @@
 # Native iOS ATS Regression
 
-From the repository root, with dependencies installed, Xcode selected, and the iOS 26.5
+From the repository root, with dependencies installed, Xcode selected, and the iOS 27.0
 simulator runtime installed on an Apple Silicon Mac:
 
 ```sh
@@ -13,7 +13,7 @@ Use a new evidence filename each time. No prebuild or production bridge is neede
 The scenario reads the real app configuration with Expo `config --type introspect`, including
 the registered plugin chain, without writing the native project. It builds one Swift executable
 in the harness root and packages it with three ATS policies: permissive control, the old policy,
-and the generated policy. Each has a separate bundle ID on a newly created iOS 26.5 simulator.
+and the generated policy. Each has a separate bundle ID on a newly created iOS 27.0 simulator.
 
 The control must upload successfully, the old policy must fail with `NSURLErrorDomain/-1022`
 without reaching the receiver, and the generated policy must upload successfully twice across
