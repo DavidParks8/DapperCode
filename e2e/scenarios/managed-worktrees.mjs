@@ -154,6 +154,32 @@ export default async function scenario(e2e) {
     });
   });
   await e2e.phase('chat', async () => {
+    await e2e.check('automatic checkout and chat creation share durable idempotency', async () => {
+      const create = {
+        submissionId: 'automatic-chat',
+        workspace: { mode: 'worktree', branch: 'main' },
+        threadStart: { cwd: e2e.workspaceDir, agentId: 'fixture' },
+      };
+      const first = await rpc('bridge/thread/create', create);
+      assert.notEqual(first.thread.cwd, e2e.workspaceDir);
+      const second = await rpc('bridge/thread/create', create);
+      assert.equal(first.thread.id, second.thread.id);
+      assert.equal(first.thread.cwd, second.thread.cwd);
+      await socket.close();
+      await host.stop();
+      await start();
+      assert.equal((await rpc('bridge/thread/create', create)).thread.id, first.thread.id);
+      const managed = (await rpc('bridge/worktrees/list')).worktrees.find(
+        (entry) => entry.path === first.thread.cwd,
+      );
+      assert.ok(managed);
+      assert.equal(managed.baseRef, 'main');
+      // The fixture's sessions are process-local; the durable index still protects the checkout.
+      assert.match(
+        (await rpc('bridge/worktrees/remove', { id: managed.id }, true)).message,
+        /Delete the chats/,
+      );
+    });
     const created = await rpc('thread/start', { agentId: 'fixture', cwd: checkout.path });
     const threadId = created.thread.id;
     await e2e.check('ACP chat uses checkout and blocks removal', async () => {
@@ -177,7 +203,10 @@ export default async function scenario(e2e) {
     await e2e.check('removal succeeds and branch stays', async () => {
       assert.equal((await rpc('bridge/worktrees/remove', { id })).removed, true);
       assert.equal((await rpc('bridge/worktrees/remove', { id })).removed, true);
-      assert.deepEqual((await rpc('bridge/worktrees/list')).worktrees, []);
+      assert.equal(
+        (await rpc('bridge/worktrees/list')).worktrees.some((entry) => entry.id === id),
+        false,
+      );
       assert.match(
         (await git(['branch', '--list', 'feature/isolated'])).stdout,
         /feature\/isolated/,
@@ -189,7 +218,10 @@ export default async function scenario(e2e) {
     await host.stop();
     await start();
     await e2e.check('removal remains durable and old creation cannot resurrect it', async () => {
-      assert.deepEqual((await rpc('bridge/worktrees/list')).worktrees, []);
+      assert.equal(
+        (await rpc('bridge/worktrees/list')).worktrees.some((entry) => entry.id === id),
+        false,
+      );
       assert.match((await rpc('bridge/worktrees/create', request, true)).message, /removed/);
       assert.equal(e2e.readFile('workspace/tracked.txt', 'utf8'), 'source changes\n');
     });

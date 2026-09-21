@@ -1,3 +1,8 @@
+export interface ChatWorkspace {
+  mode: 'local' | 'worktree';
+  branch: string;
+}
+
 export interface ManagedWorktree {
   id: string;
   repository: string;

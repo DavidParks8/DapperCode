@@ -38,12 +38,6 @@ export const routes = {
       params: { profileId, chatId },
     };
   },
-  worktrees(profileId: string, chatId: string, cwd: string): Href {
-    return {
-      pathname: '/profiles/[profileId]/chats/[chatId]/worktrees',
-      params: { profileId, chatId, cwd },
-    };
-  },
   browser(profileId: string, source?: { chatId: string; threadId?: string }): Href {
     return {
       pathname: '/profiles/[profileId]/browser',

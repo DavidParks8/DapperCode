@@ -42,7 +42,6 @@ export interface WorkspacePickerViewProps {
   actionDescription: string | null;
   actionDisabled: boolean;
   onActionPress?: (path: string | null) => void;
-  onManageWorktrees?: (path: string) => void;
   favoriteWorkspaces: WorkspaceSummary[];
   favoritePathSet: Set<string>;
   pendingSelectionPath: string | null;
@@ -87,15 +86,6 @@ function buildPathMenuItems(props: WorkspacePickerViewProps): WorkspacePickerMen
 
 function buildOverflowMenuItems(props: WorkspacePickerViewProps): WorkspacePickerMenuItem[] {
   const items: WorkspacePickerMenuItem[] = [];
-  if (props.onManageWorktrees && props.footerPath) {
-    const path = props.footerPath;
-    items.push({
-      key: 'worktrees',
-      label: 'Managed worktrees',
-      icon: 'git-branch-outline',
-      onPress: () => props.onManageWorktrees?.(path),
-    });
-  }
   if (props.onToggleFavorite && props.footerPath) {
     const path = props.footerPath;
     items.push({
@@ -132,14 +122,6 @@ function buildEntryMenuItems(
       onPress: () => props.onSelectPath(entry.path),
     },
   ];
-  if (props.onManageWorktrees) {
-    items.push({
-      key: 'worktrees',
-      label: 'Managed worktrees',
-      icon: 'git-branch-outline',
-      onPress: () => props.onManageWorktrees?.(entry.path),
-    });
-  }
   if (props.onToggleFavorite) {
     const pinned = props.favoritePathSet.has(entry.path);
     items.push({

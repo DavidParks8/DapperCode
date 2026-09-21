@@ -1,6 +1,7 @@
 import type { ActivityMessage, Message } from '@ag-ui/core';
 import type { RawAcpSnapshot } from '@bridge/mapping/chatMapping';
 import type { TurnPlanStep } from '@bridge/types/bridge';
+import type { ChatWorkspace } from './worktrees';
 
 export type ChatStatus = 'idle' | 'running' | 'error' | 'complete';
 export type AgentId = string;
@@ -182,6 +183,7 @@ export interface Chat extends ChatSummary {
     agentId: string | null;
     cwd: string | null;
     createdChatId?: string;
+    workspace?: ChatWorkspace;
   };
   /** Local read/recovery failure, independent of the agent's run status. */
   historyRecoveryError?: string | null;
@@ -204,6 +206,7 @@ export interface Chat extends ChatSummary {
 }
 
 export interface CreateChatRequest {
+  workspace?: ChatWorkspace;
   title?: string;
   message?: string;
   cwd?: string;

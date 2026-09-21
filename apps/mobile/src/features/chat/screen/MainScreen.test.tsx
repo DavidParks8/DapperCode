@@ -623,6 +623,46 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
+    it('recovers the worktree mode and branch with the original submission without selecting a checkout', async () => {
+      const interrupted: Chat = {
+        ...chat,
+        id: 'pending-submission-worktree',
+        cwd: '',
+        title: '',
+        status: 'running',
+        localPendingCreation: {
+          draft: 'Isolated task',
+          hadAttachments: false,
+          agentId: 'codex',
+          cwd: '',
+          workspace: { mode: 'worktree', branch: 'main' },
+        },
+        messages: [
+          { id: 'prompt', role: 'user', content: 'Isolated task', createdAt: chat.createdAt },
+        ],
+      };
+      const created = { ...chat, id: 'thread-created', cwd: '/central/worktrees/automatic' };
+      const api = createApi({ loadedChat: created });
+      jest.mocked(api.createChatIdempotent).mockResolvedValueOnce(created);
+      const { tree, store } = await renderMain({ api, interruptedChat: interrupted });
+      const root = tree.root as Queryable;
+      expect(api.createChatIdempotent).not.toHaveBeenCalled();
+      await pressLabel(root, 'Send message');
+      expect(api.createChatIdempotent).toHaveBeenCalledWith(
+        expect.objectContaining({ workspace: { mode: 'worktree', branch: 'main' } }),
+        'submission-worktree',
+      );
+      expect(api.sendChatMessageIdempotent).toHaveBeenCalledWith(
+        'thread-created',
+        expect.objectContaining({ cwd: created.cwd }),
+        'submission-worktree',
+        expect.any(Object),
+      );
+      expect(store.get(defaultStartCwdAtom)).not.toBe(created.cwd);
+      expect(store.get(interruptedChatCreationAtom)).toBeNull();
+      act(() => tree.unmount());
+    });
+
     it('reuses the recovered submission after creation succeeds but its first send fails', async () => {
       const interrupted: Chat = {
         ...chat,

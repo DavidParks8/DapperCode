@@ -14,6 +14,7 @@ import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { useAppTheme } from '@shared/theme';
 import { createStyles } from '../styles/styles';
+import { NewChatWorkspace } from '../../workspace/worktrees/NewChatWorkspace';
 
 const SUGGESTIONS = [
   { label: 'Explain the codebase', prompt: 'Explain the current codebase structure' },
@@ -108,6 +109,7 @@ export function ComposeView({
           </View>
         </GlassSurface>
       </Pressable>
+      <NewChatWorkspace />
       <View style={styles.suggestions}>
         {SUGGESTIONS.map((suggestion) => (
           <Pressable

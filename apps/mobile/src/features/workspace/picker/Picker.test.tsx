@@ -256,20 +256,6 @@ describe('WorkspacePicker', () => {
     act(() => tree.unmount());
   });
 
-  it('opens managed worktrees for the selected folder from the overflow menu', () => {
-    const onManageWorktrees = jest.fn();
-    let rendered: ReactTestRenderer | undefined;
-    act(() => {
-      rendered = renderer.create(renderPickerMatrix({ selectedPath: '/repo', onManageWorktrees }));
-    });
-    const tree = expectValue(rendered);
-    const root = tree.root as QueryableTestInstance;
-    pressLabel(root, 'More actions');
-    pressLabel(root, 'Managed worktrees');
-    expect(onManageWorktrees).toHaveBeenCalledWith('/repo');
-    act(() => tree.unmount());
-  });
-
   it('preserves a browsed pending path when the external selection changes', () => {
     const onBrowsePath = jest.fn();
     let rendered: ReactTestRenderer | undefined;

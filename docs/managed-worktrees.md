@@ -1,20 +1,21 @@
 # Managed worktrees
 
-From the workspace picker, open **More actions → Managed worktrees** (or a folder's
-context menu). Enter a new branch name and a starting reference such as `HEAD`, `main`,
-or `origin/main`. **Create worktree** checks out the committed reference in a separate
-directory. **Use worktree** selects it for a new chat. Existing chats keep their workspace.
+On **New chat**, choose your workspace, **Local** or **New worktree**, and the branch.
+Send your first message to start. **Local** uses the source checkout (switching to your chosen
+branch); **New worktree** automatically creates an isolated checkout on a generated branch
+from the selected source branch and starts the chat there. There is no checkout picker or
+separate create/select step. Existing chats keep their workspace.
 
 The base reference is local: fetch remote updates with your agent before using an updated
 remote-tracking branch. Uncommitted changes in the original checkout are not copied.
 Setup scripts, dependency installation, and copying local environment files remain explicit
 agent tasks.
 
-Managed checkouts appear in this screen after reconnecting or restarting the desktop app.
-Chats retain their checkout path. Multiple chats can use a checkout. A failed or interrupted
-creation can be retried from its entry without creating a second checkout.
+Chats retain their checkout path across reconnects and desktop restarts. Retrying interrupted
+chat creation reuses the same checkout and chat submission ID. The original workspace stays
+selected for subsequent new chats; generated paths are never installed as the workspace default.
 
-**Remove checkout** removes only the managed working directory and Git worktree registration.
+The bridge's `bridge/worktrees/remove` maintenance RPC removes only the working directory and Git registration.
 The branch and its commits are kept. Delete chats using that checkout first; this also prevents
 queued work, scheduled prompts, or a live agent from losing its directory. Git refuses removal
 of locked worktrees, and DapperCode refuses modified, untracked, or ignored files. It never
@@ -27,7 +28,17 @@ The desktop's per-workspace central state directory holds `managed-worktrees.jso
 must set `BRIDGE_STATE_DIR` outside their repositories. The path policy grants access to this
 worker's checkout directory, not to sibling profiles or the rest of its state directory.
 
-Protocol v2 adds the optional `supports.managedWorktrees` capability and:
+The bridge must be updated before mobile. The new-chat flow directly calls the current contract
+without a capability probe or older-bridge fallback.
+
+`bridge/thread/create` accepts `workspace: { mode: 'local' | 'worktree', branch: string }` alongside
+`submissionId` and `threadStart`. `HEAD` means the current branch. The bridge prepares the checkout
+before starting the agent and returns the actual checkout in `thread.cwd`. Worktree IDs and branch
+names are derived from the thread submission ID; retries reuse the saved base commit. Cached chat
+creation returns before any checkout mutation. Existing clients omitting `workspace` retain the
+ordinary thread creation behavior.
+
+Protocol v2 also exposes `supports.managedWorktrees` and these maintenance RPCs:
 
 - `bridge/worktrees/list` → `{ worktrees: ManagedWorktree[] }` (excludes removed entries).
 - `bridge/worktrees/create` accepts `{ id, cwd, branch, baseRef }` and returns `{ worktree }`.
@@ -37,7 +48,6 @@ Protocol v2 adds the optional `supports.managedWorktrees` capability and:
 
 Each entry includes `id`, `repository`, `path`, `branch`, `baseRef`, `baseCommit`, and `status`
 (`creating`, `ready`, or the internal tombstone `removed`). Removed IDs cannot be reused.
-An older bridge shows an update message instead of enabling creation.
 
 ## Validation
 
@@ -47,7 +57,7 @@ For authenticated RPC, persistence, and removal checks against isolated real Git
 ```bash
 pnpm run cargo build --locked --manifest-path services/rust-bridge/Cargo.toml --features e2e-agent --bins
 node .agents/skills/local-e2e-validation/scripts/run.mjs \
-  --evidence /absolute/path/to/new-evidence.jsonl scripts/validate-managed-worktrees.mjs
+  --evidence /absolute/path/to/new-evidence.jsonl e2e/scenarios/managed-worktrees.mjs
 ```
 
 Use a new evidence filename for every invocation. The runner cleans up its own processes,

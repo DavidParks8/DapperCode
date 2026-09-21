@@ -19,6 +19,5 @@ export interface WorkspacePickerProps {
   actionDescription?: string | null;
   actionDisabled?: boolean;
   onActionPress?: (path: string | null) => void;
-  onManageWorktrees?: (path: string) => void;
   onClose: () => void;
 }

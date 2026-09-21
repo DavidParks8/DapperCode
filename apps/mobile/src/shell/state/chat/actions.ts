@@ -76,6 +76,7 @@ function linkedPendingChat(pendingChat: Chat, linked: InterruptedChatCreation): 
       agentId: linked.agentId ?? null,
       cwd: linked.cwd ?? null,
       createdChatId: linked.createdChatId,
+      workspace: linked.workspace,
     },
   };
 }

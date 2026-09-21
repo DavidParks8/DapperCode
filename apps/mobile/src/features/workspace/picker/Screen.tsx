@@ -1,8 +1,5 @@
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useEffect } from 'react';
-import { router } from 'expo-router';
-import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
-import { routes } from '@shell/navigation/routes';
 
 import { WorkspacePicker } from './Picker';
 import { defaultStartCwdAtom } from '@shell/state/appState/settings';
@@ -35,7 +32,6 @@ import {
 import { normalizeWorkspacePath } from '../../chat/helpers/helpers';
 
 export function WorkspacePickerScreen() {
-  const profile = useAtomValue(activeBridgeProfileAtom);
   const purpose = useAtomValue(workspacePickerPurposeAtom);
   const bridgeRoot = useAtomValue(workspaceBridgeRootAtom);
   const recentWorkspaces = useAtomValue(workspaceRootsAtom);
@@ -92,11 +88,6 @@ export function WorkspacePickerScreen() {
       actionLabel={isGitCheckoutDestination ? null : 'Clone Repo'}
       actionDescription={isGitCheckoutDestination ? null : 'Into this workspace'}
       onActionPress={isGitCheckoutDestination ? undefined : (path) => openGitCheckout(path)}
-      onManageWorktrees={
-        !isGitCheckoutDestination && profile
-          ? (path) => router.push(routes.worktrees(profile.id, 'new', path))
-          : undefined
-      }
       onClose={() => closePicker()}
     />
   );

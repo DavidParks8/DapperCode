@@ -146,6 +146,12 @@ mod tests {
         ))
         .expect("v2 contract fixture parses");
         assert_eq!(manifest["protocolVersion"], crate::BRIDGE_PROTOCOL_VERSION);
+        let creation: crate::BridgeThreadCreateRequest =
+            serde_json::from_value(manifest["fixtures"]["worktreeChatCreate"].clone()).unwrap();
+        assert!(matches!(
+            creation.workspace.unwrap().mode,
+            crate::worktrees::ChatWorkspaceMode::Worktree
+        ));
         let worktree: crate::worktrees::ManagedWorktree = serde_json::from_value(
             manifest["fixtures"]["managedWorktrees"]["worktrees"][0].clone(),
         )

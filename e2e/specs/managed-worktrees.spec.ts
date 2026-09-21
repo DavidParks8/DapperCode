@@ -9,9 +9,7 @@ import { readRect } from '../layout/geometry.ts';
 
 const execute = promisify(execFile);
 
-test('creates and selects a managed checkout with usable phone and tablet controls', async ({
-  app,
-}) => {
+test('automatically creates a worktree on send from the selected branch', async ({ app }) => {
   const { bridge, page } = app;
   const roots = (await bridge.request('bridge/workspaces/list', {})) as { bridgeRoot: string };
   const cwd = roots.bridgeRoot;
@@ -31,44 +29,52 @@ test('creates and selects a managed checkout with usable phone and tablet contro
     '-m',
     'Initial',
   ]);
-  await page.goto(
-    new URL(
-      `/profiles/harness-profile/chats/new/worktrees?cwd=${encodeURIComponent(cwd)}`,
-      page.url(),
-    ).href,
-  );
-  await expect(selectors.worktreesScreen(page)).toBeVisible();
-  await expect(selectors.worktreeBranch(page)).toBeEditable();
-  await expect(selectors.worktreeCreate(page)).toBeDisabled();
-  await selectors.worktreeBranch(page).fill('feature/mobile-task');
-  await selectors.worktreeBase(page).fill('main');
-  const branch = await readRect(selectors.worktreeBranch(page));
-  const base = await readRect(selectors.worktreeBase(page));
-  const create = await readRect(selectors.worktreeCreate(page));
+  await execute('git', ['-C', cwd, 'branch', 'feature/source']);
+  await page.goto(new URL('/profiles/harness-profile/chats/new', page.url()).href);
+  await expect(selectors.newChatWorkspace(page)).toBeVisible();
+  await expect(selectors.newChatLocal(page)).toBeChecked();
+  await selectors.newChatWorktree(page).click();
+  await expect(selectors.newChatWorktree(page)).toBeChecked();
+  await selectors.newChatBranch(page).click();
+  await selectors.branchOption(page, 'feature/source').click();
+  await expect(selectors.newChatBranch(page)).toContainText('feature/source');
+  const branch = await readRect(selectors.newChatBranch(page));
+  const local = await readRect(selectors.newChatLocal(page));
+  const isolated = await readRect(selectors.newChatWorktree(page));
   const viewport = page.viewportSize()!;
-  for (const rect of [branch, base, create]) {
+  for (const rect of [branch, local, isolated]) {
     expect(rect.height).toBeGreaterThanOrEqual(44);
     expect(rect.left).toBeGreaterThanOrEqual(0);
     expect(rect.right).toBeLessThanOrEqual(viewport.width);
   }
-  expect(base.top).toBeGreaterThanOrEqual(branch.bottom);
-  expect(create.top).toBeGreaterThanOrEqual(base.bottom);
-  await selectors.worktreeCreate(page).click();
-  await expect(selectors.worktreeUse(page, 'feature/mobile-task')).toBeEnabled();
-  const listed = (await bridge.request('bridge/worktrees/list', {})) as {
-    worktrees: { path: string; status: string }[];
-  };
-  expect(listed.worktrees).toHaveLength(1);
-  expect(listed.worktrees[0]?.status).toBe('ready');
-  await selectors.worktreeUse(page, 'feature/mobile-task').click();
-  await expect(page).toHaveURL(/\/chats\/new$/);
-  await expect(selectors.composerInput(page)).toBeVisible();
-  // Selection is also verified by the real chat's cwd after the user submits below.
+  expect(branch.top).toBeGreaterThanOrEqual(local.bottom);
+  expect(isolated.left).toBeGreaterThanOrEqual(local.right);
+  expect(await bridge.request('bridge/worktrees/list', {})).toEqual({ worktrees: [] });
   await selectors.composerInput(page).fill('Work in the isolated checkout');
   await selectors.composerSend(page).click();
   await expect(page).not.toHaveURL(/\/chats\/new$/);
-  const chats = (await bridge.request('thread/list', { limit: 100 })) as {
-    data: { cwd: string }[];
+  await expect
+    .poll(
+      async () =>
+        ((await bridge.request('bridge/worktrees/list', {})) as { worktrees: unknown[] }).worktrees
+          .length,
+    )
+    .toBe(1);
+  const listed = (await bridge.request('bridge/worktrees/list', {})) as {
+    worktrees: { path: string; status: string; baseRef: string }[];
   };
-  expect(chats.data.some((chat) => chat.cwd === listed.worktrees[0]?.path)).toBe(true);
+  expect(listed.worktrees).toHaveLength(1);
+  expect(listed.worktrees[0]?.status).toBe('ready');
+  expect(listed.worktrees[0]?.baseRef).toBe('feature/source');
+  await expect
+    .poll(async () => {
+      const chats = (await bridge.request('thread/list', { limit: 100 })) as {
+        data: { cwd: string }[];
+      };
+      return chats.data.some((chat) => chat.cwd === listed.worktrees[0]?.path);
+    })
+    .toBe(true);
+  expect((await execute('git', ['-C', cwd, 'branch', '--show-current'])).stdout.trim()).toBe(
+    'main',
+  );
 });

@@ -6,10 +6,25 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::{services::GitService, storage::atomic_write_private, BridgeError};
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ChatWorkspace {
+    pub mode: ChatWorkspaceMode,
+    pub branch: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ChatWorkspaceMode {
+    Local,
+    Worktree,
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,6 +63,49 @@ pub(crate) struct WorktreeService {
 }
 
 impl WorktreeService {
+    pub(crate) async fn prepare_chat(
+        &self,
+        submission_id: &str,
+        cwd: Option<&str>,
+        workspace: &ChatWorkspace,
+    ) -> Result<String, BridgeError> {
+        validate_ref(&workspace.branch)?;
+        match workspace.mode {
+            ChatWorkspaceMode::Local => {
+                if workspace.branch == "HEAD" {
+                    return Ok(self
+                        .git
+                        .resolve_workspace(cwd)?
+                        .to_string_lossy()
+                        .into_owned());
+                }
+                let result = self
+                    .git
+                    .switch_branch(workspace.branch.clone(), cwd)
+                    .await?;
+                if !result.switched {
+                    return Err(BridgeError::server(&result.stderr));
+                }
+                Ok(result.cwd)
+            }
+            ChatWorkspaceMode::Worktree => {
+                // The existing thread submission ID owns both checkout and chat across retries.
+                let digest = Sha256::digest(submission_id.as_bytes());
+                let mut bytes = [0u8; 16];
+                bytes.copy_from_slice(&digest[..16]);
+                let id = Uuid::from_bytes(bytes).to_string();
+                let worktree = self
+                    .create(CreateWorktree {
+                        branch: format!("dappercode/{id}"),
+                        id,
+                        cwd: cwd.map(str::to_string),
+                        base_ref: workspace.branch.clone(),
+                    })
+                    .await?;
+                Ok(worktree.path)
+            }
+        }
+    }
     pub(crate) async fn load(git: Arc<GitService>, state_dir: &Path) -> Result<Self, BridgeError> {
         let root = state_dir.join("worktrees");
         tokio::fs::create_dir_all(&root).await.map_err(io_error)?;
@@ -533,6 +591,59 @@ mod tests {
             "source dirty\n"
         );
         assert!(service.create(fixture.request(&id)).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn automatic_chat_workspace_retries_and_local_mode_preserve_the_source() {
+        let fixture = Fixture::new();
+        fixture.git(&fixture.repo, &["branch", "selected"]);
+        let service = fixture.service().await;
+        let workspace = ChatWorkspace {
+            mode: ChatWorkspaceMode::Worktree,
+            branch: "selected".into(),
+        };
+        let cwd = fixture.repo.to_str();
+        let path = service
+            .prepare_chat("submission-one", cwd, &workspace)
+            .await
+            .unwrap();
+        assert_ne!(Path::new(&path), fixture.repo);
+        assert_eq!(
+            fixture
+                .git(&fixture.repo, &["branch", "--show-current"])
+                .trim(),
+            "main"
+        );
+        let service = fixture.service().await;
+        assert_eq!(
+            service
+                .prepare_chat("submission-one", cwd, &workspace)
+                .await
+                .unwrap(),
+            path
+        );
+        assert_eq!(service.list().await.len(), 1);
+        assert_eq!(service.list().await[0].base_ref, "selected");
+        let second = service
+            .prepare_chat("submission-two", cwd, &workspace)
+            .await
+            .unwrap();
+        assert_ne!(path, second);
+        let local = ChatWorkspace {
+            mode: ChatWorkspaceMode::Local,
+            branch: "selected".into(),
+        };
+        assert_eq!(
+            Path::new(&service.prepare_chat("local", cwd, &local).await.unwrap()),
+            fixture.repo.canonicalize().unwrap()
+        );
+        assert_eq!(
+            fixture
+                .git(&fixture.repo, &["branch", "--show-current"])
+                .trim(),
+            "selected"
+        );
+        assert_eq!(service.list().await.len(), 2);
     }
 
     #[tokio::test]

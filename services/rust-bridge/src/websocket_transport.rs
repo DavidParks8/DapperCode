@@ -374,6 +374,7 @@ pub(super) async fn handle_bridge_method(
             Ok(json!({ "worktree": state.worktrees.create(request).await? }))
         }
         "bridge/worktrees/remove" => {
+            let _create_guard = state.thread_create_actor.lock().await;
             let id = params
                 .as_ref()
                 .and_then(|value| value.get("id"))
@@ -681,6 +682,18 @@ pub(super) async fn handle_bridge_method(
                 return Err(BridgeError::server(
                     "thread creation outcome is indeterminate after a worker interruption; refresh the thread list before choosing a new submissionId",
                 ));
+            }
+            if let Some(workspace) = &request.workspace {
+                let cwd = request.thread_start.get("cwd").and_then(Value::as_str);
+                let prepared = state
+                    .worktrees
+                    .prepare_chat(&request.submission_id, cwd, workspace)
+                    .await?;
+                let start = request
+                    .thread_start
+                    .as_object_mut()
+                    .ok_or_else(|| BridgeError::invalid_params("threadStart must be an object"))?;
+                start.insert("cwd".into(), Value::String(prepared));
             }
             request.thread_start =
                 normalize_forwarded_path_params(Some(request.thread_start), &state.path_policy)?

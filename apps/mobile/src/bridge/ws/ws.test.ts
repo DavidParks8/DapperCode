@@ -128,6 +128,12 @@ describe('HostBridgeWsClient', () => {
     });
     expect(manifest.fixtures.capabilities.protocolVersion).toBe(manifest.protocolVersion);
     expect(manifest.fixtures.capabilities.agUiEvents).toBe(true);
+    expect(manifest.fixtures).toMatchObject({
+      worktreeChatCreate: {
+        workspace: { mode: 'worktree', branch: 'main' },
+        threadStart: { cwd: '/workspace/repo' },
+      },
+    });
     expect(manifest.fixtures.capabilities).toMatchObject({ supports: { managedWorktrees: true } });
     expect(manifest.fixtures.notification).toMatchObject({
       protocolVersion: manifest.protocolVersion,
