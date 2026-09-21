@@ -365,6 +365,26 @@ pub(super) async fn handle_bridge_method(
     client_id: u64,
 ) -> Result<Value, BridgeError> {
     match method {
+        "bridge/worktrees/list" => Ok(json!({ "worktrees": state.worktrees.list().await })),
+        "bridge/worktrees/create" => {
+            let request = serde_json::from_value::<crate::worktrees::CreateWorktree>(
+                params.unwrap_or(Value::Null),
+            )
+            .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+            Ok(json!({ "worktree": state.worktrees.create(request).await? }))
+        }
+        "bridge/worktrees/remove" => {
+            let id = params
+                .as_ref()
+                .and_then(|value| value.get("id"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| BridgeError::invalid_params("Worktree id is required"))?;
+            state
+                .backend
+                .remove_managed_worktree(&state.worktrees, id)
+                .await?;
+            Ok(json!({ "removed": true }))
+        }
         "bridge/health/read" => serde_json::to_value(state.bridge_status().await)
             .map_err(|error| BridgeError::server(&error.to_string())),
         "bridge/capabilities/read" => serde_json::to_value(state.bridge_capabilities())

@@ -226,6 +226,7 @@ export function WorkspacePicker(props: WorkspacePickerProps) {
       actionDescription={actionDescription}
       actionDisabled={actionDisabled}
       onActionPress={handleActionPress}
+      onManageWorktrees={props.onManageWorktrees}
       favoriteWorkspaces={favoriteWorkspaces}
       favoritePathSet={favoritePathSet}
       pendingSelectionPath={pendingSelectionPath}

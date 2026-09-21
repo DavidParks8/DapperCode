@@ -4,6 +4,8 @@ import { File } from 'expo-file-system';
 import { normalizeCwd } from '@bridge/client/clientChatListInternals';
 import { readString, toRecord } from '@bridge/mapping/chatMapping';
 import type {
+  CreateManagedWorktree,
+  ManagedWorktree,
   BridgeThreadQueueActionResponse,
   DismissBridgeUiSurfaceResponse,
   GitBranchesResponse,
@@ -33,6 +35,15 @@ import type {
 } from '@bridge/types/types';
 
 export abstract class HostBridgeApiClientBridgeActionsLayer extends HostBridgeApiClientTurnLifecycleLayer {
+  listManagedWorktrees(): Promise<{ worktrees: ManagedWorktree[] }> {
+    return this.ws.request('bridge/worktrees/list');
+  }
+  createManagedWorktree(request: CreateManagedWorktree): Promise<{ worktree: ManagedWorktree }> {
+    return this.ws.request('bridge/worktrees/create', request);
+  }
+  removeManagedWorktree(id: string): Promise<{ removed: boolean }> {
+    return this.ws.request('bridge/worktrees/remove', { id });
+  }
   steerQueuedThreadMessage(
     threadId: string,
     itemId: string,

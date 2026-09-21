@@ -146,6 +146,12 @@ mod tests {
         ))
         .expect("v2 contract fixture parses");
         assert_eq!(manifest["protocolVersion"], crate::BRIDGE_PROTOCOL_VERSION);
+        let worktree: crate::worktrees::ManagedWorktree = serde_json::from_value(
+            manifest["fixtures"]["managedWorktrees"]["worktrees"][0].clone(),
+        )
+        .expect("managed worktree contract");
+        assert_eq!(worktree.status, crate::worktrees::WorktreeStatus::Ready);
+        assert_eq!(worktree.branch, "feature/task");
         let missing = &manifest["fixtures"]["threadReadNotFound"];
         let error = crate::thread_not_found_error(
             missing["data"]["threadId"]

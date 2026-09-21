@@ -114,8 +114,21 @@ describe('HostBridgeWsClient', () => {
 
     expect(manifest.protocolVersion).toBe(HostBridgeWsClient.PROTOCOL_VERSION);
     expect(manifest.bridgeMethods).toContain('bridge/push/presence');
+    expect(manifest.bridgeMethods).toEqual(
+      expect.arrayContaining([
+        'bridge/worktrees/create',
+        'bridge/worktrees/list',
+        'bridge/worktrees/remove',
+      ]),
+    );
+    expect(manifest.fixtures).toMatchObject({
+      managedWorktrees: {
+        worktrees: [{ branch: 'feature/task', baseRef: 'main', status: 'ready' }],
+      },
+    });
     expect(manifest.fixtures.capabilities.protocolVersion).toBe(manifest.protocolVersion);
     expect(manifest.fixtures.capabilities.agUiEvents).toBe(true);
+    expect(manifest.fixtures.capabilities).toMatchObject({ supports: { managedWorktrees: true } });
     expect(manifest.fixtures.notification).toMatchObject({
       protocolVersion: manifest.protocolVersion,
       eventId: 7,

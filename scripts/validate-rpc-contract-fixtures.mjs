@@ -112,6 +112,17 @@ for (const { code, name } of manifest.errors) {
 }
 
 const fixtures = manifest.fixtures;
+const managedWorktree = fixtures.managedWorktrees.worktrees[0];
+if (
+  !managedWorktree.id ||
+  !managedWorktree.path ||
+  !managedWorktree.repository ||
+  managedWorktree.branch !== 'feature/task' ||
+  managedWorktree.baseRef !== 'main' ||
+  managedWorktree.status !== 'ready' ||
+  !/^[a-f0-9]{40}$/.test(managedWorktree.baseCommit)
+)
+  fail('managed worktree fixture');
 if (
   fixtures.threadReadNotFound.code !== -32004 ||
   fixtures.threadReadNotFound.data.error !== 'thread_not_found' ||

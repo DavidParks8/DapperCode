@@ -45,7 +45,10 @@
     "bridge/ui/update",
     "bridge/userInput/list",
     "bridge/userInput/resolve",
-    "bridge/workspaces/list"
+    "bridge/workspaces/list",
+    "bridge/worktrees/create",
+    "bridge/worktrees/list",
+    "bridge/worktrees/remove"
   ],
   "httpEndpoints": [
     {
@@ -103,6 +106,19 @@
     { "code": -32005, "name": "overloaded" }
   ],
   "fixtures": {
+    "managedWorktrees": {
+      "worktrees": [
+        {
+          "id": "00000000-0000-4000-8000-000000000002",
+          "repository": "/workspace/repo",
+          "path": "/app-data/state/worktrees/00000000-0000-4000-8000-000000000002",
+          "branch": "feature/task",
+          "baseRef": "main",
+          "baseCommit": "0123456789012345678901234567890123456789",
+          "status": "ready"
+        }
+      ]
+    },
     "threadReadNotFound": {
       "code": -32004,
       "message": "Thread not found",
@@ -132,12 +148,14 @@
       ],
       "agUiEvents": true,
       "supports": {
+        "managedWorktrees": true,
         "turnSteer": true,
         "threadFork": true,
         "threadDelete": true
       },
       "supportsByAgent": {
         "local-primary": {
+          "managedWorktrees": true,
           "turnSteer": true,
           "threadFork": true,
           "threadDelete": true

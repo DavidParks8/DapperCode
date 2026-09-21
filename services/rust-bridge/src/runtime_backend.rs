@@ -1515,6 +1515,20 @@ pub(super) trait QueueRuntimeDispatcher: Send + Sync {
 }
 
 impl RuntimeBackend {
+    pub(crate) async fn remove_managed_worktree(
+        &self,
+        worktrees: &crate::worktrees::WorktreeService,
+        id: &str,
+    ) -> Result<(), BridgeError> {
+        let _workspace = self.manager.workspace_lifecycle.write().await;
+        let path = worktrees.path(id).await?;
+        if self.manager.workspace_has_sessions(&path).await {
+            return Err(BridgeError::invalid_params(
+                "Delete the chats using this worktree before removing it.",
+            ));
+        }
+        worktrees.remove(id).await
+    }
     #[cfg(test)]
     pub(crate) async fn from_manager_for_test(
         manager: Arc<AgentManager>,

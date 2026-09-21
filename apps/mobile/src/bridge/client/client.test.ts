@@ -61,6 +61,22 @@ function makeSnapshot(overrides: Partial<RawAcpSnapshot> = {}): RawAcpSnapshot {
 }
 
 describe('HostBridgeApiClient', () => {
+  it('uses the managed worktree RPC contract for create, list, and removal', async () => {
+    const ws = createWsMock();
+    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
+    const request = {
+      id: '00000000-0000-4000-8000-000000000002',
+      cwd: '/repo',
+      branch: 'feature/task',
+      baseRef: 'main',
+    };
+    await client.createManagedWorktree(request);
+    expect(ws.request).toHaveBeenLastCalledWith('bridge/worktrees/create', request);
+    await client.listManagedWorktrees();
+    expect(ws.request).toHaveBeenLastCalledWith('bridge/worktrees/list');
+    await client.removeManagedWorktree(request.id);
+    expect(ws.request).toHaveBeenLastCalledWith('bridge/worktrees/remove', { id: request.id });
+  });
   it('listChats() maps app-server list response', async () => {
     const ws = createWsMock();
     ws.request.mockResolvedValue({

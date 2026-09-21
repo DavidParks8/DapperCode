@@ -51,7 +51,7 @@ impl GitService {
         self.path_policy.resolve_cwd(raw_cwd)
     }
 
-    async fn resolve_and_validate_git_path(
+    pub(crate) async fn resolve_and_validate_git_path(
         &self,
         raw_cwd: Option<&str>,
         require_repository: bool,
@@ -673,7 +673,7 @@ impl GitService {
         Ok(result.stdout)
     }
 
-    async fn run_git_stdout(
+    pub(crate) async fn run_git_stdout(
         &self,
         repo_path: &Path,
         command: &[&str],

@@ -1145,6 +1145,8 @@ pub struct AgentManager {
     subagent_generations: Mutex<HashMap<String, SubagentGenerationState>>,
     workspace_root: PathBuf,
     allow_outside_root_cwd: bool,
+    managed_worktrees_root: Option<PathBuf>,
+    pub(crate) workspace_lifecycle: tokio::sync::RwLock<()>,
     events: CanonicalEventSender,
     event_receiver: Mutex<Option<CanonicalEventReceiver>>,
     agent_messaging: OnceLock<AgentMessagingMcpConfig>,
@@ -1453,6 +1455,11 @@ impl AgentManager {
         let agent_message_journal_path = session_index_path
             .as_ref()
             .map(|path| path.with_file_name(AGENT_MESSAGE_JOURNAL_FILE));
+        let managed_worktrees_root = session_index_path
+            .as_ref()
+            .and_then(|path| path.parent())
+            .and_then(|path| path.canonicalize().ok())
+            .map(|path| path.join("worktrees"));
         let session_index = DurableSessionIndex::load(session_index_path).await;
         let agent_message_journal =
             DurableAgentMessageJournal::load(agent_message_journal_path).await;
@@ -1467,6 +1474,8 @@ impl AgentManager {
             subagent_generations: Mutex::new(HashMap::new()),
             workspace_root,
             allow_outside_root_cwd,
+            managed_worktrees_root,
+            workspace_lifecycle: tokio::sync::RwLock::new(()),
             events,
             event_receiver: Mutex::new(Some(event_receiver)),
             agent_messaging: OnceLock::new(),
@@ -1687,6 +1696,7 @@ impl AgentManager {
         approval_policy: ApprovalPolicy,
         cancellation: RequestCancellation,
     ) -> Result<ManagedSession, AgentOperationFailure> {
+        let _workspace = self.workspace_lifecycle.read().await;
         let cwd = self
             .validate_cwd(&request.cwd)
             .map_err(AgentOperationFailure::definitive)?;
@@ -1739,6 +1749,7 @@ impl AgentManager {
         limit: usize,
         agent_filter: Option<&str>,
     ) -> Result<ManagedSessionPage, AgentManagerError> {
+        let _workspace = self.workspace_lifecycle.read().await;
         self.flush_pending_durable_sessions().await?;
         let offset = decode_cursor(cursor)?;
         let limit = limit.clamp(1, MAX_PAGE_SIZE);
@@ -1958,6 +1969,7 @@ impl AgentManager {
         cwd: impl Into<PathBuf>,
         approval_policy: ApprovalPolicy,
     ) -> Result<ManagedSession, AgentManagerError> {
+        let _workspace = self.workspace_lifecycle.read().await;
         let (identity, session_id, connection) = self.route_thread(thread_id)?;
         let cwd = self.validate_cwd(&cwd.into())?;
         if !connection.negotiated().supports_session_resume()
@@ -4319,7 +4331,12 @@ impl AgentManager {
             ))
         })?;
         if !canonical.is_dir()
-            || (!self.allow_outside_root_cwd && !canonical.starts_with(&self.workspace_root))
+            || (!self.allow_outside_root_cwd
+                && !canonical.starts_with(&self.workspace_root)
+                && !self
+                    .managed_worktrees_root
+                    .as_ref()
+                    .is_some_and(|root| canonical.starts_with(root)))
         {
             return Err(AgentManagerError::SessionIndex(
                 "session workspace is outside the allowed root or is not a directory".to_string(),
@@ -4331,6 +4348,21 @@ impl AgentManager {
             ));
         }
         Ok(canonical)
+    }
+
+    pub(crate) async fn workspace_has_sessions(&self, path: &Path) -> bool {
+        self.session_index
+            .lock()
+            .await
+            .entries
+            .iter()
+            .any(|entry| entry.cwd.starts_with(path))
+            || self
+                .pending_durable_sessions
+                .lock()
+                .await
+                .values()
+                .any(|entry| entry.cwd.starts_with(path))
     }
 
     async fn read_known_session(
