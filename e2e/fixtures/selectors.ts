@@ -8,6 +8,12 @@ import type { Locator, Page } from '@playwright/test';
  * is used instead — those are stable because they are user-facing accessibility contracts.
  */
 export const selectors = {
+  newChatWorkspace: (page: Page): Locator => page.getByTestId('new-chat-workspace'),
+  newChatLocal: (page: Page): Locator => page.getByRole('radio', { name: 'Local', exact: true }),
+  newChatWorktree: (page: Page): Locator =>
+    page.getByRole('radio', { name: 'New worktree', exact: true }),
+  newChatBranch: (page: Page): Locator => page.getByTestId('new-chat-branch'),
+  branchOption: (page: Page, branch: string): Locator => page.getByText(branch, { exact: true }),
   drawer: (page: Page): Locator => page.getByTestId('drawer-glass-surface'),
   drawerChatRow: (page: Page, chatId: string): Locator =>
     page.getByTestId(`drawer-chat-row-${chatId}`),

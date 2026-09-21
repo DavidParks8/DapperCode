@@ -190,6 +190,7 @@ export abstract class HostBridgeApiClientWorkspaceAndChatReadLayer extends HostB
     const requestedApprovalPolicy = normalizeApprovalPolicy(body.approvalPolicy) ?? 'untrusted';
     const started = await this.ws.request<BridgeThreadCreateResponse>('bridge/thread/create', {
       submissionId,
+      workspace: body.workspace,
       threadStart: {
         agentId: requestedAgentId ?? undefined,
         model: requestedModel ?? null,

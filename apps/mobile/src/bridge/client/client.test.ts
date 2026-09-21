@@ -61,6 +61,43 @@ function makeSnapshot(overrides: Partial<RawAcpSnapshot> = {}): RawAcpSnapshot {
 }
 
 describe('HostBridgeApiClient', () => {
+  it('creates an automatic worktree chat through the thread submission without a capability probe', async () => {
+    const ws = createWsMock();
+    ws.request.mockResolvedValue({
+      thread: { id: 'isolated', cwd: '/central/worktrees/task', turns: [] },
+    });
+    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
+    const result = await client.createChatIdempotent(
+      { cwd: '/repo', workspace: { mode: 'worktree', branch: 'main' } },
+      'submission-task',
+    );
+    expect(ws.request).toHaveBeenCalledTimes(1);
+    expect(ws.request).toHaveBeenCalledWith(
+      'bridge/thread/create',
+      expect.objectContaining({
+        submissionId: 'submission-task',
+        workspace: { mode: 'worktree', branch: 'main' },
+        threadStart: expect.objectContaining({ cwd: '/repo' }),
+      }),
+    );
+    expect(result.cwd).toBe('/central/worktrees/task');
+  });
+  it('uses the managed worktree RPC contract for create, list, and removal', async () => {
+    const ws = createWsMock();
+    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
+    const request = {
+      id: '00000000-0000-4000-8000-000000000002',
+      cwd: '/repo',
+      branch: 'feature/task',
+      baseRef: 'main',
+    };
+    await client.createManagedWorktree(request);
+    expect(ws.request).toHaveBeenLastCalledWith('bridge/worktrees/create', request);
+    await client.listManagedWorktrees();
+    expect(ws.request).toHaveBeenLastCalledWith('bridge/worktrees/list');
+    await client.removeManagedWorktree(request.id);
+    expect(ws.request).toHaveBeenLastCalledWith('bridge/worktrees/remove', { id: request.id });
+  });
   it('listChats() maps app-server list response', async () => {
     const ws = createWsMock();
     ws.request.mockResolvedValue({

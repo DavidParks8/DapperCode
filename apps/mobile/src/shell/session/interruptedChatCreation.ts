@@ -1,5 +1,5 @@
 import { getMessageText } from '@bridge/messages';
-import type { Chat } from '@bridge/types/types';
+import type { Chat, ChatWorkspace } from '@bridge/types/types';
 
 export interface InterruptedChatCreation {
   submissionId: string;
@@ -11,6 +11,7 @@ export interface InterruptedChatCreation {
   agentId: string | undefined;
   hadAttachments: boolean;
   createdChatId?: string;
+  workspace?: ChatWorkspace;
 }
 
 export function isPendingChatId(id: string | null | undefined): boolean {
@@ -53,6 +54,7 @@ export function readInterruptedChatCreation(chat: Chat | null): InterruptedChatC
     agentId: readPendingAgentId(chat),
     hadAttachments: metadata?.hadAttachments ?? hadLegacyAttachments,
     createdChatId: metadata?.createdChatId,
+    workspace: metadata?.workspace,
   };
 }
 

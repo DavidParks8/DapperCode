@@ -17,6 +17,7 @@ pub(super) struct AppState {
     pub(super) operation_dedupe_dirty: Arc<std::sync::atomic::AtomicBool>,
     pub(super) thread_list_streams: Arc<Mutex<HashMap<String, Arc<ThreadListStreamCancellation>>>>,
     pub(super) git: Arc<GitService>,
+    pub(super) worktrees: Arc<crate::worktrees::WorktreeService>,
     pub(super) preview: Arc<BrowserPreviewService>,
     pub(super) push: Arc<PushService>,
     pub(super) ws_global_in_flight: Arc<Semaphore>,
@@ -168,6 +169,7 @@ pub(super) struct BridgeCapabilitySupport {
     pub(super) account_rate_limits: bool,
     pub(super) browser_preview: bool,
     pub(super) generic_ui_surface: bool,
+    pub(super) managed_worktrees: bool,
 }
 
 impl AppState {
@@ -216,9 +218,11 @@ impl AppState {
         capabilities.ag_ui_events = true;
         capabilities.supports.browser_preview = self.preview.is_available();
         capabilities.supports.generic_ui_surface = true;
+        capabilities.supports.managed_worktrees = true;
         for supports in capabilities.supports_by_agent.values_mut() {
             supports.browser_preview = capabilities.supports.browser_preview;
             supports.generic_ui_surface = true;
+            supports.managed_worktrees = true;
         }
 
         capabilities

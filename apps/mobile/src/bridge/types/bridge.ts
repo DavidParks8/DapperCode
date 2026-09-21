@@ -183,6 +183,7 @@ export interface BridgeCapabilitySupport {
   fastMode?: boolean;
   browserPreview: boolean;
   genericUiSurface: boolean;
+  managedWorktrees?: boolean;
 }
 
 export interface BrowserPreviewSession {

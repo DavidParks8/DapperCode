@@ -690,6 +690,8 @@ pub(super) struct DismissBridgeUiSurfaceRequest {
 pub(super) struct BridgeThreadCreateRequest {
     pub(super) submission_id: String,
     pub(super) thread_start: Value,
+    #[serde(default)]
+    pub(super) workspace: Option<crate::worktrees::ChatWorkspace>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -27,6 +27,7 @@ pub struct PathPolicy {
     allow_outside_root: bool,
     root_handle: SecureRootHandle,
     attachments_handle: SecureRootHandle,
+    managed_worktrees: Option<(PathBuf, SecureRootHandle)>,
 }
 
 #[derive(Debug)]
@@ -104,7 +105,19 @@ impl PathPolicy {
             allow_outside_root,
             root_handle: roots.root_handle,
             attachments_handle: roots.attachments_handle,
+            managed_worktrees: None,
         })
+    }
+
+    /// Adds the bridge-owned checkout directory, never the surrounding state directory.
+    pub fn with_managed_worktrees(mut self, directory: PathBuf) -> Result<Self, String> {
+        let roots = platform::initialize_secure_roots(
+            &self.root,
+            Some(&directory),
+            std::ffi::OsStr::new(DEFAULT_ATTACHMENTS_DIR_NAME),
+        )?;
+        self.managed_worktrees = Some((roots.attachments_root, roots.attachments_handle));
+        Ok(self)
     }
 
     pub fn root(&self) -> &Path {
@@ -295,6 +308,12 @@ impl PathPolicy {
             return Err(BridgeError::invalid_params("path must not be empty"));
         }
         let requested = Path::new(trimmed);
+        if let Some((root, handle)) = &self.managed_worktrees {
+            if let Some(relative) = platform::relative_beneath(requested, root) {
+                validate_relative_components(&relative)?;
+                return Ok((root, handle, relative));
+            }
+        }
         let (base_root, base_handle, relative) = if requested.is_absolute() {
             if let Some(relative) = platform::relative_beneath(requested, &self.attachments_root) {
                 (
@@ -321,7 +340,13 @@ impl PathPolicy {
     }
 
     pub fn parent_for_browsing(&self, path: &Path) -> Option<PathBuf> {
-        if !self.allow_outside_root && path == self.root {
+        if !self.allow_outside_root
+            && (path == self.root
+                || self
+                    .managed_worktrees
+                    .as_ref()
+                    .is_some_and(|(root, _)| path.parent() == Some(root.as_path()) || path == root))
+        {
             return None;
         }
         path.parent().map(Path::to_path_buf)
@@ -332,6 +357,13 @@ impl PathPolicy {
             return Ok(());
         }
         if canonical.starts_with(&self.root) || canonical.starts_with(&self.attachments_root) {
+            return Ok(());
+        }
+        if self
+            .managed_worktrees
+            .as_ref()
+            .is_some_and(|(root, _)| canonical.starts_with(root))
+        {
             return Ok(());
         }
         Err(BridgeError::invalid_params(

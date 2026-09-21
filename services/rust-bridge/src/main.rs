@@ -86,6 +86,7 @@ mod services;
 #[cfg(test)]
 mod source_policy;
 mod storage;
+mod worktrees;
 
 use attachments::{
     infer_image_content_type_from_path, save_multipart_attachment, ATTACHMENT_MULTIPART_MAX_BYTES,
@@ -188,11 +189,17 @@ async fn main() {
             config.allow_outside_root_cwd,
             Some(config.attachments_dir.clone()),
         )
+        .and_then(|policy| policy.with_managed_worktrees(config.state_dir.join("worktrees")))
         .expect("validated bridge path policy"),
     );
 
     let terminal = Arc::new(TerminalService::new(path_policy.clone()));
     let git = Arc::new(GitService::new(terminal.clone(), path_policy.clone()));
+    let worktrees = Arc::new(
+        worktrees::WorktreeService::load(git.clone(), &config.state_dir)
+            .await
+            .expect("valid managed worktree registry"),
+    );
     let preview = Arc::new(BrowserPreviewService::new(
         config.port,
         config.preview_port,
@@ -300,6 +307,7 @@ async fn main() {
         operation_dedupe_dirty: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         thread_list_streams: Arc::new(Mutex::new(HashMap::new())),
         git,
+        worktrees,
         preview,
         push,
         ws_global_in_flight: Arc::new(Semaphore::new(config.ws_limits.global_in_flight)),

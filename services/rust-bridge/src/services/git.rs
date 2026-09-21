@@ -47,11 +47,15 @@ impl GitService {
         self
     }
 
-    fn resolve_repo_path(&self, raw_cwd: Option<&str>) -> Result<PathBuf, BridgeError> {
+    pub(crate) fn resolve_workspace(&self, raw_cwd: Option<&str>) -> Result<PathBuf, BridgeError> {
         self.path_policy.resolve_cwd(raw_cwd)
     }
 
-    async fn resolve_and_validate_git_path(
+    fn resolve_repo_path(&self, raw_cwd: Option<&str>) -> Result<PathBuf, BridgeError> {
+        self.resolve_workspace(raw_cwd)
+    }
+
+    pub(crate) async fn resolve_and_validate_git_path(
         &self,
         raw_cwd: Option<&str>,
         require_repository: bool,
@@ -635,7 +639,7 @@ impl GitService {
         Ok(result.stdout)
     }
 
-    async fn run_git_stdout(
+    pub(crate) async fn run_git_stdout(
         &self,
         repo_path: &Path,
         command: &[&str],

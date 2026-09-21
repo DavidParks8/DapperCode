@@ -15,6 +15,7 @@ import {
   selectedEffortAtom,
 } from '../state/models';
 import { activityAtom } from '../state/composer';
+import { newChatWorkspaceAtom } from '../../workspace/state/newChatWorkspace';
 import { interruptedChatCreationAtom } from '@shell/state/chat/atoms';
 import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
 import { interruptedCreationRetryId } from '@shell/session/interruptedChatCreation';
@@ -117,6 +118,20 @@ function createDraftContent(
   const draftSnapshot = draftController.snapshot();
   const content = draftSnapshot.value.trim();
   return !draftController.restoring && content ? { draftSnapshot, content } : null;
+}
+
+function prepareWorkspace(
+  store: MainScreenChatCreationFlowContext['store'],
+  optimisticChat: Chat,
+  interrupted: InterruptedChatCreation | null,
+  retryId: string | undefined,
+) {
+  const workspace =
+    retryId && interrupted?.workspace ? interrupted.workspace : store.get(newChatWorkspaceAtom);
+  if (optimisticChat.localPendingCreation) {
+    optimisticChat.localPendingCreation.workspace = workspace;
+  }
+  return workspace;
 }
 
 export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlowContext) {
@@ -235,6 +250,7 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
       submissionController,
       interruptedSubmissionId,
     });
+    const workspace = prepareWorkspace(store, optimisticChat, interrupted, interruptedSubmissionId);
 
     attachmentController.beginSubmission();
     clearSubmissionComposer(draftController, submissionController, submission);
@@ -289,6 +305,7 @@ export function useMainScreenChatCreationFlow(context: MainScreenChatCreationFlo
       const updated = await turnExecutionController.createAndStart({
         submissionId: submission.id,
         create: {
+          workspace,
           agentId: activeAgentId ?? undefined,
           cwd: preferredStartCwd ?? undefined,
           model: activeModelId ?? undefined,

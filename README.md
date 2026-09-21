@@ -161,6 +161,7 @@ workflow. There is no package-registry publication workflow for the bridge.
 - [Realtime streaming limitations](docs/realtime-streaming-limitations.md)
 - [Push notifications](docs/push-notifications.md)
 - [Browser preview limitations](docs/browser-preview-limitations.md)
+- [Managed worktrees](docs/managed-worktrees.md)
 - [Privacy policy](docs/privacy-policy.md)
 - [Terms of service](docs/terms-of-service.md)
 - [Security policy](SECURITY.md)

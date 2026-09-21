@@ -365,6 +365,27 @@ pub(super) async fn handle_bridge_method(
     client_id: u64,
 ) -> Result<Value, BridgeError> {
     match method {
+        "bridge/worktrees/list" => Ok(json!({ "worktrees": state.worktrees.list().await })),
+        "bridge/worktrees/create" => {
+            let request = serde_json::from_value::<crate::worktrees::CreateWorktree>(
+                params.unwrap_or(Value::Null),
+            )
+            .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+            Ok(json!({ "worktree": state.worktrees.create(request).await? }))
+        }
+        "bridge/worktrees/remove" => {
+            let _create_guard = state.thread_create_actor.lock().await;
+            let id = params
+                .as_ref()
+                .and_then(|value| value.get("id"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| BridgeError::invalid_params("Worktree id is required"))?;
+            state
+                .backend
+                .remove_managed_worktree(&state.worktrees, id)
+                .await?;
+            Ok(json!({ "removed": true }))
+        }
         "bridge/health/read" => serde_json::to_value(state.bridge_status().await)
             .map_err(|error| BridgeError::server(&error.to_string())),
         "bridge/capabilities/read" => serde_json::to_value(state.bridge_capabilities())
@@ -661,6 +682,18 @@ pub(super) async fn handle_bridge_method(
                 return Err(BridgeError::server(
                     "thread creation outcome is indeterminate after a worker interruption; refresh the thread list before choosing a new submissionId",
                 ));
+            }
+            if let Some(workspace) = &request.workspace {
+                let cwd = request.thread_start.get("cwd").and_then(Value::as_str);
+                let prepared = state
+                    .worktrees
+                    .prepare_chat(&request.submission_id, cwd, workspace)
+                    .await?;
+                let start = request
+                    .thread_start
+                    .as_object_mut()
+                    .ok_or_else(|| BridgeError::invalid_params("threadStart must be an object"))?;
+                start.insert("cwd".into(), Value::String(prepared));
             }
             request.thread_start =
                 normalize_forwarded_path_params(Some(request.thread_start), &state.path_policy)?
