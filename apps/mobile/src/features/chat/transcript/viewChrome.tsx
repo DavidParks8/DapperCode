@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { Dispatch, ReactElement, ReactNode, RefObject, SetStateAction } from 'react';
-import { Pressable, Text, type FlatList } from 'react-native';
+import { Pressable, Text, View, type FlatList } from 'react-native';
 import Animated, { ReduceMotion, ZoomIn, ZoomOut, type SharedValue } from 'react-native-reanimated';
 
 import { TABLET_LAYOUT_MIN_WIDTH } from '@shell/boot/appConstants';
@@ -13,8 +13,8 @@ import {
   CHAT_SCROLL_RAIL_REVEAL_MARGIN,
   type collectUserMessageAnchors,
 } from './scrollRail/geometry';
-import type { useAppTheme } from '@shared/theme';
-import type { AutoScrollState } from '../helpers/helpers';
+import { useAppTheme } from '@shared/theme';
+import { LARGE_CHAT_MESSAGE_COUNT_THRESHOLD, type AutoScrollState } from '../helpers/helpers';
 import type { createStyles } from '../styles/styles';
 import type { TranscriptDisplayItem } from './messages';
 import type { TranscriptContinuationState } from './controllers/continuationController';
@@ -27,15 +27,28 @@ import { TranscriptActivitySlot, type useCollapsibleActivity } from './Transcrip
 
 export const JUMP_TO_LATEST_VISIBLE_SIZE = { width: 48, height: 48 };
 
+export function TranscriptHistoryEdge() {
+  return <View collapsable={false} />;
+}
+
+// Keep spacing inside measured cells: a container gap makes virtual spacers underestimate lengths.
+export function TranscriptItemSeparator() {
+  const theme = useAppTheme();
+  return <View style={{ height: theme.spacing.xl }} />;
+}
+
 export const resolveResetRailActiveIndex = (count: number) => Math.max(-1, count - 1);
 export const resolveRailRestingActiveIndex = (activeIndex: number, count: number) =>
   activeIndex >= 0 ? activeIndex : resolveResetRailActiveIndex(count);
-export const resolveListBatchingConfig = (count: number, isLarge: boolean) => ({
-  initialNumToRender: Math.min(count, isLarge ? 18 : 16),
-  maxToRenderPerBatch: Math.min(count, isLarge ? 12 : 10),
-  updateCellsBatchingPeriod: isLarge ? 32 : undefined,
-  windowSize: isLarge ? 13 : 11,
-});
+export const resolveListBatchingConfig = (count: number, messageCount: number) => {
+  const isLarge = messageCount >= LARGE_CHAT_MESSAGE_COUNT_THRESHOLD;
+  return {
+    initialNumToRender: Math.min(count, isLarge ? 18 : 16),
+    maxToRenderPerBatch: Math.min(count, isLarge ? 12 : 10),
+    updateCellsBatchingPeriod: isLarge ? 32 : undefined,
+    windowSize: isLarge ? 13 : 11,
+  };
+};
 export function renderHistoryRecovery(
   chat: Chat,
   presentation: ReturnType<typeof useCollapsibleActivity>,
@@ -60,12 +73,11 @@ export function renderHistoryRecovery(
         testID="chat-history-recovery"
         onPress={onRetry}
         accessibilityRole="button"
-        accessibilityLabel="Retry loading chat history"
+        accessibilityLabel="Fast forwarding"
+        accessibilityHint="Chat history is catching up automatically. Double tap to retry now."
         style={{ minHeight: 48, justifyContent: 'center' }}
       >
-        <Text style={styles.inlineChoiceHint} accessibilityRole="alert">
-          Chat history could not be restored. Retrying automatically. Tap to retry now.
-        </Text>
+        <Text style={styles.inlineChoiceHint}>Fast forwarding...</Text>
       </Pressable>
     </>
   );

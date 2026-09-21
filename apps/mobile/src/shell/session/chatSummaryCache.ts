@@ -1,4 +1,6 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { File, Paths } from 'expo-file-system';
+import { Platform } from 'react-native';
+import { deleteFileIfPresent, ensureDirectory, writeFile } from '@shared/filesystem';
 
 import type { ChatSummary } from '@bridge/types/types';
 import {
@@ -251,7 +253,7 @@ export function deleteChatSummaryCache(profileId: string): Promise<void> {
   }
   return enqueue(path, async () => {
     try {
-      await FileSystem.deleteAsync(path, { idempotent: true });
+      await deleteFileIfPresent(new File(path));
     } catch {
       // Cache cleanup is best effort.
     }
@@ -260,12 +262,12 @@ export function deleteChatSummaryCache(profileId: string): Promise<void> {
 
 export function getChatSummaryCachePath(
   profileId: string,
-  base = FileSystem.documentDirectory,
+  base: string | null = Platform.OS === 'web' ? null : Paths.document.uri,
 ): string | null {
   if (typeof base !== 'string' || !base || !profileId.trim()) {
     return null;
   }
-  return `${base}dappercode-chat-cache/${encodeURIComponent(profileId)}/summaries.json`;
+  return `${base.replace(/\/$/, '')}/dappercode-chat-cache/${encodeURIComponent(profileId)}/summaries.json`;
 }
 
 function parseCurrentCache(
@@ -372,16 +374,16 @@ function boundChatSummaryCache(cache: ChatSummaryCache): ChatSummaryCache {
 
 async function readCache(path: string, profileId: string): Promise<ChatSummaryCache> {
   try {
-    return parseChatSummaryCache(await FileSystem.readAsStringAsync(path), profileId);
+    return parseChatSummaryCache(await new File(path).text(), profileId);
   } catch {
     return createEmptyChatSummaryCache(profileId);
   }
 }
 
 async function writeCache(path: string, cache: ChatSummaryCache): Promise<void> {
-  const directory = path.slice(0, path.lastIndexOf('/') + 1);
-  await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
-  await FileSystem.writeAsStringAsync(path, JSON.stringify(cache));
+  const file = new File(path);
+  await ensureDirectory(file.parentDirectory);
+  await writeFile(file, JSON.stringify(cache));
 }
 
 function enqueue(path: string, operation: () => Promise<void>): Promise<void> {

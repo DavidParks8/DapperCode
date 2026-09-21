@@ -3,12 +3,12 @@ import React from 'react';
 import { Keyboard, Platform } from 'react-native';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system/legacy';
+import { fileSystemMock as FileSystem } from '@shared/testing/expoFileSystemMock';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 
 jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn() }));
-jest.mock('expo-file-system/legacy', () => ({ getInfoAsync: jest.fn(), deleteAsync: jest.fn() }));
+
 jest.mock('expo-image-manipulator', () => ({
   ImageManipulator: { manipulate: jest.fn() },
   SaveFormat: { JPEG: 'jpeg' },
@@ -31,8 +31,8 @@ import {
 } from './attachmentController';
 
 const documentPicker = DocumentPicker.getDocumentAsync as jest.Mock;
-const getInfo = FileSystem.getInfoAsync as jest.Mock;
-const deleteFile = FileSystem.deleteAsync as jest.Mock;
+const getInfo = FileSystem.info as jest.Mock;
+const deleteFile = FileSystem.deleteFile as jest.Mock;
 const manipulate = ImageManipulator.ImageManipulator.manipulate as jest.Mock;
 const mediaPermission = ImagePicker.requestMediaLibraryPermissionsAsync as jest.Mock;
 const cameraPermission = ImagePicker.requestCameraPermissionsAsync as jest.Mock;
@@ -218,7 +218,7 @@ describe('attachmentController', () => {
     expect(harness.current.composerAttachments).toEqual([
       { id: 'prepared:image:file:///prepared.jpg', label: 'uploading · paste.jpg' },
     ]);
-    expect(deleteFile).toHaveBeenCalledWith(pastedImage.uri, { idempotent: true });
+    expect(deleteFile).toHaveBeenCalledWith(pastedImage.uri);
     expect(manipulate.mock.results[0]?.value.resize).toHaveBeenCalledWith({ width: 2048 });
     expect(harness.api.uploadAttachment).toHaveBeenCalledWith({
       uri: 'file:///prepared.jpg',
@@ -251,10 +251,7 @@ describe('attachmentController', () => {
     ]) {
       expect(interaction).not.toHaveBeenCalled();
     }
-    expect(deleteFile.mock.calls).toEqual([
-      [pastedImage.uri, { idempotent: true }],
-      ['file:///prepared.jpg', { idempotent: true }],
-    ]);
+    expect(deleteFile.mock.calls).toEqual([[pastedImage.uri], ['file:///prepared.jpg']]);
     harness.unmount();
   });
 
@@ -268,7 +265,7 @@ describe('attachmentController', () => {
     expect(harness.current.hasFailedUploads).toBe(true);
     expect(harness.current.composerAttachments[0]?.label).toBe('retry · paste.jpg');
     expect(harness.setError).toHaveBeenLastCalledWith('offline');
-    expect(deleteFile.mock.calls).toEqual([[pastedImage.uri, { idempotent: true }]]);
+    expect(deleteFile.mock.calls).toEqual([[pastedImage.uri]]);
     const uploaded = deferred<{ kind: string; path: string }>();
     harness.api.uploadAttachment.mockReturnValueOnce(uploaded.promise);
     act(() => harness.current.retryFailedUploads());
@@ -280,10 +277,7 @@ describe('attachmentController', () => {
     expect(harness.current.toTurnInputs().localImages).toEqual([{ path: '/repo/retried.jpg' }]);
     expect(harness.setError).toHaveBeenLastCalledWith(null);
     expect(manipulate).toHaveBeenCalledTimes(1);
-    expect(deleteFile.mock.calls).toEqual([
-      [pastedImage.uri, { idempotent: true }],
-      ['file:///prepared.jpg', { idempotent: true }],
-    ]);
+    expect(deleteFile.mock.calls).toEqual([[pastedImage.uri], ['file:///prepared.jpg']]);
     expect(harness.api.uploadAttachment.mock.calls[1]).toEqual(
       harness.api.uploadAttachment.mock.calls[0],
     );
@@ -304,7 +298,7 @@ describe('attachmentController', () => {
       expect(harness.current.uploading).toBe(true);
       act(() => harness.current.removeComposerAttachment('prepared:image:file:///prepared.jpg'));
       expect(harness.current.uploading).toBe(false);
-      expect(deleteFile).toHaveBeenCalledWith('file:///prepared.jpg', { idempotent: true });
+      expect(deleteFile).toHaveBeenCalledWith('file:///prepared.jpg');
       harness.setError.mockClear();
       await act(async () => {
         if (outcome === 'success') {
@@ -332,7 +326,7 @@ describe('attachmentController', () => {
     expect(harness.current.hasFailedUploads).toBe(true);
     expect(harness.current.uploading).toBe(false);
     expect(harness.setError).toHaveBeenLastCalledWith('temporarily unavailable');
-    expect(deleteFile.mock.calls).toEqual([[pastedImage.uri, { idempotent: true }]]);
+    expect(deleteFile.mock.calls).toEqual([[pastedImage.uri]]);
     harness.api.uploadAttachment.mockResolvedValueOnce({
       kind: 'image',
       path: '/repo/retried.jpg',
@@ -340,10 +334,7 @@ describe('attachmentController', () => {
     await act(async () => harness.current.retryFailedUploads());
     expect(harness.current.hasFailedUploads).toBe(false);
     expect(harness.current.toTurnInputs().localImages).toEqual([{ path: '/repo/retried.jpg' }]);
-    expect(deleteFile.mock.calls).toEqual([
-      [pastedImage.uri, { idempotent: true }],
-      ['file:///prepared.jpg', { idempotent: true }],
-    ]);
+    expect(deleteFile.mock.calls).toEqual([[pastedImage.uri], ['file:///prepared.jpg']]);
     harness.unmount();
   });
 
@@ -354,7 +345,7 @@ describe('attachmentController', () => {
       harness.api.uploadAttachment.mockRejectedValueOnce(new Error('offline'));
       await harness.mount();
       await act(async () => harness.current.pasteImage(harness.image));
-      expect(deleteFile.mock.calls).toEqual([[pastedImage.uri, { idempotent: true }]]);
+      expect(deleteFile.mock.calls).toEqual([[pastedImage.uri]]);
       if (action === 'unmount') {
         harness.unmount();
       } else {
@@ -370,10 +361,7 @@ describe('attachmentController', () => {
         expect(harness.current.uploading).toBe(false);
         harness.unmount();
       }
-      expect(deleteFile.mock.calls).toEqual([
-        [pastedImage.uri, { idempotent: true }],
-        ['file:///prepared.jpg', { idempotent: true }],
-      ]);
+      expect(deleteFile.mock.calls).toEqual([[pastedImage.uri], ['file:///prepared.jpg']]);
     },
   );
 
@@ -397,7 +385,7 @@ describe('attachmentController', () => {
       expect(manipulate).not.toHaveBeenCalled();
       expect(harness.api.uploadAttachment).not.toHaveBeenCalled();
       expect(harness.setError).not.toHaveBeenCalled();
-      expect(deleteFile).toHaveBeenCalledWith(image.uri, { idempotent: true });
+      expect(deleteFile).toHaveBeenCalledWith(image.uri);
       harness.unmount();
     },
   );
@@ -480,8 +468,8 @@ describe('attachmentController', () => {
         gate.reject(new Error('old async error'));
         await paste;
       });
-      expect(deleteFile).toHaveBeenCalledWith('file:///stale.png', { idempotent: true });
-      expect(deleteFile).toHaveBeenCalledWith(pastedImage.uri, { idempotent: true });
+      expect(deleteFile).toHaveBeenCalledWith('file:///stale.png');
+      expect(deleteFile).toHaveBeenCalledWith(pastedImage.uri);
       expect(harness.current.uploading).toBe(false);
       expect(harness.current.composerAttachments).toEqual([]);
       expect(harness.current.toTurnInputs().localImages).toEqual([]);
@@ -528,7 +516,7 @@ describe('attachmentController', () => {
         await paste;
       });
       expect(harness.setError).not.toHaveBeenCalled();
-      expect(deleteFile).toHaveBeenCalledWith('file:///late.png', { idempotent: true });
+      expect(deleteFile).toHaveBeenCalledWith('file:///late.png');
       if (action !== 'unmount') {
         expect(harness.current.uploading).toBe(false);
         expect(harness.current.pickerBusy).toBe(false);
@@ -575,8 +563,8 @@ describe('attachmentController', () => {
       expect(harness.current.composerAttachments).toEqual([]);
       expect(harness.api.uploadAttachment).not.toHaveBeenCalled();
       expect(deleteFile.mock.calls).toEqual([
-        ...(failure === 'prepared' ? [['file:///prepared.jpg', { idempotent: true }]] : []),
-        [pastedImage.uri, { idempotent: true }],
+        ...(failure === 'prepared' ? [['file:///prepared.jpg']] : []),
+        [pastedImage.uri],
       ]);
       harness.unmount();
     },
@@ -623,10 +611,7 @@ describe('attachmentController', () => {
       firstRender.resolve({ saveAsync: jest.fn().mockResolvedValue({ uri: 'file:///first.jpg' }) });
       await first;
     });
-    expect(deleteFile.mock.calls).toEqual([
-      [pastedImage.uri, { idempotent: true }],
-      ['file:///first.jpg', { idempotent: true }],
-    ]);
+    expect(deleteFile.mock.calls).toEqual([[pastedImage.uri], ['file:///first.jpg']]);
     expect(harness.current.uploading).toBe(true);
     expect(harness.current.pickerBusy).toBe(true);
     expect(harness.current.toTurnInputs().localImages).toEqual([{ path: '/repo/first.jpg' }]);
@@ -669,10 +654,7 @@ describe('attachmentController', () => {
         });
         await paste;
       });
-      expect(deleteFile.mock.calls).toEqual([
-        [pastedImage.uri, { idempotent: true }],
-        ['file:///prepared.jpg', { idempotent: true }],
-      ]);
+      expect(deleteFile.mock.calls).toEqual([[pastedImage.uri], ['file:///prepared.jpg']]);
       expect(harness.api.uploadAttachment).not.toHaveBeenCalled();
       expect(harness.setError).not.toHaveBeenCalled();
       if (action === 'clear') {
@@ -704,7 +686,7 @@ describe('attachmentController', () => {
     expect(harness.current.pickerBusy).toBe(false);
     expect(harness.current.composerAttachments).toEqual([]);
     expect(harness.api.uploadAttachment).not.toHaveBeenCalled();
-    expect(deleteFile.mock.calls).toEqual([['file:///prepared.jpg', { idempotent: true }]]);
+    expect(deleteFile.mock.calls).toEqual([['file:///prepared.jpg']]);
     harness.unmount();
   });
 

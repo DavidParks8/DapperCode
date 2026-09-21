@@ -918,7 +918,7 @@ export class E2EHarness {
     const leasePort = 40_000 + (digest.readUInt16BE(0) % 20_000);
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const server = createServer();
+      const server = createServer((socket) => socket.destroy());
       try {
         await withTimeout(
           new Promise((resolve, reject) => {

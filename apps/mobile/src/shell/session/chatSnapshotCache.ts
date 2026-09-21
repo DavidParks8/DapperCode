@@ -1,7 +1,10 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { File, Paths } from 'expo-file-system';
+import { Platform } from 'react-native';
+import { deleteFileIfPresent, ensureDirectory, writeFile } from '@shared/filesystem';
 import { MessageSchema } from '@ag-ui/core';
 
 import type { Chat, ChatMessage, ChatMessagePart, ChatToolMeta } from '@bridge/types/types';
+import { isPendingChatId } from '@shell/session/interruptedChatCreation';
 
 export const CHAT_SNAPSHOT_CACHE_VERSION = 1;
 export const CHAT_SNAPSHOT_CACHE_MAX_ENTRIES = 20;
@@ -80,9 +83,12 @@ export function parseChatSnapshotCache(
     }
 
     const rawEntries: unknown[] = record['entries'];
+    const rawSelectedChatId =
+      typeof record['selectedChatId'] === 'string' ? record['selectedChatId'] : null;
     const entries = rawEntries
       .map(normalizeCacheEntry)
       .filter((entry): entry is ChatSnapshotCacheEntry => entry !== null)
+      .filter((entry) => !isPendingChatId(entry.chat.id) || entry.chat.id === rawSelectedChatId)
       .filter((entry) => now - Date.parse(entry.cachedAt) <= CHAT_SNAPSHOT_CACHE_MAX_AGE_MS)
       .sort((left, right) => right.lastAccessedAt.localeCompare(left.lastAccessedAt));
     const selectedChatId =
@@ -141,13 +147,30 @@ export function updateChatSnapshotCache(
   });
 }
 
+export function removeChatSnapshotCacheEntry(
+  cache: ChatSnapshotCache,
+  chatId: string,
+  now = new Date().toISOString(),
+): ChatSnapshotCache {
+  const normalizedChatId = chatId.trim();
+  if (!normalizedChatId || !cache.entries.some((entry) => entry.chat.id === normalizedChatId)) {
+    return cache;
+  }
+  return {
+    ...cache,
+    selectedChatId: cache.selectedChatId === normalizedChatId ? null : cache.selectedChatId,
+    updatedAt: now,
+    entries: cache.entries.filter((entry) => entry.chat.id !== normalizedChatId),
+  };
+}
+
 export async function loadChatSnapshotCache(profileId: string): Promise<ChatSnapshotCache> {
   const path = getChatSnapshotCachePath(profileId);
   if (!path) {
     return createEmptyChatSnapshotCache(profileId);
   }
   try {
-    return parseChatSnapshotCache(await FileSystem.readAsStringAsync(path), profileId);
+    return parseChatSnapshotCache(await new File(path).text(), profileId);
   } catch {
     return createEmptyChatSnapshotCache(profileId);
   }
@@ -167,14 +190,14 @@ export function saveChatSnapshotCache(
       return;
     }
 
-    const directory = path.slice(0, path.lastIndexOf('/') + 1);
-    await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
+    const file = new File(path);
+    await ensureDirectory(file.parentDirectory);
     // A purge can arrive while directory creation is pending. Re-check at
     // the final point before writing so this stale save cannot recreate it.
     if (!isChatSnapshotCacheGenerationCurrent(cache.profileId, generation)) {
       return;
     }
-    await FileSystem.writeAsStringAsync(path, JSON.stringify(boundChatSnapshotCache(cache)));
+    await writeFile(file, JSON.stringify(boundChatSnapshotCache(cache)));
   });
 }
 
@@ -188,7 +211,7 @@ export function deleteChatSnapshotCache(profileId: string): Promise<void> {
   }
   return enqueueCacheOperation(path, async () => {
     try {
-      await FileSystem.deleteAsync(path, { idempotent: true });
+      await deleteFileIfPresent(new File(path));
     } catch {
       // Cache cleanup is best effort.
     }
@@ -197,12 +220,12 @@ export function deleteChatSnapshotCache(profileId: string): Promise<void> {
 
 export function getChatSnapshotCachePath(
   profileId: string,
-  base = FileSystem.documentDirectory,
+  base: string | null = Platform.OS === 'web' ? null : Paths.document.uri,
 ): string | null {
   if (typeof base !== 'string' || !base || !profileId.trim()) {
     return null;
   }
-  return `${base}dappercode-chat-cache/${encodeURIComponent(profileId)}/snapshots.json`;
+  return `${base.replace(/\/$/, '')}/dappercode-chat-cache/${encodeURIComponent(profileId)}/snapshots.json`;
 }
 
 function enqueueCacheOperation(path: string, operation: () => Promise<void>): Promise<void> {

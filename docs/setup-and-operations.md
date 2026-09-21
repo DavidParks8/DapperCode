@@ -440,6 +440,19 @@ The Expo bootstrap reads the bridge host from the central `config.json`, falling
 `.env.secure` for the `pnpm run bridge` development flow. Physical devices must use a LAN or Tailscale
 bridge URL, not localhost.
 
+iOS permits native HTTP requests to user-configured bridge hosts, including private DNS names,
+through an app-wide App Transport Security exception. The Expo
+`withIosBridgeTransportSecurity` plugin removes granular ATS keys that would override this exception
+during prebuild. This also covers clipboard, photo-library, and document attachment uploads. Bearer
+authentication and insecure-host warnings still apply; HTTP does not encrypt tokens or attachments.
+Use HTTPS or an encrypted private network such as Tailscale, and never expose the bridge publicly.
+The exception needs an App Review justification for connections to user-managed private hosts.
+
+ATS changes require a new native iOS build, not an OTA update or JavaScript reload. For an existing
+local native project, run `pnpm --filter @dappercode/mobile exec expo prebuild --platform ios --no-install`
+before rebuilding. Native transport regression coverage can be run with
+`node .agents/skills/local-e2e-validation/scripts/run.mjs apps/mobile/plugins/tests/native-ats.mjs`.
+
 The mobile app uses Expo Router with the `dappercode` scheme. Canonical links include
 `dappercode://profiles/<profile-id>/chats/<thread-id>` and
 `/profiles/<profile-id>/chats/<thread-id>` on web. Web output is a client-rendered single-page app;

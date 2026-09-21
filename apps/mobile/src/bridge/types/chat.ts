@@ -173,6 +173,16 @@ export interface SessionTokenTotals {
 
 export interface Chat extends ChatSummary {
   messages: ChatMessage[];
+  /** Local-only recovery metadata for a new chat whose create acknowledgement was interrupted. */
+  localPendingCreation?: {
+    profileId?: string;
+    draft: string;
+    originalDraft?: string;
+    hadAttachments: boolean;
+    agentId: string | null;
+    cwd: string | null;
+    createdChatId?: string;
+  };
   /** Local read/recovery failure, independent of the agent's run status. */
   historyRecoveryError?: string | null;
   acpSnapshot?: RawAcpSnapshot;

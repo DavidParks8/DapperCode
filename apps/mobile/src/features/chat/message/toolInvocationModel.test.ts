@@ -1,6 +1,6 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import type { ChatMessage, ChatToolMeta } from '@bridge/types/types';
-import { buildToolInvocations, toolKindIcon, type ToolInvocation } from './toolInvocationModel';
+import { buildToolInvocations, type ToolInvocation } from './toolInvocationModel';
 import { resolveToolInvocationHeader } from './toolInvocationPresentation';
 
 function toolMessage(
@@ -484,13 +484,5 @@ describe('buildToolInvocations', () => {
         ).label,
       ).toBe('Edited config.ts +2 -2');
     });
-  });
-});
-
-describe('toolKindIcon', () => {
-  it('maps every kind and falls back for unknown values', () => {
-    expect(toolKindIcon('execute')).toBe('terminal-outline');
-    expect(toolKindIcon('switch_mode')).toBe('swap-horizontal-outline');
-    expect(toolKindIcon('nope' as 'other')).toBe('construct-outline');
   });
 });

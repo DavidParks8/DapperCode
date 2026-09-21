@@ -1,4 +1,5 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { Paths } from 'expo-file-system';
+import { Platform } from 'react-native';
 import type {
   BridgeScheduledPrompt,
   BridgeThreadSchedulesState,
@@ -26,7 +27,6 @@ import {
   CHAT_DRAFTS_VERSION,
   CHAT_MODEL_PREFERENCES_FILE,
   CHAT_MODEL_PREFERENCES_VERSION,
-  CHAT_NEW_DRAFT_KEY,
   CHAT_PLAN_SNAPSHOTS_FILE,
   CHAT_PLAN_SNAPSHOTS_VERSION,
   CHAT_SUBMISSION_IDEMPOTENCY_FILE,
@@ -95,11 +95,11 @@ export function encodePersistenceProfileId(profileId: string | null | undefined)
 }
 
 function getDocumentPath(fileName: string): string | null {
-  const base = FileSystem.documentDirectory;
-  if (typeof base !== 'string' || base.trim().length === 0) {
+  if (Platform.OS === 'web') {
     return null;
   }
-  return `${base}${fileName}`;
+  // Profile filenames are already URI-encoded; File path segments would encode them again.
+  return `${Paths.document.uri}${fileName}`;
 }
 
 function getProfileDocumentPath(
@@ -401,11 +401,6 @@ export function queuedMessageStatusLabel(options: {
     return 'Waiting to steer';
   }
   return 'Queued message';
-}
-
-export function getDraftScopeKey(threadId: string | null | undefined): string {
-  const normalized = threadId?.trim();
-  return normalized && normalized.length > 0 ? normalized : CHAT_NEW_DRAFT_KEY;
 }
 
 export function parseChatModelPreferences(raw: string): Record<string, ChatModelPreference> {

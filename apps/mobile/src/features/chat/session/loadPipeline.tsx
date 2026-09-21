@@ -21,16 +21,10 @@ import type {
 } from '../composer/slashCommandHandler';
 import { OPEN_CHAT_MIN_LOADING_MS } from '../screen/constants';
 import { shouldReleaseOpeningChat, shouldScrollAfterLoad } from './openingChatState';
-
+import type { LoadChatOptions } from './openingChatState';
+import { isPendingChatId } from '@shell/session/interruptedChatCreation';
 export type MainScreenChatLoadPipelineContext = MainScreenSlashCommandHandlerContext &
   MainScreenSlashCommandHandlerResult;
-
-type LoadChatOptions = {
-  forceScroll?: boolean;
-  preserveRuntimeState?: boolean;
-  revalidate?: boolean;
-};
-
 type SetActivity = (update: ActivityState | ((current: ActivityState) => ActivityState)) => void;
 
 function isCurrentLoadRequest(
@@ -458,6 +452,9 @@ export function useMainScreenChatLoadPipeline(context: MainScreenChatLoadPipelin
 
   const loadChat = useCallback(
     async (chatId: string, options?: LoadChatOptions): Promise<boolean> => {
+      if (isPendingChatId(chatId)) {
+        return false;
+      }
       const requestId = loadChatRequestRef.current + 1;
       loadChatRequestRef.current = requestId;
       let loadedSuccessfully = false;

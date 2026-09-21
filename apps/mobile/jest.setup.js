@@ -7,6 +7,7 @@ jest.mock('react-native-worklets', () => require('@shared/testing/workletsMock')
 jest.mock('react-native-gesture-handler', () => require('@shared/testing/gestureHandlerMock'));
 jest.mock('expo-glass-effect', () => require('@shared/testing/glassEffectMock'));
 jest.mock('react-native-webview', () => require('@shared/testing/webViewMock'));
+jest.mock('expo-file-system', () => require('@shared/testing/expoFileSystemMock'));
 jest.mock('expo-haptics', () => ({
   ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy' },
   NotificationFeedbackType: { Success: 'success', Warning: 'warning', Error: 'error' },
@@ -16,6 +17,7 @@ jest.mock('expo-haptics', () => ({
 }));
 
 beforeEach(() => {
+  require('@shared/testing/expoFileSystemMock').resetFileSystemMock();
   require('@shared/testing/expoRouterMock').resetRouterMock();
   require('@shared/testing/glassEffectMock').resetMockGlassEffect();
 });

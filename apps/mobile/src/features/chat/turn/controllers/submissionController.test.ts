@@ -25,6 +25,20 @@ function fakeIdempotencyStore(): SubmissionIdempotencyStore & {
 }
 
 describe('submissionController', () => {
+  it('uses an interrupted creation ID rather than allocating a duplicate creation', () => {
+    const store = fakeIdempotencyStore();
+    const controller = new SubmissionController(() => 'new-id', store);
+    const snapshot = { scopeKey: 'scope', value: 'Original message', revision: 1 };
+    const attachments = { mentions: [], localImages: [] };
+    const prior = controller.begin(snapshot, attachments);
+    controller.fail(prior, snapshot);
+    const resumed = controller.begin(snapshot, attachments, 'interrupted-id');
+    expect(resumed.id).toBe('interrupted-id');
+    expect(resumed.draft).toBe(snapshot.value);
+    controller.succeed(resumed);
+    expect(controller.begin(snapshot, attachments).id).toBe('new-id');
+  });
+
   it('supports its default id factory', () => {
     expect(
       new SubmissionController().begin(
@@ -75,6 +89,29 @@ describe('submissionController', () => {
     controller.fail(first, { ...snapshot, value: '', revision: 2 });
 
     expect(controller.begin(snapshot, attachments).id).toBe('submission-1');
+  });
+
+  it('carries cleared draft ownership into an edited retry with a new id', () => {
+    let nextId = 0;
+    const controller = new SubmissionController(() => `submission-${++nextId}`);
+    const original = controller.begin(
+      { scopeKey: 'created-thread', value: 'Original', revision: 1 },
+      { mentions: [], localImages: [] },
+    );
+    controller.markCleared(original, 'new-composer', 2, 'Original');
+    controller.fail(original, { scopeKey: 'created-thread', value: 'Edited', revision: 3 });
+
+    const edited = controller.begin(
+      { scopeKey: 'created-thread', value: 'Edited', revision: 3 },
+      { mentions: [], localImages: [] },
+      undefined,
+      original.id,
+    );
+    expect(edited.id).toBe('submission-2');
+    expect(edited.clearedDraftEntries).toContainEqual({
+      scopeKey: 'new-composer',
+      draft: 'Original',
+    });
   });
 
   it('normalizes scopes and generates an id when the injected id is blank', () => {

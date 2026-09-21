@@ -22,7 +22,16 @@ export interface ComposerSubmission {
   draft: string;
   mentions: string[];
   localImages: string[];
+  draftRevision: number;
+  clearedDraft: string | null;
+  clearedDraftEntries: Array<{ scopeKey: string; draft: string }>;
   clearedRevision: number | null;
+  clearedScopeKey: string | null;
+}
+
+export interface ClearedDraftEntry {
+  scopeKey: string;
+  draft: string;
 }
 
 const FAILED_SUBMISSION_LIMIT = 32;
@@ -47,17 +56,35 @@ export class SubmissionController {
   begin(
     snapshot: SubmissionDraftSnapshot,
     attachments: { mentions: string[]; localImages: string[] },
+    interruptedSubmissionId?: string,
+    inheritClearedDraftsFromSubmissionId?: string,
+    inheritedClearedDraftEntries: readonly ClearedDraftEntry[] = [],
   ): ComposerSubmission {
     const retryKey = this.retryKey(snapshot.scopeKey, snapshot.value, attachments);
-    const retry = this.failed.get(retryKey);
+    const interruptedId = interruptedSubmissionId?.trim() || null;
+    const failedRetry = this.failed.get(retryKey);
+    const retry = !interruptedId || failedRetry?.id === interruptedId ? failedRetry : undefined;
     if (retry) {
       this.failed.delete(retryKey);
+      retry.draftRevision = snapshot.revision;
+      retry.clearedDraft = null;
       retry.clearedRevision = null;
+      retry.clearedScopeKey = null;
       return retry;
     }
+    const inheritedClearedDrafts = [
+      ...this.takeClearedDraftEntries(inheritClearedDraftsFromSubmissionId),
+      ...inheritedClearedDraftEntries,
+    ].filter(
+      (entry, index, entries) =>
+        entries.findIndex(
+          (candidate) => candidate.scopeKey === entry.scopeKey && candidate.draft === entry.draft,
+        ) === index,
+    );
 
     const requestHash = hashSubmissionRequest(snapshot.value, attachments);
-    const persistedId = this.idempotencyStore?.lookup(snapshot.scopeKey, requestHash) ?? null;
+    const persistedId =
+      interruptedId ?? this.idempotencyStore?.lookup(snapshot.scopeKey, requestHash) ?? null;
     if (persistedId) {
       return {
         id: persistedId,
@@ -65,7 +92,11 @@ export class SubmissionController {
         draft: snapshot.value,
         mentions: [...attachments.mentions],
         localImages: [...attachments.localImages],
+        draftRevision: snapshot.revision,
+        clearedDraft: null,
+        clearedDraftEntries: inheritedClearedDrafts,
         clearedRevision: null,
+        clearedScopeKey: null,
       };
     }
 
@@ -77,12 +108,33 @@ export class SubmissionController {
       draft: snapshot.value,
       mentions: [...attachments.mentions],
       localImages: [...attachments.localImages],
+      draftRevision: snapshot.revision,
+      clearedDraft: null,
+      clearedDraftEntries: inheritedClearedDrafts,
       clearedRevision: null,
+      clearedScopeKey: null,
     };
   }
 
-  markCleared(submission: ComposerSubmission, revision: number): void {
-    submission.clearedRevision = revision;
+  markCleared(
+    submission: ComposerSubmission,
+    scopeKeyOrRevision: string | number,
+    revision?: number,
+    draft = submission.draft,
+  ): void {
+    const clearedScopeKey =
+      typeof scopeKeyOrRevision === 'string' ? scopeKeyOrRevision : submission.scopeKey;
+    submission.clearedDraft = draft;
+    if (
+      !submission.clearedDraftEntries.some(
+        (entry) => entry.scopeKey === clearedScopeKey && entry.draft === draft,
+      )
+    ) {
+      submission.clearedDraftEntries.push({ scopeKey: clearedScopeKey, draft });
+    }
+    submission.clearedScopeKey = clearedScopeKey;
+    submission.clearedRevision =
+      typeof scopeKeyOrRevision === 'number' ? scopeKeyOrRevision : (revision ?? null);
   }
 
   fail(submission: ComposerSubmission, current: SubmissionDraftSnapshot): boolean {
@@ -103,7 +155,7 @@ export class SubmissionController {
     );
     return (
       submission.clearedRevision !== null &&
-      current.scopeKey === submission.scopeKey &&
+      current.scopeKey === submission.clearedScopeKey &&
       current.revision === submission.clearedRevision &&
       current.value === ''
     );
@@ -115,6 +167,23 @@ export class SubmissionController {
       submission.scopeKey,
       hashSubmissionRequest(submission.draft, submission),
     );
+  }
+
+  private takeClearedDraftEntries(submissionId?: string): Array<{
+    scopeKey: string;
+    draft: string;
+  }> {
+    const normalizedId = submissionId?.trim();
+    if (!normalizedId) {
+      return [];
+    }
+    for (const [key, failed] of this.failed) {
+      if (failed.id === normalizedId) {
+        this.failed.delete(key);
+        return failed.clearedDraftEntries.map((entry) => ({ ...entry }));
+      }
+    }
+    return [];
   }
 
   private retryKey(

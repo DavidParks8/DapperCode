@@ -137,7 +137,7 @@ test('same-session transcript recovers after offline replay overflow and a cache
 
   await test.step('trigger', async () => {
     await setVisibility(page, 'hidden');
-    await expect.poll(() => closed).toBe(opened);
+    await expect.poll(() => closed, { timeout: 15_000 }).toBe(opened);
     await page.context().setOffline(true);
     disconnectedCursor = lastEventId;
     disconnectedFrames = received;
@@ -259,7 +259,7 @@ test('same-session transcript recovers after offline replay overflow and a cache
 
   await test.step('confirmation', async () => {
     await setVisibility(page, 'hidden');
-    await expect.poll(() => closed).toBe(opened);
+    await expect.poll(() => closed, { timeout: 15_000 }).toBe(opened);
     await setVisibility(page, 'visible');
     await expect.poll(() => opened - closed).toBe(1);
     await expectSettled(page);

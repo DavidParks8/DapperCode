@@ -1,6 +1,7 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { File, Paths } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { writeFile } from '@shared/filesystem';
 
 import type { AppStatePersistenceAdapter } from '@shell/state/appState';
 
@@ -30,26 +31,19 @@ export function createAppStatePersistence(): AppStatePersistenceAdapter {
 }
 
 async function readE2EFile(): Promise<string | null> {
-  const path = e2eFilePath();
-  const info = await FileSystem.getInfoAsync(path);
+  const file = new File(Paths.cache, E2E_APP_STATE_FILE);
+  const info = Paths.info(file.uri);
   if (!info.exists) {
     return null;
   }
   if (info.isDirectory) {
     throw new Error('E2E app-state path points to a directory.');
   }
-  return await FileSystem.readAsStringAsync(path);
+  return await file.text();
 }
 
 async function writeE2EFile(raw: string): Promise<void> {
-  await FileSystem.writeAsStringAsync(e2eFilePath(), raw);
-}
-
-function e2eFilePath(): string {
-  if (!FileSystem.cacheDirectory) {
-    throw new Error('E2E app-state cache storage is unavailable.');
-  }
-  return `${FileSystem.cacheDirectory}${E2E_APP_STATE_FILE}`;
+  await writeFile(new File(Paths.cache, E2E_APP_STATE_FILE), raw);
 }
 
 async function readSecureValue(key: string): Promise<string | null> {

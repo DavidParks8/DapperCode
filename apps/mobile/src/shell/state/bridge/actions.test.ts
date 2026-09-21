@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { fileSystemMock as FileSystem } from '@shared/testing/expoFileSystemMock';
 
 import { createDefaultAppStateData } from '@shell/state/appState';
 import {
@@ -26,20 +26,18 @@ describe('bridge profile purge coordinates with pending summary writes', () => {
       value: 'file:///documents/',
     });
     const files = new Map<string, string>();
-    jest.spyOn(FileSystem, 'makeDirectoryAsync').mockResolvedValue(undefined);
-    jest.spyOn(FileSystem, 'readAsStringAsync').mockImplementation(async (path: string) => {
+    jest.spyOn(FileSystem, 'createDirectory').mockResolvedValue(undefined);
+    jest.spyOn(FileSystem, 'read').mockImplementation(async (path: string) => {
       const raw = files.get(path);
       if (raw === undefined) {
         throw new Error('missing');
       }
       return raw;
     });
-    jest
-      .spyOn(FileSystem, 'writeAsStringAsync')
-      .mockImplementation(async (path: string, raw: string) => {
-        files.set(path, raw);
-      });
-    jest.spyOn(FileSystem, 'deleteAsync').mockImplementation(async (path: string) => {
+    jest.spyOn(FileSystem, 'write').mockImplementation(async (path: string, raw: string) => {
+      files.set(path, raw);
+    });
+    jest.spyOn(FileSystem, 'deleteFile').mockImplementation(async (path: string) => {
       files.delete(path);
     });
     return {

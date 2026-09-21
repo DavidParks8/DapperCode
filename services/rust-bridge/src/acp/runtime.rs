@@ -138,37 +138,7 @@ pub enum AcpRuntimeError {
     Interaction(#[from] InteractionError),
 }
 
-#[derive(Clone)]
-pub struct RequestCancellation {
-    sender: watch::Sender<bool>,
-}
-
-impl Default for RequestCancellation {
-    fn default() -> Self {
-        let (sender, _) = watch::channel(false);
-        Self { sender }
-    }
-}
-
-impl RequestCancellation {
-    pub fn cancel(&self) {
-        self.sender.send_replace(true);
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        *self.sender.borrow()
-    }
-
-    pub async fn cancelled(&self) {
-        let mut receiver = self.sender.subscribe();
-        while !*receiver.borrow_and_update() {
-            receiver
-                .changed()
-                .await
-                .expect("request cancellation sender remains alive");
-        }
-    }
-}
+pub type RequestCancellation = tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
 pub struct NegotiatedInitialize {
@@ -5208,14 +5178,18 @@ mod tests {
     async fn cancelling_typed_new_session_cancels_agent_future_without_mutation() {
         let signal = RequestCancellation::default();
         assert!(!signal.is_cancelled());
-        let waiter = {
-            let signal = signal.clone();
-            tokio::spawn(async move { signal.cancelled().await })
-        };
+        let waiting_signal = signal.clone();
+        let waiter = waiting_signal.cancelled();
+        tokio::pin!(waiter);
+        assert!(futures_util::poll!(&mut waiter).is_pending());
         signal.cancel();
-        waiter.await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), waiter)
+            .await
+            .expect("cancellation wakes a registered waiter");
         assert!(signal.is_cancelled());
-        signal.cancelled().await;
+        tokio::time::timeout(Duration::from_secs(1), signal.cancelled())
+            .await
+            .expect("cancellation is visible to a later waiter");
 
         let attempts = Arc::new(AtomicUsize::new(0));
         let (cancelled_tx, cancelled_rx) = oneshot::channel();

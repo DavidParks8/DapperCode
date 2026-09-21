@@ -1,7 +1,6 @@
 import { memo, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
-  Keyboard,
   Platform,
   type ListRenderItem,
   type NativeScrollEvent,
@@ -26,7 +25,6 @@ import {
   CHAT_AUTO_LOAD_OLDER_TOP_THRESHOLD_PX,
   CHAT_JUMP_TO_LATEST_MIN_SCROLLABLE_PX,
   CHAT_MESSAGE_PAGE_SIZE,
-  LARGE_CHAT_MESSAGE_COUNT_THRESHOLD,
   findInlineChoiceSet,
   getInitialVisibleMessageStartIndex,
 } from '../helpers/helpers';
@@ -55,10 +53,17 @@ import {
   resolveListBatchingConfig,
   resolveRailRestingActiveIndex,
   resolveResetRailActiveIndex,
+  TranscriptHistoryEdge,
+  TranscriptItemSeparator,
 } from './viewChrome';
 import { useMessageTimestampReveal } from './useMessageTimestampReveal';
 import { useTranscriptAnimationVisibility } from './animationVisibility';
-import { PINNED_SCROLL_EPSILON_PX, updateAutoScrollStickiness } from './autoScroll';
+import {
+  getMaintainedScrollPosition,
+  shouldRequestPinnedScroll,
+  updateAutoScrollStickiness,
+  useTranscriptScrollInteraction,
+} from './autoScroll';
 import { TranscriptRenderRoot } from './TranscriptRenderRoot';
 
 export interface ChatTranscriptViewProps {
@@ -390,6 +395,14 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     onReachStart: handleRailReachStart,
   });
   const timestampReveal = useMessageTimestampReveal(rail.gesture);
+  const { isInteracting, ...scrollInteraction } = useTranscriptScrollInteraction(
+    chat.id,
+    autoScrollStateRef,
+    () => {
+      railJumpControllerRef.current?.cancel();
+      onScrollInteractionStart();
+    },
+  );
 
   useEffect(() => {
     autoScrollStateRef.current.shouldStickToBottom = true;
@@ -406,10 +419,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   }, [autoScrollStateRef, chat.id]);
   const messageListContentStyle = useMemo(
     () =>
-      // The list is inverted, so its content padding is flipped on screen: `paddingBottom` lands
-      // under the floating top chrome and `paddingTop` lands behind the composer. Feeding these
-      // the other way round left the oldest message permanently clipped by the header. The extra
-      // gutter keeps the oldest message from stopping flush against the chrome.
+      // Inverted padding: bottom clears the top chrome plus a gutter; top clears the composer.
       [
         styles.messageListContent,
         { paddingTop: bottomInset, paddingBottom: topInset + theme.spacing.lg },
@@ -417,10 +427,9 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     [bottomInset, styles.messageListContent, theme.spacing.lg, topInset],
   );
   const jumpToLatestHitSlop = useMemo(() => computeHitSlop(JUMP_TO_LATEST_VISIBLE_SIZE), []);
-  const isLargeChat = visibleMessages.length >= LARGE_CHAT_MESSAGE_COUNT_THRESHOLD;
-  const listBatchingConfig = useMemo(
-    () => resolveListBatchingConfig(displayMessages.length, isLargeChat),
-    [displayMessages.length, isLargeChat],
+  const listBatchingConfig = resolveListBatchingConfig(
+    displayMessages.length,
+    visibleMessages.length,
   );
   const activityPresentation = useCollapsibleActivity(activity);
   const listExtraData = useMemo(
@@ -485,37 +494,24 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           keyExtractor={transcriptDisplayItemKey}
           renderItem={renderMessageItem}
           ListHeaderComponent={activityEvent}
-          ListFooterComponent={historyBoundary}
+          ListHeaderComponentStyle={styles.messageListHeader}
+          ListFooterComponent={historyBoundary ?? TranscriptHistoryEdge}
+          ListFooterComponentStyle={historyBoundary ? styles.messageListFooter : undefined}
+          ItemSeparatorComponent={TranscriptItemSeparator}
           style={styles.messageList}
           contentContainerStyle={messageListContentStyle}
-          // Preserving the first response cell while it grows shifts this inverted list's activity
-          // header toward the overlay composer. Preserve cells only after the user leaves latest.
-          maintainVisibleContentPosition={showJumpToLatest ? { minIndexForVisible: 0 } : undefined}
+          maintainVisibleContentPosition={getMaintainedScrollPosition(
+            displayMessages,
+            Boolean(activityEvent),
+            showJumpToLatest,
+            isInteracting,
+          )}
           inverted
           scrollEnabled={rail.scrollEnabled}
           showsVerticalScrollIndicator={false}
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           keyboardShouldPersistTaps="handled"
-          onScrollBeginDrag={() => {
-            railJumpControllerRef.current?.cancel();
-            onScrollInteractionStart();
-            Keyboard.dismiss();
-            autoScrollStateRef.current.isUserInteracting = true;
-            autoScrollStateRef.current.isMomentumScrolling = false;
-            autoScrollStateRef.current.shouldStickToBottom = false;
-          }}
-          onScrollEndDrag={() => {
-            if (!autoScrollStateRef.current.isMomentumScrolling) {
-              autoScrollStateRef.current.isUserInteracting = false;
-            }
-          }}
-          onMomentumScrollBegin={() => {
-            autoScrollStateRef.current.isMomentumScrolling = true;
-          }}
-          onMomentumScrollEnd={() => {
-            autoScrollStateRef.current.isUserInteracting = false;
-            autoScrollStateRef.current.isMomentumScrolling = false;
-          }}
+          {...scrollInteraction}
           onScroll={handleScroll}
           scrollEventThrottle={32}
           onViewableItemsChanged={onViewableItemsChanged}
@@ -526,9 +522,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           onLayout={(event) => {
             const nextViewportHeight = event.nativeEvent.layout.height;
             viewportHeightRef.current = nextViewportHeight;
-            setViewportHeight((current) =>
-              current === nextViewportHeight ? current : nextViewportHeight,
-            );
+            setViewportHeight(nextViewportHeight);
             railJumpControllerRef.current?.notifyLayoutProgress();
             hideJumpToLatestWhenContentFits();
             maybeAutoLoadOlderMessages(true);
@@ -537,9 +531,8 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
             contentHeightRef.current = height;
             railJumpControllerRef.current?.notifyLayoutProgress();
             hideJumpToLatestWhenContentFits();
-            // At offset zero, another scrollToOffset(0) races Fabric's native position adjustment
-            // and can briefly paint a rapidly inserted tool row over the activity header.
-            if (scrollOffsetYRef.current > PINNED_SCROLL_EPSILON_PX) {
+            // At zero, another scrollToOffset(0) races Fabric and paints new tool rows over activity.
+            if (shouldRequestPinnedScroll(autoScrollStateRef.current, scrollOffsetYRef.current)) {
               onPinnedAutoScroll(false);
             }
             maybeAutoLoadOlderMessages(true);

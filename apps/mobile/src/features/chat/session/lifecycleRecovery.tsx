@@ -25,7 +25,22 @@ export type MainScreenLifecycleRecoveryContext = MainScreenCoreBootstrapContext 
     lastAppForegroundedAtRef?: RefObject<number>;
   };
 
-export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecoveryContext) {
+export function useMainScreenLifecycleRecovery(
+  context: Pick<
+    MainScreenLifecycleRecoveryContext,
+    | 'appStateRef'
+    | 'deferredDisconnectActivityTimeoutRef'
+    | 'foregroundAgentRefreshHandleRef'
+    | 'genericRunningActivityTimeoutRef'
+    | 'heldActivityTimeoutRef'
+    | 'lastAppForegroundedAtRef'
+    | 'lastPinnedScrollAtRef'
+    | 'scheduledPinnedScrollTimeoutRef'
+    | 'scrollRef'
+    | 'scrollRetryTimeoutsRef'
+    | 'ws'
+  >,
+) {
   const {
     appStateRef,
     deferredDisconnectActivityTimeoutRef,
@@ -50,6 +65,7 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
     isUserInteracting: false,
     isMomentumScrolling: false,
   });
+  const scrollGenerationRef = useRef(0);
   const loadChatRequestRef = useRef(0);
   const modelOptionsRequestRef = useRef(0);
   const agentThreadsRequestRef = useRef(0);
@@ -139,6 +155,7 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
   ]);
 
   const clearPendingScrollRetries = useCallback(() => {
+    scrollGenerationRef.current += 1;
     for (const timeoutId of scrollRetryTimeoutsRef.current) {
       clearTimeout(timeoutId);
     }
@@ -152,10 +169,19 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
   const scrollToBottomReliable = useCallback(
     (animated = true) => {
       clearPendingScrollRetries();
+      const generation = scrollGenerationRef.current;
       const delays = [0, 70, 180, 320];
       scrollRetryTimeoutsRef.current = delays.map((delay, index) =>
         setTimeout(() => {
           requestAnimationFrame(() => {
+            // A timeout may already have queued this frame when the finger cancels scrolling.
+            if (
+              generation !== scrollGenerationRef.current ||
+              autoScrollStateRef.current.isUserInteracting ||
+              autoScrollStateRef.current.isMomentumScrolling
+            ) {
+              return;
+            }
             scrollRef.current?.scrollToOffset({
               offset: 0,
               animated: index === 0 ? animated : false,
@@ -212,10 +238,15 @@ export function useMainScreenLifecycleRecovery(context: MainScreenLifecycleRecov
       scheduledPinnedScrollTimeoutRef.current = setTimeout(() => {
         scheduledPinnedScrollTimeoutRef.current = null;
         lastPinnedScrollAtRef.current = Date.now();
-        scrollToBottomReliable(animated);
+        scrollToBottomIfPinned(animated);
       }, STREAMING_SCROLL_THROTTLE_MS - elapsed);
     },
-    [lastPinnedScrollAtRef, scheduledPinnedScrollTimeoutRef, scrollToBottomReliable],
+    [
+      lastPinnedScrollAtRef,
+      scheduledPinnedScrollTimeoutRef,
+      scrollToBottomIfPinned,
+      scrollToBottomReliable,
+    ],
   );
 
   useEffect(() => {

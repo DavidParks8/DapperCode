@@ -8,13 +8,18 @@ import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
 import {
   activeChatAtom,
   gitChatAtom,
+  interruptedChatCreationAtom,
   mainOpeningChatIdAtom,
   newChatRoutePendingAtom,
   pendingMainChatIdAtom,
   pendingMainChatSnapshotAtom,
   selectedChatIdAtom,
 } from '@shell/state/chat/atoms';
-import { cancelChatTransitionAtom, openChatWithTransitionAtom } from '@shell/state/chat/actions';
+import {
+  cancelChatTransitionAtom,
+  discardInterruptedChatCreationAtom,
+  openChatWithTransitionAtom,
+} from '@shell/state/chat/actions';
 import { mainScreenCommandsAtom } from '@shell/state/commands';
 import { closeDrawerAtom } from '@shell/state/drawer/atoms';
 import { agentRootThreadIdAtom } from '../../features/workspace/state/workspace';
@@ -73,6 +78,13 @@ export const startNewChatAtom = atom(
   null,
   (get, set, options: { keepDrawerOpen?: boolean } = {}): void => {
     const profileId = activeProfileId(get);
+    const interrupted = get(interruptedChatCreationAtom);
+    if (interrupted) {
+      set(discardInterruptedChatCreationAtom, {
+        expectedPendingChatId: interrupted.pendingChatId,
+        profileId: profileId ?? undefined,
+      });
+    }
     set(cancelChatTransitionAtom);
     set(newChatRoutePendingAtom, Boolean(profileId));
     set(pendingMainChatIdAtom, null);

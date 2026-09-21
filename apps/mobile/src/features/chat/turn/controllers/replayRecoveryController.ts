@@ -8,6 +8,7 @@ import type {
   PendingApproval,
   PendingUserInputRequest,
 } from '@bridge/types/types';
+import { isPendingChatId } from '@shell/session/interruptedChatCreation';
 
 export const REPLAY_RECOVERY_CONCURRENCY = 4;
 export const REPLAY_RECOVERY_MAX_LOADED_THREADS = 2_048;
@@ -136,7 +137,7 @@ export async function fetchReplayRecoverySnapshot(
     loadedThreadIds,
     approvals.map((approval) => approval.threadId),
     userInputs.map((request) => request.threadId),
-  ]).filter((threadId) => !excludedThreadIds?.has(threadId));
+  ]).filter((threadId) => !isPendingChatId(threadId) && !excludedThreadIds?.has(threadId));
 
   const results = await mapWithConcurrency(
     threadIds,

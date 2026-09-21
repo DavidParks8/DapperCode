@@ -47,7 +47,7 @@ type BodyContentProps = Pick<
   | 'handleLoadEarlier'
   | 'defaultStartWorkspaceLabel'
   | 'activeAgentSupports'
-  | 'setDraft'
+  | 'draftController'
   | 'openWorkspaceModal'
   | 'forkConversation'
 > & {
@@ -107,7 +107,7 @@ function TranscriptOrComposerContent({
   activeAgentSupports,
   keyboardVisible,
   activity,
-  setDraft,
+  draftController,
   openWorkspaceModal,
   forkConversation,
 }: BodyContentProps) {
@@ -156,7 +156,7 @@ function TranscriptOrComposerContent({
       keyboardVisible={keyboardVisible}
       bottomInset={bottomInset}
       topInset={topInset}
-      onSuggestion={(suggestion) => setDraft(suggestion)}
+      onSuggestion={(suggestion) => draftController.editDraft(suggestion)}
       onOpenWorkspacePicker={openWorkspaceModal}
     />
   );
@@ -245,7 +245,7 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
     defaultStartWorkspaceLabel,
     activeAgentLabel,
     activeAgentSupports,
-    setDraft,
+    draftController,
     openWorkspaceModal,
     forkConversation,
     shouldShowComposer,
@@ -297,7 +297,7 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
     handleLoadEarlier,
     defaultStartWorkspaceLabel,
     activeAgentSupports,
-    setDraft,
+    draftController,
     openWorkspaceModal,
     forkConversation,
     liveMessageState: selectedChat ? (liveAssistantByThread[selectedChat.id] ?? null) : null,

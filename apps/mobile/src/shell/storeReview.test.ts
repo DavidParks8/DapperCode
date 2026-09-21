@@ -1,14 +1,15 @@
 import * as StoreReview from 'expo-store-review';
-import { Linking, Platform } from 'react-native';
-import type * as StoreReviewModule from '@shell/storeReview';
+import { Platform } from 'react-native';
+import { fileSystemMock } from '@shared/testing/expoFileSystemMock';
 
 import {
   AUTO_STORE_REVIEW_THRESHOLD_MS,
   createDefaultAutoStoreReviewState,
   isAutoStoreReviewEligible,
-  openAppStoreWriteReviewPage,
+  loadAutoStoreReviewState,
   parseAutoStoreReviewState,
   requestNativeStoreReview,
+  saveAutoStoreReviewState,
 } from '@shell/storeReview';
 
 describe('storeReview helpers', () => {
@@ -69,26 +70,15 @@ describe('storeReview helpers', () => {
   });
 
   it('loads, saves, and defaults file state', async () => {
-    const read = jest.fn();
-    const write = jest.fn().mockResolvedValue(undefined);
-    jest.resetModules();
-    jest.doMock('expo-file-system/legacy', () => ({
-      documentDirectory: 'file:///documents/',
-      readAsStringAsync: read,
-      writeAsStringAsync: write,
-    }));
-    let isolated!: typeof StoreReviewModule;
-    jest.isolateModules(() => {
-      isolated = jest.requireActual('@shell/storeReview');
-    });
+    const { read, write } = fileSystemMock;
     read.mockResolvedValueOnce(
       JSON.stringify({ accumulatedForegroundMs: 12, automaticRequestAt: null }),
     );
-    await expect(isolated.loadAutoStoreReviewState()).resolves.toEqual({
+    await expect(loadAutoStoreReviewState()).resolves.toEqual({
       accumulatedForegroundMs: 12,
       automaticRequestAt: null,
     });
-    await isolated.saveAutoStoreReviewState({
+    await saveAutoStoreReviewState({
       accumulatedForegroundMs: 20,
       automaticRequestAt: null,
     });
@@ -97,9 +87,7 @@ describe('storeReview helpers', () => {
       JSON.stringify({ accumulatedForegroundMs: 20, automaticRequestAt: null }),
     );
     read.mockRejectedValueOnce(new Error('missing'));
-    await expect(isolated.loadAutoStoreReviewState()).resolves.toEqual(
-      createDefaultAutoStoreReviewState(),
-    );
+    await expect(loadAutoStoreReviewState()).resolves.toEqual(createDefaultAutoStoreReviewState());
   });
 
   it('requests native review only when available on iOS', async () => {
@@ -115,32 +103,5 @@ describe('storeReview helpers', () => {
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
     await expect(requestNativeStoreReview()).resolves.toBe(false);
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOs });
-  });
-
-  it('opens the deep link and falls back to the web review URL', async () => {
-    const originalAppStoreId = process.env['EXPO_PUBLIC_IOS_APP_STORE_ID'];
-    process.env['EXPO_PUBLIC_IOS_APP_STORE_ID'] = '1234567890';
-    jest.resetModules();
-    const isolated = jest.requireActual<typeof StoreReviewModule>('@shell/storeReview');
-    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
-    await expect(isolated.openAppStoreWriteReviewPage()).resolves.toBe(true);
-    expect(open).toHaveBeenLastCalledWith(expect.stringMatching(/^itms-apps:/));
-    open.mockRejectedValueOnce(new Error('unsupported')).mockResolvedValueOnce(undefined);
-    await expect(isolated.openAppStoreWriteReviewPage()).resolves.toBe(true);
-    expect(open).toHaveBeenLastCalledWith(expect.stringMatching(/^https:/));
-
-    const originalOs = Platform.OS;
-    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'android' });
-    await expect(isolated.openAppStoreWriteReviewPage()).resolves.toBe(false);
-    Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOs });
-    if (originalAppStoreId === undefined) {
-      delete process.env['EXPO_PUBLIC_IOS_APP_STORE_ID'];
-    } else {
-      process.env['EXPO_PUBLIC_IOS_APP_STORE_ID'] = originalAppStoreId;
-    }
-  });
-
-  it('hides the App Store review link until the fork owns a listing', async () => {
-    await expect(openAppStoreWriteReviewPage()).resolves.toBe(false);
   });
 });

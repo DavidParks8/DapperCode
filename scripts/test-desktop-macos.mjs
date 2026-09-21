@@ -40,8 +40,12 @@ try {
     [
       'swiftc',
       '-parse-as-library',
+      '-D',
+      'DAPPERCODE_TESTING',
       'apps/desktop/macos/AppTermination.swift',
       'apps/desktop/macos/BridgeStatusObserver.swift',
+      'apps/desktop/macos/DapperCodeApp.swift',
+      'apps/desktop/macos/tests/BridgeRecoveryTests.swift',
       'apps/desktop/macos/tests/AppTerminationTests.swift',
       '-o',
       testExecutable,

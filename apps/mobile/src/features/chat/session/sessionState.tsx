@@ -347,7 +347,6 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     removeMentionPath: removePendingMentionPath,
     retryFailedUploads,
   } = attachmentController;
-
   return {
     chatIdRef,
     selectedChatRef,

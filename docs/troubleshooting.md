@@ -1,5 +1,19 @@
 # Troubleshooting
 
+## iOS 27 App Closes at Launch
+
+An iOS 27 crash containing `UIScene life cycle is required for apps built with this SDK`
+means UIKit rejected the native startup configuration before JavaScript could run. Updating
+Metro or restarting the bridge cannot fix it.
+
+DapperCode uses Expo 57.0.24's native scene lifecycle through
+`apps/mobile/plugins/withIosSceneLifecycle.js`. The prebuild plugin registers
+`EXExpoAppSceneDelegate` and leaves React Native startup to that scene delegate, while preserving
+Expo's deep-link and application-state forwarding. Regenerate and rebuild the native app after
+updating dependencies; a JavaScript-only update is insufficient. See
+[local iOS builds and launch validation](eas-builds.md#local-native-build-option-no-eas-cloud).
+Keep existing app data and bridge profiles; clearing them does not address this crash.
+
 ## macOS App Does Not Open
 
 Verify the bundle and launch it directly:
@@ -68,6 +82,10 @@ Open Tailscale and confirm it is connected:
 tailscale ip -4
 ```
 
+If the macOS tray started before Tailscale, leave DapperCode open. For an already configured
+workspace, it retries a stopped broker every five seconds and reconnects once the configured
+Tailscale address is available; restarting the tray is not required.
+
 Alternatively choose **Local network** and enter the desktop computer's LAN IPv4 address.
 
 ## Bridge Will Not Start
@@ -134,7 +152,7 @@ The Expo script reads the bridge host from the central `config.json`, falling ba
 
 Keep the phone connected to the same bridge on its private network. The app preserves the
 last-known transcript and title while history is being recovered, including when switching chats.
-If it displays **Chat history could not be restored**, leave the chat open for automatic retry or
+If it displays **Fast forwarding...**, leave the chat open for automatic retry or
 tap the notice to retry immediately. History recovery is separate from turn status: a completed
 turn should not show a Stop action merely because messages have not finished loading.
 
@@ -142,6 +160,14 @@ Do not delete the chat, clear the app's data, or restart the bridge to refresh t
 If recovery continues to fail, inspect the bridge/agent diagnostics and record whether the failure
 followed a bridge restart or opening many other sessions. ACP history reconstruction must load the
 conversation; a successful resume alone does not prove that the agent replayed its messages.
+
+## App Closed While Creating a Chat
+
+If chat creation was interrupted before the phone received its result, the local placeholder is
+recovered into the new-chat composer as a draft, not reopened as an agent session. Review the
+recovered text and reattach files or images if needed, then press **Send**. Nothing is resent
+automatically. An unchanged text retry reuses the original submission ID so a lost creation reply
+does not create another chat or repeat an already accepted prompt.
 
 ## Agent Stops When the Phone Disconnects
 

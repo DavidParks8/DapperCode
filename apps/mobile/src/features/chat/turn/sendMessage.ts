@@ -14,9 +14,17 @@ import {
 import { selectedCollaborationModeAtom, selectedEffortAtom } from '../state/models';
 import { screenSetter } from '../state/registry';
 import { activityAtom, showDelayedGenericRunningActivityAtom } from '../state/composer';
+import { interruptedChatCreationAtom } from '@shell/state/chat/atoms';
+import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
+import {
+  consumeInterruptedChatCreationAtom,
+  replaceInterruptedChatSubmissionAtom,
+} from '@shell/state/chat/actions';
+import { interruptedCreationRetryId } from '@shell/session/interruptedChatCreation';
+import type { InterruptedChatCreation } from '@shell/session/interruptedChatCreation';
 import type { CollaborationMode, LocalImageInput, MentionInput } from '@bridge/types/types';
 import type { MainScreenSendMessageHandlerContext } from './sendMessageHandler';
-import type { ComposerSubmission } from './controllers/submissionController';
+import { submissionScopeKey, type ComposerSubmission } from './controllers/submissionController';
 import {
   applyQueuedMessageResult,
   applyStartedTurnResult,
@@ -39,18 +47,161 @@ export interface SendMessageOptions {
   submission?: ComposerSubmission;
 }
 
+export type BeginSendMessageSubmissionArgs = {
+  rawContent: string;
+  options?: SendMessageOptions;
+  selectedCollaborationMode: CollaborationMode;
+  selectedChat?: RunSendMessageTurnArgs['selectedChat'];
+  pendingMentionPaths: string[];
+  pendingLocalImagePaths: string[];
+  submissionController: MainScreenSendMessageHandlerContext['submissionController'];
+  draftController: MainScreenSendMessageHandlerContext['draftController'];
+  interruptedSubmissionId?: string;
+  inheritClearedDraftsFromSubmissionId?: string;
+  inheritedClearedDraftEntries?: Array<{ scopeKey: string; draft: string }>;
+};
+
+function resolveInterruptedSendRecovery(options: {
+  interrupted: InterruptedChatCreation | null;
+  targetChatId: string;
+  content: string;
+  sendOptions?: SendMessageOptions;
+  pendingMentionPaths: string[];
+  pendingLocalImagePaths: string[];
+  sameProfile: boolean;
+  targetChat: RunSendMessageTurnArgs['selectedChat'];
+}): { pendingChatId: string | null; submissionId: string | undefined } {
+  const interrupted = options.interrupted;
+  if (!interrupted || interrupted.createdChatId !== options.targetChatId) {
+    return { pendingChatId: null, submissionId: undefined };
+  }
+  return {
+    pendingChatId: interrupted.pendingChatId,
+    submissionId: interruptedCreationRetryId(
+      interrupted,
+      options.content,
+      (options.sendOptions?.mentions ?? options.pendingMentionPaths).map((mention) =>
+        typeof mention === 'string' ? mention : mention.path,
+      ),
+      (options.sendOptions?.localImages ?? options.pendingLocalImagePaths).map((image) =>
+        typeof image === 'string' ? image : image.path,
+      ),
+      options.sameProfile,
+      options.targetChat?.agentId ?? null,
+      options.targetChat?.cwd ?? null,
+    ),
+  };
+}
+
+function interruptedClearedDraftEntries(
+  interrupted: InterruptedChatCreation | null,
+  targetChatId: string,
+  profileId: string,
+): Array<{ scopeKey: string; draft: string }> | undefined {
+  if (interrupted?.createdChatId !== targetChatId) {
+    return undefined;
+  }
+  return [
+    {
+      scopeKey: submissionScopeKey({ profileId, threadId: null }),
+      draft: interrupted.originalDraft ?? interrupted.draft,
+    },
+  ];
+}
+
+function interruptedPredecessorId(
+  interrupted: InterruptedChatCreation | null,
+  targetChatId: string,
+): string | undefined {
+  return interrupted?.createdChatId === targetChatId ? interrupted.submissionId : undefined;
+}
+
+function acceptedReplacementChat(
+  result: { chat: RunSendMessageTurnArgs['selectedChat'] },
+  targetChatId: string,
+  fallback: RunSendMessageTurnArgs['selectedChat'],
+) {
+  return result.chat?.id === targetChatId ? result.chat : (fallback ?? null);
+}
+
+async function persistChangedInterruptedSubmission(options: {
+  context: MainScreenSendMessageHandlerContext;
+  interrupted: InterruptedChatCreation | null;
+  pendingChatId: string | null;
+  submission: ComposerSubmission;
+  content: string;
+  hadAttachments: boolean;
+  shouldClearComposer: boolean;
+  targetChat: RunSendMessageTurnArgs['selectedChat'];
+}): Promise<string | null> {
+  const { context, interrupted, pendingChatId, submission } = options;
+  if (!pendingChatId || !interrupted || submission.id === interrupted.submissionId) {
+    return pendingChatId;
+  }
+  try {
+    const replacement = await context.store.set(replaceInterruptedChatSubmissionAtom, {
+      profileId: context.bridgeProfileId,
+      expectedPendingChatId: pendingChatId,
+      submissionId: submission.id,
+      draft: options.content,
+      hadAttachments: options.hadAttachments,
+      agentId: options.targetChat?.agentId ?? null,
+      cwd: options.targetChat?.cwd ?? null,
+    });
+    if (replacement) {
+      return replacement.pendingChatId;
+    }
+  } catch (error) {
+    context.store.set(errorAtom, (error as Error).message);
+  }
+  restorePreparedSubmission(context, submission, options.shouldClearComposer);
+  return null;
+}
+
+function prepareSubmissionForDispatch(
+  context: MainScreenSendMessageHandlerContext,
+  submission: ComposerSubmission,
+  shouldClearComposer: boolean,
+): void {
+  if (!shouldClearComposer) {
+    return;
+  }
+  context.attachmentController.beginSubmission();
+  const clearedRevision = context.draftController.clearForSubmission({
+    scopeKey: submission.scopeKey,
+    value: submission.draft,
+    revision: submission.draftRevision,
+  });
+  if (clearedRevision !== null) {
+    context.submissionController.markCleared(submission, submission.scopeKey, clearedRevision);
+  }
+}
+
+function restorePreparedSubmission(
+  context: MainScreenSendMessageHandlerContext,
+  submission: ComposerSubmission,
+  shouldClearComposer: boolean,
+): void {
+  if (!shouldClearComposer) {
+    return;
+  }
+  const shouldRestoreDraft = context.submissionController.fail(
+    submission,
+    context.draftController.snapshot(),
+  );
+  context.attachmentController.finishSubmission(false, shouldRestoreDraft);
+  if (shouldRestoreDraft) {
+    context.setDraft(submission.draft);
+  }
+}
+
 async function runSendMessageTurn(args: RunSendMessageTurnArgs) {
   try {
-    args.setSending(true);
-    args.setActivity({ tone: 'running', title: 'Sending message' });
-    args.bumpRunWatchdog();
-    if (args.shouldClearComposer) {
-      args.attachmentController.beginSubmission();
-      args.setDraft('');
-      args.submissionController.markCleared(
-        args.submission,
-        args.draftController.snapshot().revision,
-      );
+    const isSelectedForDispatch = args.selectedChatIdRef.current === args.targetChatId;
+    if (isSelectedForDispatch) {
+      args.setSending(true);
+      args.setActivity({ tone: 'running', title: 'Sending message' });
+      args.bumpRunWatchdog();
     }
     args.optimisticState.applyGoalSurface();
     args.optimisticState.applySentMessage();
@@ -87,6 +238,7 @@ async function runSendMessageTurn(args: RunSendMessageTurnArgs) {
     const isStillSelectedForResult = args.selectedChatIdRef.current === args.targetChatId;
     finalizeSuccessfulSubmission(args, isStillSelectedForResult);
     if (result.disposition === 'queued') {
+      await args.consumeInterruptedChatCreation(args.selectedChat ?? null);
       applyQueuedMessageResult({
         optimisticState: args.optimisticState,
         selectedChatIdRef: args.selectedChatIdRef,
@@ -126,6 +278,9 @@ async function runSendMessageTurn(args: RunSendMessageTurnArgs) {
       setShowDelayedGenericRunningActivity: args.setShowDelayedGenericRunningActivity,
       bumpRunWatchdog: args.bumpRunWatchdog,
     });
+    await args.consumeInterruptedChatCreation(
+      acceptedReplacementChat(result, args.targetChatId, args.selectedChat),
+    );
     return true;
   } catch (err) {
     restoreFailedSubmission(args);
@@ -153,6 +308,7 @@ export async function executeSendMessage(
 ): Promise<boolean> {
   const {
     selectedChatId,
+    bridgeProfileId,
     handleSlashCommand,
     setDraft,
     pendingMentionPaths,
@@ -212,7 +368,6 @@ export async function executeSendMessage(
     store,
     showDelayedGenericRunningActivityAtom,
   );
-
   const request = prepareSendMessageRequest({
     rawContent,
     options,
@@ -222,6 +377,31 @@ export async function executeSendMessage(
     return false;
   }
   const { content, targetChatId, shouldClearComposer, shouldPreservePlan } = request;
+  const targetChatAtStart =
+    selectedChatRef.current?.id === targetChatId ? selectedChatRef.current : selectedChat;
+  const interruptedAtStart = store.get(interruptedChatCreationAtom);
+  const { pendingChatId: initialInterruptedPendingChatId, submissionId: interruptedSubmissionId } =
+    resolveInterruptedSendRecovery({
+      interrupted: interruptedAtStart,
+      targetChatId,
+      content,
+      sendOptions: options,
+      pendingMentionPaths,
+      pendingLocalImagePaths,
+      sameProfile: store.get(activeBridgeProfileAtom)?.id === bridgeProfileId,
+      targetChat: targetChatAtStart,
+    });
+  let interruptedPendingChatId = initialInterruptedPendingChatId;
+  const consumeInterruptedChatCreation = async (chat: typeof selectedChatRef.current) => {
+    if (!interruptedPendingChatId || !chat || chat.id !== targetChatId) {
+      return;
+    }
+    await store.set(consumeInterruptedChatCreationAtom, {
+      expectedPendingChatId: interruptedPendingChatId,
+      profileId: bridgeProfileId,
+      replacement: chat,
+    });
+  };
   if (options?.allowSlashCommands && (await handleSlashCommand(content))) {
     if (shouldClearComposer) {
       setDraft('');
@@ -233,12 +413,36 @@ export async function executeSendMessage(
       rawContent,
       options,
       selectedCollaborationMode,
-      selectedChat,
+      selectedChat: targetChatAtStart,
       pendingMentionPaths,
       pendingLocalImagePaths,
       submissionController,
       draftController,
+      interruptedSubmissionId,
+      inheritClearedDraftsFromSubmissionId: interruptedPredecessorId(
+        interruptedAtStart,
+        targetChatId,
+      ),
+      inheritedClearedDraftEntries: interruptedClearedDraftEntries(
+        interruptedAtStart,
+        targetChatId,
+        bridgeProfileId,
+      ),
     });
+  prepareSubmissionForDispatch(context, submission, shouldClearComposer);
+  interruptedPendingChatId = await persistChangedInterruptedSubmission({
+    context,
+    interrupted: interruptedAtStart,
+    pendingChatId: interruptedPendingChatId,
+    submission,
+    content,
+    hadAttachments: turnMentions.length > 0 || turnLocalImages.length > 0,
+    shouldClearComposer,
+    targetChat: targetChatAtStart,
+  });
+  if (initialInterruptedPendingChatId && !interruptedPendingChatId) {
+    return false;
+  }
   const selectedThreadSnapshot = threadRuntimeSnapshotsRef.current[targetChatId] ?? null;
   const optimisticState = createOptimisticSendState({
     targetChatId,
@@ -268,7 +472,7 @@ export async function executeSendMessage(
     content,
     turnMentions,
     turnLocalImages,
-    selectedChat,
+    selectedChat: targetChatAtStart,
     activeModelId,
     activeEffort,
     activeServiceTier,
@@ -312,5 +516,6 @@ export async function executeSendMessage(
     setShowDelayedGenericRunningActivity,
     suppressPlanModeAutoEnable: options?.suppressPlanModeAutoEnable ?? false,
     handleTurnFailure,
+    consumeInterruptedChatCreation,
   });
 }

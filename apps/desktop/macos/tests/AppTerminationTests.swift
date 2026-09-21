@@ -62,6 +62,8 @@ private final class FakeBridgeStatusConnection: BridgeStatusConnection {
 private struct AppTerminationTests {
     @MainActor
     static func main() async throws {
+        try await BridgeRecoveryTests.run()
+
         let registry = OperatorProcessRegistry()
         let inFlight = sleepingProcess()
         try registry.run(inFlight)

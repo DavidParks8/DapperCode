@@ -9,7 +9,7 @@ export interface AgUiChunkAssembly {
 export interface AgUiThreadMessageState {
   messages: ChatMessage[];
   messageIndexById: Record<string, number>;
-  authoritativeSnapshot: boolean;
+  snapshotMessageIds: string[] | null;
   runByMessageId: Record<string, string>;
   terminalMessageIds: string[];
   replacesMessageIdByMessageId: Record<string, string>;
@@ -69,7 +69,7 @@ export function createAgUiThreadMessageState(): AgUiThreadMessageState {
   return {
     messages: [],
     messageIndexById: {},
-    authoritativeSnapshot: false,
+    snapshotMessageIds: null,
     runByMessageId: {},
     terminalMessageIds: [],
     replacesMessageIdByMessageId: {},

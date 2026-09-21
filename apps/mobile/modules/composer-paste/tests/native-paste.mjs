@@ -15,7 +15,12 @@ export default async function scenario(e2e) {
 <plist version="1.0"><dict><key>CFBundleIdentifier</key><string>dev.dappercode.paste-test</string>
 <key>CFBundleExecutable</key><string>PasteTest</string><key>CFBundleName</key><string>PasteTest</string>
 <key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>1</string>
-<key>CFBundleShortVersionString</key><string>1.0</string><key>UILaunchScreen</key><dict/></dict></plist>`,
+<key>CFBundleShortVersionString</key><string>1.0</string><key>UILaunchScreen</key><dict/>
+<key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/>
+<key>UISceneConfigurations</key><dict><key>UIWindowSceneSessionRoleApplication</key><array><dict>
+<key>UISceneConfigurationName</key><string>Default Configuration</string>
+<key>UISceneDelegateClassName</key><string>PasteTestSceneDelegate</string>
+</dict></array></dict></dict></dict></plist>`,
       );
       const sdk = await e2e.run('xcrun', ['--sdk', 'iphonesimulator', '--show-sdk-path']);
       await e2e.run('xcrun', [
@@ -38,16 +43,16 @@ export default async function scenario(e2e) {
         'create',
         e2e.runId,
         'com.apple.CoreSimulator.SimDeviceType.iPhone-17',
-        'com.apple.CoreSimulator.SimRuntime.iOS-26-5',
+        'com.apple.CoreSimulator.SimRuntime.iOS-27-0',
       ]);
       simulator = created.stdout.trim();
       await e2e.run('xcrun', ['simctl', 'boot', simulator]);
       await e2e.run('xcrun', ['simctl', 'bootstatus', simulator, '-b'], { timeoutMs: 120000 });
-      await e2e.run('xcrun', ['simctl', 'install', simulator, app]);
+      await e2e.run('xcrun', ['simctl', 'install', simulator, app], { timeoutMs: 120000 });
       const result = await e2e.run(
         'xcrun',
         ['simctl', 'launch', '--console', simulator, 'dev.dappercode.paste-test'],
-        { timeoutMs: 30000 },
+        { timeoutMs: 60000 },
       );
       await e2e.expectMatch(
         'real UIKit paste sequence',

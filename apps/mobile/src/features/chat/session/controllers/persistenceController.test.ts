@@ -1,10 +1,4 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
-jest.mock('expo-file-system/legacy', () => ({
-  documentDirectory: 'file:///documents/',
-  readAsStringAsync: jest.fn(),
-  writeAsStringAsync: jest.fn(),
-  getInfoAsync: jest.fn(),
-}));
 
 import { MainScreenPersistenceController } from './persistenceController';
 import type { MainScreenStorage } from './persistenceController';

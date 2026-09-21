@@ -14,7 +14,7 @@ private struct OperatorFailure: Decodable {
     let error: String
 }
 
-private struct BridgeSnapshot: Decodable, Identifiable {
+struct BridgeSnapshot: Decodable, Identifiable {
     let state: String
     let headline: String
     let detail: String
@@ -119,7 +119,7 @@ private struct SetupResult: Decodable {
     let secretBackend: String
 }
 
-private enum NetworkMode: String, CaseIterable, Identifiable {
+enum NetworkMode: String, CaseIterable, Identifiable {
     case tailscale
     case local
 
@@ -134,7 +134,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @MainActor
-private final class BridgeModel: ObservableObject {
+final class BridgeModel: ObservableObject {
     @Published var snapshot = BridgeSnapshot.loading
     @Published var bridges: [BridgeSnapshot] = []
     @Published var isBusy = false
@@ -147,6 +147,11 @@ private final class BridgeModel: ObservableObject {
     @Published var agentExecutable = ""
     @Published var agentArguments = "acp"
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
+    private let operatorURL: URL?
+    private let defaults: UserDefaults
+    private let brokerRetryDelay: Duration
+    private var brokerRetryTask: Task<Void, Never>?
+    private var brokerStartupError: String?
     private var statusObserver: BridgeStatusObserver?
     private var isRefreshing = false
     private var refreshAgain = false
@@ -154,13 +159,17 @@ private final class BridgeModel: ObservableObject {
 
     var workspace: String {
         get {
-            UserDefaults.standard.string(forKey: "workspace")
+            defaults.string(forKey: "workspace")
                 ?? FileManager.default.homeDirectoryForCurrentUser.path
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: "workspace")
+            defaults.set(newValue, forKey: "workspace")
             objectWillChange.send()
         }
+    }
+
+    deinit {
+        brokerRetryTask?.cancel()
     }
 
     var isConfigured: Bool {
@@ -177,7 +186,14 @@ private final class BridgeModel: ObservableObject {
         }
     }
 
-    init() {
+    init(
+        operatorURL: URL? = Bundle.main.resourceURL?.appendingPathComponent("bin/dappercode"),
+        defaults: UserDefaults = .standard,
+        brokerRetryDelay: Duration = .seconds(5)
+    ) {
+        self.operatorURL = operatorURL
+        self.defaults = defaults
+        self.brokerRetryDelay = brokerRetryDelay
         statusObserver = BridgeStatusObserver(
             onHealth: { [weak self] profileId, health in
                 self?.applyObservedHealth(health, to: profileId)
@@ -211,6 +227,7 @@ private final class BridgeModel: ObservableObject {
                 errorMessage = error.localizedDescription
             }
         } while refreshAgain
+        synchronizeBrokerRecovery()
     }
 
     func refreshIfStale() async {
@@ -328,15 +345,43 @@ private final class BridgeModel: ObservableObject {
         }
     }
 
-    private func ensureBrokerRunning() async {
-        let configuredBridge = bridges.first {
+    private var stoppedBridge: BridgeSnapshot? {
+        bridges.first {
             BridgeLaunchPolicy.shouldStart(
                 isRunning: $0.isRunning,
                 state: $0.state
             )
         }
-        guard let configuredBridge else { return }
+    }
 
+    private func synchronizeBrokerRecovery() {
+        guard stoppedBridge != nil else {
+            brokerRetryTask?.cancel()
+            brokerRetryTask = nil
+            if bridges.contains(where: { $0.isRunning && $0.state != "inaccessible" }) {
+                if errorMessage == brokerStartupError {
+                    errorMessage = nil
+                }
+                brokerStartupError = nil
+            }
+            return
+        }
+        guard brokerRetryTask == nil else { return }
+        let delay = brokerRetryDelay
+        // A failed start has no health connection to trigger disconnect reconciliation.
+        brokerRetryTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self else { return }
+            self.brokerRetryTask = nil
+            await self.refresh()
+            await self.ensureBrokerRunning()
+        }
+    }
+
+    private func ensureBrokerRunning() async {
+        guard !isBusy, let configuredBridge = stoppedBridge else { return }
+        brokerRetryTask?.cancel()
+        brokerRetryTask = nil
         isBusy = true
         defer { isBusy = false }
         do {
@@ -346,7 +391,13 @@ private final class BridgeModel: ObservableObject {
                 includeWorkspace: false
             )
         } catch {
-            errorMessage = "Could not start the broker: \(error.localizedDescription)"
+            let message = "Could not start the broker: \(error.localizedDescription)"
+            if brokerStartupError != message {
+                if errorMessage == nil || errorMessage == brokerStartupError {
+                    errorMessage = message
+                }
+                brokerStartupError = message
+            }
         }
         await refresh()
     }
@@ -403,8 +454,9 @@ private final class BridgeModel: ObservableObject {
             ? ["--owner-pid", String(ProcessInfo.processInfo.processIdentifier)]
             : []
         let workspaceArguments = includeWorkspace ? ["--workspace", workspace] : []
+        let operatorURL = operatorURL
         return try await Task.detached(priority: .userInitiated) {
-            guard let operatorURL = Bundle.main.resourceURL?.appendingPathComponent("bin/dappercode"),
+            guard let operatorURL,
                   FileManager.default.isExecutableFile(atPath: operatorURL.path) else {
                 throw OperatorError.unavailable
             }
@@ -703,7 +755,9 @@ private enum TrayIcon {
     }
 }
 
+#if !DAPPERCODE_TESTING
 @main
+#endif
 private struct DapperCodeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = BridgeModel()

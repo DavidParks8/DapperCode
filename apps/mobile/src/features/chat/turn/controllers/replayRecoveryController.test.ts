@@ -76,6 +76,17 @@ describe('replay recovery controller', () => {
     expect(api.readThreadSchedules).toHaveBeenCalledTimes(1);
   });
 
+  it('never sends local pending thread IDs through replay recovery reads', async () => {
+    const api = createApi();
+    api.listLoadedChatIds.mockResolvedValue(['pending-loaded', 'selected']);
+    const result = await fetchReplayRecoverySnapshot(api, ['pending-current', 'selected']);
+    expect(result.threads.map(({ chat: value }) => value.id)).not.toContain('pending-current');
+    expect(api.getChat).not.toHaveBeenCalledWith('pending-current', expect.anything());
+    expect(api.getChat).not.toHaveBeenCalledWith('pending-loaded', expect.anything());
+    expect(api.readThreadQueue).not.toHaveBeenCalledWith('pending-current');
+    expect(api.readThreadSchedules).not.toHaveBeenCalledWith('pending-current');
+  });
+
   it('rejects the entire snapshot when one late thread fails and refetches all threads on retry', async () => {
     const api = createApi();
     api.listApprovals.mockResolvedValue([]);

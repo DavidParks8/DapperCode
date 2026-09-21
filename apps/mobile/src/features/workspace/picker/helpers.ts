@@ -7,11 +7,11 @@ export function toPathBasename(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
-/** One rung of the folder path, ordered current-first so the title menu reads top-down like Files. */
+/** One rung of the folder path, ordered from filesystem root toward the current folder. */
 export interface WorkspacePathCrumb {
   path: string;
   name: string;
-  /** 0 for the current folder, 1 for its parent, and so on — drives the menu's indent. */
+  /** 0 for the filesystem root, increasing toward the current folder — drives the menu's indent. */
   depth: number;
 }
 
@@ -26,18 +26,17 @@ export function toPathCrumbs(path: string | null): WorkspacePathCrumb[] {
   const isPosix = path.startsWith('/');
   const separator = isPosix ? '/' : '\\';
   const segments = path.split(/[\\/]/).filter(Boolean);
-  const crumbs: WorkspacePathCrumb[] = [];
-  for (let length = segments.length; length > 0; length -= 1) {
+  const crumbs: WorkspacePathCrumb[] = isPosix
+    ? [{ path: separator, name: separator, depth: 0 }]
+    : [];
+  for (let length = 1; length <= segments.length; length += 1) {
     const branch = segments.slice(0, length);
     const joined = branch.join(separator);
     crumbs.push({
       path: isPosix ? `${separator}${joined}` : joined,
       name: branch[branch.length - 1] ?? path,
-      depth: segments.length - length,
+      depth: crumbs.length,
     });
-  }
-  if (isPosix) {
-    crumbs.push({ path: separator, name: separator, depth: segments.length });
   }
   return crumbs;
 }

@@ -1,6 +1,7 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import * as Haptics from 'expo-haptics';
 import { isValidElement } from 'react';
+import type * as ReactModule from 'react';
 import { FlatList, Keyboard, Platform, Pressable, StyleSheet } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -20,6 +21,7 @@ import {
   setMockLiquidGlassAvailable,
 } from '@shared/testing/glassEffectMock';
 import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscriptView';
+import { ToolInvocationRow } from '../message/ChatMessage';
 import { ActivityEvent } from './ActivityEvent';
 import { ACTIVITY_COLLAPSE_DURATION_MS } from './TranscriptActivitySlot';
 import {
@@ -32,10 +34,13 @@ import {
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
-jest.mock('../message/ChatMessage', () => ({
-  ChatMessage: ({ message }: { message: { content: string } }) => message.content,
-  ToolInvocationRow: () => null,
-}));
+jest.mock('../message/ChatMessage', () => {
+  const { memo } = jest.requireActual<typeof ReactModule>('react');
+  return {
+    ChatMessage: ({ message }: { message: { content: string } }) => message.content,
+    ToolInvocationRow: memo(jest.fn(() => null)),
+  };
+});
 
 type Queryable = ReactTestInstance & {
   children: unknown[];
@@ -203,7 +208,7 @@ describe('ChatTranscriptView activity event', () => {
     jest.useRealTimers();
   });
 
-  it('renders a retry action independently of settled turn activity and clears it on recovery', () => {
+  it('shows fast forwarding without an error alert while history catches up, then clears it', () => {
     const retry = jest.fn();
     const tree = render({ chat, onLoadEarlier: retry });
     expect(tree.root.findAllByProps({ testID: 'chat-history-recovery' })).toHaveLength(0);
@@ -212,9 +217,19 @@ describe('ChatTranscriptView activity event', () => {
       onLoadEarlier: retry,
     });
     const button = tree.root.findAllByProps({
-      accessibilityLabel: 'Retry loading chat history',
+      accessibilityLabel: 'Fast forwarding',
     })[0];
     expect(button).toBeDefined();
+    expect(findText(tree.root, 'Fast forwarding...')).toBeDefined();
+    expect(tree.root.findAllByProps({ accessibilityRole: 'alert' })).toHaveLength(0);
+    expect(
+      tree.root.findAll((node) =>
+        node.children.some(
+          (child) =>
+            typeof child === 'string' && child.includes('Chat history could not be restored'),
+        ),
+      ),
+    ).toHaveLength(0);
     act(() => button!.props.onPress());
     expect(retry).toHaveBeenCalledTimes(1);
     expect(tree.root.findAllByProps({ testID: 'atom-glyph' })).toHaveLength(0);
@@ -1248,7 +1263,7 @@ describe('ChatTranscriptView continuation', () => {
     act(() => list.props.onScrollEndDrag());
     expect(autoScrollStateRef.current.shouldStickToBottom).toBe(false);
     expect(getList(tree).props['maintainVisibleContentPosition']).toEqual({
-      minIndexForVisible: 0,
+      minIndexForVisible: 2,
     });
     expect(
       tree.root.findAllByProps({ accessibilityLabel: 'Jump to latest message' }).length,
@@ -1420,6 +1435,64 @@ describe('ChatTranscriptView continuation', () => {
     expect(getList(tree).props.data).toHaveLength(20);
     act(() => tree.unmount());
   });
+
+  it('includes inter-row spacing in measured cells rather than the virtualized container', () => {
+    const tree = render({ chat: makeChat({ messages: makeMessages(140) }) });
+    const list = getList(tree);
+    expect(StyleSheet.flatten(list.props.contentContainerStyle)).not.toHaveProperty('gap');
+    expect(list.props['ItemSeparatorComponent']).toBeDefined();
+    const cell = tree.root.findByProps({ cellKey: 'message-139' }) as Queryable;
+    expect(
+      cell.findAll((node) => {
+        const style = StyleSheet.flatten(node.props['style']);
+        return (
+          typeof style === 'object' &&
+          style !== null &&
+          'height' in style &&
+          style.height === theme.spacing.xl
+        );
+      }).length,
+    ).toBeGreaterThan(0);
+    act(() => tree.unmount());
+  });
+
+  it.each(['complete', 'running'] as const)(
+    'does not repaint settled tool rows while scrolling a %s chat',
+    (status) => {
+      const tree = render({
+        chat: makeChat({
+          status,
+          messages: Array.from({ length: 8 }, (_, index) => ({
+            id: `tool-${String(index)}`,
+            role: 'tool',
+            toolCallId: `tool-${String(index)}`,
+            content: 'Finished',
+            createdAt: '2026-09-01T00:00:00.000Z',
+            toolMeta: {
+              toolCallId: `tool-${String(index)}`,
+              kind: 'read',
+              title: 'Read file',
+              status: 'completed',
+            },
+          })),
+        }),
+      });
+      const rows = jest.mocked(ToolInvocationRow.type);
+      rows.mockClear();
+      const list = getList(tree);
+      for (const [index, item] of list.props.data.entries()) {
+        act(() => {
+          list.props.onViewableItemsChanged({
+            viewableItems: [{ item, index, key: item['id'], isViewable: true }],
+            changed: [],
+          });
+        });
+      }
+      act(() => list.props.onViewableItemsChanged({ viewableItems: [], changed: [] }));
+      expect(rows).not.toHaveBeenCalled();
+      act(() => tree.unmount());
+    },
+  );
 
   it('guards bridge pagination while loading or exhausted and requests it when available', () => {
     const onLoadEarlier = jest.fn();

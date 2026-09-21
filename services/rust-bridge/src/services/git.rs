@@ -74,29 +74,15 @@ impl GitService {
         raw_cwd: Option<&str>,
     ) -> Result<GitStatusResponse, BridgeError> {
         let repo_path = self.resolve_and_validate_git_path(raw_cwd, true).await?;
-        let args = vec![
-            "-C".to_string(),
-            repo_path.to_string_lossy().to_string(),
-            "status".to_string(),
-            "--short".to_string(),
-            "--branch".to_string(),
-            "-uall".to_string(),
-        ];
-        let result = self
-            .terminal
-            .execute_git(&args, repo_path.clone(), None)
+        let output = self
+            .run_git_stdout(
+                &repo_path,
+                &["status", "--short", "--branch", "-uall"],
+                "git status failed",
+            )
             .await?;
 
-        if result.code != Some(0) {
-            return Err(BridgeError::server(&git_failure_message(
-                &result.stderr,
-                &result.stdout,
-                "git status failed",
-            )));
-        }
-
-        let lines = result
-            .stdout
+        let lines = output
             .lines()
             .filter(|line| !line.trim().is_empty())
             .collect::<Vec<_>>();
@@ -123,7 +109,7 @@ impl GitService {
             used_bytes += entry_bytes;
             returned_files.push(entry);
         }
-        let (raw, raw_truncated) = truncate_utf8_bytes(&result.stdout, GIT_STATUS_MAX_BYTES);
+        let (raw, raw_truncated) = truncate_utf8_bytes(&output, GIT_STATUS_MAX_BYTES);
         let truncated = raw_truncated || returned_files.len() < total_files;
         let returned_file_count = returned_files.len();
 
@@ -281,33 +267,24 @@ impl GitService {
     ) -> Result<GitHistoryResponse, BridgeError> {
         let repo_path = self.resolve_and_validate_git_path(raw_cwd, true).await?;
         let history_limit = limit.unwrap_or(12).clamp(1, 30);
-        let args = vec![
-            "-C".to_string(),
-            repo_path.to_string_lossy().to_string(),
-            "log".to_string(),
-            "--first-parent".to_string(),
-            "--decorate=short".to_string(),
-            "--date=iso-strict".to_string(),
-            format!("--max-count={history_limit}"),
-            "--pretty=format:%H\x1f%h\x1f%an\x1f%aI\x1f%D\x1f%s\x1e".to_string(),
-            "HEAD".to_string(),
-        ];
-
-        let result = self
-            .terminal
-            .execute_git(&args, repo_path.clone(), None)
+        let output = self
+            .run_git_stdout(
+                &repo_path,
+                &[
+                    "log",
+                    "--first-parent",
+                    "--decorate=short",
+                    "--date=iso-strict",
+                    &format!("--max-count={history_limit}"),
+                    "--pretty=format:%H\x1f%h\x1f%an\x1f%aI\x1f%D\x1f%s\x1e",
+                    "HEAD",
+                ],
+                "git log failed",
+            )
             .await?;
 
-        if result.code != Some(0) {
-            return Err(BridgeError::server(&git_failure_message(
-                &result.stderr,
-                &result.stdout,
-                "git log failed",
-            )));
-        }
-
         Ok(GitHistoryResponse {
-            commits: parse_git_history(&result.stdout),
+            commits: parse_git_history(&output),
             cwd: repo_path.to_string_lossy().to_string(),
         })
     }
@@ -619,30 +596,15 @@ impl GitService {
         &self,
         repo_path: &Path,
     ) -> Result<Vec<GitStatusEntry>, BridgeError> {
-        let args = vec![
-            "-C".to_string(),
-            repo_path.to_string_lossy().to_string(),
-            "status".to_string(),
-            "--porcelain=v1".to_string(),
-            "--branch".to_string(),
-            "-uall".to_string(),
-            "-z".to_string(),
-        ];
-
-        let result = self
-            .terminal
-            .execute_git(&args, repo_path.to_path_buf(), None)
+        let output = self
+            .run_git_stdout(
+                repo_path,
+                &["status", "--porcelain=v1", "--branch", "-uall", "-z"],
+                "git status --porcelain failed",
+            )
             .await?;
 
-        if result.code != Some(0) {
-            return Err(BridgeError::server(&git_failure_message(
-                &result.stderr,
-                &result.stdout,
-                "git status --porcelain failed",
-            )));
-        }
-
-        parse_porcelain_status_entries(&result.stdout)
+        parse_porcelain_status_entries(&output)
     }
 
     async fn run_git_diff_command(
@@ -679,23 +641,8 @@ impl GitService {
         command: &[&str],
         fallback_message: &str,
     ) -> Result<String, BridgeError> {
-        let mut args = vec!["-C".to_string(), repo_path.to_string_lossy().to_string()];
-        args.extend(command.iter().map(|segment| (*segment).to_string()));
-
-        let result = self
-            .terminal
-            .execute_git(&args, repo_path.to_path_buf(), None)
-            .await?;
-
-        if result.code != Some(0) {
-            return Err(BridgeError::server(&git_failure_message(
-                &result.stderr,
-                &result.stdout,
-                fallback_message,
-            )));
-        }
-
-        Ok(result.stdout)
+        self.run_git_diff_command(repo_path, command, false, fallback_message)
+            .await
     }
 
     async fn resolve_default_remote_name(
@@ -2032,22 +1979,34 @@ mod tests {
 
         fs::write(repo.0.join("tracked.txt"), "first\nsecond\n").expect("modify tracked file");
         fs::write(repo.0.join("new file.txt"), "untracked\n").expect("write untracked file");
-        service
-            .run_git_diff_command(
-                &repo.0,
-                &[
-                    "diff",
-                    "--no-ext-diff",
-                    "--exit-code",
-                    "HEAD",
-                    "--",
-                    "tracked.txt",
-                ],
-                true,
-                "git diff --exit-code failed",
-            )
+        let diff_args = [
+            "diff",
+            "--no-ext-diff",
+            "--exit-code",
+            "HEAD",
+            "--",
+            "tracked.txt",
+        ];
+        let diff_with_exit_code_one = service
+            .run_git_diff_command(&repo.0, &diff_args, true, "git diff --exit-code failed")
             .await
             .expect("allow git diff exit code one");
+        let strict_error = service
+            .run_git_stdout(&repo.0, &diff_args, "git diff --exit-code failed")
+            .await
+            .expect_err("stdout executor rejects exit code one");
+        assert_eq!(strict_error.code, -32000);
+        assert_eq!(strict_error.message, diff_with_exit_code_one);
+        let quiet_error = service
+            .run_git_stdout(
+                &repo.0,
+                &["diff", "--quiet", "HEAD"],
+                "git quiet diff failed",
+            )
+            .await
+            .expect_err("quiet diff exits with one");
+        assert_eq!(quiet_error.code, -32000);
+        assert_eq!(quiet_error.message, "git quiet diff failed");
         let dirty = service.get_status(None).await.expect("dirty status");
         assert!(!dirty.clean);
         assert_eq!(dirty.total_files, 2);

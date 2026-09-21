@@ -2,10 +2,12 @@ import { atom } from 'jotai';
 
 import type { Chat } from '@bridge/types/types';
 import type { ChatSnapshotCache } from '@shell/session/chatSnapshotCache';
+import type { InterruptedChatCreation } from '@shell/session/interruptedChatCreation';
 
 export const selectedChatIdAtom = atom<string | null>(null);
 
 export const activeChatAtom = atom<Chat | null>(null);
+export const interruptedChatCreationAtom = atom<InterruptedChatCreation | null>(null);
 
 export const gitChatAtom = atom<Chat | null>(null);
 

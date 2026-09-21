@@ -8,9 +8,8 @@ use dappercode_broker::BrokerServer;
 use dappercode_desktop_core::BrokerSettings;
 use dappercode_desktop_core::{
     discover_agent_executable, profile_id_for, resolve_bridge_host, setup_profile,
-    validate_workspace, AppPaths, BridgeSnapshot, BridgeState,
-    BridgeSupervisor as LegacyBridgeSupervisor, BrokerLifecycleAction, BrokerSupervisor, FileLease,
-    NetworkMode, Profile, RuntimePaths, SecretStore, SetupRequest,
+    validate_workspace, AppPaths, BridgeSnapshot, BridgeState, BrokerLifecycleAction,
+    BrokerSupervisor, FileLease, NetworkMode, Profile, SecretStore, SetupRequest,
 };
 use serde::Serialize;
 
@@ -155,7 +154,6 @@ fn run_workspace_command(
             let Some(supervisor) = supervisor(workspace.clone(), paths, secrets, owner_pid)? else {
                 bail!("this workspace is not set up yet; run 'dappercode setup' first");
             };
-            stop_legacy_bridges(paths, secrets)?;
             let action = match command {
                 "start" => BrokerLifecycleAction::Start,
                 "stop" => BrokerLifecycleAction::Stop,
@@ -240,7 +238,7 @@ fn run_setup(
 }
 
 /// Removes a workspace's profile entirely: its stored token, its profile directory, and its entry
-/// in `config.json`. Refuses while that profile's bridge is still running.
+/// in `config.json`. Refuses while the desktop broker is still running.
 fn forget_profile(
     workspace: PathBuf,
     paths: &AppPaths,
@@ -248,7 +246,6 @@ fn forget_profile(
 ) -> Result<serde_json::Value> {
     let workspace = validate_workspace(&workspace)?;
     let profile_id = profile_id_for(&workspace);
-    stop_legacy_bridges(paths, secrets)?;
     let _transition_lease = FileLease::acquire(&paths.broker_transition_lock_path())?;
     let config = paths.load_config()?;
     if let (Some(profile), Some(settings)) =
@@ -336,8 +333,7 @@ fn list_profiles(
     Ok(snapshots)
 }
 
-/// Stops every bridge this app owns. Used when the desktop app quits, so parallel bridges from
-/// different worktrees are all torn down. One failing profile does not abort the rest.
+/// Stops the app-owned broker, which shuts down its workspace workers when the desktop app quits.
 fn stop_all(paths: &AppPaths, secrets: &SecretStore) -> Result<StopAllResult> {
     let config = paths.load_config()?;
     let profiles = config.profiles;
@@ -371,25 +367,7 @@ fn stop_all(paths: &AppPaths, secrets: &SecretStore) -> Result<StopAllResult> {
             }
         }
     }
-    stop_legacy_bridges(paths, secrets)?;
     Ok(StopAllResult { stopped, results })
-}
-
-fn stop_legacy_bridges(paths: &AppPaths, secrets: &SecretStore) -> Result<()> {
-    let runtime = RuntimePaths::discover()?;
-    for profile in paths.load_config()?.profiles {
-        let supervisor = LegacyBridgeSupervisor::new(
-            profile,
-            paths.clone(),
-            secrets.clone(),
-            runtime.clone(),
-            None,
-        );
-        if supervisor.owns_running_process() {
-            supervisor.stop()?;
-        }
-    }
-    Ok(())
 }
 
 fn supervisor(

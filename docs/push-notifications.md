@@ -112,8 +112,13 @@ not sent. Approval notifications never include reply content.
   phones. The Expo notification handler also suppresses a foreground/inactive
   delivery as a fallback for connection and lifecycle races.
 - **Backgrounded but not quit / killed:** the app reports background before its
-  normal disconnect attempt. Pushes remain enabled even if the WebSocket stays
-  connected, and the OS delivers and displays them.
+  normal disconnect attempt, then keeps the connection for a 10-second grace
+  period. Returning during that window cancels the disconnect. The native iOS
+  app requests bounded background execution so the grace period can run while
+  locked; the OS can still expire or deny that time. Pushes remain enabled
+  during the grace period even though the WebSocket stays connected, and the OS
+  delivers and displays them. After a longer absence, automatic history recovery
+  shows "Fast forwarding..." rather than an immediate restore-error alert.
 - Tapping a notification opens the app and navigates to the relevant thread.
 - **Approval notifications carry Approve / Deny action buttons** (iOS notification
   category `approval`). The approval push includes the `approvalId`; tapping a
@@ -125,24 +130,6 @@ not sent. Approval notifications never include reply content.
   purpose: resolving needs the WS, which only runs while the app is active, so a
   fully-background resolve isn't reliable for this transport. The in-app approval
   banner remains as a fallback if the action can't complete.
-
-## iOS Live Activities
-
-On iOS 16.2 and later, DapperCode publishes one native Live Activity for the currently selected
-chat while its agent turn is running. The Lock Screen and Dynamic Island show only generic state:
-working, planning, waiting, completed, failed, or stopped. They do not show the chat title,
-workspace, prompt, command, approval detail, or error text. Tapping the activity opens the selected
-chat.
-
-Live Activities are enabled by default and respect the per-app iOS system setting. A completed,
-failed, or stopped result remains visible for one minute unless another selected turn starts first.
-They require a development, preview, or TestFlight build and do not work in Expo Go.
-
-This first phase uses local ActivityKit updates only. When the app is backgrounded, iOS suspends its
-JavaScript and the activity retains its last state until DapperCode returns to the foreground and
-reconciles with the bridge. Continuous background updates would require a separate ActivityKit
-push-token and direct APNs integration; ordinary Expo notification pushes do not update a Live
-Activity.
 
 ## Build requirements (standalone apps)
 

@@ -129,3 +129,102 @@ export default async function globalSetup(): Promise<void> {
   );
   assert.equal(result.status, 0, result.stderr);
 });
+
+for (const [name, importSource] of [
+  [
+    'an import-looking string',
+    `const example = "import { ensureWebBuild } from './harness/webBuild.ts'";`,
+  ],
+  ['a type-only import', `import type { ensureWebBuild } from './harness/webBuild.ts';`],
+  ['a type-only specifier', `import { type ensureWebBuild } from './harness/webBuild.ts';`],
+  ['a different module', `import { ensureWebBuild } from './other/webBuild.ts';`],
+  ['a module-name prefix', `import { ensureWebBuild } from './harness/webBuild.ts.backup';`],
+  [
+    'a different exported function',
+    `import { unrelated as ensureWebBuild } from './harness/webBuild.ts';`,
+  ],
+]) {
+  test(`rejects ${name} as the web-build import`, () => {
+    const result = withSyntheticRepo(
+      `${importSource}
+export default async function globalSetup(): Promise<void> {
+  await ensureWebBuild();
+}`,
+      runChecker,
+    );
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /must import ensureWebBuild/);
+  });
+}
+
+for (const [name, body] of [
+  ['a string literal', `const example = 'await ensureWebBuild()';`],
+  ['a template literal', 'const example = `await ensureWebBuild()`;'],
+  ['a regular expression', 'const example = /await ensureWebBuild()/;'],
+  ['a nested function', 'async function unused() { await ensureWebBuild(); }'],
+  ['a nested callback', 'const unused = async () => { await ensureWebBuild(); };'],
+  ['a conditional branch', 'if (false) { await ensureWebBuild(); }'],
+  ['an optional call', 'await ensureWebBuild?.();'],
+]) {
+  test(`rejects ${name} as the directly awaited pre-build`, () => {
+    const result = withSyntheticRepo(
+      `import { ensureWebBuild } from './harness/webBuild.ts';
+export default async function globalSetup(): Promise<void> {
+  ${body}
+}`,
+      runChecker,
+    );
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /must .await ensureWebBuild\(\)./);
+  });
+}
+
+test('rejects a function-looking literal instead of a default async function declaration', () => {
+  const result = withSyntheticRepo(
+    `import { ensureWebBuild } from './harness/webBuild.ts';
+const example = 'export default async function globalSetup() { await ensureWebBuild(); }';`,
+    runChecker,
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /must export an async default globalSetup function/);
+});
+
+test('preserves the unbalanced-body diagnostic instead of accepting a recovered syntax tree', () => {
+  const result = withSyntheticRepo(
+    `import { ensureWebBuild } from './harness/webBuild.ts';
+export default async function globalSetup(): Promise<void> {
+  await ensureWebBuild();`,
+    runChecker,
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /function body has an unbalanced brace/);
+});
+
+test('rejects other parse errors even when a recovered tree contains the awaited call', () => {
+  const result = withSyntheticRepo(
+    `import { ensureWebBuild } from './harness/webBuild.ts';
+export default async function globalSetup(): Promise<void> {
+  const broken = ;
+  await ensureWebBuild();
+}`,
+    runChecker,
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /contains invalid TypeScript/);
+});
+
+test('accepts real syntax containing braces, escaped quotes, nested templates, and call comments', () => {
+  const result = withSyntheticRepo(
+    [
+      `import { ensureWebBuild } from './harness/webBuild';`,
+      'export default async function globalSetup(): Promise<void> {',
+      '  const braces = /[{}]/;',
+      '  const escaped = "quote: \\" } //";',
+      '  const template = `outer ${`nested ${"}"}`} /*`; ',
+      '  await /* pre-build */ ensureWebBuild();',
+      '}',
+    ].join('\n'),
+    runChecker,
+  );
+  assert.equal(result.status, 0, result.stderr);
+});

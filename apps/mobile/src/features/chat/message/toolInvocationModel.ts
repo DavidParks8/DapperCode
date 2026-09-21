@@ -1,5 +1,3 @@
-import type { Ionicons } from '@expo/vector-icons';
-
 import { getMessageText, getToolCallDisplayLines } from '@bridge/messages';
 import { renderAgUiCustomContent } from '@bridge/agui/agUiContent';
 import type { ChatMessage, ChatToolKind, ChatToolMeta, ChatToolStatus } from '@bridge/types/types';
@@ -51,23 +49,6 @@ export interface ToolInvocation {
   empty: boolean;
 }
 
-const KIND_ICONS: Record<ChatToolKind, keyof typeof Ionicons.glyphMap> = {
-  read: 'document-text-outline',
-  edit: 'create-outline',
-  delete: 'trash-outline',
-  move: 'arrow-forward-outline',
-  search: 'search-outline',
-  execute: 'terminal-outline',
-  think: 'bulb-outline',
-  fetch: 'globe-outline',
-  switch_mode: 'swap-horizontal-outline',
-  other: 'construct-outline',
-};
-
-export function toolKindIcon(kind: ChatToolKind): keyof typeof Ionicons.glyphMap {
-  return KIND_ICONS[kind] ?? KIND_ICONS.other;
-}
-
 export function buildToolInvocations(messages: ChatMessage[]): ToolInvocation[] {
   const order: string[] = [];
   const drafts = new Map<string, ToolInvocationDraft>();
@@ -91,7 +72,7 @@ export function buildToolInvocations(messages: ChatMessage[]): ToolInvocation[] 
 
   for (const message of messages) {
     const meta = message.toolMeta;
-    const callId = meta?.toolCallId ?? toolCallIdOf(message);
+    const callId = getMessageToolCallId(message);
     if (callId) {
       const draft = draftFor(callId);
       if (meta) {
@@ -257,7 +238,10 @@ function parseTimestamp(value: string | undefined): number | null {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-function toolCallIdOf(message: ChatMessage): string | null {
+export function getMessageToolCallId(message: ChatMessage): string | null {
+  if (message.toolMeta) {
+    return message.toolMeta.toolCallId;
+  }
   if (message.role === 'tool') {
     return message.toolCallId || null;
   }

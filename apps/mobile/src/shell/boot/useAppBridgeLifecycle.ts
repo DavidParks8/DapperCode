@@ -22,7 +22,13 @@ import { getActiveBridgeProfile } from '@shell/state/bridgeProfiles';
 import { appStateLoadedAtom, bridgeProfileStoreAtom } from '@shell/state/appState/atoms';
 import { initializeAppStateAtom } from '@shell/state/appState/actions';
 import { applyRestoredChatSnapshotAtom } from '@shell/state/chat/actions';
-import { activeChatAtom, chatSnapshotCacheAtom, selectedChatIdAtom } from '@shell/state/chat/atoms';
+import {
+  activeChatAtom,
+  chatSnapshotCacheAtom,
+  interruptedChatCreationAtom,
+  selectedChatIdAtom,
+} from '@shell/state/chat/atoms';
+import { isPendingChatId } from '@shell/session/interruptedChatCreation';
 import {
   activeBridgeProfileAtom,
   apiClientAtom,
@@ -315,7 +321,9 @@ export function useAppBridgeLifecycle(): void {
       return;
     }
     for (const entry of chatSnapshotCache.entries) {
-      api.rememberChat(entry.chat);
+      if (!isPendingChatId(entry.chat.id)) {
+        api.rememberChat(entry.chat);
+      }
     }
   }, [activeBridgeProfileId, api, chatSnapshotCache]);
 
@@ -341,6 +349,11 @@ export function useAppBridgeLifecycle(): void {
 
     const generation = getChatSnapshotCacheGeneration(activeBridgeProfileId);
     persistScheduler.schedule(() => {
+      // The pending snapshot is the durable operation identity. Do not replace it with an
+      // optimistic real-chat handoff until create+send is acknowledged or explicitly abandoned.
+      if (store.get(interruptedChatCreationAtom)) {
+        return;
+      }
       const previous = store.get(chatSnapshotCacheAtom);
       const base =
         previous?.profileId === activeBridgeProfileId

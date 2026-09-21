@@ -10,7 +10,7 @@ jest.mock('expo-haptics', () => ({
 import { AccessibilityInfo, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 
-import { feedback, isHapticsSupportedPlatform, isReduceMotionPreferred } from '@shared/feedback';
+import { feedback, isHapticsSupportedPlatform } from '@shared/feedback';
 
 const mockHaptics = Haptics as unknown as {
   selectionAsync: jest.Mock;
@@ -94,18 +94,7 @@ describe('feedback helpers', () => {
     setPlatformOs('ios');
     jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(true);
 
-    await expect(isReduceMotionPreferred()).resolves.toBe(true);
     await feedback.success();
     expect(mockHaptics.notificationAsync).toHaveBeenCalledTimes(1);
-  });
-
-  it('defaults reduce motion preference to false when unsupported', async () => {
-    const original = AccessibilityInfo.isReduceMotionEnabled;
-    // @ts-expect-error - simulating a platform without this accessibility API.
-    delete AccessibilityInfo.isReduceMotionEnabled;
-
-    await expect(isReduceMotionPreferred()).resolves.toBe(false);
-
-    AccessibilityInfo.isReduceMotionEnabled = original;
   });
 });

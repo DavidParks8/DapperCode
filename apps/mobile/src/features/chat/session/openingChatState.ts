@@ -1,3 +1,9 @@
+export type LoadChatOptions = {
+  forceScroll?: boolean;
+  preserveRuntimeState?: boolean;
+  revalidate?: boolean;
+};
+
 /**
  * Decides what a finished `loadChat` should do with the "Opening chat" spinner.
  *

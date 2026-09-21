@@ -23,6 +23,7 @@ jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/r
 
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: ({ name }: { name: string }) => name,
+  MaterialCommunityIcons: ({ name }: { name: string }) => name,
 }));
 
 type Queryable = ReactTestInstance & {
@@ -326,6 +327,35 @@ describe('ToolInvocationRow', () => {
   afterEach(() => {
     setMockReducedMotionEnabled(false);
     jest.useRealTimers();
+  });
+
+  it.each([
+    ['/usr/bin/sqlite3 app.db', 'database-outline'],
+    ['git status', 'git-branch-outline'],
+    ['docker ps', 'cube-outline'],
+    ['curl https://example.test', 'globe-outline'],
+    ['pytest', 'flask-outline'],
+    ['cargo build', 'hammer-outline'],
+    ['echo sqlite3', 'terminal-outline'],
+  ])('uses the semantic execution icon for %s', (title, iconName) => {
+    const tree = render(invocation({ kind: 'execute', title, monospaceTitle: true }));
+    expect(tree.root.findAllByProps({ name: iconName })).toHaveLength(1);
+    act(() => tree.unmount());
+  });
+
+  it('preserves the error icon for failed semantic executions', () => {
+    const tree = render(
+      invocation({
+        kind: 'execute',
+        status: 'failed',
+        title: 'sqlite3 app.db',
+        monospaceTitle: true,
+        isError: true,
+      }),
+    );
+    expect(tree.root.findAllByProps({ name: 'alert-circle-outline' })).toHaveLength(1);
+    expect(tree.root.findAllByProps({ name: 'database-outline' })).toHaveLength(0);
+    act(() => tree.unmount());
   });
 
   it('marks a pending tool with a waiting affordance', () => {

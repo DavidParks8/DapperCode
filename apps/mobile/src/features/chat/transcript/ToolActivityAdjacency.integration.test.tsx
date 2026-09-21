@@ -5,6 +5,7 @@ import type { Chat, ChatMessage } from '@bridge/types/types';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscriptView';
 import { ActivityEvent } from './ActivityEvent';
+import type { TranscriptDisplayItem } from './messages';
 
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(true) }));
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
@@ -21,7 +22,11 @@ type Queryable = ReactTestInstance & {
 
 const theme = createAppTheme('dark');
 
-function toolCall(id: string, title: string, status: 'in_progress' | 'completed'): ChatMessage {
+function toolCall(
+  id: string,
+  title: string,
+  status: 'pending' | 'in_progress' | 'completed',
+): ChatMessage {
   return {
     id,
     role: 'tool',
@@ -79,6 +84,48 @@ function element(messages: ChatMessage[], onPinnedAutoScroll = baseProps.onPinne
 }
 
 describe('tool rows adjacent to the transcript activity row', () => {
+  it('keeps visibility through pending-to-running updates and stops shimmer offscreen or settled', () => {
+    let tree: ReactTestRenderer | undefined;
+    act(() => {
+      tree = renderer.create(element([toolCall('tool-1', 'Reading a file', 'pending')]));
+    });
+    if (!tree) {
+      throw new Error('Expected a transcript tree');
+    }
+    const root = tree.root as Queryable;
+    const setVisible = (visible: boolean) => {
+      const list = root.findByType(FlatList);
+      const item = (list.props['data'] as TranscriptDisplayItem[])[0];
+      const onViewableItemsChanged = list.props['onViewableItemsChanged'] as (event: {
+        viewableItems: unknown[];
+        changed: unknown[];
+      }) => void;
+      act(() =>
+        onViewableItemsChanged({
+          viewableItems: visible ? [{ item, index: 0, key: 'tool-1', isViewable: true }] : [],
+          changed: [],
+        }),
+      );
+    };
+    const shimmer = () => root.findAllByProps({ testID: 'tool-header-shimmer' });
+    setVisible(true);
+    expect(shimmer()).toHaveLength(0);
+
+    // Viewability reports membership, not status changes to an already-visible cell.
+    act(() => tree?.update(element([toolCall('tool-1', 'Reading a file', 'in_progress')])));
+    expect(shimmer().length).toBeGreaterThan(0);
+    setVisible(false);
+    expect(shimmer()).toHaveLength(0);
+    setVisible(true);
+    expect(shimmer().length).toBeGreaterThan(0);
+    act(() => tree?.update(element([toolCall('tool-1', 'Reading a file', 'completed')])));
+    expect(shimmer()).toHaveLength(0);
+    setVisible(false);
+    setVisible(true);
+    expect(shimmer()).toHaveLength(0);
+    act(() => tree?.unmount());
+  });
+
   /**
    * Fabric already keeps the visible content position of this inverted list. Asking the parent to
    * scroll to offset zero again on every content-size update creates a second position adjustment

@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { fileSystemMock as FileSystem } from '@shared/testing/expoFileSystemMock';
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 import { router } from 'expo-router';
 
@@ -50,13 +50,6 @@ import {
   toggleWorkspaceFavoriteAtom,
   WORKSPACE_RESOURCES_TTL_MS,
 } from './workspaceActions';
-
-jest.mock('expo-file-system/legacy', () => ({
-  documentDirectory: 'file:///documents/',
-  readAsStringAsync: jest.fn().mockRejectedValue(new Error('missing')),
-  writeAsStringAsync: jest.fn().mockResolvedValue(undefined),
-  getInfoAsync: jest.fn(),
-}));
 
 interface ApiMocks {
   listFilesystemEntries: jest.Mock;
@@ -159,8 +152,8 @@ function editActiveProfile(
 describe('workspace actions', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.mocked(FileSystem.readAsStringAsync).mockRejectedValue(new Error('missing'));
-    jest.mocked(FileSystem.writeAsStringAsync).mockResolvedValue(undefined);
+    jest.mocked(FileSystem.read).mockRejectedValue(new Error('missing'));
+    jest.mocked(FileSystem.write).mockResolvedValue(undefined);
   });
 
   it('keeps cached roots visible while stale data revalidates and survives failure', async () => {
@@ -247,7 +240,7 @@ describe('workspace actions', () => {
 
   it('isolates cached roots and favorites by active bridge profile', async () => {
     const { store, api } = createStore();
-    jest.mocked(FileSystem.readAsStringAsync).mockImplementation(async (path) =>
+    jest.mocked(FileSystem.read).mockImplementation(async (path) =>
       JSON.stringify({
         version: 1,
         paths: String(path).includes('profile-2') ? ['/two/favorite'] : ['/one/favorite'],
@@ -298,7 +291,7 @@ describe('workspace actions', () => {
   it('clears cached roots and browse data (but keeps favorites) when a profile is edited in place', async () => {
     const { store, api } = createStore();
     jest
-      .mocked(FileSystem.readAsStringAsync)
+      .mocked(FileSystem.read)
       .mockResolvedValue(JSON.stringify({ version: 1, paths: ['/one/favorite'] }));
     api.listWorkspaceRoots.mockResolvedValueOnce({
       bridgeRoot: '/old-bridge',
@@ -441,7 +434,7 @@ describe('workspace actions', () => {
   it('does not let an older favorites load overwrite a local toggle', async () => {
     const { store } = createStore();
     const loadedFavorites = deferred<string>();
-    jest.mocked(FileSystem.readAsStringAsync).mockReturnValueOnce(loadedFavorites.promise);
+    jest.mocked(FileSystem.read).mockReturnValueOnce(loadedFavorites.promise);
 
     const load = store.set(loadWorkspaceFavoritesAtom, { force: true });
     await Promise.resolve();
@@ -513,7 +506,7 @@ describe('workspace actions', () => {
 
     await store.set(browseWorkspacePathAtom, '/workspace');
 
-    expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(FileSystem.write).not.toHaveBeenCalled();
   });
 
   it('falls back to the start folder when the saved workspace is gone', async () => {

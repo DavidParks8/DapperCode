@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
+import { connect } from 'node:net';
 import path from 'node:path';
 import test from 'node:test';
 import { Writable } from 'node:stream';
@@ -279,6 +280,32 @@ test('leases serialize non-isolatable resources without sharing data', async () 
   } finally {
     await Promise.all([first.cleanup(), second.cleanup()]);
   }
+});
+
+test('network probes cannot keep a resource lease open during cleanup', async () => {
+  const harness = createHarness({ name: 'lease-probe', output: memoryOutput().stream });
+  let probe;
+  try {
+    const resource = `simulator:${harness.runId}`;
+    const release = await harness.acquireLease(resource);
+    const lease = harness.leases.get(resource);
+    const accepted = once(lease.server, 'connection');
+    probe = connect({ host: '127.0.0.1', port: lease.port });
+    const closed = new Promise((resolve, reject) => {
+      probe.once('close', resolve);
+      probe.on('error', (error) => {
+        if (error.code !== 'ECONNRESET') reject(error);
+      });
+    });
+    await accepted;
+    await release();
+    await closed;
+    assert.equal(harness.leases.size, 0);
+  } finally {
+    probe?.destroy();
+    await harness.cleanup();
+  }
+  assert.equal(existsSync(harness.root), false);
 });
 
 test('run-root path guards reject traversal', async () => {

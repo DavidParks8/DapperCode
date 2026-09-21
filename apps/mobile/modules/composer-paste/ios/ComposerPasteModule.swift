@@ -42,6 +42,6 @@ final class ComposerPasteView: ExpoView {
 
   private func findTextView(in view: UIView) -> UITextView? {
     if let input = view as? UITextView { return input }
-    return view.subviews.lazy.compactMap { findTextView(in: $0) }.first
+    return view.subviews.lazy.compactMap { self.findTextView(in: $0) }.first
   }
 }

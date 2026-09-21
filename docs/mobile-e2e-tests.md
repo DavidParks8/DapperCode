@@ -143,6 +143,20 @@ Run just this regression with `pnpm run e2e -- patch-progress.spec.ts`. When usi
 `local-e2e-validation` skill, execute that command through its scripted runner rather than manually
 orchestrating services.
 
+### Virtualized transcript scrolling
+
+`transcript-scroll.spec.ts` scrolls a long history in small increments through the production app
+and bridge on phone and tablet. It checks that newly mounted cells include their inter-row spacing
+in FlatList's measurements. Keep that spacing in `ItemSeparatorComponent`, not the content
+container's `gap`: virtual spacers represent multiple cells, and an external gap makes the scroll
+range change as those cells mount. Activity and history-boundary spacing belongs to their own
+header/footer containers.
+
+The transcript component regressions also count tool-row renders while rows enter and leave the
+viewport: completed tools must not repaint for visibility alone. Running tools still shimmer only
+while visible, including a pending tool that starts without changing its visible row identity.
+The web suite does not measure native iOS frame rate; use a device or simulator for that check.
+
 ## How parallel safety works
 
 Nothing in the suite uses a fixed port or a shared mutable path.
@@ -175,3 +189,21 @@ The app runs under react-native-web here, so a few things differ from a device:
 - Attachment upload relies on native file handling and is not exercised.
 - Gesture-driven interactions should be driven through their labeled buttons rather than simulated
   drags.
+
+### Streaming touch anchoring
+
+`TouchScroll.integration.test.tsx` wires the transcript to its production scroll scheduler. It
+covers touch-down before dragging, stationary contact after a drag pauses, multiple fingers,
+touch cancellation, momentum, and already-queued scroll callbacks. Incoming messages must not
+request a pinned scroll until touch and native scrolling have both ended. Releasing near latest
+permits following again; releasing in history keeps the jump-to-latest action available.
+Native position preservation anchors above the mutable response/tool rows at the latest user
+message (or the zero-height history edge when no user message exists). Anchoring the growing
+inverted response itself preserves its bottom edge, which still lets its text pan under a finger.
+
+Native verification is also required: during a real streaming turn, drag the transcript, pause
+without lifting the finger, and keep it stationary across several content updates. Measure a
+visible text anchor before and during the hold, not just the scroll offset (an inverted list can
+move text when a cell grows without changing that offset). Verify no anchor movement during the
+stationary hold, then verify release, momentum, and jump-to-latest behavior. Web geometry and
+mocked native events alone do not establish that iOS preserves the on-screen anchor.

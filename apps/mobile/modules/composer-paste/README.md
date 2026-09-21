@@ -41,7 +41,7 @@ without a package dependency or config plugin.
 
 ## Regression Checks
 
-From the repository root, on an Apple Silicon Mac with Xcode and an iOS 26.5 simulator runtime:
+From the repository root, on an Apple Silicon Mac with Xcode and an iOS 27.0 simulator runtime:
 
 ```sh
 node .agents/skills/local-e2e-validation/scripts/run.mjs \
