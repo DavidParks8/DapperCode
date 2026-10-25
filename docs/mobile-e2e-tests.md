@@ -105,6 +105,17 @@ mode from the pane geometry. Assert against `shell.pane` rather than the viewpor
 on tablet for the wrong reason. `app.openDrawer()` is shell-aware: on the pinned shell there is no
 toggle, so it just waits for the docked drawer.
 
+The breakpoint applies on every platform. On iOS a compact size class can also veto docking. On wide
+windows the user can hide the docked sidebar ("Hide sidebar"/"Show sidebar"). The overlay shell's
+"Open navigation drawer" label never appears there, so fixtures can keep using it to detect the
+overlay shell. On iOS and Android, a vertical fold keeps the chat at full width and moves the
+session list behind the menu. On iOS, header buttons move to a vertical bar when the system
+reports one. The web build cannot report size classes, safe-area side insets, vertical bars, or
+folds, so those are covered by Jest
+(`src/shell/layout`) and simulator/emulator checks. The
+shell spec still replays opening and closing iPhone Duo by resizing live between its outer
+(466×678) and inner (951×669) displays.
+
 ## Observing transient state
 
 State that only exists mid-turn — the stop button, running indicators — must not be observed by

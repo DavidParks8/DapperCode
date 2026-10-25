@@ -1,9 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
-import type { Dispatch, ReactElement, ReactNode, RefObject, SetStateAction } from 'react';
-import { Pressable, Text, View, type FlatList } from 'react-native';
+import {
+  useMemo,
+  type Dispatch,
+  type ReactElement,
+  type ReactNode,
+  type RefObject,
+  type SetStateAction,
+} from 'react';
+import { Pressable, Text, View, type FlatList, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, { ReduceMotion, ZoomIn, ZoomOut, type SharedValue } from 'react-native-reanimated';
 
-import { TABLET_LAYOUT_MIN_WIDTH } from '@shell/boot/appConstants';
 import { ChatScrollRail } from './scrollRail/ChatScrollRail';
 import {
   createChatScrollRailJumpController,
@@ -14,6 +20,7 @@ import {
   type collectUserMessageAnchors,
 } from './scrollRail/geometry';
 import { useAppTheme } from '@shared/theme';
+import { useSceneContentInsets } from '@shell/layout/useShellLayout';
 import { LARGE_CHAT_MESSAGE_COUNT_THRESHOLD, type AutoScrollState } from '../helpers/helpers';
 import type { createStyles } from '../styles/styles';
 import type { TranscriptDisplayItem } from './messages';
@@ -164,7 +171,7 @@ export function renderScrollRail(params: {
   topInset: number;
   viewportHeight: number;
   windowStart: number;
-  windowWidth: number;
+  alwaysVisible: boolean;
 }): ReactNode {
   if (!params.scrollRailEnabled) {
     return null;
@@ -177,7 +184,7 @@ export function renderScrollRail(params: {
       capacity={params.capacity}
       topInset={params.topInset}
       viewportHeight={params.viewportHeight}
-      alwaysVisible={params.windowWidth >= TABLET_LAYOUT_MIN_WIDTH}
+      alwaysVisible={params.alwaysVisible}
       engaged={params.engaged}
       fingerY={params.fingerY}
     />
@@ -186,6 +193,8 @@ export function renderScrollRail(params: {
 export function renderJumpToLatestButton(params: {
   autoScrollStateRef: RefObject<AutoScrollState>;
   bottomInset: number;
+  /** Leading space to skip so the centered button sits on the trailing page, off a hinge. */
+  foldLeadingInset: number;
   hitSlop: ReturnType<typeof computeHitSlop>;
   onJumpToLatest: () => void;
   railJumpControllerRef: RefObject<ChatScrollRailJumpController | null>;
@@ -204,7 +213,10 @@ export function renderJumpToLatestButton(params: {
       exiting={ZoomOut.duration(motion.duration.immediate).reduceMotion(ReduceMotion.System)}
       style={[
         params.styles.jumpToLatestButton,
-        { bottom: params.bottomInset + params.theme.spacing.xs },
+        {
+          bottom: params.bottomInset + params.theme.spacing.xs,
+          marginLeft: params.foldLeadingInset,
+        },
       ]}
     >
       <Pressable
@@ -241,4 +253,28 @@ export function renderJumpToLatestButton(params: {
       </Pressable>
     </Animated.View>
   );
+}
+
+/**
+ * Inverted padding: bottom clears the top chrome plus a gutter; top clears the composer. The sides
+ * keep messages in a readable column on wide windows.
+ */
+export function useTranscriptContentLayout(
+  baseStyle: StyleProp<ViewStyle>,
+  insets: { top: number; bottom: number },
+  gutter: number,
+): { messageListContentStyle: StyleProp<ViewStyle>; foldLeadingInset: number } {
+  const { readable, foldLeading } = useSceneContentInsets();
+  const messageListContentStyle = useMemo(
+    () => [
+      baseStyle,
+      {
+        paddingTop: insets.bottom,
+        paddingBottom: insets.top + gutter,
+        paddingHorizontal: gutter + readable,
+      },
+    ],
+    [baseStyle, gutter, insets.bottom, insets.top, readable],
+  );
+  return { messageListContentStyle, foldLeadingInset: foldLeading };
 }

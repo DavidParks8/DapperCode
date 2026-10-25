@@ -18,6 +18,7 @@ export function parseAppSettings(raw: string): {
   approvalMode: ApprovalMode;
   showToolCalls: boolean;
   confirmSessionDeletion: boolean;
+  sidebarHidden: boolean;
   workspaceChatLimit: WorkspaceChatLimit;
   recentBrowserTargetUrls: string[];
   recentModelIdsByAgent: RecentModelIdsByAgent;
@@ -30,6 +31,7 @@ export function parseAppSettings(raw: string): {
       approvalMode: 'all',
       showToolCalls: true,
       confirmSessionDeletion: true,
+      sidebarHidden: false,
       workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
       recentBrowserTargetUrls: [],
       recentModelIdsByAgent: {},
@@ -47,6 +49,7 @@ export function parseAppSettings(raw: string): {
         approvalMode: 'all',
         showToolCalls: true,
         confirmSessionDeletion: true,
+        sidebarHidden: false,
         workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
         recentBrowserTargetUrls: [],
         recentModelIdsByAgent: {},
@@ -72,6 +75,7 @@ export function parseAppSettings(raw: string): {
         typeof (parsed as { confirmSessionDeletion?: unknown }).confirmSessionDeletion === 'boolean'
           ? (parsed as { confirmSessionDeletion: boolean }).confirmSessionDeletion
           : true,
+      sidebarHidden: (parsed as { sidebarHidden?: unknown }).sidebarHidden === true,
       workspaceChatLimit: normalizeWorkspaceChatLimit(
         (parsed as { workspaceChatLimit?: unknown }).workspaceChatLimit,
       ),
@@ -90,6 +94,7 @@ export function parseAppSettings(raw: string): {
       approvalMode: 'all',
       showToolCalls: true,
       confirmSessionDeletion: true,
+      sidebarHidden: false,
       workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
       recentBrowserTargetUrls: [],
       recentModelIdsByAgent: {},

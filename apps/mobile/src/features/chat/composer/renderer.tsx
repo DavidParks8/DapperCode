@@ -7,6 +7,7 @@ import {
 } from '../state/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useMemo, type ComponentProps } from 'react';
+import { useSceneContentInsets } from '@shell/layout/useShellLayout';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, Text, View, type LayoutChangeEvent } from 'react-native';
 import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
@@ -84,6 +85,13 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
   const queueActionItemId = useAtomValue(queueActionItemIdAtom);
   const queueActionKind = useAtomValue(queueActionKindAtom);
   const setComposerHeight = useSetAtom(composerHeightAtom);
+  const contentInsets = useSceneContentInsets();
+  // The composer shares the transcript's readable column. Over a fold it moves to the trailing
+  // page so its controls never rest on the hinge.
+  const composerMargins =
+    contentInsets.foldLeading > 0
+      ? { marginLeft: contentInsets.foldLeading, marginRight: 0 }
+      : { marginLeft: contentInsets.readable, marginRight: contentInsets.readable };
   const bridgeRecoveryBannerButtonHitSlop = useMemo(
     () => computeHitSlop({ width: 160, height: 32 }),
     [],
@@ -109,6 +117,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
       style={[
         styles.composerContainer,
         overlay ? styles.composerContainerOverlay : null,
+        composerMargins,
         overlay ? { bottom: composerOverlayInset } : null,
         !overlay && !keyboardVisible ? styles.composerContainerResting : null,
       ]}

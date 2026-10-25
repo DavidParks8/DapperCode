@@ -1,5 +1,8 @@
 import { Provider, createStore } from 'jotai';
+import { StyleSheet } from 'react-native';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
+
+import { windowTraitsAtom } from '@shell/state/layout/atoms';
 
 import { MainScreenView } from './View';
 
@@ -61,21 +64,21 @@ jest.mock('../models/ModelAndEffortSheets', () => ({
     return null;
   },
 }));
-jest.mock('../styles/useStyles', () => ({
-  useMainScreenStyles: () => ({
-    styles: {
-      container: {},
-      topChromeOverlay: {},
-    },
-  }),
-}));
+jest.mock('../styles/useStyles', () => {
+  const { createMainScreenShellStyles } = jest.requireActual('../styles/shellStyles');
+  const { createAppTheme } = jest.requireActual('@shared/theme');
+  const styles = createMainScreenShellStyles(createAppTheme('dark'));
+  return { useMainScreenStyles: () => ({ styles }) };
+});
 
-function renderScreen(initialContext: Record<string, unknown> = {}): {
+function renderScreen(
+  initialContext: Record<string, unknown> = {},
+  store = createStore(),
+): {
   tree: ReactTestRenderer;
   updateContext: (context: Record<string, unknown>) => void;
 } {
   let tree: ReactTestRenderer | undefined;
-  const store = createStore();
   const render = (context: Record<string, unknown>) => (
     <Provider store={store}>
       <MainScreenView context={context as never} />
@@ -114,6 +117,34 @@ describe('MainScreenView', () => {
     >) {
       mockSurfaceRenderCounts[key] = 0;
     }
+  });
+
+  it('docks the chrome just above the composer, and only there, on a device folded like a laptop', () => {
+    const store = createStore();
+    const { tree, updateContext } = renderScreen({ composerReservedInset: 102 }, store);
+    const chromeStyle = () =>
+      StyleSheet.flatten(
+        tree.root.findByProps({ testID: 'main-screen-top-chrome' }).props['style'] as never,
+      ) as Record<string, unknown>;
+
+    expect(chromeStyle()).toMatchObject({ position: 'absolute', top: 0 });
+    expect(chromeStyle()['bottom']).toBeUndefined();
+
+    act(() => {
+      store.set(windowTraitsAtom, {
+        horizontalSizeClass: 'regular',
+        verticalSizeClass: 'regular',
+        divisions: [{ x: 0, y: 455.5, width: 669, height: 40 }],
+      });
+    });
+    // Pinning both edges stretched the chrome over the whole transcript.
+    expect(chromeStyle()).toMatchObject({ position: 'absolute', bottom: 102 });
+    // Native ignores `top: undefined`, so the key itself must be absent.
+    expect('top' in chromeStyle()).toBe(false);
+
+    updateContext({ composerReservedInset: 140 });
+    expect(chromeStyle()).toMatchObject({ bottom: 140 });
+    act(() => tree.unmount());
   });
 
   it('publishes top-chrome layout changes to the transcript sibling', () => {

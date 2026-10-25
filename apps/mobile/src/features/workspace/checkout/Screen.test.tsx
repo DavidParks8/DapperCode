@@ -59,6 +59,15 @@ import {
   gitCheckoutRepoUrlAtom,
 } from '../state/gitCheckout';
 import { createTestStore, withAppStore } from '@shell/state/testing';
+import { windowTraitsAtom } from '@shell/state/layout/atoms';
+import {
+  CLOSED_DUO_SAFE_AREA,
+  CLOSED_DUO_TRAITS,
+  queryRoot,
+  sizeWindowLikeClosedDuo,
+} from '@shared/testing/foldableLayout';
+import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
+
 import type { AppStore } from '@shell/state/types';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { GitCheckoutScreen } from './Screen';
@@ -91,13 +100,16 @@ function findByAccessibilityRole(root: Queryable, role: string): Queryable[] {
   return root.findAll((node) => node.props['accessibilityRole'] === role);
 }
 
-async function renderScreen(store: AppStore): Promise<ReactTestRenderer> {
+async function renderScreen(
+  store: AppStore,
+  metrics = SAFE_AREA_METRICS,
+): Promise<ReactTestRenderer> {
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
       withAppStore(
         store,
-        <SafeAreaProvider initialMetrics={SAFE_AREA_METRICS}>
+        <SafeAreaProvider initialMetrics={metrics}>
           <AppThemeProvider theme={theme}>
             <GitCheckoutScreen />
           </AppThemeProvider>
@@ -358,5 +370,36 @@ describe('GitCheckoutScreen', () => {
 
       act(() => tree.unmount());
     });
+  });
+});
+
+describe('GitCheckoutScreen on a foldable', () => {
+  it('moves back into the vertical bar when the system lays bars out on a side', async () => {
+    const restoreWindow = sizeWindowLikeClosedDuo();
+    try {
+      const store = createTestStore();
+      store.set(windowTraitsAtom, CLOSED_DUO_TRAITS);
+      const tree = await renderScreen(store, CLOSED_DUO_SAFE_AREA);
+      const sideBar = queryRoot(tree).findAll(
+        (node) =>
+          node.props['testID'] === 'scene-vertical-toolbar' && typeof node.type !== 'string',
+      )[0];
+      expect(
+        sideBar
+          ?.findAll((node) => node.type === CircularToolbarButton)
+          .map((button) => button.props['accessibilityLabel']),
+      ).toEqual(['Back']);
+      expect(
+        queryRoot(tree).findAll(
+          (node) =>
+            node.props['accessibilityLabel'] === 'Back' &&
+            typeof node.props['onPress'] === 'function' &&
+            !sideBar?.findAll((child) => child === node).length,
+        ),
+      ).toHaveLength(0);
+      act(() => tree.unmount());
+    } finally {
+      restoreWindow();
+    }
   });
 });

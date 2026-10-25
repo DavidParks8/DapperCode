@@ -2,7 +2,7 @@ import { requireTestValue } from '@shared/testing/requireTestValue';
 import * as mockReact from 'react';
 import { router } from 'expo-router';
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
-import { BackHandler, Platform } from 'react-native';
+import { BackHandler, Platform, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -15,6 +15,15 @@ import { refreshBridgeCapabilitiesAtom } from '@shell/state/bridge/capabilities'
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { pendingBrowserTargetUrlAtom } from '../state/browser';
 import { createTestStore, withAppStore } from '@shell/state/testing';
+import { windowTraitsAtom } from '@shell/state/layout/atoms';
+import {
+  CLOSED_DUO_SAFE_AREA,
+  CLOSED_DUO_TRAITS,
+  queryRoot,
+  sizeWindowLikeClosedDuo,
+  type QueryNode,
+} from '@shared/testing/foldableLayout';
+import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
 import type { AppStore } from '@shell/state/types';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { BrowserScreen } from './BrowserScreen';
@@ -230,6 +239,7 @@ async function renderBrowser(
     handlePendingTarget?: boolean;
     bottomInset?: number;
     store?: AppStore;
+    closedDuo?: boolean;
   } = {},
 ): Promise<{
   tree: ReactTestRenderer;
@@ -260,6 +270,9 @@ async function renderBrowser(
   store.set(apiClientAtom, api);
   store.set(drawerCommandsAtom, { closeDrawer: jest.fn(), toggleNavigation: jest.fn() });
   store.set(pendingBrowserTargetUrlAtom, options.pendingTargetUrl ?? null);
+  if (options.closedDuo) {
+    store.set(windowTraitsAtom, CLOSED_DUO_TRAITS);
+  }
   const ref = {
     get current(): { handleHardwareBackPress: () => boolean } | null {
       return hardwareBackHandler ? { handleHardwareBackPress: hardwareBackHandler } : null;
@@ -271,10 +284,14 @@ async function renderBrowser(
       withAppStore(
         store,
         <SafeAreaProvider
-          initialMetrics={{
-            frame: { x: 0, y: 0, width: 390, height: 844 },
-            insets: { top: 47, left: 0, right: 0, bottom: options.bottomInset ?? 34 },
-          }}
+          initialMetrics={
+            options.closedDuo
+              ? CLOSED_DUO_SAFE_AREA
+              : {
+                  frame: { x: 0, y: 0, width: 390, height: 844 },
+                  insets: { top: 47, left: 0, right: 0, bottom: options.bottomInset ?? 34 },
+                }
+          }
         >
           <AppThemeProvider theme={theme}>
             <BrowserScreen />
@@ -1100,5 +1117,68 @@ describe('BrowserScreen behavior', () => {
     expect(mockSelection).toHaveBeenCalledTimes(4);
 
     act(() => result.tree.unmount());
+  });
+});
+
+describe('BrowserScreen on a foldable', () => {
+  it('moves the navigation buttons from the floating bar to the bottom of the vertical bar', async () => {
+    const restoreWindow = sizeWindowLikeClosedDuo();
+    try {
+      const { tree } = await renderBrowser({ closedDuo: true });
+      const sideBar = queryRoot(tree).findAll(
+        (node) =>
+          node.props['testID'] === 'scene-vertical-toolbar' && typeof node.type !== 'string',
+      )[0];
+      expect(
+        sideBar
+          ?.findAll((node) => node.type === CircularToolbarButton)
+          .map((button) => button.props['accessibilityLabel'] as string),
+      ).toEqual([
+        'Open navigation drawer',
+        'Back',
+        'Forward',
+        'Scan for local previews',
+        'Scan for local previews',
+      ]);
+      expect(
+        queryRoot(tree).findAll(
+          (node) => node.props['testID'] === 'browser-bottom-bar-glass-surface',
+        ),
+      ).toHaveLength(0);
+      act(() => tree.unmount());
+    } finally {
+      restoreWindow();
+    }
+  });
+
+  it('keeps status banners clear of the status column beside the content', async () => {
+    const restoreWindow = sizeWindowLikeClosedDuo();
+    try {
+      const { tree } = await renderBrowser({
+        closedDuo: true,
+        api: createApi({
+          capabilities: {
+            ...capabilities,
+            supports: { ...capabilities.supports, browserPreview: false },
+          },
+        }),
+      });
+      let banner: QueryNode | null | undefined = queryRoot(tree).findAll(
+        (node) =>
+          typeof node.type === 'string' &&
+          node.children.map(String).join('').includes('did not start its preview server'),
+      )[0];
+      let rightInset: number | undefined;
+      while (banner && rightInset === undefined) {
+        rightInset = (
+          StyleSheet.flatten(banner.props['style'] as never) as { paddingRight?: number }
+        )?.paddingRight;
+        banner = banner.parent;
+      }
+      expect(rightInset).toBe(84);
+      act(() => tree.unmount());
+    } finally {
+      restoreWindow();
+    }
   });
 });

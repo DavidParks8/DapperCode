@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 
 import { motion, useAppTheme, type AppTheme } from '@shared/theme';
+import { useNavigationToggleLabel } from '@shell/state/drawer/atoms';
 
 /**
  * Scroll distance after which the large title has passed under the bar and the inline title takes
@@ -24,6 +25,7 @@ interface SettingsHeaderProps {
 
 export function SettingsHeader({ title, collapsed, onMenuPress }: SettingsHeaderProps) {
   const theme = useAppTheme();
+  const navigationLabel = useNavigationToggleLabel();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const titleStyle = useAnimatedStyle(() => ({
     opacity: withTiming(collapsed ? 1 : 0, COLLAPSE_TIMING),
@@ -38,7 +40,7 @@ export function SettingsHeader({ title, collapsed, onMenuPress }: SettingsHeader
         <View style={styles.barSide}>
           {onMenuPress ? (
             <Pressable
-              accessibilityLabel="Open navigation drawer"
+              accessibilityLabel={navigationLabel}
               accessibilityRole="button"
               onPress={onMenuPress}
               style={styles.barButton}

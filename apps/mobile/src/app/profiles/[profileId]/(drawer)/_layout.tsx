@@ -1,13 +1,14 @@
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { Drawer, type DrawerContentComponentProps, useDrawerStatus } from 'expo-router/drawer';
 import { useEffect } from 'react';
-import { useWindowDimensions } from 'react-native';
 
-import { TABLET_LAYOUT_MIN_WIDTH, TABLET_SIDEBAR_WIDTH } from '@shell/boot/appConstants';
+import type { ShellLayout } from '@shell/layout/windowLayout';
+import { useShellLayout } from '@shell/layout/useShellLayout';
 import { DrawerContent } from '@shell/navigation/DrawerContent';
 import { useDrawerForegroundSync } from '@shell/navigation/useDrawerForegroundSync';
+import { sidebarHiddenAtom } from '@shell/state/appState/settings';
 import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
-import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
+import { drawerCommandsAtom, OPEN_NAVIGATION_LABEL } from '@shell/state/drawer/atoms';
 import { useAppTheme } from '@shared/theme';
 
 export const unstable_settings = {
@@ -15,24 +16,25 @@ export const unstable_settings = {
 };
 
 export default function DrawerLayout() {
-  const { width } = useWindowDimensions();
-  return <ResponsiveDrawerLayout width={width} />;
+  const layout = useShellLayout();
+  return <ResponsiveDrawerLayout layout={layout} />;
 }
 
-export function ResponsiveDrawerLayout({ width }: { width: number }) {
+export function ResponsiveDrawerLayout({ layout }: { layout: ShellLayout }) {
   const theme = useAppTheme();
-  const permanent = width >= TABLET_LAYOUT_MIN_WIDTH;
+  const { sidebarMode } = layout;
 
   return (
     <Drawer
       backBehavior="history"
-      drawerContent={(props) => <RouterDrawerContent {...props} permanent={permanent} />}
+      drawerContent={(props) => <RouterDrawerContent {...props} sidebarMode={sidebarMode} />}
       screenOptions={{
         headerShown: false,
-        drawerType: permanent ? 'permanent' : 'front',
-        swipeEnabled: !permanent,
+        drawerType: sidebarMode === 'docked' ? 'permanent' : 'front',
+        // A collapsed sidebar is re-docked by its toggle, never dragged in over the chat.
+        swipeEnabled: sidebarMode === 'overlay',
         drawerStyle: {
-          width: permanent ? TABLET_SIDEBAR_WIDTH : width,
+          width: layout.sidebarWidth,
           backgroundColor: theme.colors.transparent,
         },
         overlayColor: theme.colors.transparent,
@@ -44,26 +46,43 @@ export function ResponsiveDrawerLayout({ width }: { width: number }) {
 
 function RouterDrawerContent({
   navigation,
-  permanent,
-}: DrawerContentComponentProps & { permanent: boolean }) {
+  sidebarMode,
+}: DrawerContentComponentProps & { sidebarMode: ShellLayout['sidebarMode'] }) {
   const drawerStatus = useDrawerStatus();
   const activeProfileId = useAtomValue(activeBridgeProfileAtom)?.id;
   const setDrawerCommands = useSetAtom(drawerCommandsAtom);
-  useDrawerForegroundSync(permanent ? null : navigation, drawerStatus);
+  const store = useStore();
+  const docked = sidebarMode === 'docked';
+  useDrawerForegroundSync(sidebarMode === 'overlay' ? navigation : null, drawerStatus);
 
   useEffect(() => {
-    setDrawerCommands({
-      closeDrawer: () => navigation.closeDrawer(),
-      toggleNavigation: permanent ? undefined : () => navigation.toggleDrawer(),
-    });
+    if (sidebarMode === 'collapsed' && drawerStatus === 'open') {
+      navigation.closeDrawer();
+    }
+  }, [drawerStatus, navigation, sidebarMode]);
+
+  useEffect(() => {
+    setDrawerCommands(
+      sidebarMode === 'overlay'
+        ? {
+            closeDrawer: () => navigation.closeDrawer(),
+            toggleNavigation: () => navigation.toggleDrawer(),
+            navigationLabel: OPEN_NAVIGATION_LABEL,
+          }
+        : {
+            closeDrawer: () => navigation.closeDrawer(),
+            toggleNavigation: () => store.set(sidebarHiddenAtom, !store.get(sidebarHiddenAtom)),
+            navigationLabel: docked ? 'Hide sidebar' : 'Show sidebar',
+          },
+    );
     return () => setDrawerCommands(null);
-  }, [navigation, permanent, setDrawerCommands]);
+  }, [docked, navigation, setDrawerCommands, sidebarMode, store]);
 
   return (
     <DrawerContent
       key={activeProfileId}
-      active={permanent || drawerStatus === 'open'}
-      onClose={permanent ? undefined : () => navigation.closeDrawer()}
+      active={docked || drawerStatus === 'open'}
+      onClose={docked ? undefined : () => navigation.closeDrawer()}
     />
   );
 }

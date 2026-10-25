@@ -1,8 +1,10 @@
 import React from 'react';
-import { StyleSheet } from 'react-native';
+import { getDefaultStore } from 'jotai';
+import { Dimensions, StyleSheet } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import { windowTraitsAtom } from '@shell/state/layout/atoms';
 import {
   getRenderedGlassViewProps,
   resetMockGlassEffect,
@@ -78,6 +80,41 @@ function hasText(root: QueryableInstance, text: string): boolean {
 }
 
 describe('ComposeView', () => {
+  it('centers its actions on the trailing page instead of on a fold', () => {
+    act(() => {
+      Dimensions.set({
+        window: { width: 951, height: 669, scale: 3, fontScale: 1 },
+        screen: { width: 951, height: 669, scale: 3, fontScale: 1 },
+      });
+    });
+    getDefaultStore().set(windowTraitsAtom, {
+      horizontalSizeClass: 'regular',
+      verticalSizeClass: 'compact',
+      divisions: [{ x: 455, y: 0, width: 41, height: 669 }],
+    });
+    try {
+      const { tree, root } = renderCompose();
+      const scroll = root.findAll(
+        (node) =>
+          node.props['contentContainerStyle'] !== undefined && typeof node.type !== 'string',
+      )[0];
+      expect(
+        StyleSheet.flatten(scroll?.props['contentContainerStyle'] as never) as {
+          paddingLeft?: number;
+        },
+      ).toMatchObject({ paddingLeft: 496 });
+      act(() => tree.unmount());
+    } finally {
+      getDefaultStore().set(windowTraitsAtom, null);
+      act(() => {
+        Dimensions.set({
+          window: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+          screen: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+        });
+      });
+    }
+  });
+
   beforeEach(() => {
     resetMockGlassEffect();
   });

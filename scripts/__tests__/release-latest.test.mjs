@@ -15,6 +15,7 @@ test('release:latest dry run describes the complete release workflow', () => {
   });
 
   assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Xcode 27\.1\+/);
   assert.match(result.stdout, /fast-forward to origin\/main/i);
   assert.match(result.stdout, /in parallel/i);
   assert.match(result.stdout, /desktop:build:macos/);
@@ -106,6 +107,13 @@ process.exit(1);
       );
       writeExecutable(
         binDirectory,
+        'xcodebuild',
+        `#!/usr/bin/env node
+process.stdout.write('Xcode 27.1\\nBuild version 27A9275\\n');
+`,
+      );
+      writeExecutable(
+        binDirectory,
         'open',
         `#!/usr/bin/env node
 process.exit(0);
@@ -163,6 +171,55 @@ process.stdout.write('123\\n');
         submitStart >= buildEnd,
         `expected submit to wait for archive creation, got ${JSON.stringify(events)}`,
       );
+    } finally {
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'release:latest refuses an Xcode that would letterbox iPhone Duo before touching the checkout',
+  { skip: process.platform !== 'darwin' },
+  () => {
+    const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), 'release-latest-xcode-'));
+    const binDirectory = path.join(temporaryDirectory, 'bin');
+    const logFile = path.join(temporaryDirectory, 'events.log');
+    mkdirSync(binDirectory);
+    writeFileSync(logFile, '');
+
+    try {
+      writeExecutable(
+        binDirectory,
+        'xcodebuild',
+        `#!/usr/bin/env node
+process.stdout.write('Xcode 27.0\\nBuild version 27A266a\\n');
+`,
+      );
+      for (const tool of ['git', 'pnpm']) {
+        writeExecutable(
+          binDirectory,
+          tool,
+          `#!/usr/bin/env node
+require('node:fs').appendFileSync(process.env.LOG_FILE, '${tool}\\n');
+process.exit(1);
+`,
+        );
+      }
+
+      const result = spawnSync(process.execPath, ['--experimental-strip-types', script], {
+        cwd: rootDir,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          LOG_FILE: logFile,
+          PATH: `${binDirectory}:${process.env.PATH ?? ''}`,
+        },
+      });
+
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /needs Xcode 27\.1 or newer/);
+      assert.match(result.stderr, /found "Xcode 27\.0"/);
+      assert.equal(readFileSync(logFile, 'utf8'), '');
     } finally {
       rmSync(temporaryDirectory, { recursive: true, force: true });
     }

@@ -6,14 +6,15 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   type ViewToken,
-  useWindowDimensions,
   View,
 } from 'react-native';
 
 import type { Chat } from '@bridge/types/types';
+import { useShellLayout } from '@shell/layout/useShellLayout';
 import type { ChatScrollRailJumpController } from './scrollRail/jumpController';
 import {
   collectUserMessageAnchors,
+  shouldPinRail,
   railWindowCapacity,
   resolveActiveAnchorIndex,
 } from './scrollRail/geometry';
@@ -55,6 +56,7 @@ import {
   resolveResetRailActiveIndex,
   TranscriptHistoryEdge,
   TranscriptItemSeparator,
+  useTranscriptContentLayout,
 } from './viewChrome';
 import { useMessageTimestampReveal } from './useMessageTimestampReveal';
 import { useTranscriptAnimationVisibility } from './animationVisibility';
@@ -120,7 +122,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   activity = null,
 }: ChatTranscriptViewProps) {
   const theme = useAppTheme();
-  const { width: windowWidth } = useWindowDimensions();
+  const { sidebarMode } = useShellLayout();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const { activityVisible, updateActivityVisibility, updateVisibleItems, visibleItemIds } =
@@ -417,14 +419,10 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     scrollingTowardOlderMessagesRef.current = false;
     autoLoadOlderCheckpointRef.current = null;
   }, [autoScrollStateRef, chat.id]);
-  const messageListContentStyle = useMemo(
-    () =>
-      // Inverted padding: bottom clears the top chrome plus a gutter; top clears the composer.
-      [
-        styles.messageListContent,
-        { paddingTop: bottomInset, paddingBottom: topInset + theme.spacing.lg },
-      ],
-    [bottomInset, styles.messageListContent, theme.spacing.lg, topInset],
+  const { messageListContentStyle, foldLeadingInset } = useTranscriptContentLayout(
+    styles.messageListContent,
+    { top: topInset, bottom: bottomInset },
+    theme.spacing.lg,
   );
   const jumpToLatestHitSlop = useMemo(() => computeHitSlop(JUMP_TO_LATEST_VISIBLE_SIZE), []);
   const listBatchingConfig = resolveListBatchingConfig(
@@ -555,9 +553,10 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           topInset,
           viewportHeight: railViewportHeight,
           windowStart: rail.state.windowStart,
-          windowWidth,
+          alwaysVisible: shouldPinRail(sidebarMode !== 'overlay', userMessageAnchorCount),
         })}
         {renderJumpToLatestButton({
+          foldLeadingInset,
           autoScrollStateRef,
           bottomInset,
           hitSlop: jumpToLatestHitSlop,

@@ -1,4 +1,5 @@
-import { KeyboardAvoidingView, Platform } from 'react-native';
+import { KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Provider, createStore } from 'jotai';
 import { createRef } from 'react';
 import renderer, { act, type ReactTestInstance } from 'react-test-renderer';
@@ -6,6 +7,7 @@ import renderer, { act, type ReactTestInstance } from 'react-test-renderer';
 import { createAgUiThreadMessageState } from '@bridge/agui/agUiMessagesState';
 import { keyboardInsetAtom, keyboardVisibleAtom, topChromeHeightAtom } from '../state/composer';
 import { liveAssistantByThreadAtom } from '../state/turn';
+import { windowTraitsAtom } from '@shell/state/layout/atoms';
 import { MainScreenTranscriptAndSheets } from './TranscriptAndSheets';
 
 type Queryable = ReactTestInstance & {
@@ -279,5 +281,107 @@ describe('MainScreenTranscriptAndSheets', () => {
       composeTree?.unmount();
       openingTree?.unmount();
     });
+  });
+
+  it('keeps the transcript and composer clear of the iPhone Duo status column', () => {
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+    const store = createStore();
+    store.set(windowTraitsAtom, {
+      horizontalSizeClass: 'compact',
+      verticalSizeClass: 'regular',
+      divisions: [],
+    });
+    const renderComposer = jest.fn(() => null);
+    const context = createContext({ renderComposer, shouldShowComposer: true });
+    let tree: ReturnType<typeof renderer.create> | undefined;
+
+    act(() => {
+      tree = renderer.create(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 466, height: 678 },
+            insets: { top: 0, left: 12, right: 84, bottom: 20 },
+          }}
+        >
+          <Provider store={store}>
+            <MainScreenTranscriptAndSheets context={context as never} />
+          </Provider>
+        </SafeAreaProvider>,
+      );
+    });
+    const bodyStyle = () =>
+      StyleSheet.flatten(
+        (tree?.root as Queryable).findAll(
+          (node) => node.props['testID'] === 'chat-body' && typeof node.type !== 'string',
+        )[0]?.props['style'] as never,
+      );
+
+    // Closed: the composer overlay lives inside this body, so the Send button stays out of the
+    // vertical status bar and camera column.
+    expect(renderComposer).toHaveBeenCalledWith(true);
+    expect(bodyStyle()).toMatchObject({ paddingLeft: 12, paddingRight: 84 });
+
+    // Open with a docked sidebar: the sidebar owns the leading edge.
+    act(() => {
+      store.set(windowTraitsAtom, {
+        horizontalSizeClass: 'regular',
+        verticalSizeClass: 'compact',
+        divisions: [],
+      });
+    });
+    expect(bodyStyle()).toMatchObject({ paddingLeft: 0, paddingRight: 84 });
+
+    // Folded like a book: the session list moves behind the menu and the chat keeps the full
+    // width, so it pads the leading edge itself again.
+    act(() => {
+      store.set(windowTraitsAtom, {
+        horizontalSizeClass: 'regular',
+        verticalSizeClass: 'compact',
+        divisions: [{ x: 300, y: 0, width: 41, height: 669 }],
+      });
+    });
+    expect(bodyStyle()).toMatchObject({ paddingLeft: 12, paddingRight: 84 });
+
+    act(() => tree?.unmount());
+  });
+
+  it('moves the chrome above the composer on a device folded like a laptop', () => {
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+    const store = createStore();
+    store.set(topChromeHeightAtom, 80);
+    const context = createContext({
+      composerReservedInset: 88,
+      renderComposer: jest.fn(() => null),
+      shouldShowComposer: true,
+    });
+    let tree: ReturnType<typeof renderer.create> | undefined;
+    act(() => {
+      tree = renderer.create(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 669, height: 951 },
+            insets: { top: 30, left: 0, right: 0, bottom: 20 },
+          }}
+        >
+          <Provider store={store}>
+            <MainScreenTranscriptAndSheets context={context as never} />
+          </Provider>
+        </SafeAreaProvider>,
+      );
+    });
+    // Flat: the chrome is at the top.
+    expect(mockTranscriptProps.at(-1)).toMatchObject({ topInset: 80, bottomInset: 88 });
+
+    // Laptop pose: the controls sit on the lower half, directly above the composer, so the
+    // transcript clears them at the bottom and only the safe area at the top.
+    act(() => {
+      store.set(windowTraitsAtom, {
+        horizontalSizeClass: 'regular',
+        verticalSizeClass: 'regular',
+        divisions: [{ x: 0, y: 455.5, width: 669, height: 40 }],
+      });
+    });
+    expect(mockTranscriptProps.at(-1)).toMatchObject({ topInset: 30, bottomInset: 88 + 80 });
+    act(() => tree?.unmount());
   });
 });

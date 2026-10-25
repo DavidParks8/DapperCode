@@ -27,6 +27,7 @@ import { confirmSessionDeletionAtom, workspaceChatLimitAtom } from '@shell/state
 import { apiClientAtom, wsClientAtom } from '@shell/state/bridge/atoms';
 import { selectedChatIdAtom } from '@shell/state/chat/atoms';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
+import { windowTraitsAtom } from '@shell/state/layout/atoms';
 import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
 import type { AppStore } from '@shell/state/types';
 import type { WorkspaceChatLimit } from '@shell/state/appSettings';
@@ -348,6 +349,57 @@ describe('DrawerContent material', () => {
     );
     expect(glassProps?.glassEffectStyle).toBe(theme.glass.drawer.glassEffectStyle);
     expect(glassProps?.tintColor).toBe(theme.glass.drawer.tintColor);
+
+    act(() => tree.unmount());
+  });
+});
+
+describe('DrawerContent on iPhone Duo', () => {
+  function safeAreaProps(tree: ReactTestRenderer): Record<string, unknown> {
+    const [safeArea] = (tree.root as Queryable).findAll(
+      (node) => node.props['testID'] === 'drawer-safe-area' && typeof node.type !== 'string',
+    );
+    if (!safeArea) {
+      throw new Error('Expected the drawer safe area');
+    }
+    return safeArea.props;
+  }
+
+  it('keeps a sidebar narrower than the window off the trailing status column', async () => {
+    const harness = createHarness();
+    const store = createDrawerStore(harness.api, harness.ws);
+    store.set(windowTraitsAtom, {
+      horizontalSizeClass: 'compact',
+      verticalSizeClass: 'regular',
+      divisions: [],
+    });
+    const tree = await renderDrawer(harness, { store });
+
+    // Closed: the overlay drawer spans the window, so every inset applies to it.
+    expect(safeAreaProps(tree)['edges']).toBeUndefined();
+
+    // Open: the docked sidebar never reaches the trailing edge where the status bar sits, so the
+    // window's trailing inset must not shrink its rows.
+    await act(async () => {
+      store.set(windowTraitsAtom, {
+        horizontalSizeClass: 'regular',
+        verticalSizeClass: 'compact',
+        divisions: [],
+      });
+      await Promise.resolve();
+    });
+    expect(safeAreaProps(tree)['edges']).toEqual(['top', 'bottom', 'left']);
+
+    // Book pose: the session list opens over the leading page only, stopping before the fold.
+    await act(async () => {
+      store.set(windowTraitsAtom, {
+        horizontalSizeClass: 'regular',
+        verticalSizeClass: 'compact',
+        divisions: [{ x: 300, y: 0, width: 41, height: 669 }],
+      });
+      await Promise.resolve();
+    });
+    expect(safeAreaProps(tree)['edges']).toEqual(['top', 'bottom', 'left']);
 
     act(() => tree.unmount());
   });

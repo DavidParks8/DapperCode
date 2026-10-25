@@ -11,6 +11,13 @@ import { BrowserBottomBar, BrowserStartPage } from './StartBottom';
 import { BrowserChatReturn, BrowserTopBar, StatusBanner, ViewportTray } from './TopSections';
 import { ViewportMenu } from './ViewportMenu';
 import { createBrowserScreenStyles } from './styles';
+import { useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
+import {
+  SceneVerticalToolbar,
+  useDrawerNavigationItem,
+  useInlineToolbar,
+  type SceneToolbarItem,
+} from '@shell/layout/SceneToolbar';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { useBrowserScreenCoreHandlers } from './useCoreHandlers';
 import { useBrowserScreenModel } from './useModel';
@@ -24,6 +31,10 @@ export function BrowserScreen() {
   const handleGoBackPress = handlers.handleGoBackPress;
   const viewport = useBrowserScreenViewport(model);
   const drawerCommands = useAtomValue(drawerCommandsAtom);
+  const sceneInsets = useSceneHorizontalInsets();
+  const inlineToolbar = useInlineToolbar();
+  const navigationItem = useDrawerNavigationItem();
+  const toolbarItems = buildBrowserToolbarItems(navigationItem, model, handlers);
 
   useFocusEffect(
     useCallback(() => {
@@ -48,11 +59,11 @@ export function BrowserScreen() {
         style={styles.chromeSurface}
         testID="browser-top-chrome-glass-surface"
       >
-        <SafeAreaView edges={['top']}>
+        <SafeAreaView edges={['top']} style={sceneInsets}>
           <View style={styles.chrome}>
             <BrowserChatReturn />
             <BrowserTopBar
-              onOpenDrawer={drawerCommands?.toggleNavigation}
+              onOpenDrawer={inlineToolbar ? drawerCommands?.toggleNavigation : undefined}
               inputValue={model.inputValue}
               setInputValue={model.setInputValue}
               previewUrl={model.previewUrl}
@@ -74,15 +85,17 @@ export function BrowserScreen() {
         </SafeAreaView>
       </GlassSurface>
 
-      {model.capabilitiesError ? (
-        <StatusBanner tone="error" message={model.capabilitiesError} />
-      ) : null}
-      {!model.supportsBrowserPreview ? (
-        <StatusBanner
-          tone="warning"
-          message="This bridge did not start its preview server. Check bridge logs for preview port conflicts."
-        />
-      ) : null}
+      <View style={sceneInsets}>
+        {model.capabilitiesError ? (
+          <StatusBanner tone="error" message={model.capabilitiesError} />
+        ) : null}
+        {!model.supportsBrowserPreview ? (
+          <StatusBanner
+            tone="warning"
+            message="This bridge did not start its preview server. Check bridge logs for preview port conflicts."
+          />
+        ) : null}
+      </View>
 
       <ViewportMenu
         showViewportMenu={model.showViewportMenu}
@@ -98,7 +111,7 @@ export function BrowserScreen() {
         handleApplyDesktopViewport={viewport.handleApplyDesktopViewport}
       />
 
-      <View style={styles.contentArea}>
+      <View style={[styles.contentArea, sceneInsets]}>
         {model.previewUrl ? (
           <BrowserPreviewSurface
             previewUrl={model.previewUrl}
@@ -146,27 +159,77 @@ export function BrowserScreen() {
         )}
       </View>
 
-      <RNAnimated.View
-        style={[
-          styles.bottomBarWrap,
-          {
-            paddingBottom: model.bottomBarInset,
-            transform: [{ translateY: model.bottomBarTranslateY }],
-          },
-        ]}
-      >
-        <BrowserBottomBar
-          canGoBack={model.canGoBack}
-          canGoForward={model.canGoForward}
-          loadingPreview={model.loadingPreview}
-          previewUrl={model.previewUrl}
-          handleGoBackPress={handlers.handleGoBackPress}
-          handleGoForwardPress={handlers.handleGoForwardPress}
-          handleReload={handlers.handleReload}
-          handleShowStartPage={handlers.handleShowStartPage}
-          loadSuggestions={model.loadSuggestions}
-        />
-      </RNAnimated.View>
+      {inlineToolbar ? (
+        <RNAnimated.View
+          style={[
+            styles.bottomBarWrap,
+            { left: sceneInsets.paddingLeft, right: sceneInsets.paddingRight },
+            {
+              paddingBottom: model.bottomBarInset,
+              transform: [{ translateY: model.bottomBarTranslateY }],
+            },
+          ]}
+        >
+          <BrowserBottomBar
+            canGoBack={model.canGoBack}
+            canGoForward={model.canGoForward}
+            loadingPreview={model.loadingPreview}
+            previewUrl={model.previewUrl}
+            handleGoBackPress={handlers.handleGoBackPress}
+            handleGoForwardPress={handlers.handleGoForwardPress}
+            handleReload={handlers.handleReload}
+            handleShowStartPage={handlers.handleShowStartPage}
+            loadSuggestions={model.loadSuggestions}
+          />
+        </RNAnimated.View>
+      ) : null}
+      <SceneVerticalToolbar items={toolbarItems} />
     </View>
   );
+}
+
+function buildBrowserToolbarItems(
+  navigationItem: SceneToolbarItem | null,
+  model: ReturnType<typeof useBrowserScreenModel>,
+  handlers: ReturnType<typeof useBrowserScreenCoreHandlers>,
+): SceneToolbarItem[] {
+  const webNavigationDisabled = Platform.OS === 'web';
+  return [
+    ...(navigationItem ? [navigationItem] : []),
+    {
+      key: 'back',
+      icon: 'chevron-back',
+      label: 'Back',
+      onPress: handlers.handleGoBackPress,
+      group: 'bottom',
+      disabled: webNavigationDisabled || !model.canGoBack,
+    },
+    {
+      key: 'forward',
+      icon: 'chevron-forward',
+      label: 'Forward',
+      onPress: handlers.handleGoForwardPress,
+      group: 'bottom',
+      disabled: webNavigationDisabled || !model.canGoForward,
+    },
+    {
+      key: 'reload',
+      icon: model.loadingPreview ? 'hourglass-outline' : 'refresh-outline',
+      label: model.loadingPreview
+        ? 'Preview loading'
+        : model.previewUrl
+          ? 'Reload preview'
+          : 'Scan for local previews',
+      onPress: handlers.handleReload,
+      group: 'bottom',
+      priority: 1,
+    },
+    {
+      key: 'start',
+      icon: model.previewUrl ? 'home-outline' : 'scan-outline',
+      label: model.previewUrl ? 'Show preview start page' : 'Scan for local previews',
+      onPress: model.previewUrl ? handlers.handleShowStartPage : () => void model.loadSuggestions(),
+      group: 'bottom',
+    },
+  ];
 }

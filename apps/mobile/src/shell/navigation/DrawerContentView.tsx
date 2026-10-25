@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { memo, useMemo, type RefObject } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import { useAppTheme, type AppTheme } from '@shared/theme';
@@ -11,6 +11,7 @@ import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { SelectionSheet, type SelectionSheetOption } from '@shared/ui/SelectionSheet';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { getDrawerFolderPickerLabels } from '@shell/navigation/drawerAttention';
+import { useShellLayout } from '@shell/layout/useShellLayout';
 import {
   createDrawerContentStyles,
   type DrawerContentStyles,
@@ -441,6 +442,10 @@ export interface DrawerContentViewProps {
   retryDeepChatListRef: RefObject<() => Promise<void>>;
 }
 
+// Safe-area insets are window-wide. A sidebar narrower than the window never reaches the trailing
+// edge, so an inset there, such as a status bar or camera beside the content, belongs to the chat.
+const SIDEBAR_EDGES: readonly Edge[] = ['top', 'bottom', 'left'];
+
 export const DrawerContentView = memo(function DrawerContentView({
   handleClose,
   handleDeleteChat,
@@ -454,10 +459,15 @@ export const DrawerContentView = memo(function DrawerContentView({
 }: DrawerContentViewProps) {
   const theme = useAppTheme();
   const styles = useMemo(() => createDrawerContentStyles(theme), [theme]);
+  const { sidebarSpansWindow } = useShellLayout();
 
   return (
     <GlassSurface role="drawer" style={styles.container} testID="drawer-glass-surface">
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView
+        edges={sidebarSpansWindow ? undefined : SIDEBAR_EDGES}
+        style={styles.safeArea}
+        testID="drawer-safe-area"
+      >
         <View style={styles.mainContent}>
           <DrawerHeader
             handleClose={handleClose}

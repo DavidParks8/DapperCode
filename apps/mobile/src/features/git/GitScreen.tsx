@@ -3,6 +3,12 @@ import { useMemo } from 'react';
 import { ActivityIndicator, ScrollView, Text } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
+import {
+  SceneToolbarHost,
+  useInlineToolbar,
+  type SceneToolbarItem,
+} from '@shell/layout/SceneToolbar';
 
 import type { Chat } from '@bridge/types/types';
 import { useAccessibilityAnnouncement } from '@shared/accessibility';
@@ -26,6 +32,7 @@ interface GitScreenProps {
 export function GitScreen({ chat }: GitScreenProps) {
   const theme = useAppTheme();
   const styles = useMemo(() => createGitScreenStyles(theme), [theme]);
+  const sceneInsets = useSceneHorizontalInsets();
   const api = useBridgeApi();
   const approvalMode = useAtomValue(approvalModeAtom);
   const onBack = useSetAtom(closeGitAtom);
@@ -54,51 +61,82 @@ export function GitScreen({ chat }: GitScreenProps) {
               : null,
   );
 
+  const inlineToolbar = useInlineToolbar();
+  const refreshing = controller.loading || controller.refreshing;
+  const toolbarItems: SceneToolbarItem[] = [
+    {
+      key: 'back',
+      icon: 'chevron-back',
+      label: 'Back to chat',
+      onPress: onBack,
+      group: 'navigation',
+    },
+    {
+      key: 'refresh',
+      icon: 'refresh',
+      label: 'Refresh Git status',
+      onPress: () => void controller.refresh(),
+      group: 'action',
+      disabled: refreshing,
+    },
+  ];
+
   return (
-    <SafeAreaView style={styles.container}>
-      <GitScreenHeaderSection
-        controller={controller}
-        styles={styles}
-        theme={theme}
-        onBack={onBack}
-      />
+    <SceneToolbarHost items={toolbarItems}>
+      <SafeAreaView style={[styles.container, sceneInsets]} edges={['top', 'bottom']}>
+        <GitScreenHeaderSection
+          controller={controller}
+          styles={styles}
+          theme={theme}
+          onBack={onBack}
+          showButtons={inlineToolbar}
+        />
 
-      <ScrollView
-        style={styles.body}
-        contentContainerStyle={styles.bodyContent}
-        scrollEnabled={controller.bodyScrollEnabled}
-        nestedScrollEnabled
-        keyboardShouldPersistTaps="handled"
-      >
-        <GitScreenWorkspaceSection controller={controller} styles={styles} theme={theme} />
+        <ScrollView
+          style={styles.body}
+          contentContainerStyle={styles.bodyContent}
+          scrollEnabled={controller.bodyScrollEnabled}
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
+        >
+          <GitScreenWorkspaceSection controller={controller} styles={styles} theme={theme} />
 
-        {controller.loading ? (
-          <ActivityIndicator
-            accessibilityRole="progressbar"
-            accessibilityLabel="Loading Git status"
-            color={theme.colors.textPrimary}
-            style={styles.loader}
-          />
-        ) : (
-          <Animated.View entering={FadeIn.duration(200)}>
-            <GitScreenBranchSummarySection controller={controller} styles={styles} theme={theme} />
-            <GitScreenCommitHistorySection controller={controller} styles={styles} theme={theme} />
-            <GitScreenDiffSection controller={controller} styles={styles} theme={theme} />
-          </Animated.View>
-        )}
+          {controller.loading ? (
+            <ActivityIndicator
+              accessibilityRole="progressbar"
+              accessibilityLabel="Loading Git status"
+              color={theme.colors.textPrimary}
+              style={styles.loader}
+            />
+          ) : (
+            <Animated.View entering={FadeIn.duration(200)}>
+              <GitScreenBranchSummarySection
+                controller={controller}
+                styles={styles}
+                theme={theme}
+              />
+              <GitScreenCommitHistorySection
+                controller={controller}
+                styles={styles}
+                theme={theme}
+              />
+              <GitScreenDiffSection controller={controller} styles={styles} theme={theme} />
+            </Animated.View>
+          )}
 
-        {controller.error ? (
-          <Text
-            accessibilityRole="alert"
-            accessibilityLiveRegion="assertive"
-            style={styles.errorText}
-          >
-            {controller.error}
-          </Text>
-        ) : null}
-      </ScrollView>
+          {controller.error ? (
+            <Text
+              accessibilityRole="alert"
+              accessibilityLiveRegion="assertive"
+              style={styles.errorText}
+            >
+              {controller.error}
+            </Text>
+          ) : null}
+        </ScrollView>
 
-      <GitScreenReviewSection controller={controller} styles={styles} theme={theme} />
-    </SafeAreaView>
+        <GitScreenReviewSection controller={controller} styles={styles} theme={theme} />
+      </SafeAreaView>
+    </SceneToolbarHost>
   );
 }

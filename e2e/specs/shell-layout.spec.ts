@@ -108,4 +108,62 @@ test.describe('shell layout', () => {
     await app.settle();
     await expectShellMode(app.page, 'pinned');
   });
+
+  test('the docked sidebar can be hidden and shown again', async ({ createApp }) => {
+    test.skip(
+      expectedShellModeFor(test.info().project.name) !== 'pinned',
+      'Only wide windows dock the sidebar.',
+    );
+    const app = await createApp({ chatId: E2E_THREADS.layout });
+    await expectShellMode(app.page, 'pinned');
+
+    await app.page.getByLabel('Hide sidebar').first().click();
+    await app.settle();
+    const hidden = await expectShellMode(app.page, 'overlay');
+    expect(Math.round(hidden.pane.width)).toBe(Math.round(hidden.viewport.width));
+    expect(hidden.drawer.right).toBeLessThanOrEqual(hidden.viewport.left + 1);
+    await expectWithinViewport(selectors.composer(app.page));
+    // Wide windows re-dock the sidebar rather than sliding a drawer over the chat.
+    await expect(app.page.getByLabel('Open navigation drawer')).toHaveCount(0);
+
+    await app.page.getByLabel('Show sidebar').first().click();
+    await app.settle();
+    const shown = await expectShellMode(app.page, 'pinned');
+    expect(shown.drawer.width).toBeLessThanOrEqual(TABLET_SIDEBAR_WIDTH);
+  });
+
+  /**
+   * Opening and closing an iPhone Duo resizes the running app between its outer and inner displays
+   * rather than relaunching it. Native size classes and the fold are covered by unit tests; this pins
+   * that the shell re-tiles live across the real display sizes in both directions.
+   */
+  test('the shell follows iPhone Duo between its outer and inner displays', async ({
+    createApp,
+  }) => {
+    test.skip(
+      expectedShellModeFor(test.info().project.name) !== 'overlay',
+      'The resize sequence sets its own viewports, so it only needs to run once.',
+    );
+    const app = await createApp({ chatId: E2E_THREADS.layout });
+    const closed = { width: 466, height: 678 };
+    const open = { width: 951, height: 669 };
+
+    await app.page.setViewportSize(closed);
+    await app.settle();
+    await expectShellMode(app.page, 'overlay');
+    await expectWithinViewport(selectors.composer(app.page));
+
+    await app.page.setViewportSize(open);
+    await app.settle();
+    const opened = await expectShellMode(app.page, 'pinned');
+    expect(opened.drawer.width).toBeLessThanOrEqual(TABLET_SIDEBAR_WIDTH);
+    await expectNoOverlap(selectors.drawer(app.page), selectors.composer(app.page));
+    await expectWithinViewport(selectors.composer(app.page));
+
+    await app.page.setViewportSize(closed);
+    await app.settle();
+    const reclosed = await expectShellMode(app.page, 'overlay');
+    expect(Math.round(reclosed.pane.width)).toBe(closed.width);
+    await expectWithinViewport(selectors.composer(app.page));
+  });
 });

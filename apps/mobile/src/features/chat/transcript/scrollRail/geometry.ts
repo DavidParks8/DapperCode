@@ -3,6 +3,15 @@ import { getToolCallDisplayLines } from '@bridge/messages';
 
 export const CHAT_SCROLL_RAIL_ACTIVATION_DELAY_MS = 200;
 export const CHAT_SCROLL_RAIL_BAR_HEIGHT = 4;
+/**
+ * Wide windows pin the rail open, but a lone pinned bar reads as a stray mark, so pinning waits for a
+ * second user message. A single bar still appears while the rail is used to jump back to it.
+ */
+export const CHAT_SCROLL_RAIL_MIN_PINNED_ANCHORS = 2;
+
+export function shouldPinRail(wideWindow: boolean, anchorCount: number): boolean {
+  return wideWindow && anchorCount >= CHAT_SCROLL_RAIL_MIN_PINNED_ANCHORS;
+}
 export const CHAT_SCROLL_RAIL_BAR_PITCH = 24;
 export const CHAT_SCROLL_RAIL_COLLAPSED_WIDTH = 16;
 export const CHAT_SCROLL_RAIL_COLLAPSED_ACTIVE_WIDTH = 21;

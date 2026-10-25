@@ -25,6 +25,14 @@ import { GitScreen } from './GitScreen';
 import { GIT_SCREEN_REFRESH_INTERVAL_MS } from './controller/screenController';
 import { mainOpeningChatIdAtom, pendingMainChatIdAtom } from '@shell/state/chat/atoms';
 import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
+import { windowTraitsAtom } from '@shell/state/layout/atoms';
+import {
+  CLOSED_DUO_SAFE_AREA,
+  CLOSED_DUO_TRAITS,
+  queryRoot,
+  sizeWindowLikeClosedDuo,
+} from '@shared/testing/foldableLayout';
+import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
 import { routes } from '@shell/navigation/routes';
 
 jest.mock('@expo/vector-icons', () => ({
@@ -222,17 +230,26 @@ function createGitStore(api: HostBridgeApiClient) {
 async function renderGit(
   api: HostBridgeApiClient,
   activeChat: Chat = chat,
+  closedDuo = false,
 ): Promise<ReactTestRenderer> {
+  const store = createGitStore(api);
+  if (closedDuo) {
+    store.set(windowTraitsAtom, CLOSED_DUO_TRAITS);
+  }
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
       withAppStore(
-        createGitStore(api),
+        store,
         <SafeAreaProvider
-          initialMetrics={{
-            frame: { x: 0, y: 0, width: 390, height: 844 },
-            insets: { top: 47, left: 0, right: 0, bottom: 34 },
-          }}
+          initialMetrics={
+            closedDuo
+              ? CLOSED_DUO_SAFE_AREA
+              : {
+                  frame: { x: 0, y: 0, width: 390, height: 844 },
+                  insets: { top: 47, left: 0, right: 0, bottom: 34 },
+                }
+          }
         >
           <AppThemeProvider theme={theme}>
             <GitScreen chat={activeChat} />
@@ -1136,3 +1153,34 @@ async function invoke(node: Queryable, property = 'onPress', value?: unknown): P
 async function invokeByLabel(root: Queryable, label: string): Promise<void> {
   await invoke(findByLabel(root, label));
 }
+
+describe('GitScreen on a foldable', () => {
+  it('moves back and refresh into the vertical bar when the system lays bars out on a side', async () => {
+    const restoreWindow = sizeWindowLikeClosedDuo();
+    try {
+      const api = createApi();
+      const tree = await renderGit(api, chat, true);
+      const sideBar = queryRoot(tree).findAll(
+        (node) =>
+          node.props['testID'] === 'scene-vertical-toolbar' && typeof node.type !== 'string',
+      );
+      expect(sideBar).toHaveLength(1);
+      expect(
+        sideBar[0]
+          ?.findAll((node) => node.type === CircularToolbarButton)
+          .map((button) => button.props['accessibilityLabel'] as string),
+      ).toEqual(['Back to chat', 'Refresh Git status']);
+      // The header keeps its titles, which stay horizontal, but no longer duplicates the buttons.
+      const headerButtons = queryRoot(tree).findAll(
+        (node) =>
+          node.props['accessibilityLabel'] === 'Back to chat' &&
+          typeof node.props['onPress'] === 'function' &&
+          !sideBar[0]?.findAll((child) => child === node).length,
+      );
+      expect(headerButtons).toHaveLength(0);
+      act(() => tree.unmount());
+    } finally {
+      restoreWindow();
+    }
+  });
+});

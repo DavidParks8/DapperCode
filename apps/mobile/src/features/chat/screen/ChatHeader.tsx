@@ -9,6 +9,8 @@ import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { HorizontalFadeMask } from '@shared/ui/HorizontalFadeMask';
 import { useHorizontalOverflow } from '@shared/ui/useHorizontalOverflow';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
+import { useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
+import { useNavigationToggleLabel } from '@shell/state/drawer/atoms';
 import {
   CIRCULAR_TOOLBAR_BUTTON_SIZE,
   CircularToolbarButton,
@@ -22,6 +24,8 @@ interface ChatHeaderProps {
   onRenameTitle?: () => void;
   /** Avoids nesting glass when the header shares a surface with adjacent chrome. */
   embeddedInGlass?: boolean;
+  /** Pads for the top safe area; off when the header sits low on the screen. */
+  respectsTopSafeArea?: boolean;
   rightIconName?: keyof typeof Ionicons.glyphMap;
   onRightActionPress?: () => void;
 }
@@ -32,6 +36,7 @@ export function ChatHeader({
   agent,
   onRenameTitle,
   embeddedInGlass = false,
+  respectsTopSafeArea = true,
   rightIconName,
   onRightActionPress,
 }: ChatHeaderProps) {
@@ -39,12 +44,17 @@ export function ChatHeader({
   const { colors } = theme;
   const styles = useMemo(() => createStyles(theme), [theme]);
   const titleDisplay = title.trim() || 'New chat';
+  const sceneInsets = useSceneHorizontalInsets();
+  const navigationLabel = useNavigationToggleLabel();
 
   const header = (
-    <SafeAreaView edges={['top', 'left', 'right']}>
-      <View style={styles.header} testID="chat-header-row">
+    <SafeAreaView edges={respectsTopSafeArea ? ['top'] : []} style={sceneInsets}>
+      <View
+        style={[styles.header, onOpenDrawer ? null : styles.headerWithoutLeadingButton]}
+        testID="chat-header-row"
+      >
         {onOpenDrawer ? (
-          <CircularToolbarButton onPress={onOpenDrawer} accessibilityLabel="Open navigation drawer">
+          <CircularToolbarButton onPress={onOpenDrawer} accessibilityLabel={navigationLabel}>
             <Ionicons
               {...decorativeAccessibilityProps}
               name="menu"
@@ -169,6 +179,9 @@ const createStyles = (theme: AppTheme) =>
       // The selector row below is pulled up into this row's dead space, so the header has to win
       // touches in the overlap band or the leading button would lose its bottom edge.
       zIndex: 1,
+    },
+    headerWithoutLeadingButton: {
+      paddingLeft: theme.spacing.lg,
     },
     titleRow: {
       flexDirection: 'row',

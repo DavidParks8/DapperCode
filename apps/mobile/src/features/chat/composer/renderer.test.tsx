@@ -1,10 +1,13 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import React from 'react';
-import { StyleSheet } from 'react-native';
+import { Dimensions, StyleSheet } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { ReduceMotion } from 'react-native-reanimated';
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import { READABLE_COLUMN_WIDTH } from '@shell/layout/windowLayout';
+import { sidebarHiddenAtom } from '@shell/state/appState/settings';
+import { windowTraitsAtom } from '@shell/state/layout/atoms';
 import { createTestStore, withAppStore } from '@shell/state/testing';
 import type { AppStore } from '@shell/state/types';
 import { useMainScreenStyles } from '../styles/useStyles';
@@ -114,8 +117,8 @@ function Harness({
 function render(
   context: Omit<MainScreenComposerRendererContext, 'styles' | 'theme'>,
   overlay = false,
+  store: AppStore = createTestStore(),
 ): ReactTestRenderer {
-  const store: AppStore = createTestStore();
   const resultRef: { current: ReturnType<typeof useMainScreenComposerRenderer> | null } = {
     current: null,
   };
@@ -141,6 +144,48 @@ function root(tree: ReactTestRenderer): QueryableInstance {
 }
 
 describe('mainScreenComposerRenderer suggestion surfaces', () => {
+  it('keeps the composer in the readable column and off a fold on wide windows', () => {
+    act(() => {
+      Dimensions.set({
+        window: { width: 951, height: 669, scale: 3, fontScale: 1 },
+        screen: { width: 951, height: 669, scale: 3, fontScale: 1 },
+      });
+    });
+    const store = createTestStore();
+    // A hidden sidebar gives the chat the whole 951pt window.
+    store.set(sidebarHiddenAtom, true);
+    const overlayStyle = (tree: ReactTestRenderer) =>
+      StyleSheet.flatten(
+        root(tree).findAll((node) => {
+          const style = StyleSheet.flatten(node.props['style'] as never) as { position?: string };
+          return style?.position === 'absolute' && typeof node.props['onLayout'] === 'function';
+        })[0]?.props['style'] as never,
+      );
+
+    const flat = render(baseContext(), true, store);
+    expect(overlayStyle(flat)).toMatchObject({
+      marginLeft: (951 - READABLE_COLUMN_WIDTH) / 2,
+      marginRight: (951 - READABLE_COLUMN_WIDTH) / 2,
+    });
+    act(() => flat.unmount());
+
+    // Folded like a book: the composer's controls move onto the trailing page.
+    store.set(windowTraitsAtom, {
+      horizontalSizeClass: 'regular',
+      verticalSizeClass: 'compact',
+      divisions: [{ x: 455, y: 0, width: 41, height: 669 }],
+    });
+    const folded = render(baseContext(), true, store);
+    expect(overlayStyle(folded)).toMatchObject({ marginLeft: 496, marginRight: 0 });
+    act(() => folded.unmount());
+    act(() => {
+      Dimensions.set({
+        window: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+        screen: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+      });
+    });
+  });
+
   it('offsets the overlay composer by the measured iOS keyboard inset', () => {
     const tree = render(baseContext({ composerOverlayInset: 291 }), true);
     const overlay = root(tree).findAll((node) => {

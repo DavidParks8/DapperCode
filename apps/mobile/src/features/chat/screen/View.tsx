@@ -1,4 +1,6 @@
 import { MainScreenHeaderAndWorkflow } from './HeaderAndWorkflow';
+import { ChatSceneToolbar } from './chatToolbar';
+import { useToolbarPlacement } from '@shell/layout/SceneToolbar';
 import { MainScreenTranscriptAndSheets } from '../transcript/TranscriptAndSheets';
 import { MainScreenRenameSheet } from './RenameSheet';
 import { MainScreenAttachmentModals } from '../composer/AttachmentModals';
@@ -159,6 +161,9 @@ const StableApprovalAndBridgePrompts = memoizeContextSurface(MainScreenApprovalA
 
 export function MainScreenView({ context }: { context: MainScreenViewContext }) {
   const { styles } = useMainScreenStyles();
+  // On a device folded like a laptop the chrome's controls move to the lower half, just above the
+  // composer, where they are reachable without tipping the device back.
+  const chromeAtBottom = useToolbarPlacement() === 'bottom';
   const setTopChromeHeight = useSetAtom(topChromeHeightAtom);
   const handleTopChromeLayout = useCallback(
     (event: LayoutChangeEvent) => {
@@ -172,11 +177,16 @@ export function MainScreenView({ context }: { context: MainScreenViewContext }) 
     <View style={styles.container}>
       <View
         onLayout={handleTopChromeLayout}
-        style={styles.topChromeOverlay}
+        style={
+          chromeAtBottom
+            ? [styles.bottomChromeOverlay, { bottom: context.composerReservedInset }]
+            : styles.topChromeOverlay
+        }
         testID="main-screen-top-chrome"
       >
         <StableHeaderAndWorkflow context={context} />
       </View>
+      <ChatSceneToolbar context={context} />
       <StableTranscriptAndSheets context={context} />
       <StableModelAndEffortSheets context={context} />
       <StableRenameSheet context={context} />

@@ -116,6 +116,8 @@ export interface SubAgentHeaderProps {
   headingFocusRef: ReturnType<typeof useAccessibilityFocus<Text>>;
   styles: ReturnType<typeof createStyles>;
   theme: AppTheme;
+  /** False when the back button lives in a vertical bar instead. */
+  showBackButton?: boolean;
 }
 
 export interface SubAgentStatusBarProps {
@@ -155,23 +157,26 @@ export function SubAgentHeader({
   headingFocusRef,
   styles,
   theme,
+  showBackButton = true,
 }: SubAgentHeaderProps) {
   return (
     <View style={styles.header}>
-      <Pressable
-        onPress={navigateBack}
-        hitSlop={8}
-        style={styles.iconButton}
-        accessibilityRole="button"
-        accessibilityLabel="Back from sub-agent transcript"
-      >
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name="chevron-back"
-          size={22}
-          color={theme.colors.textPrimary}
-        />
-      </Pressable>
+      {showBackButton ? (
+        <Pressable
+          onPress={navigateBack}
+          hitSlop={8}
+          style={styles.iconButton}
+          accessibilityRole="button"
+          accessibilityLabel="Back from sub-agent transcript"
+        >
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="chevron-back"
+            size={22}
+            color={theme.colors.textPrimary}
+          />
+        </Pressable>
+      ) : null}
       <View style={styles.headerCopy}>
         <Text style={styles.eyebrow}>Sub-agent</Text>
         <Text
@@ -183,7 +188,7 @@ export function SubAgentHeader({
           {title}
         </Text>
       </View>
-      <View style={styles.iconButton} />
+      {showBackButton ? <View style={styles.iconButton} /> : null}
     </View>
   );
 }

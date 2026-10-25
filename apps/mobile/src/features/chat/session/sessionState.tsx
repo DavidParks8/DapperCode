@@ -12,7 +12,7 @@ import {
 } from '../state/session';
 import { screenRefView } from '../state/registry';
 import { threadRuntimeSnapshotsAtom } from '../state/runtime';
-import { AppState, Dimensions, Keyboard, type KeyboardEvent, Platform } from 'react-native';
+import { AppState } from 'react-native';
 import { findAgentDescriptor, getAgentLabel, selectAgentId } from '@shared/agents';
 import type { BridgeCapabilities, BridgeUiSurface, Chat, ModelOption } from '@bridge/types/types';
 import {
@@ -29,7 +29,7 @@ import { useAttachmentController } from '../composer/controllers/attachmentContr
 import { mergeModelOptions, modelOptionsFromAcpConfig } from '../state/chatState';
 import { lastUsedModelPreference } from '../helpers/preferences';
 import { useMountTimestampRef } from '../screen/useMountTimestampRef';
-import { resolveKeyboardInset } from './keyboardLayout';
+import { useKeyboardFrameTracking } from './keyboardLayout';
 import type {
   MainScreenLifecycleRecoveryContext,
   MainScreenLifecycleRecoveryResult,
@@ -195,33 +195,7 @@ export function useMainScreenChatSessionState(context: MainScreenChatSessionStat
     };
   }, [replayRecoveryAbortControllerRef, replayRecoveryGenerationRef, replayRecoveryRetryTimerRef]);
 
-  useEffect(() => {
-    const updateKeyboardFrame = (event: KeyboardEvent) => {
-      const inset = resolveKeyboardInset(
-        Dimensions.get('screen').height,
-        event.endCoordinates?.screenY,
-        event.endCoordinates?.height,
-      );
-      setKeyboardVisible(inset > 0);
-      setKeyboardInset(inset);
-    };
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, updateKeyboardFrame);
-    const frameSub =
-      Platform.OS === 'ios'
-        ? Keyboard.addListener('keyboardWillChangeFrame', updateKeyboardFrame)
-        : null;
-    const hideSub = Keyboard.addListener(hideEvent, () => {
-      setKeyboardVisible(false);
-      setKeyboardInset(0);
-    });
-    return () => {
-      showSub.remove();
-      frameSub?.remove();
-      hideSub.remove();
-    };
-  }, [setKeyboardInset, setKeyboardVisible]);
+  useKeyboardFrameTracking(setKeyboardVisible, setKeyboardInset);
 
   // Live views so callbacks always read the newest value without re-subscribing. They are
   // memoized on the store so every consumer that lists one as a hook dependency keeps a stable

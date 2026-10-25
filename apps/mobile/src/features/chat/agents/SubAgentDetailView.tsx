@@ -4,6 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FlatList } from 'react-native';
 import { AppState, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
+import {
+  SceneToolbarHost,
+  useInlineToolbar,
+  type SceneToolbarItem,
+} from '@shell/layout/SceneToolbar';
 
 import type { Chat, RpcNotification } from '@bridge/types/types';
 import { showToolCallsAtom } from '@shell/state/appState/settings';
@@ -92,6 +98,7 @@ function useShimmerPresentation(active: boolean): boolean {
 
 export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
   const router = useRouter();
+  const sceneInsets = useSceneHorizontalInsets();
   const { chatId, profileId } = useLocalSearchParams<{
     chatId?: string;
     profileId?: string;
@@ -298,6 +305,17 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
     [chatId, profileId, router],
   );
 
+  const inlineToolbar = useInlineToolbar();
+  const toolbarItems: SceneToolbarItem[] = [
+    {
+      key: 'back',
+      icon: 'chevron-back',
+      label: 'Back from sub-agent transcript',
+      onPress: navigateBack,
+      group: 'navigation',
+    },
+  ];
+
   const openSubAgentThread = useCallback(
     (nextThreadId: string) => openSubAgent(nextThreadId),
     [openSubAgent],
@@ -305,54 +323,57 @@ export function SubAgentDetailView({ threadId }: SubAgentDetailViewProps) {
 
   return (
     <ChatAnimationClockProvider enabled={bridgeConnected}>
-      <SafeAreaView style={styles.page}>
-        <SubAgentHeader
-          title={title}
-          navigateBack={navigateBack}
-          headingFocusRef={headingFocusRef}
-          styles={styles}
-          theme={theme}
-        />
-        <SubAgentStatusBar
-          display={display}
-          loading={detail.loading}
-          activityDetail={activityDetail}
-          styles={styles}
-          theme={theme}
-        />
+      <SceneToolbarHost items={toolbarItems}>
+        <SafeAreaView style={[styles.page, sceneInsets]} edges={['top', 'bottom']}>
+          <SubAgentHeader
+            title={title}
+            navigateBack={navigateBack}
+            headingFocusRef={headingFocusRef}
+            styles={styles}
+            theme={theme}
+            showBackButton={inlineToolbar}
+          />
+          <SubAgentStatusBar
+            display={display}
+            loading={detail.loading}
+            activityDetail={activityDetail}
+            styles={styles}
+            theme={theme}
+          />
 
-        {detail.error ? (
-          <Text
-            accessibilityRole="alert"
-            accessibilityLiveRegion="assertive"
-            style={styles.errorText}
-          >
-            {detail.error}
-          </Text>
-        ) : null}
-        <SubAgentTranscriptContent
-          chat={chat}
-          parentChat={detail.parentChat}
-          bridgeUrl={bridgeUrl}
-          bridgeToken={bridgeToken}
-          openBrowser={openBrowser}
-          showToolCalls={showToolCalls}
-          onOpenSubAgentThread={openSubAgentThread}
-          onRetryHistory={retryHistory}
-          agentThreadStatusById={agentThreadStatusById}
-          scrollRef={scrollRef}
-          autoScrollStateRef={autoScrollStateRef}
-          liveMessageState={liveMessageState}
-          projectedMessageCount={projectedMessageCount}
-          isStarting={isStarting}
-          isEmpty={isEmpty}
-          isHydratingTranscript={isHydratingTranscript}
-          showHydrationShimmer={showHydrationShimmer}
-          detailLoading={detail.loading}
-          styles={styles}
-          theme={theme}
-        />
-      </SafeAreaView>
+          {detail.error ? (
+            <Text
+              accessibilityRole="alert"
+              accessibilityLiveRegion="assertive"
+              style={styles.errorText}
+            >
+              {detail.error}
+            </Text>
+          ) : null}
+          <SubAgentTranscriptContent
+            chat={chat}
+            parentChat={detail.parentChat}
+            bridgeUrl={bridgeUrl}
+            bridgeToken={bridgeToken}
+            openBrowser={openBrowser}
+            showToolCalls={showToolCalls}
+            onOpenSubAgentThread={openSubAgentThread}
+            onRetryHistory={retryHistory}
+            agentThreadStatusById={agentThreadStatusById}
+            scrollRef={scrollRef}
+            autoScrollStateRef={autoScrollStateRef}
+            liveMessageState={liveMessageState}
+            projectedMessageCount={projectedMessageCount}
+            isStarting={isStarting}
+            isEmpty={isEmpty}
+            isHydratingTranscript={isHydratingTranscript}
+            showHydrationShimmer={showHydrationShimmer}
+            detailLoading={detail.loading}
+            styles={styles}
+            theme={theme}
+          />
+        </SafeAreaView>
+      </SceneToolbarHost>
     </ChatAnimationClockProvider>
   );
 }

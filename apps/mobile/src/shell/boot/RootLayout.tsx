@@ -8,6 +8,7 @@ import { StatusBar, useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 
+import { WindowLayoutObserver } from '@shell/layout/WindowLayoutObserver';
 import { createStackScreenOptions } from '@shell/navigation/stackScreenOptions';
 import {
   appStateLoadedAtom,
@@ -39,6 +40,7 @@ export function RootLayout() {
         <SafeAreaProvider initialMetrics={initialWindowMetrics}>
           <BottomSheetModalProvider>
             <StatusBar barStyle={theme.statusBarStyle} backgroundColor={theme.colors.bgMain} />
+            <WindowLayoutObserver />
             <RootNavigator theme={theme} styles={styles} />
           </BottomSheetModalProvider>
         </SafeAreaProvider>

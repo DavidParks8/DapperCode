@@ -2,6 +2,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { StyleProp, ViewStyle } from 'react-native';
 
 import { useAppTheme } from '@shared/theme';
+import { useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
 
 /**
  * Fades transcript content into the bottom of the screen.
@@ -17,6 +18,7 @@ export function TranscriptEdgeScrim({
   edgeStyle: StyleProp<ViewStyle>;
 }) {
   const theme = useAppTheme();
+  const sceneInsets = useSceneHorizontalInsets();
   if (bottomInset <= 0) {
     return null;
   }
@@ -29,7 +31,17 @@ export function TranscriptEdgeScrim({
     <LinearGradient
       pointerEvents="none"
       colors={[theme.colors.transparent, theme.colors.bgMain]}
-      style={[edgeStyle, { bottom: 0, height: bottomHeight }]}
+      // The transcript sits inside the scene's side safe-area padding, but a scrim is background:
+      // it bleeds under that inset to the window edge instead of stopping beside the status bar.
+      style={[
+        edgeStyle,
+        {
+          bottom: 0,
+          height: bottomHeight,
+          left: -sceneInsets.paddingLeft,
+          right: -sceneInsets.paddingRight,
+        },
+      ]}
       testID="transcript-bottom-scrim"
     />
   );

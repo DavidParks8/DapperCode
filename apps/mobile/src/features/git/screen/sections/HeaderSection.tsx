@@ -6,6 +6,8 @@ import type { GitSectionCommonProps } from '../sectionTypes';
 
 interface GitScreenHeaderSectionProps extends GitSectionCommonProps {
   onBack: () => void;
+  /** False when the back and refresh buttons live in a vertical bar instead. */
+  showButtons?: boolean;
 }
 
 export function GitScreenHeaderSection({
@@ -13,60 +15,65 @@ export function GitScreenHeaderSection({
   styles,
   theme,
   onBack,
+  showButtons = true,
 }: GitScreenHeaderSectionProps) {
   return (
     <View style={styles.header}>
-      <Pressable
-        onPress={onBack}
-        hitSlop={8}
-        style={styles.backBtn}
-        accessibilityRole="button"
-        accessibilityLabel="Back to chat"
-      >
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name="chevron-back"
-          size={22}
-          color={theme.colors.textPrimary}
-        />
-      </Pressable>
+      {showButtons ? (
+        <Pressable
+          onPress={onBack}
+          hitSlop={8}
+          style={styles.backBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Back to chat"
+        >
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="chevron-back"
+            size={22}
+            color={theme.colors.textPrimary}
+          />
+        </Pressable>
+      ) : null}
       <View style={styles.headerTitles}>
         <Text style={styles.headerTitle}>Git</Text>
         <Text style={styles.headerSubtitle} numberOfLines={1}>
           {controller.activeChat.title || 'Untitled chat'}
         </Text>
       </View>
-      <Pressable
-        onPress={() => void controller.refresh()}
-        hitSlop={8}
-        style={({ pressed }) => [
-          styles.refreshBtn,
-          pressed && styles.refreshBtnPressed,
-          (controller.loading || controller.refreshing) && styles.refreshBtnDisabled,
-        ]}
-        disabled={controller.loading || controller.refreshing}
-        accessibilityRole="button"
-        accessibilityLabel="Refresh Git status"
-        accessibilityState={controlAccessibilityState({
-          disabled: controller.loading || controller.refreshing,
-          busy: controller.loading || controller.refreshing,
-        })}
-      >
-        {controller.refreshing ? (
-          <ActivityIndicator
-            {...decorativeAccessibilityProps}
-            size="small"
-            color={theme.colors.textMuted}
-          />
-        ) : (
-          <Ionicons
-            {...decorativeAccessibilityProps}
-            name="refresh"
-            size={16}
-            color={theme.colors.textMuted}
-          />
-        )}
-      </Pressable>
+      {showButtons ? (
+        <Pressable
+          onPress={() => void controller.refresh()}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.refreshBtn,
+            pressed && styles.refreshBtnPressed,
+            (controller.loading || controller.refreshing) && styles.refreshBtnDisabled,
+          ]}
+          disabled={controller.loading || controller.refreshing}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh Git status"
+          accessibilityState={controlAccessibilityState({
+            disabled: controller.loading || controller.refreshing,
+            busy: controller.loading || controller.refreshing,
+          })}
+        >
+          {controller.refreshing ? (
+            <ActivityIndicator
+              {...decorativeAccessibilityProps}
+              size="small"
+              color={theme.colors.textMuted}
+            />
+          ) : (
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name="refresh"
+              size={16}
+              color={theme.colors.textMuted}
+            />
+          )}
+        </Pressable>
+      ) : null}
     </View>
   );
 }

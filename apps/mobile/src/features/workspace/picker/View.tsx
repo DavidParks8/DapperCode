@@ -3,6 +3,7 @@ import { useRef, useState, type RefObject } from 'react';
 import { Pressable, Text, useWindowDimensions, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
 
 import type { FileSystemEntry, WorkspaceSummary } from '@bridge/types/types';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
@@ -241,6 +242,7 @@ function WorkspacePickerNavBar({
 
 export function WorkspacePickerView(props: WorkspacePickerViewProps) {
   const { styles, theme } = props;
+  const sceneInsets = useSceneHorizontalInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [menu, setMenu] = useState<WorkspacePickerMenuState | null>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -316,7 +318,7 @@ export function WorkspacePickerView(props: WorkspacePickerViewProps) {
   return (
     <View style={styles.root}>
       <SafeAreaView
-        style={styles.screen}
+        style={[styles.screen, sceneInsets]}
         edges={['top', 'bottom']}
         accessibilityElementsHidden={menu !== null}
         importantForAccessibility={menu !== null ? 'no-hide-descendants' : 'auto'}

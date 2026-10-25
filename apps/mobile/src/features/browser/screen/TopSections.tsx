@@ -6,6 +6,7 @@ import Animated, { Easing, FadeIn, ReduceMotion } from 'react-native-reanimated'
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import { routes } from '@shell/navigation/routes';
+import { useNavigationToggleLabel } from '@shell/state/drawer/atoms';
 
 const MOTION_ROUTINE_MS = 200;
 const EASING_STANDARD = [0.4, 0, 0.2, 1] as const;
@@ -102,6 +103,7 @@ export function BrowserTopBar({
   handleSubmitInput: () => void;
 }) {
   const theme = useAppTheme();
+  const navigationLabel = useNavigationToggleLabel();
   const styles = useMemo(() => createBrowserScreenStyles(theme), [theme]);
   const { colors } = theme;
 
@@ -113,7 +115,7 @@ export function BrowserTopBar({
           hitSlop={8}
           style={styles.chromeButton}
           accessibilityRole="button"
-          accessibilityLabel="Open navigation drawer"
+          accessibilityLabel={navigationLabel}
         >
           <Ionicons
             {...decorativeAccessibilityProps}

@@ -15,6 +15,15 @@ import { liveAssistantByThreadAtom } from '../state/turn';
 import { threadRuntimeSnapshotsAtom } from '../state/runtime';
 import { agentRootThreadIdAtom, relatedAgentThreadsAtom } from '../../workspace/state/workspace';
 import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
+import { windowTraitsAtom } from '@shell/state/layout/atoms';
+import {
+  CLOSED_DUO_SAFE_AREA,
+  CLOSED_DUO_TRAITS,
+  queryRoot,
+  sizeWindowLikeClosedDuo,
+} from '@shared/testing/foldableLayout';
+import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
+
 import type { AppStore } from '@shell/state/types';
 import { createAppTheme, AppThemeProvider } from '@shared/theme';
 import { ReasoningEntryCard } from '../message/ReasoningCard';
@@ -42,6 +51,7 @@ interface RenderOptions {
   loadedChat?: Chat;
   cachedChat?: Chat | null;
   getChat?: jest.Mock;
+  closedDuo?: boolean;
 }
 
 async function render(options: RenderOptions = {}): Promise<{
@@ -81,16 +91,23 @@ async function render(options: RenderOptions = {}): Promise<{
   const store = createBridgeTestStore({ api, ws });
   store.set(agentRootThreadIdAtom, 'root');
   store.set(relatedAgentThreadsAtom, [loadedChat]);
+  if (options.closedDuo) {
+    store.set(windowTraitsAtom, CLOSED_DUO_TRAITS);
+  }
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
       withAppStore(
         store,
         <SafeAreaProvider
-          initialMetrics={{
-            frame: { x: 0, y: 0, width: 390, height: 844 },
-            insets: { top: 47, left: 0, right: 0, bottom: 34 },
-          }}
+          initialMetrics={
+            options.closedDuo
+              ? CLOSED_DUO_SAFE_AREA
+              : {
+                  frame: { x: 0, y: 0, width: 390, height: 844 },
+                  insets: { top: 47, left: 0, right: 0, bottom: 34 },
+                }
+          }
         >
           <AppThemeProvider theme={theme}>
             <SubAgentDetailView threadId={loadedChat.id} />
@@ -723,5 +740,35 @@ describe('SubAgentDetailView transcript ordering', () => {
       'Now verifying the result.',
     ]);
     act(() => tree.unmount());
+  });
+});
+
+describe('SubAgentDetailView on a foldable', () => {
+  it('moves its buttons into the vertical bar when the system lays bars out on a side', async () => {
+    const restoreWindow = sizeWindowLikeClosedDuo();
+    try {
+      const { tree } = await render({ closedDuo: true });
+      const sideBar = queryRoot(tree).findAll(
+        (node) =>
+          node.props['testID'] === 'scene-vertical-toolbar' && typeof node.type !== 'string',
+      )[0];
+      expect(
+        sideBar
+          ?.findAll((node) => node.type === CircularToolbarButton)
+          .map((button) => button.props['accessibilityLabel'] as string),
+      ).toEqual(['Back from sub-agent transcript']);
+      // The header keeps its text but no longer duplicates the button.
+      expect(
+        queryRoot(tree).findAll(
+          (node) =>
+            node.props['accessibilityLabel'] === 'Back from sub-agent transcript' &&
+            typeof node.props['onPress'] === 'function' &&
+            !sideBar?.findAll((child) => child === node).length,
+        ),
+      ).toHaveLength(0);
+      act(() => tree.unmount());
+    } finally {
+      restoreWindow();
+    }
   });
 });

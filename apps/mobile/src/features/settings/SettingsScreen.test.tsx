@@ -23,6 +23,15 @@ import {
 import { apiClientAtom, bridgeConnectedAtom } from '@shell/state/bridge/atoms';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { createMemoryPersistence, createTestStore, withAppStore } from '@shell/state/testing';
+import { windowTraitsAtom } from '@shell/state/layout/atoms';
+import {
+  CLOSED_DUO_SAFE_AREA,
+  CLOSED_DUO_TRAITS,
+  queryRoot,
+  sizeWindowLikeClosedDuo,
+} from '@shared/testing/foldableLayout';
+import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
+
 import type { AppStore } from '@shell/state/types';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { SettingsScreen } from './SettingsScreen';
@@ -222,6 +231,7 @@ async function renderSettings(
     store?: AppStore;
     connected?: boolean;
     drawerToggle?: jest.Mock;
+    closedDuo?: boolean;
   } = {},
 ): Promise<{ tree: ReactTestRenderer; api: Record<string, jest.Mock>; store: AppStore }> {
   const api = {
@@ -243,6 +253,9 @@ async function renderSettings(
     });
   store.set(apiClientAtom, api as unknown as HostBridgeApiClient);
   store.set(bridgeConnectedAtom, options.connected ?? true);
+  if (options.closedDuo) {
+    store.set(windowTraitsAtom, CLOSED_DUO_TRAITS);
+  }
   store.set(drawerCommandsAtom, {
     closeDrawer: jest.fn(),
     toggleNavigation: options.drawerToggle ?? jest.fn(),
@@ -253,10 +266,14 @@ async function renderSettings(
       withAppStore(
         store,
         <SafeAreaProvider
-          initialMetrics={{
-            frame: { x: 0, y: 0, width: 390, height: 844 },
-            insets: { top: 47, left: 0, right: 0, bottom: 34 },
-          }}
+          initialMetrics={
+            options.closedDuo
+              ? CLOSED_DUO_SAFE_AREA
+              : {
+                  frame: { x: 0, y: 0, width: 390, height: 844 },
+                  insets: { top: 47, left: 0, right: 0, bottom: 34 },
+                }
+          }
         >
           <AppThemeProvider theme={theme}>
             <SettingsScreen />
@@ -624,5 +641,35 @@ describe('SettingsScreen behavior', () => {
     expect(noProfileStore.get(pushSettingsAtom).optedOut).toBe(false);
     expect(noProfileStore.get(pushSettingsAtom).events.turnCompleted).toBe(true);
     act(() => noProfile.tree.unmount());
+  });
+});
+
+describe('SettingsScreen on a foldable', () => {
+  it('moves its buttons into the vertical bar when the system lays bars out on a side', async () => {
+    const restoreWindow = sizeWindowLikeClosedDuo();
+    try {
+      const { tree } = await renderSettings({ closedDuo: true });
+      const sideBar = queryRoot(tree).findAll(
+        (node) =>
+          node.props['testID'] === 'scene-vertical-toolbar' && typeof node.type !== 'string',
+      )[0];
+      expect(
+        sideBar
+          ?.findAll((node) => node.type === CircularToolbarButton)
+          .map((button) => button.props['accessibilityLabel'] as string),
+      ).toEqual(['Open navigation drawer']);
+      // The header keeps its text but no longer duplicates the button.
+      expect(
+        queryRoot(tree).findAll(
+          (node) =>
+            node.props['accessibilityLabel'] === 'Open navigation drawer' &&
+            typeof node.props['onPress'] === 'function' &&
+            !sideBar?.findAll((child) => child === node).length,
+        ),
+      ).toHaveLength(0);
+      act(() => tree.unmount());
+    } finally {
+      restoreWindow();
+    }
   });
 });

@@ -20,6 +20,7 @@ lives under `apps/mobile/src/shell/state`, with feature-owned state under each f
 | `shell/state/chat/*`                       | Selected/active/pending chat data and the chat-open transition                                      |
 | `shell/state/drawer/atoms.ts`              | Imperative access to the Router drawer from custom in-screen headers                                |
 | `shell/state/drawer/contentAtoms.ts`       | Per-drawer source, derived view-slice, and action atoms for loading, filtering, and selection        |
+| `shell/state/layout/atoms.ts`              | Native window traits (size classes, fold divisions) reported by `shell/layout/WindowLayoutObserver` |
 | `shell/state/commands.ts`                  | Screen-registered imperative entry points (replaces `useImperativeHandle` refs)                     |
 | `shell/state/theme.ts`                     | Theme derived from settings and the system colour scheme                                            |
 | `features/chat/state/*`                    | MainScreen screen state, grouped by domain, plus the reset registry                                 |

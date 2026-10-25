@@ -148,13 +148,29 @@ For iOS local device/signed builds, Apple signing/tooling is still required.
 
 ### Xcode 27 and native launch validation
 
-Use Xcode 27 and install its iOS 27 simulator runtime:
+Use Xcode 27.1 or newer and install its iOS 27 simulator runtime. Builds from older SDKs run
+letterboxed on iPhone Duo instead of extending to the edges of both displays. They also cannot
+report the fold. `pnpm run release:latest` refuses older Xcode versions, and every `eas.json` build
+profile pins the `macos-tahoe-26.6-xcode-27.1` cloud image, because SDK 57's default image ships
+Xcode 26.6:
 
 ```bash
 xcodebuild -version
-xcodebuild -downloadPlatform iOS -buildVersion 27.0 -architectureVariant arm64
+xcodebuild -downloadPlatform iOS -buildVersion 27.1 -architectureVariant arm64
 xcrun simctl list runtimes
 ```
+
+To check iPhone Duo layouts, create a simulator with
+`xcrun simctl create "Duo QA" com.apple.CoreSimulator.SimDeviceType.iPhone-Duo` and switch poses
+(closed, open, book, laptop) in Xcode's Device Hub. `simctl` cannot change poses. Check each pose:
+- **Closed and open landscape:** the status bar and camera sit in a vertical column on the trailing
+  edge. Header buttons appear as a vertical bar in that column, below the clock. Content and other
+  controls stay inside the safe area.
+- **Book:** the chat keeps the full width, the session list stays behind the menu, and the
+  composer and sheets sit on the right page, off the hinge.
+- **Laptop:** the window is portrait. The chat's title, chips, and buttons sit on the lower half,
+  just above the composer. With the keyboard up, the composer sits directly above the fold. Android foldables
+report folds through the same module. Use a `pixel_9_pro_fold` emulator and its fold controls.
 
 The SDK 57 scene-lifecycle backport requires Expo 57.0.23 or newer; this project pins the
 57.0.24 patch line. `withIosSceneLifecycle` connects the standard generated AppDelegate to

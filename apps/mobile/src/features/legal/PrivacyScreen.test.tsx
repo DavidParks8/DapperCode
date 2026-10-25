@@ -1,6 +1,16 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import { Alert, Linking, Platform, StyleSheet } from 'react-native';
+import { Provider, createStore } from 'jotai';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { windowTraitsAtom } from '@shell/state/layout/atoms';
+import {
+  CLOSED_DUO_SAFE_AREA,
+  CLOSED_DUO_TRAITS,
+  queryRoot,
+  sizeWindowLikeClosedDuo,
+} from '@shared/testing/foldableLayout';
+import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
+
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
@@ -92,19 +102,33 @@ function effectiveSize(
   return visible + (a ?? 0) + (b ?? 0);
 }
 
-async function renderPrivacy(url: string | null, onBack = jest.fn()): Promise<ReactTestRenderer> {
+async function renderPrivacy(
+  url: string | null,
+  onBack = jest.fn(),
+  closedDuo = false,
+): Promise<ReactTestRenderer> {
+  const store = createStore();
+  if (closedDuo) {
+    store.set(windowTraitsAtom, CLOSED_DUO_TRAITS);
+  }
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
       <SafeAreaProvider
-        initialMetrics={{
-          frame: { x: 0, y: 0, width: 390, height: 844 },
-          insets: { top: 47, left: 0, right: 0, bottom: 34 },
-        }}
+        initialMetrics={
+          closedDuo
+            ? CLOSED_DUO_SAFE_AREA
+            : {
+                frame: { x: 0, y: 0, width: 390, height: 844 },
+                insets: { top: 47, left: 0, right: 0, bottom: 34 },
+              }
+        }
       >
-        <AppThemeProvider theme={theme}>
-          <PrivacyScreen policyUrl={url} onBack={onBack} />
-        </AppThemeProvider>
+        <Provider store={store}>
+          <AppThemeProvider theme={theme}>
+            <PrivacyScreen policyUrl={url} onBack={onBack} />
+          </AppThemeProvider>
+        </Provider>
       </SafeAreaProvider>,
     );
   });
@@ -277,6 +301,37 @@ describe('PrivacyScreen behavior', () => {
       act(() => tree!.unmount());
     } finally {
       Platform.OS = originalOS;
+    }
+  });
+});
+
+describe('PrivacyScreen on a foldable', () => {
+  it('moves back into the vertical bar when the system lays bars out on a side', async () => {
+    const restoreWindow = sizeWindowLikeClosedDuo();
+    try {
+      const onBack = jest.fn();
+      const tree = await renderPrivacy(null, onBack, true);
+      const sideBar = queryRoot(tree).findAll(
+        (node) =>
+          node.props['testID'] === 'scene-vertical-toolbar' && typeof node.type !== 'string',
+      )[0];
+      const buttons = sideBar?.findAll((node) => node.type === CircularToolbarButton) ?? [];
+      expect(buttons.map((button) => button.props['accessibilityLabel'])).toEqual([
+        'Back from Privacy',
+      ]);
+      act(() => (buttons[0]?.props['onPress'] as () => void)());
+      expect(onBack).toHaveBeenCalledTimes(1);
+      expect(
+        queryRoot(tree).findAll(
+          (node) =>
+            node.props['accessibilityLabel'] === 'Back from Privacy' &&
+            typeof node.props['onPress'] === 'function' &&
+            !sideBar?.findAll((child) => child === node).length,
+        ),
+      ).toHaveLength(0);
+      act(() => tree.unmount());
+    } finally {
+      restoreWindow();
     }
   });
 });

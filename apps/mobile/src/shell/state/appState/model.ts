@@ -53,6 +53,8 @@ export interface AppSettingsState {
   approvalMode: ApprovalMode;
   showToolCalls: boolean;
   confirmSessionDeletion: boolean;
+  /** The user collapsed the docked session sidebar on a wide window. */
+  sidebarHidden: boolean;
   workspaceChatLimit: WorkspaceChatLimit;
   recentBrowserTargetUrls: string[];
   recentModelIdsByAgent: RecentModelIdsByAgent;
@@ -124,6 +126,7 @@ export function createDefaultAppSettings(): AppSettingsState {
     approvalMode: 'all',
     showToolCalls: true,
     confirmSessionDeletion: true,
+    sidebarHidden: false,
     workspaceChatLimit: DEFAULT_WORKSPACE_CHAT_LIMIT,
     recentBrowserTargetUrls: [],
     recentModelIdsByAgent: {},
@@ -272,6 +275,7 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
       approvalMode: record['approvalMode'],
       showToolCalls: record['showToolCalls'],
       confirmSessionDeletion: record['confirmSessionDeletion'],
+      sidebarHidden: record['sidebarHidden'],
       workspaceChatLimit: record['workspaceChatLimit'],
       recentBrowserTargetUrls: record['recentBrowserTargetUrls'],
       recentModelIdsByAgent: record['recentModelIdsByAgent'],
@@ -284,6 +288,7 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
     approvalMode: parsed.approvalMode,
     showToolCalls: parsed.showToolCalls,
     confirmSessionDeletion: parsed.confirmSessionDeletion,
+    sidebarHidden: parsed.sidebarHidden,
     workspaceChatLimit: parsed.workspaceChatLimit,
     recentBrowserTargetUrls: dedupeRecentPreviewTargets(
       parsed.recentBrowserTargetUrls

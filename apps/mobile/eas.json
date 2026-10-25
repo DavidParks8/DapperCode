@@ -7,6 +7,9 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "ios": {
+        "image": "macos-tahoe-26.6-xcode-27.1"
+      },
       "env": {
         "EXPO_PUBLIC_ALLOW_QUERY_TOKEN_AUTH": "true",
         "EXPO_PUBLIC_PRIVACY_POLICY_URL": "https://github.com/DavidParks8/DapperCode/blob/main/docs/privacy-policy.md",
@@ -19,6 +22,9 @@
       "android": {
         "buildType": "apk"
       },
+      "ios": {
+        "image": "macos-tahoe-26.6-xcode-27.1"
+      },
       "env": {
         "EXPO_PUBLIC_ALLOW_QUERY_TOKEN_AUTH": "true",
         "EXPO_PUBLIC_PRIVACY_POLICY_URL": "https://github.com/DavidParks8/DapperCode/blob/main/docs/privacy-policy.md",
@@ -27,6 +33,9 @@
     },
     "production": {
       "autoIncrement": true,
+      "ios": {
+        "image": "macos-tahoe-26.6-xcode-27.1"
+      },
       "env": {
         "EXPO_PUBLIC_ALLOW_QUERY_TOKEN_AUTH": "true",
         "EXPO_PUBLIC_PRIVACY_POLICY_URL": "https://github.com/DavidParks8/DapperCode/blob/main/docs/privacy-policy.md",

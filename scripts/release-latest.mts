@@ -105,6 +105,23 @@ function ensureSupportedPlatform(): void {
   }
 }
 
+// Builds from older SDKs run letterboxed on iPhone Duo instead of using its full displays.
+const MIN_XCODE_VERSION = [27, 1] as const;
+
+function ensureFullScreenCapableXcode(): void {
+  const output = capture('xcodebuild', ['-version']);
+  const match = /^Xcode (\d+)\.(\d+)/m.exec(output);
+  const major = Number(match?.[1]);
+  const minor = Number(match?.[2]);
+  const [minMajor, minMinor] = MIN_XCODE_VERSION;
+  if (!match || major < minMajor || (major === minMajor && minor < minMinor)) {
+    fail(
+      `release:latest needs Xcode ${String(minMajor)}.${String(minMinor)} or newer so the iOS ` +
+        `build uses the full iPhone Duo displays; found "${output.split('\n')[0] ?? ''}"`,
+    );
+  }
+}
+
 function ensureTrackedTreeClean(): void {
   const result = spawnSync('git', ['diff', '--quiet', 'HEAD', '--'], {
     cwd: ROOT,
@@ -194,7 +211,7 @@ function printDryRun(): void {
   info(
     [
       'Dry run. Would:',
-      '  1. Verify tracked changes are clean.',
+      '  1. Verify Xcode 27.1+ and that tracked changes are clean.',
       '  2. Fetch and fast-forward to origin/main.',
       '  3. In parallel, run pnpm run desktop:build:macos, open the tray app, and start',
       '     a local iOS production EAS build.',
@@ -237,6 +254,7 @@ async function main(): Promise<void> {
   }
 
   ensureSupportedPlatform();
+  ensureFullScreenCapableXcode();
   syncMain();
   await runReleaseTasksInParallel();
   info('TestFlight submission scheduled; Apple processing may take several minutes.');

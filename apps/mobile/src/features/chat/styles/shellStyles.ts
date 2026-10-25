@@ -22,6 +22,13 @@ export const createMainScreenShellStyles = (theme: AppTheme) =>
       left: 0,
       zIndex: 5,
     },
+    // Laptop pose: the same chrome docks just above the composer; `bottom` is set at render time.
+    bottomChromeOverlay: {
+      position: 'absolute',
+      right: 0,
+      left: 0,
+      zIndex: 5,
+    },
     topChromeGlass: {
       overflow: 'hidden',
     },

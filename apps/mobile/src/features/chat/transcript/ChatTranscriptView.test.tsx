@@ -2,10 +2,14 @@ import { requireTestValue } from '@shared/testing/requireTestValue';
 import * as Haptics from 'expo-haptics';
 import { isValidElement } from 'react';
 import type * as ReactModule from 'react';
-import { FlatList, Keyboard, Platform, Pressable, StyleSheet } from 'react-native';
+import { Dimensions, FlatList, Keyboard, Platform, Pressable, StyleSheet } from 'react-native';
+import { Provider, createStore, getDefaultStore } from 'jotai';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { Chat } from '@bridge/types/types';
+import { windowTraitsAtom } from '@shell/state/layout/atoms';
+import type { QueryNode } from '@shared/testing/foldableLayout';
 import { createAgUiThreadMessageState } from '@bridge/agui/agUiMessages';
 import { ChatScrollRail } from './scrollRail/ChatScrollRail';
 import { JUMP_TO_LATEST_VISIBLE_SIZE } from './viewChrome';
@@ -380,6 +384,46 @@ describe('ChatTranscriptView activity collapse', () => {
 });
 
 describe('ChatTranscriptView edge scrims', () => {
+  it('bleeds the bottom scrim under side safe areas while the transcript stays inside them', () => {
+    // The closed iPhone Duo puts its status bar and camera in a column on the trailing edge. The
+    // scene pads the transcript clear of it, but the scrim is background and must reach the edge.
+    const store = createStore();
+    store.set(windowTraitsAtom, {
+      horizontalSizeClass: 'compact',
+      verticalSizeClass: 'regular',
+      divisions: [],
+    });
+    let tree: ReactTestRenderer | undefined;
+    act(() => {
+      tree = renderer.create(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 466, height: 678 },
+            insets: { top: 0, left: 12, right: 84, bottom: 20 },
+          }}
+        >
+          <Provider store={store}>
+            <AppThemeProvider theme={theme}>
+              <ChatTranscriptView {...baseProps} bottomInset={88} />
+            </AppThemeProvider>
+          </Provider>
+        </SafeAreaProvider>,
+      );
+    });
+    const bottomScrim = requireTestValue(
+      (tree as QueryableRenderer | undefined)?.root.findAllByProps({
+        testID: 'transcript-bottom-scrim',
+      })[0],
+      'bottom transcript scrim',
+    );
+
+    expect(StyleSheet.flatten(bottomScrim.props['style'] as never)).toMatchObject({
+      left: -12,
+      right: -84,
+    });
+    act(() => tree?.unmount());
+  });
+
   it('leaves the latest row unfaded when a long transcript has no bottom chrome', () => {
     const tree = render({
       chat: makeChat({ messages: makeMessages(60) }),
@@ -690,11 +734,48 @@ describe('ChatTranscriptView message timestamp reveal', () => {
   });
 });
 
+function marginLeftOf(node: QueryNode): number | undefined {
+  return (StyleSheet.flatten(node.props['style'] as never) as { marginLeft?: number } | null)
+    ?.marginLeft;
+}
+
+function railPinned(tree: ReactTestRenderer): unknown {
+  return (tree.root as Queryable).findAll(
+    (node) => Array.isArray(node.props['anchors']) && 'alwaysVisible' in node.props,
+  )[0]?.props['alwaysVisible'];
+}
+
 describe('ChatTranscriptView magical scroll rail', () => {
   beforeEach(() => {
     resetMockGestures();
     jest.mocked(Haptics.impactAsync).mockClear();
     jest.mocked(Haptics.selectionAsync).mockClear();
+  });
+
+  it('pins the rail on a wide window only once there are two user messages', () => {
+    // A lone pinned bar beside the transcript read as a stray mark. One bar still renders and the
+    // rail gesture still works, so it can jump back to the only prompt after a long reply.
+    const first: Chat['messages'] = [
+      { id: 'u1', role: 'user', content: 'First', createdAt: '2026-08-01T00:00:00Z' },
+      { id: 'a1', role: 'assistant', content: 'Reply', createdAt: '2026-08-01T00:00:01Z' },
+    ];
+    const tree = render({ chat: makeChat({ messages: first }) });
+    act(() => getList(tree).props.onLayout({ nativeEvent: { layout: { height: 300 } } }));
+
+    expect(railPinned(tree)).toBe(false);
+    expect(tree.root.findAllByProps({ testID: 'chat-scroll-rail-bar-u1' }).length).toBeGreaterThan(
+      0,
+    );
+    expect(mockGestureByTestId('chat-scroll-rail-pan').config['enabled']).toBe(true);
+
+    const second: Chat['messages'] = [
+      ...first,
+      { id: 'u2', role: 'user', content: 'Second', createdAt: '2026-08-01T00:00:02Z' },
+    ];
+    update(tree, { chat: makeChat({ messages: second }) });
+
+    expect(railPinned(tree)).toBe(true);
+    act(() => tree.unmount());
   });
 
   it('renders one fixed-pitch bar per user message and configures delayed edge activation', () => {
@@ -1251,6 +1332,8 @@ describe('ChatTranscriptView continuation', () => {
     expect(list.props.contentContainerStyle[1]).toEqual({
       paddingTop: 380,
       paddingBottom: theme.spacing.lg,
+      // Narrow windows keep only the transcript gutter; wide ones add a readable-column inset.
+      paddingHorizontal: theme.spacing.lg,
     });
     scroll(list, 320, 1100, 500);
     expect(autoScrollStateRef.current.shouldStickToBottom).toBe(true);
@@ -1282,6 +1365,49 @@ describe('ChatTranscriptView continuation', () => {
     act(() => list.props.onContentSizeChange(320, 1240));
     expect(scrollToLatest).toHaveBeenLastCalledWith(false);
     act(() => tree.unmount());
+  });
+
+  it('moves the jump-to-latest control onto the trailing page instead of a fold', () => {
+    act(() => {
+      Dimensions.set({
+        window: { width: 951, height: 669, scale: 3, fontScale: 1 },
+        screen: { width: 951, height: 669, scale: 3, fontScale: 1 },
+      });
+    });
+    getDefaultStore().set(windowTraitsAtom, {
+      horizontalSizeClass: 'regular',
+      verticalSizeClass: 'compact',
+      divisions: [{ x: 455, y: 0, width: 41, height: 669 }],
+    });
+    try {
+      const tree = render({
+        autoScrollStateRef: {
+          current: {
+            shouldStickToBottom: true,
+            isUserInteracting: false,
+            isMomentumScrolling: false,
+          },
+        },
+      });
+      drag(getList(tree), 100);
+      let node: QueryNode | null = tree.root.findByProps({
+        accessibilityLabel: 'Jump to latest message',
+      }) as unknown as QueryNode;
+      while (node && marginLeftOf(node) === undefined) {
+        node = node.parent;
+      }
+      const buttonStyle = StyleSheet.flatten(node?.props['style'] as never);
+      act(() => tree.unmount());
+      expect(buttonStyle).toMatchObject({ alignSelf: 'center', marginLeft: 496 });
+    } finally {
+      getDefaultStore().set(windowTraitsAtom, null);
+      act(() => {
+        Dimensions.set({
+          window: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+          screen: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+        });
+      });
+    }
   });
 
   it('keeps the jump-to-latest control hidden when the transcript is not scrollable', () => {
@@ -1536,6 +1662,7 @@ describe('ChatTranscriptView continuation', () => {
     expect(androidList.props.contentContainerStyle[1]).toEqual({
       paddingTop: 24,
       paddingBottom: 40 + theme.spacing.lg,
+      paddingHorizontal: theme.spacing.lg,
     });
     act(() => androidTree.unmount());
 
@@ -1550,6 +1677,7 @@ describe('ChatTranscriptView continuation', () => {
     expect(iosList.props.contentContainerStyle[1]).toEqual({
       paddingTop: 12,
       paddingBottom: 40 + theme.spacing.lg,
+      paddingHorizontal: theme.spacing.lg,
     });
     act(() => iosTree.unmount());
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOS });
@@ -1560,6 +1688,7 @@ describe('ChatTranscriptView continuation', () => {
     expect(getList(tree).props.contentContainerStyle[1]).toEqual({
       paddingTop: 0,
       paddingBottom: 24 + theme.spacing.lg,
+      paddingHorizontal: theme.spacing.lg,
     });
 
     update(tree, { topInset: 64 });
@@ -1567,6 +1696,7 @@ describe('ChatTranscriptView continuation', () => {
     expect(getList(tree).props.contentContainerStyle[1]).toEqual({
       paddingTop: 0,
       paddingBottom: 64 + theme.spacing.lg,
+      paddingHorizontal: theme.spacing.lg,
     });
     act(() => tree.unmount());
   });

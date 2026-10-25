@@ -2,6 +2,7 @@ import { useAtom, useAtomValue } from 'jotai';
 import { useCallback, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Animated as RNAnimated, Platform, type ScrollView, type Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useInlineToolbar } from '@shell/layout/SceneToolbar';
 import type { WebView } from 'react-native-webview';
 
 import type { BrowserPreviewSession } from '@bridge/types/types';
@@ -139,6 +140,7 @@ export function useBrowserScreenModel(theme: AppTheme) {
   }, [setPendingTargetUrl]);
 
   const insets = useSafeAreaInsets();
+  const inlineToolbar = useInlineToolbar();
   const webViewRef = useRef<WebView>(null);
   const desktopScrollViewRef = useRef<ScrollView>(null);
   const bottomBarTranslateY = useRef(new RNAnimated.Value(0)).current;
@@ -226,8 +228,9 @@ export function useBrowserScreenModel(theme: AppTheme) {
   );
 
   const bottomBarInset = resolveBottomBarInset(insets.bottom, theme.spacing.md, theme.spacing.xs);
-  const bottomBarReservedSpace = bottomBarInset + 58;
-  const webViewBottomInset = bottomBarVisible ? bottomBarReservedSpace : 0;
+  // When bars are vertical the navigation buttons join the side bar, so nothing floats here.
+  const bottomBarReservedSpace = inlineToolbar ? bottomBarInset + 58 : bottomBarInset;
+  const webViewBottomInset = inlineToolbar && bottomBarVisible ? bottomBarReservedSpace : 0;
 
   const nativeUserAgent = resolveNativeUserAgent(Platform.OS, nativeShellMode, desktopModeEnabled);
   const nativeContentMode = resolveNativeContentMode(

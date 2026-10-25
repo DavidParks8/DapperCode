@@ -478,6 +478,18 @@ describe('app-state persistence format', () => {
     ).toBe(false);
   });
 
+  it('defaults the sidebar to shown for older state and remembers when it was hidden', () => {
+    const persisted = JSON.parse(serializeAppState(createDefaultAppStateData())) as {
+      settings: Record<string, unknown>;
+    };
+    delete persisted.settings['sidebarHidden'];
+    expect(parsePersistedAppState(JSON.stringify(persisted)).settings.sidebarHidden).toBe(false);
+
+    const hidden = createDefaultAppStateData();
+    hidden.settings.sidebarHidden = true;
+    expect(parsePersistedAppState(serializeAppState(hidden)).settings.sidebarHidden).toBe(true);
+  });
+
   it('rejects unknown versions without falling back and overwriting them', () => {
     expect(() => parsePersistedAppState('{"version":999}')).toThrow(AppStatePersistenceError);
   });

@@ -11,6 +11,12 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
+import {
+  SceneToolbarHost,
+  useDrawerNavigationItem,
+  useInlineToolbar,
+} from '@shell/layout/SceneToolbar';
 
 import type { AgentDescriptor, BridgeCapabilities } from '@bridge/types/types';
 import type { HostBridgeApiClient } from '@bridge/client/client';
@@ -276,6 +282,7 @@ export function SettingsScreen() {
   const { profileId: routeProfileId } = useLocalSearchParams<{ profileId?: string }>();
   const store = useStore();
   const insets = useSafeAreaInsets();
+  const sceneInsets = useSceneHorizontalInsets();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const api = useAtomValue(apiClientAtom);
   const bridgeConnected = useAtomValue(bridgeConnectedAtom);
@@ -287,6 +294,8 @@ export function SettingsScreen() {
   const persistenceError = useAtomValue(appStatePersistenceErrorAtom);
   const drawerCommands = useAtomValue(drawerCommandsAtom);
   const retryPersistence = useSetAtom(retryPersistenceAtom);
+  const inlineToolbar = useInlineToolbar();
+  const navigationItem = useDrawerNavigationItem();
 
   const {
     value: capabilities,
@@ -333,55 +342,57 @@ export function SettingsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <SettingsHeader
-        title="Settings"
-        collapsed={titleCollapsed}
-        onMenuPress={drawerCommands?.toggleNavigation}
-      />
-      <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
-        scrollIndicatorInsets={{ right: 1 }}
-      >
-        <Text accessibilityRole="header" style={styles.largeTitle}>
-          Settings
-        </Text>
+    <SceneToolbarHost items={navigationItem ? [navigationItem] : []}>
+      <SafeAreaView style={[styles.safeArea, sceneInsets]} edges={['top']}>
+        <SettingsHeader
+          title="Settings"
+          collapsed={titleCollapsed}
+          onMenuPress={inlineToolbar ? drawerCommands?.toggleNavigation : undefined}
+        />
+        <ScrollView
+          contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
+          scrollIndicatorInsets={{ right: 1 }}
+        >
+          <Text accessibilityRole="header" style={styles.largeTitle}>
+            Settings
+          </Text>
 
-        {persistenceError ? (
-          <SettingsNotice
-            text={persistenceError.message}
-            action="Retry"
-            onPress={retryPersistence}
+          {persistenceError ? (
+            <SettingsNotice
+              text={persistenceError.message}
+              action="Retry"
+              onPress={retryPersistence}
+            />
+          ) : null}
+          {capabilitiesError ? <SettingsNotice text={capabilitiesError} /> : null}
+          {error ? <SettingsNotice text={error} /> : null}
+
+          <ConnectionSection
+            activeBridgeProfile={activeBridgeProfile}
+            activeBridgeProfileId={activeBridgeProfileId}
+            bridgeConnected={bridgeConnected}
+            bridgeProfiles={bridgeProfiles}
+            profileId={profileId}
+            router={router}
           />
-        ) : null}
-        {capabilitiesError ? <SettingsNotice text={capabilitiesError} /> : null}
-        {error ? <SettingsNotice text={error} /> : null}
 
-        <ConnectionSection
-          activeBridgeProfile={activeBridgeProfile}
-          activeBridgeProfileId={activeBridgeProfileId}
-          bridgeConnected={bridgeConnected}
-          bridgeProfiles={bridgeProfiles}
-          profileId={profileId}
-          router={router}
-        />
+          <InstalledAgentsSection loading={loading} capabilities={capabilities} theme={theme} />
 
-        <InstalledAgentsSection loading={loading} capabilities={capabilities} theme={theme} />
+          <ChatSettingsSection api={api} bridgeConnected={bridgeConnected} onError={setError} />
 
-        <ChatSettingsSection api={api} bridgeConnected={bridgeConnected} onError={setError} />
+          <NotificationsSection
+            pushSettings={pushSettings}
+            pushBusy={pushBusy}
+            updatePush={updatePush}
+            updatePushEvent={updatePushEvent}
+          />
 
-        <NotificationsSection
-          pushSettings={pushSettings}
-          pushBusy={pushBusy}
-          updatePush={updatePush}
-          updatePushEvent={updatePushEvent}
-        />
-
-        <LegalSection profileId={profileId} router={router} />
-      </ScrollView>
-    </SafeAreaView>
+          <LegalSection profileId={profileId} router={router} />
+        </ScrollView>
+      </SafeAreaView>
+    </SceneToolbarHost>
   );
 }
 

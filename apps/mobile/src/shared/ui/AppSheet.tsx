@@ -20,6 +20,7 @@ import {
 } from '@shared/ui/sheetLayout';
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { useAppTheme, type AppTheme } from '@shared/theme';
+import { useSheetMargins } from '@shell/layout/useShellLayout';
 
 export interface AppSheetProps {
   visible: boolean;
@@ -72,15 +73,20 @@ export function AppSheet({
 }: AppSheetProps) {
   const theme = useAppTheme();
   const insets = useSafeAreaInsets();
+  const sheetMargins = useSheetMargins();
   const sheetRef = useRef<BottomSheetModal>(null);
   const styles = useMemo(() => createAppSheetStyles(theme), [theme]);
+  // Only the part of a side safe area the sheet actually overlaps needs padding; a centered or
+  // page-aligned sheet may stop short of the window edge.
+  const leftInset = Math.max(0, insets.left - sheetMargins.marginLeft);
+  const rightInset = Math.max(0, insets.right - sheetMargins.marginRight);
   const contentEdgeInsets = useMemo(
     () => ({
-      paddingLeft: sheetContentHorizontalPadding(insets.left, theme.spacing.lg),
-      paddingRight: sheetContentHorizontalPadding(insets.right, theme.spacing.lg),
+      paddingLeft: sheetContentHorizontalPadding(leftInset, theme.spacing.lg),
+      paddingRight: sheetContentHorizontalPadding(rightInset, theme.spacing.lg),
       paddingBottom: sheetContentBottomPadding(insets.bottom, theme.spacing.lg, contentBottomInset),
     }),
-    [contentBottomInset, insets.bottom, insets.left, insets.right, theme.spacing.lg],
+    [contentBottomInset, insets.bottom, leftInset, rightInset, theme.spacing.lg],
   );
   const visibleRef = useRef(visible);
   const presentedRef = useRef(false);
@@ -194,7 +200,7 @@ export function AppSheet({
       backgroundComponent={renderBackground}
       handleStyle={styles.handle}
       handleIndicatorStyle={styles.handleIndicator}
-      style={styles.sheet}
+      style={[styles.sheet, sheetMargins]}
     >
       {scrollable ? (
         <BottomSheetScrollView

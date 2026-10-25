@@ -1,5 +1,6 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
-import { Keyboard, StyleSheet, Text, type KeyboardEvent } from 'react-native';
+import { getDefaultStore } from 'jotai';
+import { Dimensions, Keyboard, StyleSheet, Text, type KeyboardEvent } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -11,6 +12,7 @@ import {
   SHEET_HANDLE_INDICATOR_WIDTH,
 } from '@shared/ui/sheetLayout';
 import { AppThemeProvider, createAppTheme, spacing } from '@shared/theme';
+import { windowTraitsAtom } from '@shell/state/layout/atoms';
 
 const theme = createAppTheme('dark');
 const safeAreaMetrics = {
@@ -88,6 +90,23 @@ function renderSheetBackground(
     style: providedStyle,
   });
 }
+
+function setWindowWidth(width: number) {
+  act(() => {
+    Dimensions.set({
+      window: { width, height: 669, scale: 3, fontScale: 1 },
+      screen: { width, height: 669, scale: 3, fontScale: 1 },
+    });
+  });
+}
+
+afterEach(() => {
+  getDefaultStore().set(windowTraitsAtom, null);
+  Dimensions.set({
+    window: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+    screen: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+  });
+});
 
 function renderSheet(node: React.ReactElement): ReactTestRenderer {
   let tree: ReactTestRenderer | undefined;
@@ -327,6 +346,7 @@ describe('AppSheet', () => {
   });
 
   it('pads scrollable content past the home indicator and the side insets', () => {
+    setWindowWidth(390);
     const tree = renderSheet(
       wrapWithInsets(
         <AppSheet visible onClose={jest.fn()} accessibilityLabel="Choose a model" scrollable>
@@ -340,6 +360,50 @@ describe('AppSheet', () => {
     expect(content['paddingBottom']).toBe(34 + spacing.lg);
     expect(content['paddingLeft']).toBe(44 + spacing.lg);
     expect(content['paddingRight']).toBe(44 + spacing.lg);
+    act(() => tree.unmount());
+  });
+
+  it('centers the sheet on a wide window and pads only the insets it still overlaps', () => {
+    setWindowWidth(951);
+    const tree = renderSheet(
+      wrapWithInsets(
+        <AppSheet visible onClose={jest.fn()} accessibilityLabel="Choose a model" scrollable>
+          <Text>Model list</Text>
+        </AppSheet>,
+        { top: 0, left: 0, right: 84, bottom: 20 },
+      ),
+    );
+
+    expect(flatten(findModal(tree).props['style'])).toMatchObject({
+      marginLeft: 175.5,
+      marginRight: 175.5,
+    });
+    // The centered sheet stops well short of the trailing status column.
+    expect(findContentContainerStyle(tree)['paddingRight']).toBe(spacing.lg);
+    act(() => tree.unmount());
+  });
+
+  it('slides the sheet onto the trailing page instead of resting on a fold', () => {
+    setWindowWidth(951);
+    getDefaultStore().set(windowTraitsAtom, {
+      horizontalSizeClass: 'regular',
+      verticalSizeClass: 'compact',
+      divisions: [{ x: 455, y: 0, width: 41, height: 669 }],
+    });
+    const tree = renderSheet(
+      wrapWithInsets(
+        <AppSheet visible onClose={jest.fn()} accessibilityLabel="Choose a model" scrollable>
+          <Text>Model list</Text>
+        </AppSheet>,
+        { top: 0, left: 0, right: 84, bottom: 20 },
+      ),
+    );
+
+    expect(flatten(findModal(tree).props['style'])).toMatchObject({
+      marginLeft: 496,
+      marginRight: 0,
+    });
+    expect(findContentContainerStyle(tree)['paddingRight']).toBe(84 + spacing.lg);
     act(() => tree.unmount());
   });
 

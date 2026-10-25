@@ -14,6 +14,7 @@ import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { useAppTheme } from '@shared/theme';
 import { createStyles } from '../styles/styles';
+import { useSceneContentInsets } from '@shell/layout/useShellLayout';
 
 const SUGGESTIONS = [
   { label: 'Explain the codebase', prompt: 'Explain the current codebase structure' },
@@ -49,6 +50,8 @@ export function ComposeView({
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const composeTopPadding = (keyboardVisible ? theme.spacing.xl : 0) + topInset;
+  // Over a fold, the centered actions move to the trailing page instead of resting on the hinge.
+  const { foldLeading } = useSceneContentInsets();
   const contentContainerStyle = [
     styles.composeContainer,
     keyboardVisible ? styles.composeContainerKeyboardOpen : null,
@@ -57,6 +60,7 @@ export function ComposeView({
         Platform.OS === 'ios' ? Math.max(theme.spacing.xxl * 2, bottomInset) : bottomInset,
       paddingTop: composeTopPadding,
     },
+    foldLeading > 0 ? { paddingLeft: foldLeading } : null,
   ];
 
   return (

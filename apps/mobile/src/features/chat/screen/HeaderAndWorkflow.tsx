@@ -17,6 +17,9 @@ import { ChatHeader } from './ChatHeader';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { feedback } from '@shared/feedback';
 import { computeHitSlop } from '@shared/ui/touchTarget';
+import { useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
+import { useInlineToolbar, useToolbarPlacement } from '@shell/layout/SceneToolbar';
+import { resolveInlineHeaderButtons } from './chatToolbar';
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { AppSheet } from '@shared/ui/AppSheet';
 import { WorkflowCard } from '../workflow/Workflow';
@@ -163,6 +166,7 @@ function SessionMetaRow(props: {
   onOpenTokenSheet: () => void;
 }) {
   const { context, styles, theme, hitSlop, tokenTotals, onOpenTokenSheet } = props;
+  const sceneInsets = useSceneHorizontalInsets();
   const {
     selectedChat,
     readyAgents,
@@ -189,7 +193,7 @@ function SessionMetaRow(props: {
   const showAgentChip = !selectedChat && readyAgents.length > 1;
 
   return (
-    <View style={styles.sessionMetaRow} testID="session-meta-row">
+    <View style={[styles.sessionMetaRow, sceneInsets]} testID="session-meta-row">
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -453,6 +457,8 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
     showTopCardsRow,
   } = context;
   const { theme, styles } = useMainScreenStyles();
+  const inlineToolbar = useInlineToolbar();
+  const chromeAtBottom = useToolbarPlacement() === 'bottom';
   const sending = useAtomValue(sendingAtom);
   const creating = useAtomValue(creatingAtom);
   const stoppingTurn = useAtomValue(stoppingTurnAtom);
@@ -475,13 +481,16 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
         testID="chat-top-chrome-glass-surface"
       >
         <ChatHeader
-          onOpenDrawer={onOpenDrawer}
+          {...resolveInlineHeaderButtons(inlineToolbar, {
+            onOpenDrawer,
+            hasChat: selectedChat !== null && selectedChat !== undefined,
+            openTitleEditor,
+            handleOpenGit,
+          })}
           title={headerTitle}
           agent={activeAgent}
-          onRenameTitle={selectedChat ? openTitleEditor : undefined}
           embeddedInGlass
-          rightIconName={selectedChat ? 'git-branch-outline' : undefined}
-          onRightActionPress={selectedChat ? handleOpenGit : undefined}
+          respectsTopSafeArea={!chromeAtBottom}
         />
         {showSessionMetaRow ? (
           <SessionMetaRow

@@ -2,6 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useMemo, useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
+import { SceneToolbarHost, useInlineToolbar } from '@shell/layout/SceneToolbar';
 
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { feedback } from '@shared/feedback';
@@ -42,6 +44,8 @@ export function LegalScreen({
   onBack,
 }: LegalScreenProps) {
   const theme = useAppTheme();
+  const sceneInsets = useSceneHorizontalInsets();
+  const inlineToolbar = useInlineToolbar();
   const { colors } = theme;
   const styles = useMemo(() => createStyles(theme), [theme]);
   const backHitSlop = useMemo(() => computeHitSlop(BACK_ICON_VISIBLE_SIZE), []);
@@ -69,48 +73,67 @@ export function LegalScreen({
   }, [documentUrl, openFailureMessage, openingDocument, unsupportedDocumentMessage]);
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <View style={styles.header}>
-        <Pressable
-          onPress={onBack}
-          hitSlop={backHitSlop}
-          accessibilityRole="button"
-          accessibilityLabel={`Back from ${title}`}
-        >
-          <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
-        </Pressable>
-        <Text style={styles.headerTitle}>{title}</Text>
-      </View>
-
-      <ScrollView style={styles.body} contentContainerStyle={styles.content}>
-        {sections.map((section) => (
-          <Section key={section.title} title={section.title} body={section.body} styles={styles} />
-        ))}
-
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>{documentSectionLabel}</Text>
-          <Pressable
-            disabled={openDocumentDisabled}
-            onPress={() => void openDocument()}
-            accessibilityRole="link"
-            style={({ pressed }) => [styles.linkRow, pressed && styles.linkRowPressed]}
-          >
-            <Text style={[styles.linkLabel, openDocumentDisabled && styles.linkLabelDisabled]}>
-              {openingDocument ? 'Opening...' : openButtonLabel}
-            </Text>
-            <Ionicons
-              name="open-outline"
-              size={16}
-              color={openDocumentDisabled ? colors.textMuted : colors.textPrimary}
-            />
-          </Pressable>
-          <Text style={styles.documentLabel}>{documentLabel}</Text>
-          <Text selectable style={styles.documentUrl}>
-            {documentUrl ?? missingDocumentMessage}
-          </Text>
+    <SceneToolbarHost
+      items={[
+        {
+          key: 'back',
+          icon: 'chevron-back',
+          label: `Back from ${title}`,
+          onPress: onBack,
+          group: 'navigation',
+        },
+      ]}
+    >
+      <SafeAreaView style={[styles.safeArea, sceneInsets]} edges={['top']}>
+        <View style={styles.header}>
+          {inlineToolbar ? (
+            <Pressable
+              onPress={onBack}
+              hitSlop={backHitSlop}
+              accessibilityRole="button"
+              accessibilityLabel={`Back from ${title}`}
+            >
+              <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
+            </Pressable>
+          ) : null}
+          <Text style={styles.headerTitle}>{title}</Text>
         </View>
-      </ScrollView>
-    </SafeAreaView>
+
+        <ScrollView style={styles.body} contentContainerStyle={styles.content}>
+          {sections.map((section) => (
+            <Section
+              key={section.title}
+              title={section.title}
+              body={section.body}
+              styles={styles}
+            />
+          ))}
+
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>{documentSectionLabel}</Text>
+            <Pressable
+              disabled={openDocumentDisabled}
+              onPress={() => void openDocument()}
+              accessibilityRole="link"
+              style={({ pressed }) => [styles.linkRow, pressed && styles.linkRowPressed]}
+            >
+              <Text style={[styles.linkLabel, openDocumentDisabled && styles.linkLabelDisabled]}>
+                {openingDocument ? 'Opening...' : openButtonLabel}
+              </Text>
+              <Ionicons
+                name="open-outline"
+                size={16}
+                color={openDocumentDisabled ? colors.textMuted : colors.textPrimary}
+              />
+            </Pressable>
+            <Text style={styles.documentLabel}>{documentLabel}</Text>
+            <Text selectable style={styles.documentUrl}>
+              {documentUrl ?? missingDocumentMessage}
+            </Text>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    </SceneToolbarHost>
   );
 }
 
