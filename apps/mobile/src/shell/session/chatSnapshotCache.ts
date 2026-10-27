@@ -1,7 +1,7 @@
 import { File, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
 import { deleteFileIfPresent, ensureDirectory, writeFile } from '@shared/filesystem';
-import { MessageSchema } from '@ag-ui/core';
+import { MessageSchema } from '@ag-ui/core/schemas';
 
 import type { Chat, ChatMessage, ChatMessagePart, ChatToolMeta } from '@bridge/types/types';
 import { isPendingChatId } from '@shell/session/interruptedChatCreation';

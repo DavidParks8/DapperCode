@@ -19,7 +19,7 @@ import {
   type AgUiThreadMessageState,
   MAX_MESSAGES_PER_THREAD,
 } from '@bridge/agui/agUiMessagesState';
-import type { AssistantMessage } from '@ag-ui/core';
+import { contentToText, type AssistantMessage } from '@ag-ui/core';
 import type { ChatMessage } from '@bridge/types/types';
 import { upsertToolResult } from '@bridge/agui/agUiToolAndCustomEventReducers';
 
@@ -198,7 +198,7 @@ export function appendToolResult(
 ): AgUiThreadMessageState {
   const previousId = current.toolResultMessageIdByCallId[toolCallId];
   const previous = previousId ? findMessage(current, previousId) : undefined;
-  const previousText = previous?.role === 'tool' ? previous.content : '';
+  const previousText = previous?.role === 'tool' ? contentToText(previous.content) : '';
   const withoutPrevious =
     previousId && previousId !== messageId
       ? (() => {

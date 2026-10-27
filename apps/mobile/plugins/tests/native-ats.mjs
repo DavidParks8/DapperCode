@@ -150,12 +150,11 @@ export default async function scenario(e2e) {
       booted = true;
       await e2e.run('xcrun', ['simctl', 'bootstatus', simulator, '-b'], { timeoutMs: 120000 });
       for (const variant of Object.keys(policies)) {
-        await e2e.run('xcrun', [
-          'simctl',
-          'install',
-          simulator,
-          path.join(e2e.runtimeDir, `${variant}.app`),
-        ], { timeoutMs: 120000 });
+        await e2e.run(
+          'xcrun',
+          ['simctl', 'install', simulator, path.join(e2e.runtimeDir, `${variant}.app`)],
+          { timeoutMs: 120000 },
+        );
       }
     });
     await e2e.phase('baseline', async () => {

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const mobile = fileURLToPath(new URL('../../apps/mobile/', import.meta.url));
 const require = createRequire(path.join(mobile, 'package.json'));
 const { ESLint } = require('eslint');
+const ts = require('typescript');
 const eslint = new ESLint({ cwd: mobile });
 
 async function restrictedImports(filePath, code) {
@@ -62,5 +63,42 @@ test('local implementations can reuse genuinely shared helpers directly', async 
       )
     ).length,
     0,
+  );
+});
+
+test('native product fixture typechecks without generated Expo environment files', () => {
+  const configPath = path.join(mobile, 'modules/on-device-agent/tests/tsconfig.json');
+  const fixturePath = path.join(mobile, 'modules/on-device-agent/tests/product-entry.tsx');
+  const generated = (filename) =>
+    filename === path.join(mobile, 'expo-env.d.ts') ||
+    filename.startsWith(path.join(mobile, '.expo') + path.sep);
+  const config = ts.readConfigFile(configPath, ts.sys.readFile);
+  assert.equal(config.error, undefined);
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, path.dirname(configPath));
+  assert.deepEqual(parsed.errors, []);
+  const host = ts.createCompilerHost(parsed.options);
+  const getSourceFile = host.getSourceFile;
+  host.fileExists = (filename) => !generated(filename) && ts.sys.fileExists(filename);
+  host.getSourceFile = (filename, ...args) =>
+    generated(filename) ? undefined : getSourceFile(filename, ...args);
+  const program = ts.createProgram({
+    rootNames: parsed.fileNames.filter((filename) => !generated(filename)),
+    options: parsed.options,
+    host,
+  });
+  assert.ok(program.getSourceFiles().every((file) => !generated(file.fileName)));
+  const fixture = program.getSourceFile(fixturePath);
+  assert.ok(fixture, 'the production native fixture must be in the program');
+  const diagnostics = [
+    ...program.getSyntacticDiagnostics(fixture),
+    ...program.getSemanticDiagnostics(fixture),
+  ];
+  assert.equal(
+    ts.formatDiagnostics(diagnostics, {
+      getCurrentDirectory: () => mobile,
+      getCanonicalFileName: (filename) => filename,
+      getNewLine: () => '\n',
+    }),
+    '',
   );
 });

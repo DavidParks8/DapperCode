@@ -517,11 +517,14 @@ function reduceCompletedCustomChunks(
   chunks: Record<number, string>,
 ): AgUiThreadMessageState {
   try {
-    const event = {
+    const value: unknown = JSON.parse(
+      Array.from({ length: count }, (_, index) => chunks[index]).join(''),
+    );
+    const event: AGUIEvent = {
       type: EventType.CUSTOM,
       name: customName.slice(0, -'-chunk'.length),
-      value: JSON.parse(Array.from({ length: count }, (_, index) => chunks[index]).join('')),
-    } as AGUIEvent;
+      value,
+    };
     const completed = reduceCustomEvent(pending, { ...envelope, event });
     const chunkAssemblies = { ...completed.chunkAssemblies };
     delete chunkAssemblies[key];

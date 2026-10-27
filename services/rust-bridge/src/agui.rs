@@ -5,8 +5,9 @@ use crate::acp::snapshot::{
     SnapshotTimelineKind, SnapshotTool,
 };
 use crate::agui_generated::{
-    AgUiEvent, AgUiEventContent, AgUiEventRole, AgUiEventType, Delta, Function, Message,
-    MessageContent, MessageRole as AgUiMessageRole, ToolCall, ToolCallType,
+    AgUiEvent, AgUiEventContent, AgUiEventMessage as Message, AgUiEventRole, AgUiEventType,
+    DeltaUnion as Delta, FluffyFunction as Function, FluffyToolCall as ToolCall,
+    IndigoContent as MessageContent, MessageRole as AgUiMessageRole, ToolCallType,
 };
 use crate::*;
 use dappercode_bridge_core::resource_limits::NOTIFICATION_MAX_BYTES;
@@ -34,7 +35,26 @@ pub(super) struct AgUiEventEnvelope {
     pub(super) run_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) source_turn_id: Option<String>,
+    #[serde(serialize_with = "serialize_event")]
     pub(super) event: AgUiEvent,
+}
+
+fn serialize_event<S: serde::Serializer>(
+    event: &AgUiEvent,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut value = serde_json::to_value(event).map_err(serde::ser::Error::custom)?;
+    let fields = value
+        .as_object_mut()
+        .ok_or_else(|| serde::ser::Error::custom("An AG-UI event must serialize as an object."))?;
+    let required_nullable = match event.ag_ui_event_type {
+        AgUiEventType::Custom => Some("value"),
+        AgUiEventType::Raw => Some("event"),
+        AgUiEventType::StateSnapshot => Some("snapshot"),
+        _ => None,
+    };
+    fields.retain(|key, value| !value.is_null() || required_nullable == Some(key.as_str()));
+    value.serialize(serializer)
 }
 
 #[derive(Debug)]
@@ -1522,6 +1542,8 @@ pub(super) fn messages_snapshot_envelope(
                     },
                     content: Some(MessageContent::String(snapshot_message_text(message))),
                     encrypted_value: None,
+                    metadata: None,
+                    subagent_run_id: None,
                     name: None,
                     tool_calls: None,
                     error: None,
@@ -1608,6 +1630,8 @@ pub(super) fn messages_snapshot_envelope(
                     role: AgUiMessageRole::Assistant,
                     content: Some(MessageContent::String(String::new())),
                     encrypted_value: None,
+                    metadata: None,
+                    subagent_run_id: None,
                     name: None,
                     tool_calls: Some(vec![ToolCall {
                         id: tool.id.clone(),
@@ -1624,6 +1648,7 @@ pub(super) fn messages_snapshot_envelope(
                             arguments: "{}".to_string(),
                         },
                         encrypted_value: None,
+                        metadata: None,
                     }]),
                     error: None,
                     tool_call_id: None,
@@ -1634,6 +1659,8 @@ pub(super) fn messages_snapshot_envelope(
                     role: AgUiMessageRole::Tool,
                     content: Some(MessageContent::String(tool_snapshot_text(tool))),
                     encrypted_value: None,
+                    metadata: None,
+                    subagent_run_id: None,
                     name: None,
                     tool_calls: None,
                     error: matches!(
@@ -1859,6 +1886,8 @@ fn activity_message(id: String, activity_type: &str, content: Value) -> Message 
         role: AgUiMessageRole::Activity,
         content: Some(MessageContent::AnythingMap(content)),
         encrypted_value: None,
+        metadata: None,
+        subagent_run_id: None,
         name: None,
         tool_calls: None,
         error: None,
@@ -2257,10 +2286,16 @@ fn generated_event(ag_ui_event_type: AgUiEventType, timestamp: i64) -> AgUiEvent
         name: None,
         raw_event: None,
         role: None,
-        timestamp: Some(timestamp as f64),
+        timestamp: Some(timestamp),
         ag_ui_event_type,
         delta: None,
-        title: None,
+        metadata: None,
+        subagent_run_id: None,
+        protocol_version: None,
+        usage: None,
+        description: None,
+        parent_tool_call_id: None,
+        parent_subagent_run_id: None,
         parent_message_id: None,
         tool_call_id: None,
         tool_call_name: None,
@@ -2760,6 +2795,50 @@ fn tool_status_wire(status: agent_client_protocol::schema::v1::ToolCallStatus) -
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn protocol_serialization_omits_optional_nulls_and_preserves_opaque_null_payloads() {
+        let text = envelope(
+            "thread",
+            "run",
+            None,
+            AgUiEvent {
+                message_id: Some("message".to_string()),
+                role: Some(AgUiEventRole::Assistant),
+                ..generated_event(AgUiEventType::TextMessageStart, 123)
+            },
+        );
+        let text = serde_json::to_value(text).expect("text event serializes");
+        assert!(text["event"].get("rawEvent").is_none());
+        assert!(text["event"].get("content").is_none());
+        assert_eq!(text["event"]["timestamp"], 123);
+
+        for (kind, key) in [
+            (AgUiEventType::Custom, "value"),
+            (AgUiEventType::Raw, "event"),
+            (AgUiEventType::StateSnapshot, "snapshot"),
+        ] {
+            let event = envelope("thread", "run", None, generated_event(kind, 123));
+            let value = serde_json::to_value(event).expect("nullable event serializes");
+            assert!(value["event"].get(key).is_some_and(Value::is_null));
+            assert!(value["event"].get("rawEvent").is_none());
+        }
+
+        let event = envelope(
+            "thread",
+            "run",
+            None,
+            AgUiEvent {
+                name: Some("opaque".to_string()),
+                value: Some(json!({ "meaningful": null })),
+                ..generated_event(AgUiEventType::Custom, 123)
+            },
+        );
+        let value = serde_json::to_value(event).expect("opaque event serializes");
+        assert!(value["event"]["value"]
+            .get("meaningful")
+            .is_some_and(Value::is_null));
+    }
     use crate::acp::snapshot::SessionSnapshot;
     use agent_client_protocol::schema::v1::{StopReason, ToolCallStatus, ToolKind};
 

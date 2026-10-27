@@ -6,27 +6,49 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { EventSchemas } from '@ag-ui/core';
+import {
+  ActivityMessageSchema,
+  ActivitySnapshotEventSchema,
+  EventSchema,
+  InterruptSchema,
+  MetadataSchema,
+} from '@ag-ui/core/schemas';
 import { quicktype, InputData, JSONSchemaInput, FetchingJSONSchemaStore } from 'quicktype-core';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { z } from 'zod';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const packageJsonPath = require.resolve('@ag-ui/core/package.json');
 const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8'));
-const packageEntryPath = require.resolve('@ag-ui/core');
+const packageEntryPath = require.resolve('@ag-ui/core/schemas');
 const sourceHash = createHash('sha256')
   .update(await readFile(packageEntryPath))
   .digest('hex');
 const schemaPath = path.join(root, 'contracts/bridge-rpc/v2/ag-ui-event.schema.json');
 const rustPath = path.join(root, 'services/rust-bridge/src/agui_generated.rs');
 
-const generatedSchema = zodToJsonSchema(EventSchemas, {
-  name: 'AgUiEvent',
-  target: 'jsonSchema7',
+const recordSchemas = new Set([
+  MetadataSchema,
+  ActivityMessageSchema.shape.content,
+  ActivitySnapshotEventSchema.shape.content,
+  InterruptSchema.shape.responseSchema.unwrap(),
+]);
+const generatedSchema = z.toJSONSchema(EventSchema, {
+  target: 'draft-7',
+  io: 'input',
+  unrepresentable: 'any',
+  override: ({ zodSchema, jsonSchema }) => {
+    if (zodSchema instanceof z.ZodCustom) {
+      if (!recordSchemas.has(zodSchema)) {
+        throw new Error('An unreviewed AG-UI custom schema cannot be generated.');
+      }
+      jsonSchema.type = 'object';
+      jsonSchema.additionalProperties = true;
+    }
+  },
 });
 const schemaArtifact = {
-  $comment: `Generated from @ag-ui/core@${packageJson.version} EventSchemas; source sha256 ${sourceHash}`,
+  $comment: `Generated from @ag-ui/core@${packageJson.version} EventSchema; source sha256 ${sourceHash}`,
   'x-ag-ui-core-version': packageJson.version,
   'x-ag-ui-core-source-sha256': sourceHash,
   ...generatedSchema,

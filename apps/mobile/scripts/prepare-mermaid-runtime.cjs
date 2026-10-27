@@ -1,18 +1,25 @@
 const { createHash } = require('node:crypto');
 const { existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
+const { buildSync } = require('esbuild');
 
 const mobileRoot = path.resolve(__dirname, '..');
 const outputPath = path.join(mobileRoot, 'assets/generated/mermaid-renderer.html');
 const mermaidPackagePath = require.resolve('mermaid/package.json', { paths: [mobileRoot] });
-const mermaidRuntimePath = require.resolve('mermaid/dist/mermaid.min.js', {
-  paths: [mobileRoot],
-});
 const mermaidVersion = JSON.parse(readFileSync(mermaidPackagePath, 'utf8')).version;
-const mermaidRuntime = readFileSync(mermaidRuntimePath, 'utf8').replace(
-  /<\/script/giu,
-  '<\\/script',
-);
+const mermaidRuntime = buildSync({
+  stdin: {
+    contents: 'import mermaid from "mermaid"; window.mermaid = mermaid;',
+    resolveDir: mobileRoot,
+    sourcefile: 'mermaid-runtime.js',
+  },
+  bundle: true,
+  format: 'iife',
+  platform: 'browser',
+  target: 'es2022',
+  minify: true,
+  write: false,
+}).outputFiles[0].text.replace(/<\/script/giu, '<\\/script');
 const runtimeHash = createHash('sha256').update(mermaidRuntime).digest('hex');
 
 const harness = String.raw`
