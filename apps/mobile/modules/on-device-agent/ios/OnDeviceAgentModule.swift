@@ -9,7 +9,7 @@ public class OnDeviceAgentModule: Module {
   public func definition() -> ModuleDefinition {
     Name("OnDeviceAgent")
 
-    Function("getAPIVersion") { 5 }
+    Function("getAPIVersion") { 6 }
 
     Function("cancelGitTransfer") { GitNetworkOperation.shared.cancel() }
     Function("getGitTransferProgress") { GitNetworkOperation.shared.snapshot() }

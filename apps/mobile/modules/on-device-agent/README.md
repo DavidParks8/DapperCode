@@ -16,12 +16,14 @@ See [product setup and limitations](../../../../docs/on-device.md).
   publication, containment, revision checks, and bounded UTF-8 operations.
 - `ios/ModelFileStore.swift` verifies size/SHA-256 before atomic ready publication.
   `RuntimeDocumentStore.swift` owns separate atomic, size-limited local journals/preferences.
-- The native ABI is versioned (currently 5). An old binary cannot silently omit new services.
+- The native ABI is versioned (currently 6). An old binary is rejected before loading model
+  variants that need the newer inference engine, including Bonsai 2's activation transforms.
 - `scripts/build-git.mjs` builds pinned libgit2 1.9.7 for iOS arm64 and simulator arm64/x86_64.
   The source archive is SHA-256 verified. HTTPS uses SecureTransport; SSH, the CLI, and tests are
   excluded from the app library. Unmodified upstream notices (including bundled dependency
   licenses, llama.rn, and llama.cpp/ggml) are copied into the `OnDeviceAgentNotices` app resource bundle.
-- Inference uses pinned `llama.rn` 0.12.9, loaded only by the on-device feature. Its install script
+- Inference uses pinned `llama.rn` 0.13.0-rc.8, loaded only by the on-device feature. This maintained
+  pre-release includes the upstream Hadamard runtime needed by Bonsai 2 Q2_0 weights. Its install script
   verifies the downloaded native artifacts. Android autolinking is disabled for this iOS-only
   feature so existing Android clients do not acquire an unused native runtime.
 - Authentication strategies live under `src/features/on-device/auth`; they do not implement Git
@@ -75,7 +77,9 @@ Q4_K_M fixture (approximately 1.3 GB) into test-owned storage. The runner remove
 simulator after the run. It asserts structured tool calls, actual file reads, JSON tool-result
 consumption, streaming, cancellation, unload/reload, and native credential storage/removal.
 Set `DAPPERCODE_NATIVE_TEST_MODEL` to a bundled catalog ID to run the same complete-tool-schema
-gate for another model. All three catalog entries have passed the simulator gate. This is not proof
+gate for another model. The original Qwen3 entries and ABI-6 representatives of Bonsai 2, Qwen3.5,
+and Gemma 4 have passed the simulator gate. Prism-only Bonsai packings are explicitly unavailable.
+This is not proof
 of physical-iPhone Metal performance or measured phone RAM compatibility.
 
 The separate native Git scenario runs the production Swift implementation against an isolated

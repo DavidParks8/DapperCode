@@ -3,6 +3,9 @@ import type { Locator, Page } from '@playwright/test';
 export const nativeOnDeviceSelectors = {
   entry: 'On this iPhone',
   modelLibrary: 'on-device-model-library',
+  qwen35Family: 'Qwen3.5 model family',
+  bonsaiFamily: 'Bonsai 2 model family',
+  gemmaFamily: 'Gemma 4 model family',
   newChat: 'on-device-new-chat',
   chatBody: 'on-device-chat-body',
   message: 'Message',

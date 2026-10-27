@@ -14,6 +14,18 @@ export interface LocalModelDefinition {
   workingBytes: number;
   minimumDeviceBytes: number;
   recommended: boolean;
+  runtimeIssue?: string;
+}
+
+export interface LocalModelFamily {
+  id: string;
+  name: string;
+  publisher: string;
+  description: string;
+  quantizationNote?: string;
+  badge?: string;
+  icon: 'leaf-outline' | 'sparkles-outline' | 'diamond-outline' | 'archive-outline';
+  featured: boolean;
 }
 
 export interface DeviceMemory {

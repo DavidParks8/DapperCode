@@ -142,6 +142,28 @@ function harness() {
   };
 }
 
+test('unsupported runtime packings cannot start transfers through the controller API', async () => {
+  const h = harness();
+  const model = {
+    ...h.model,
+    runtimeIssue: 'This packing requires the PrismML-specific runtime.',
+  };
+  const controller = new ModelDownloadController(
+    [model],
+    h.native,
+    h.transfers,
+    h.storage,
+    (state) => h.events.push(state),
+  );
+  await expect(controller.download(model.id)).rejects.toThrow('PrismML-specific runtime');
+  expect(h.transfers.create).not.toHaveBeenCalled();
+  expect(h.native.getModelFilePaths).not.toHaveBeenCalled();
+  expect(controller.snapshot(model.id)).toMatchObject({
+    phase: 'error',
+    error: model.runtimeIssue,
+  });
+});
+
 test('download moves through running and verifying before a verified file becomes ready', async () => {
   const h = harness();
   const verified = deferred<LocalModelFile>();

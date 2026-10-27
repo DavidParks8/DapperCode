@@ -38,7 +38,7 @@ function deferred<T>() {
 function harness(documents = new Map<string, string>()) {
   const workspaces = [{ id: 'workspace-one', name: 'Workspace one' }];
   const native = {
-    getAPIVersion: jest.fn(() => 5),
+    getAPIVersion: jest.fn(() => 6),
     cancelGitTransfer: jest.fn(),
     getGitTransferProgress: jest.fn(() => ({
       active: false,

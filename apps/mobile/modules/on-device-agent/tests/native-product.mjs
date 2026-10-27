@@ -88,6 +88,29 @@ export default async function scenario(e2e) {
   const type = async (label, text) => api(`/element/${await find(label)}/value`, { text });
   const source = () => api('/source', undefined, 'GET');
   const capture = async (name) => {
+    const buttons = await api('/elements', { using: 'accessibility id', value: selectors.back });
+    const anchors =
+      buttons.length > 0
+        ? buttons
+        : await api('/elements', {
+            using: 'accessibility id',
+            value: selectors.modelLibrary,
+          });
+    if (anchors[0]) {
+      const anchor = Object.values(anchors[0])[0];
+      let previous;
+      let stable = 0;
+      await e2e.waitFor(
+        'native navigation geometry settles before capture',
+        async () => {
+          const bounds = JSON.stringify(await api(`/element/${anchor}/rect`, undefined, 'GET'));
+          stable = bounds === previous ? stable + 1 : 0;
+          previous = bounds;
+          return stable >= 2;
+        },
+        { timeoutMs: 15_000, intervalMs: 300 },
+      );
+    }
     const screenshot = await api('/screenshot', undefined, 'GET');
     e2e.writeFile(`logs/${name}.png`, Buffer.from(screenshot, 'base64'));
     e2e.writeFile(`logs/${name}.xml`, await source());
@@ -228,15 +251,62 @@ export default async function scenario(e2e) {
       await find(selectors.modelLibrary);
       await capture('on-device-home');
       await tap(selectors.modelLibrary);
+      await find(selectors.qwen35Family);
+      await capture('on-device-models');
+      await e2e.check(
+        'family library exposes modern model families without inline quant actions',
+        async () => {
+          const xml = await source();
+          return (
+            xml.includes('Bonsai 2') &&
+            xml.includes('Qwen3.5') &&
+            xml.includes('Gemma 4') &&
+            !xml.includes('Load and use')
+          );
+        },
+      );
+      await tap(selectors.qwen35Family);
       await e2e.waitFor(
-        'RAM-aware downloaded model library',
-        async () => (await source()).includes('Recommended'),
+        'Qwen quant page is on the navigation stack',
+        async () => {
+          const xml = await source();
+          return xml.includes('Q4_0') && xml.includes('Q8_0');
+        },
         { timeoutMs: 30_000 },
       );
-      await capture('on-device-models');
+      await capture('on-device-quants');
+      await e2e.check('family selection pushes a separate size and quant page', async () => {
+        const xml = await source();
+        return xml.includes('0.8B') && xml.includes('Q4_0') && xml.includes('Q8_0');
+      });
       await e2e.check('model library labels simulator estimates honestly', async () =>
         (await source()).includes('Simulator host estimate'),
       );
+      await tap(selectors.back);
+      await find(selectors.qwen35Family);
+      await tap(selectors.bonsaiFamily);
+      await e2e.waitFor(
+        'Bonsai quant page is on the navigation stack',
+        async () => (await source()).includes('Unavailable in this build'),
+        { timeoutMs: 30_000 },
+      );
+      await capture('on-device-bonsai-quants');
+      await e2e.check('Bonsai fork-only packings are clearly unavailable', async () =>
+        (await source()).includes('Unavailable in this build'),
+      );
+      await tap(selectors.back);
+      await tap(selectors.gemmaFamily);
+      await e2e.waitFor(
+        'Gemma quant page is on the navigation stack',
+        async () => (await source()).includes('E2B'),
+        { timeoutMs: 30_000 },
+      );
+      await capture('on-device-gemma-quants');
+      await e2e.check('Gemma family exposes its actual quant choices', async () => {
+        const xml = await source();
+        return xml.includes('E2B') && xml.includes('Q4_0') && xml.includes('Q8_0');
+      });
+      await tap(selectors.back);
       await tap(selectors.back);
       await tap(selectors.workspaces);
       await e2e.check('workspace picker shows the native workspace', async () =>

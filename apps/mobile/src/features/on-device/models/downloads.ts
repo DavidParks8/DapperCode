@@ -1,5 +1,6 @@
 import type { DownloadProgress } from 'expo-file-system';
 import type { OnDeviceNativeServices } from '../native/services.types';
+import { requireLocalModelRuntime } from './catalog';
 import { parseSavedModelDownload } from './downloadState';
 import type { SavedModelDownload } from './downloadState';
 import type { ModelResumeStorage, ModelTransfer, ModelTransferFactory } from './expoDownloads';
@@ -189,6 +190,7 @@ export class ModelDownloadController {
   ): Promise<ModelDownloadSnapshot> {
     const { model } = context;
     try {
+      requireLocalModelRuntime(model);
       this.publish(model.id, { phase: 'preparing', error: null });
       if (await this.checkedFile(model)) {
         throw new Error('This model is already installed. Remove it before downloading again.');

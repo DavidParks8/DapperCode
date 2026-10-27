@@ -84,6 +84,14 @@ function harness() {
   return { native, initial, loader, events, session };
 }
 
+test('a Prism-only packing is rejected before native file access or model allocation', async () => {
+  const h = harness();
+  await expect(h.session.load('bonsai-2-2b-pq2-0')).rejects.toThrow('PrismML-specific runtime');
+  expect(h.native.getDownloadedModelFile).not.toHaveBeenCalled();
+  expect(h.loader).not.toHaveBeenCalled();
+  expect(h.session.snapshot()).toMatchObject({ phase: 'error' });
+});
+
 test('model switching releases the old native context before fresh memory admission and allocation', async () => {
   const h = harness();
   const second = context();

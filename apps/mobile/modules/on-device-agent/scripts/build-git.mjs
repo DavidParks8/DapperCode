@@ -134,8 +134,8 @@ async function main() {
   const notices = [
     ['libgit2 1.9.7 (including bundled dependency notices)', path.join(source, 'COPYING')],
     ['libgit2 contributors', path.join(source, 'AUTHORS')],
-    ['llama.rn 0.12.9', path.join(llama, 'LICENSE')],
-    ['llama.cpp / ggml', path.join(llama, 'cpp/LICENSE')],
+    ['llama.rn 0.13.0-rc.8', path.join(llama, 'LICENSE')],
+    ['llama.cpp / ggml', path.join(llama, 'vendor/llama.cpp/LICENSE')],
   ];
   const sections = await Promise.all(
     notices.map(async ([name, file]) => `${name}\n\n${await readFile(file, 'utf8')}`),

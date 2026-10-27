@@ -53,7 +53,7 @@
     "expo-splash-screen": "~57.0.5",
     "expo-store-review": "~57.0.1",
     "jotai": "^2.20.2",
-    "llama.rn": "0.12.9",
+    "llama.rn": "0.13.0-rc.8",
     "mermaid": "11.17.2",
     "prismjs": "^1.30.0",
     "react": "19.2.3",

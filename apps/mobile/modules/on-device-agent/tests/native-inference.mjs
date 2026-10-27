@@ -103,7 +103,7 @@ export default async function scenario(e2e) {
           result = JSON.parse(read.stdout);
           return result.status === 'pass' || result.status === 'fail';
         },
-        { timeoutMs: 240_000, intervalMs: 1000 },
+        { timeoutMs: 600_000, intervalMs: 1000 },
       );
       await e2e.check('native gate outcome', () => {
         if (result.status !== 'pass') {

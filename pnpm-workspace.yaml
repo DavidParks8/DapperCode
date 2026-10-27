@@ -4,7 +4,8 @@ packages:
 allowBuilds:
   'esbuild@0.27.4': true
   esbuild: set this to true or false
-  'llama.rn@0.12.9': true
+  'llama.rn@0.13.0-rc.8': true
+  llama.rn: set this to true or false
 
 overrides:
   '@expo/metro-config>postcss': 8.5.23

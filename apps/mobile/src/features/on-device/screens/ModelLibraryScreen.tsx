@@ -1,21 +1,15 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Linking, Switch, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 
-import { LOCAL_MODEL_CATALOG } from '../models/catalog';
-import type { ModelDownloadSnapshot } from '../models/downloads';
-import { modelMemoryAdmission, modelMemoryBytes } from '../models/memory';
-import type { DeviceMemory, LocalModelDefinition } from '../models/types';
+import { decorativeAccessibilityProps } from '@shared/accessibility';
+import { useAppTheme } from '@shared/theme';
+import { LOCAL_MODEL_CATALOG, LOCAL_MODEL_FAMILIES } from '../models/catalog';
+import { modelMemoryAdmission } from '../models/memory';
+import type { LocalModelDefinition, LocalModelFamily } from '../models/types';
 import { useOnDeviceRuntime } from '../runtime/OnDeviceProvider';
-import {
-  LocalAction,
-  LocalCard,
-  LocalField,
-  LocalPage,
-  LocalText,
-  modelSize,
-  useLocalOperation,
-} from './ui';
+import { LocalCard, LocalField, LocalPage, LocalText } from './ui';
 
 export function ModelLibraryScreen() {
   const runtime = useOnDeviceRuntime();
@@ -24,60 +18,41 @@ export function ModelLibraryScreen() {
   const [search, setSearch] = useState('');
   const [showUnsupported, setShowUnsupported] = useState(false);
   const [downloadedOnly, setDownloadedOnly] = useState(false);
-  const [memory, setMemory] = useState(() => runtime.native.getMemoryInfo());
-  const operation = useLocalOperation();
-  const models = LOCAL_MODEL_CATALOG.filter(
-    (model) =>
-      model.name.toLowerCase().includes(search.toLowerCase()) &&
-      (!downloadedOnly || runtime.downloads.snapshot(model.id).phase === 'ready') &&
-      (showUnsupported || modelMemoryAdmission(model, memory).status !== 'unsupported'),
-  ).sort(
-    (left, right) =>
-      Number(runtime.downloads.snapshot(right.id).phase === 'ready') -
-        Number(runtime.downloads.snapshot(left.id).phase === 'ready') ||
-      Number(right.recommended) - Number(left.recommended) ||
-      left.bytes - right.bytes,
+  const [memory] = useState(() => runtime.native.getMemoryInfo());
+  const families = LOCAL_MODEL_FAMILIES.map((family) => ({
+    family,
+    models: LOCAL_MODEL_CATALOG.filter(
+      (model) =>
+        model.family === family.name &&
+        (!downloadedOnly || runtime.downloads.snapshot(model.id).phase === 'ready') &&
+        (showUnsupported || modelMemoryAdmission(model, memory).status !== 'unsupported'),
+    ),
+  })).filter(
+    ({ family, models }) =>
+      models.length > 0 &&
+      `${family.name} ${family.publisher} ${family.description}`
+        .toLowerCase()
+        .includes(search.toLowerCase()),
   );
-  const select = (model: LocalModelDefinition) =>
-    operation.run(async () => {
-      await runtime.selectModel(model.id, threadId);
-      setMemory(runtime.native.getMemoryInfo());
-      if (threadId) {
-        router.back();
-      }
+  const open = (family: LocalModelFamily) =>
+    router.push({
+      pathname: '/on-device/models/[familyId]',
+      params: {
+        familyId: family.id,
+        ...(threadId ? { threadId } : {}),
+        ...(downloadedOnly ? { downloadedOnly: 'true' } : {}),
+        ...(showUnsupported ? { showUnsupported: 'true' } : {}),
+      },
     });
   return (
-    <LocalPage
-      title="Model library"
-      busy={operation.busy}
-      error={operation.error ?? runtime.error()?.message}
-    >
-      <LocalText>
-        {memory.isSimulator ? 'Simulator host estimate' : 'iPhone RAM'}:{' '}
-        {modelSize(memory.physicalBytes)} · Available app headroom:{' '}
-        {modelSize(memory.availableBytes)}
-      </LocalText>
-      <LocalText>
-        Compatibility is a conservative estimate, not a guarantee against iOS memory pressure.
-        Models run locally; downloads require internet.
-      </LocalText>
-      <LocalAction
-        title="Refresh memory"
-        onPress={() => setMemory(runtime.native.getMemoryInfo())}
+    <LocalPage title="Model library" error={runtime.error()?.message}>
+      <LocalField
+        label="Search model families"
+        value={search}
+        onChangeText={setSearch}
+        placeholder="Bonsai, Qwen, Gemma…"
       />
-      <LocalAction
-        title="Unload active model"
-        disabled={operation.busy || runtime.models.snapshot().phase === 'empty'}
-        onPress={() =>
-          operation.run(async () => {
-            await runtime.stop();
-            await runtime.models.unload();
-            setMemory(runtime.native.getMemoryInfo());
-          })
-        }
-      />
-      <LocalField label="Search models" value={search} onChangeText={setSearch} />
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+      <View style={styles.filter}>
         <Switch
           accessibilityLabel="Downloaded models only"
           value={downloadedOnly}
@@ -85,161 +60,122 @@ export function ModelLibraryScreen() {
         />
         <LocalText>Downloaded only</LocalText>
       </View>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+      {[true, false].map((featured) => {
+        const entries = families.filter((entry) => entry.family.featured === featured);
+        return entries.length > 0 ? (
+          <View key={String(featured)} style={styles.section}>
+            <LocalText title>{featured ? 'Featured' : 'More families'}</LocalText>
+            <LocalCard>
+              {entries.map(({ family, models }) => (
+                <ModelFamilyRow
+                  key={family.id}
+                  family={family}
+                  models={models}
+                  onPress={() => open(family)}
+                />
+              ))}
+            </LocalCard>
+          </View>
+        ) : null;
+      })}
+      {families.length === 0 ? <LocalText>No model families match these filters.</LocalText> : null}
+      <View style={styles.filter}>
         <Switch
           accessibilityLabel="Show models beyond this device's RAM budget"
           value={showUnsupported}
           onValueChange={setShowUnsupported}
         />
-        <LocalText>Show unsupported models</LocalText>
+        <LocalText>Show larger models</LocalText>
       </View>
-      {models.map((model) => (
-        <ModelCard
-          key={model.id}
-          model={model}
-          memory={memory}
-          operation={operation}
-          select={select}
-        />
-      ))}
+      <LocalText>
+        {memory.isSimulator
+          ? 'Compatibility uses simulator host estimates, not measured iPhone support.'
+          : 'Models are filtered by the conservative RAM budget for this iPhone.'}{' '}
+        Choose a family to compare sizes and quants.
+      </LocalText>
     </LocalPage>
   );
 }
 
-interface ModelCardProps {
-  model: LocalModelDefinition;
-  memory: DeviceMemory;
-  operation: ReturnType<typeof useLocalOperation>;
-  select: (model: LocalModelDefinition) => void;
-}
-
-function ModelCard({ model, memory, operation, select }: ModelCardProps) {
-  const runtime = useOnDeviceRuntime();
-  const download = runtime.downloads.snapshot(model.id);
-  const admission = modelMemoryAdmission(model, memory);
-  const loaded =
-    runtime.models.snapshot().modelId === model.id && runtime.models.snapshot().phase === 'ready';
-  return (
-    <LocalCard>
-      <LocalText title>
-        {model.name}
-        {model.recommended ? ' · Recommended' : ''}
-      </LocalText>
-      <LocalText>
-        {model.parameters} · {model.quantization} · {modelSize(model.bytes)} · {model.contextTokens}{' '}
-        context
-      </LocalText>
-      <LocalText>Estimated load budget {modelSize(modelMemoryBytes(model))}.</LocalText>
-      {admission.status !== 'ready' && !loaded ? <LocalText>{admission.message}</LocalText> : null}
-      <LocalText>
-        {download.phase.replaceAll('_', ' ')}
-        {download.phase === 'downloading'
-          ? ` · ${Math.floor((download.bytesWritten / model.bytes) * 100)}%`
-          : ''}
-        {loaded ? ' · Loaded' : ''}
-      </LocalText>
-      {download.error ? <LocalText>{download.error}</LocalText> : null}
-      <DownloadActions
-        model={model}
-        download={download}
-        loaded={loaded}
-        admission={admission.status}
-        operation={operation}
-        select={select}
-      />
-      <LocalAction
-        title={`Source and ${model.license} license`}
-        disabled={operation.busy}
-        onPress={() => operation.run(() => Linking.openURL(model.sourceUrl))}
-      />
-    </LocalCard>
-  );
-}
-
-function DownloadActions({
-  model,
-  download,
-  loaded,
-  admission,
-  operation,
-  select,
+function ModelFamilyRow({
+  family,
+  models,
+  onPress,
 }: {
-  model: LocalModelDefinition;
-  download: ModelDownloadSnapshot;
-  loaded: boolean;
-  admission: ReturnType<typeof modelMemoryAdmission>['status'];
-  operation: ReturnType<typeof useLocalOperation>;
-  select: (model: LocalModelDefinition) => void;
+  family: LocalModelFamily;
+  models: readonly LocalModelDefinition[];
+  onPress: () => void;
 }) {
+  const theme = useAppTheme();
   const runtime = useOnDeviceRuntime();
-  if (download.phase === 'ready') {
-    return (
-      <>
-        <LocalAction
-          title={loaded ? 'Use loaded model' : 'Load and use'}
-          disabled={operation.busy || (!loaded && admission !== 'ready')}
-          onPress={() => select(model)}
-        />
-        <LocalAction
-          title="Delete download"
-          destructive
-          disabled={operation.busy}
-          onPress={() => operation.run(() => runtime.removeModel(model.id))}
-        />
-      </>
-    );
-  }
-  if (['downloading', 'preparing'].includes(download.phase)) {
-    return (
-      <>
-        <LocalAction
-          title="Pause download"
-          onPress={() => {
-            void runtime.downloads.pause().catch((error: unknown) => runtime.report(error));
-          }}
-        />
-        <LocalAction
-          title="Cancel download"
-          destructive
-          onPress={() => {
-            void runtime.downloads.cancel().catch((error: unknown) => runtime.report(error));
-          }}
-        />
-      </>
-    );
-  }
-  if (download.phase === 'verifying') {
-    return <LocalText>Verifying pinned SHA-256 before use…</LocalText>;
-  }
+  const downloaded = models.filter(
+    (model) => runtime.downloads.snapshot(model.id).phase === 'ready',
+  ).length;
+  const sizes = [...new Set(models.map((model) => model.parameters))];
   return (
-    <>
-      <LocalAction
-        title={
-          download.verificationPending
-            ? 'Verify download'
-            : download.canResume
-              ? 'Resume download'
-              : 'Download'
-        }
-        disabled={operation.busy || admission === 'unsupported' || download.phase === 'loading'}
-        onPress={() =>
-          operation.run(() =>
-            download.verificationPending
-              ? runtime.downloads.verify(model.id)
-              : download.canResume
-                ? runtime.downloads.resume(model.id)
-                : runtime.downloads.download(model.id),
-          )
-        }
-      />
-      {['paused', 'error'].includes(download.phase) ? (
-        <LocalAction
-          title="Remove partial download"
-          destructive
-          disabled={operation.busy}
-          onPress={() => operation.run(() => runtime.removeModel(model.id))}
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${family.name} model family`}
+      accessibilityHint={`${family.publisher}. ${family.description} ${models.length} quants. ${family.badge ?? ''}`}
+      onPress={onPress}
+      style={({ pressed }) => [styles.row, { opacity: pressed ? 0.65 : 1 }]}
+    >
+      <View style={[styles.icon, { backgroundColor: theme.colors.bgItem }]}>
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name={family.icon}
+          size={23}
+          color={theme.colors.accent}
         />
-      ) : null}
-    </>
+      </View>
+      <View style={styles.copy}>
+        <Text style={[theme.typography.headline, { color: theme.colors.textPrimary }]}>
+          {family.name}
+        </Text>
+        <Text style={[theme.typography.caption, { color: theme.colors.textMuted }]}>
+          {family.publisher}
+        </Text>
+        <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+          {family.description}
+        </Text>
+        <Text style={[theme.typography.metadata, { color: theme.colors.textMuted }]}>
+          {sizes.join(' · ')} · {models.length} quants
+          {downloaded > 0 ? ` · ${downloaded} downloaded` : ''}
+        </Text>
+        {family.badge ? (
+          <Text
+            style={[
+              theme.typography.metadata,
+              styles.badge,
+              { color: theme.colors.accent, backgroundColor: theme.colors.bgItem },
+            ]}
+          >
+            {family.badge}
+          </Text>
+        ) : null}
+      </View>
+      <Ionicons
+        {...decorativeAccessibilityProps}
+        name="chevron-forward"
+        size={18}
+        color={theme.colors.textMuted}
+      />
+    </Pressable>
   );
 }
+
+const styles = StyleSheet.create({
+  filter: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  section: { gap: 10 },
+  row: { flexDirection: 'row', gap: 12, alignItems: 'center', minHeight: 112, paddingVertical: 8 },
+  icon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
+  },
+  copy: { flex: 1, gap: 4 },
+  badge: { alignSelf: 'flex-start', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
+});

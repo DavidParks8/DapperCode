@@ -1,6 +1,6 @@
 import type { TokenData } from 'llama.rn';
 import type { OnDeviceNativeServices } from '../native/services.types';
-import { localModelDefinition } from './catalog';
+import { localModelDefinition, requireLocalModelRuntime } from './catalog';
 import type {
   LocalContextLoader,
   LocalModelContext,
@@ -157,6 +157,7 @@ export class LocalModelSession {
 
   private async performLoad(model: LocalModelDefinition, epoch: number): Promise<void> {
     try {
+      requireLocalModelRuntime(model);
       await this.stop();
       await this.releaseCurrent();
       this.checkLoadingAllowed();

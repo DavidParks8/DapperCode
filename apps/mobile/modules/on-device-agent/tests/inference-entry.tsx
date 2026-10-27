@@ -22,6 +22,7 @@ function check(condition: unknown, name: string, detail = ''): asserts condition
     throw new Error(`${name}${detail ? `: ${detail}` : ''}`);
   }
   checks[name] = true;
+  outcome.write(JSON.stringify({ status: 'running', checks }));
 }
 
 async function withModel(
@@ -95,7 +96,18 @@ async function exerciseInference() {
       n_predict: 128,
     });
     const calls = first.tool_calls ?? [];
-    check(calls.length === 1, 'structuredToolCall');
+    check(
+      calls.length === 1,
+      'structuredToolCall',
+      JSON.stringify({
+        content: first.content,
+        text: first.text,
+        calls,
+        truncated: first.truncated,
+        stoppedLimit: first.stopped_limit,
+        tokens: first.tokens_predicted,
+      }),
+    );
     const call = calls[0];
     check(call?.function.name === 'read_file', 'correctToolName');
     const args: unknown = JSON.parse(call.function.arguments);

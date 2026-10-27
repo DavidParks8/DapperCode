@@ -6,8 +6,10 @@ target, not a bridge profile or a localhost server. Android and web continue to 
 ## First run
 
 1. Choose **On this iPhone** on onboarding, or in a desktop connection's Settings.
-2. Open **Model library**, download a compatible model, and choose **Load and use**.
-   Search and **Downloaded only** narrow the catalog; downloaded and recommended models appear first.
+2. Open **Model library**, choose a family, then compare its sizes and quants on the next page.
+   Download a compatible quant and choose **Load and use**. Search and **Downloaded only** narrow
+   the family list. Back returns from the quant page to the family list; selecting for an existing
+   conversation returns directly to that conversation.
    Downloads are pinned by revision, byte count, and SHA-256. Interrupted transfers can be paused,
    resumed, or removed; unverified weights cannot be loaded.
 3. Open **Workspaces** and clone an HTTPS repository. Public repositories need no account.
@@ -23,8 +25,22 @@ before desktop lifecycle effects are mounted.
 
 ## Models and memory
 
-The bundled catalog contains Qwen3 0.6B Q4_0, 1.7B Q4_K_M (recommended), and 4B Q4_K_M.
+The family-first catalog includes **Bonsai 2**, **Qwen3.5**, and **Gemma 4**, with pinned public GGUF
+variants. Qwen3.5 has 0.8B/2B choices across Q4, Q5, and Q8 formats; Gemma 4 exposes E2B Q4_0/Q8_0.
+The original Qwen3 variants remain under **More families**, preserving existing downloads and chats.
 Catalog artifacts are immutable; arbitrary model URLs/imports are not supported.
+
+Bonsai 2 exposes the publisher's 2B/4B ternary packings. Q2_0 uses upstream llama.cpp support.
+PQ2_0/PTQ1_0 are displayed with an explicit unavailable reason: they require PrismML-specific
+kernels that are not in this build. These packings contain the same ternary weights, not different
+precision levels. Unsupported packings cannot be downloaded or passed to inference through the
+controller APIs. The app does not download draft heads or multimodal projectors; these models run
+text-only here.
+
+The maintained `llama.rn` engine is pinned to `0.13.0-rc.8` for the upstream Hadamard activation
+support needed by Bonsai 2 Q2_0. This is a pre-release binding and requires a rebuilt native app
+(on-device ABI 6). Old binaries fail with a rebuild message rather than attempting unsupported
+inference through a JavaScript-only update.
 
 Compatibility uses physical RAM plus a fresh native app-memory-headroom measurement. Admission
 includes weights, the configured FP16 KV cache, working space, and a 384 MiB reserve. A model switch
@@ -32,8 +48,11 @@ releases the previous context before checking memory again. A loaded model is no
 when starting generation. iOS can still reclaim memory or terminate an app; admission is an
 estimate, not a Jetsam exemption.
 
-All three catalog models have passed simulator CPU checks with the complete production tool
+The three original Qwen3 variants have passed simulator CPU checks with the complete production tool
 schemas, native file reads, JSON tool-result consumption, streaming, stop, and unload/reload.
+Representative modern-family checks on ABI 6 also pass for Bonsai 2 2B Q2_0, Qwen3.5 0.8B Q4_0,
+and Gemma 4 E2B Q4_0. These are native tool-calling checks, not just successful model loads.
+Other size/quant variants share those architectures but do not constitute measured phone support.
 Simulator headroom is explicitly labelled as host estimation. Physical-iPhone RAM limits, Metal
 performance, thermal behavior, and offline battery use have **not** been certified. Do not publish
 specific supported-phone or performance claims from simulator results.

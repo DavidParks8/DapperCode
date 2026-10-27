@@ -6,7 +6,7 @@ import type {
 } from '../workspaces/types';
 import type { DeviceMemory, LocalModelFile, LocalModelPaths } from '../models/types';
 
-export const ON_DEVICE_NATIVE_API_VERSION = 5;
+export const ON_DEVICE_NATIVE_API_VERSION = 6;
 
 export interface OnDeviceNativeServices {
   getAPIVersion(): number;

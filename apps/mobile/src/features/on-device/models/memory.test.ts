@@ -66,9 +66,17 @@ test('the offline catalog contains distinct immutable verified artifact identiti
       /^https:\/\/huggingface\.co\/[^/]+\/[^/]+\/resolve\/[a-f0-9]{40}\//u,
     );
     expect(entry.bytes).toBeGreaterThan(0);
-    expect(entry.kvBytesPerToken).toBe(
-      entry.id.startsWith('qwen3-4b') ? 2 * 36 * 8 * 128 * 2 : 2 * 28 * 8 * 128 * 2,
-    );
+    if (entry.family === 'Qwen3') {
+      expect(entry.kvBytesPerToken).toBe(
+        entry.id.startsWith('qwen3-4b') ? 2 * 36 * 8 * 128 * 2 : 2 * 28 * 8 * 128 * 2,
+      );
+    } else if (entry.family === 'Gemma 4') {
+      expect(entry.kvBytesPerToken).toBe(4 * (28 * 256 + 7 * 512));
+    } else {
+      const fullAttentionLayers = entry.parameters === '4B' ? 8 : 6;
+      const kvHeads = entry.parameters === '4B' ? 4 : 2;
+      expect(entry.kvBytesPerToken).toBe(2 * fullAttentionLayers * kvHeads * 256 * 2);
+    }
   }
   expect(() => localModelDefinition('../custom-model')).toThrow('not in the on-device catalog');
 });
