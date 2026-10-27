@@ -1,3 +1,5 @@
+/// <reference types="expo/types/metro-require" />
+
 import { registerRootComponent } from 'expo';
 import { File, Paths } from 'expo-file-system';
 import { ExpoRoot } from 'expo-router';
@@ -7,6 +9,8 @@ import { Text } from 'react-native';
 import { getOnDeviceNativeServices } from '../../../src/features/on-device/native/services';
 import { localModelDefinition } from '../../../src/features/on-device/models/catalog';
 import { emptyLocalPreferences } from '../../../src/features/on-device/runtime/preferences';
+
+declare const require: __MetroModuleApi.RequireFunction;
 
 const context = require.context('../../../src/app', true, /\.[jt]sx?$/);
 const prepared = new File(Paths.document, 'product-prepared.json');
