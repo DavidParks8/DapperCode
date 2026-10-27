@@ -1,5 +1,18 @@
 import type { Locator, Page } from '@playwright/test';
 
+export const nativeOnDeviceSelectors = {
+  entry: 'On this iPhone',
+  modelLibrary: 'on-device-model-library',
+  newChat: 'on-device-new-chat',
+  chatBody: 'on-device-chat-body',
+  message: 'Message',
+  messagePredicate: 'type == "XCUIElementTypeTextView" AND label BEGINSWITH "Message"',
+  send: 'Send message',
+  back: 'Back',
+  workspaces: 'Workspaces',
+  account: 'GitHub and author',
+} as const;
+
 /**
  * Centralized selectors for the surfaces the layout suite measures.
  *
@@ -8,6 +21,8 @@ import type { Locator, Page } from '@playwright/test';
  * is used instead — those are stable because they are user-facing accessibility contracts.
  */
 export const selectors = {
+  onDeviceModelLibrary: (page: Page): Locator => page.getByTestId('on-device-model-library'),
+  onDeviceNewChat: (page: Page): Locator => page.getByTestId('on-device-new-chat'),
   drawer: (page: Page): Locator => page.getByTestId('drawer-glass-surface'),
   drawerChatRow: (page: Page, chatId: string): Locator =>
     page.getByTestId(`drawer-chat-row-${chatId}`),

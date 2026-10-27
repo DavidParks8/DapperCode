@@ -1,0 +1,117 @@
+# On-device agent native services
+
+This module owns native services for the experimental iOS offline agent. It does not modify the
+desktop bridge or start a server. Enter **On this iPhone** through onboarding or desktop Settings.
+See [product setup and limitations](../../../../docs/on-device.md).
+
+- `ios/OnDeviceAgentModule.swift` is the thin Expo boundary.
+- `ios/GitCredentialStore.swift` stores host-scoped credentials in a separate, device-only Keychain
+  service. JavaScript receives opaque references; there is no exported token-reading method.
+- `ios/NativeGit.swift` owns the linked-library Git operations. Credential callbacks enforce the
+  authorized HTTPS origin. Remote rejections are explicit errors, not successful push results.
+- `ios/NativeGitRead.swift` and `ios/NativeGitMutations.swift` own bounded Git queries and index/branch
+  operations. `GitNetworkOperation.swift` provides cooperative cancellation/progress; a small C
+  boundary configures libgit2's 15-second connection and read/write timeouts.
+- `ios/WorkspaceStore.swift` and `WorkspaceFileTools.swift` own actor-serialized workspace
+  publication, containment, revision checks, and bounded UTF-8 operations.
+- `ios/ModelFileStore.swift` verifies size/SHA-256 before atomic ready publication.
+  `RuntimeDocumentStore.swift` owns separate atomic, size-limited local journals/preferences.
+- The native ABI is versioned (currently 5). An old binary cannot silently omit new services.
+- `scripts/build-git.mjs` builds pinned libgit2 1.9.7 for iOS arm64 and simulator arm64/x86_64.
+  The source archive is SHA-256 verified. HTTPS uses SecureTransport; SSH, the CLI, and tests are
+  excluded from the app library. Unmodified upstream notices (including bundled dependency
+  licenses, llama.rn, and llama.cpp/ggml) are copied into the `OnDeviceAgentNotices` app resource bundle.
+- Inference uses pinned `llama.rn` 0.12.9, loaded only by the on-device feature. Its install script
+  verifies the downloaded native artifacts. Android autolinking is disabled for this iOS-only
+  feature so existing Android clients do not acquire an unused native runtime.
+- Authentication strategies live under `src/features/on-device/auth`; they do not implement Git
+  operations or expose credentials to model tools.
+
+## Native build
+
+Install Xcode and CMake on macOS. `DAPPERCODE_CMAKE` may name a specific CMake executable. Expo
+prebuild invokes the native Git build through `plugins/withOnDeviceAgentNative.js`; unchanged builds
+reuse the versioned result. Build output and downloaded sources stay under `ios/build/git` and are
+ignored by Git, Metro, and Jest.
+
+```bash
+pnpm install --frozen-lockfile
+pnpm --filter @dappercode/mobile exec expo prebuild --platform ios --no-install
+cd apps/mobile/ios
+pod install
+```
+
+Do not enable JIT or optional increased-memory entitlements to make a model appear compatible.
+Physical iPhone measurements are still required before publishing model/RAM compatibility claims.
+The native memory API is advisory; a simulator's host memory is not an iPhone memory budget.
+
+## Validation
+
+```bash
+pnpm --filter @dappercode/mobile run test --runInBand src/features/on-device/auth/github.test.ts
+pnpm --filter @dappercode/mobile run typecheck:native
+node --test scripts/__tests__/mobile-runtime-boundaries.test.mjs
+```
+
+The native inference scenario uses the existing local E2E runner, an isolated simulator, real model
+weights, and a bundled JavaScript entry. It never restarts Metro or a user bridge. Before running it,
+build a signed simulator Release app in `apps/mobile/local-builds/on-device-gate`:
+
+```bash
+xcodebuild -workspace apps/mobile/ios/DapperCode.xcworkspace -scheme DapperCode \
+  -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath apps/mobile/local-builds/on-device-gate \
+  CODE_SIGNING_ALLOWED=YES CODE_SIGNING_IDENTITY=- build
+node .agents/skills/local-e2e-validation/scripts/run.mjs \
+  --evidence /absolute/path/to/new-evidence.jsonl \
+  apps/mobile/modules/on-device-agent/tests/native-inference.mjs
+```
+
+It requires the iOS 27.0 iPhone 18 Pro simulator runtime and downloads a checksum-verified Qwen3-1.7B
+Q4_K_M fixture (approximately 1.3 GB) into test-owned storage. The runner removes the fixture and
+simulator after the run. It asserts structured tool calls, actual file reads, JSON tool-result
+consumption, streaming, cancellation, unload/reload, and native credential storage/removal.
+Set `DAPPERCODE_NATIVE_TEST_MODEL` to a bundled catalog ID to run the same complete-tool-schema
+gate for another model. All three catalog entries have passed the simulator gate. This is not proof
+of physical-iPhone Metal performance or measured phone RAM compatibility.
+
+The separate native Git scenario runs the production Swift implementation against an isolated
+authenticated HTTPS Git server. It installs a test CA only in its disposable simulator and checks
+clone, status, edits/commits, deletion, literal paths, credential-origin restrictions, remote
+rejection, credential redaction, branch switching, bounded diffs, cancellation/timeouts, recovery,
+and successful push. The fixture server runs Git on the test host;
+no Git executable or shell is shipped in the app.
+
+```bash
+node .agents/skills/local-e2e-validation/scripts/run.mjs \
+  --evidence /absolute/path/to/new-git-evidence.jsonl \
+  apps/mobile/modules/on-device-agent/tests/native-git.mjs
+```
+
+The model-file scenario also exercises atomic local runtime documents, preservation on rejected
+writes, prefix enumeration, and idempotent removal:
+
+```bash
+node .agents/skills/local-e2e-validation/scripts/run.mjs \
+  --evidence /absolute/path/to/new-storage-evidence.jsonl \
+  apps/mobile/modules/on-device-agent/tests/native-model-files.mjs
+```
+
+`native-product.mjs` bundles the production router/screens behind an isolated fixture bootstrap.
+It requires an installed Appium/XCUITest driver, owns its Appium server and disposable simulator,
+and serializes the WDA ports. Its native model/workspace preparation does not change the user app,
+Metro, or a desktop bridge. All fixture bundles disable `.env` loading and public environment
+overrides so they cannot inherit a user's configured bridge credentials.
+
+GitHub sign-in needs a public `EXPO_PUBLIC_GITHUB_CLIENT_ID` from an OAuth app with device
+authorization enabled. Never add a client secret. The current strategy requests `repo` scope for
+private clone/push access; signing out locally does not revoke the authorization at GitHub.
+
+## Dependencies and licenses
+
+- [llama.rn](https://github.com/mybigday/llama.rn) and
+  [llama.cpp](https://github.com/ggml-org/llama.cpp): MIT.
+- [libgit2](https://github.com/libgit2/libgit2/tree/v1.9.7): GPLv2 with its linking exception.
+  Retain upstream and bundled-dependency notices when distributing the native library.
+- Test model: [Qwen3-1.7B GGUF](https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF).
+  Model weights are test downloads, not committed application assets.

@@ -94,9 +94,11 @@ import {
 import type { Chat } from '@bridge/types/types';
 import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
 import { useAppBridgeLifecycle } from '@shell/boot/useAppBridgeLifecycle';
+import { useAppStateBootstrap } from '@shell/boot/useAppStateBootstrap';
 import { consumeInterruptedChatCreationAtom } from '@shell/state/chat/actions';
 
 function Harness() {
+  useAppStateBootstrap();
   useAppBridgeLifecycle();
   return null;
 }

@@ -1,0 +1,53 @@
+[
+  {
+    "id": "qwen3-0.6b-q4-0",
+    "name": "Qwen3 0.6B",
+    "family": "Qwen3",
+    "parameters": "0.6B",
+    "quantization": "Q4_0",
+    "sourceUrl": "https://huggingface.co/ggml-org/Qwen3-0.6B-GGUF",
+    "downloadUrl": "https://huggingface.co/ggml-org/Qwen3-0.6B-GGUF/resolve/13ac06624948e4d8589cb4b6f90100837342fcb8/Qwen3-0.6B-Q4_0.gguf",
+    "sha256": "da2572f16c06133561ce56accaa822216f2391ef4d37fba427801cd6736417d4",
+    "bytes": 428970080,
+    "license": "Apache-2.0",
+    "contextTokens": 2048,
+    "kvBytesPerToken": 114688,
+    "workingBytes": 201326592,
+    "minimumDeviceBytes": 2500000000,
+    "recommended": false
+  },
+  {
+    "id": "qwen3-1.7b-q4-k-m",
+    "name": "Qwen3 1.7B",
+    "family": "Qwen3",
+    "parameters": "1.7B",
+    "quantization": "Q4_K_M",
+    "sourceUrl": "https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF",
+    "downloadUrl": "https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF/resolve/daeb8e2d528a760970442092f6bf1e55c3b659eb/Qwen3-1.7B-Q4_K_M.gguf",
+    "sha256": "d2387ca2dbfee2ffabce7120d3770dadca0b293052bc2f0e138fdc940d9bc7b5",
+    "bytes": 1282439264,
+    "license": "Apache-2.0",
+    "contextTokens": 4096,
+    "kvBytesPerToken": 114688,
+    "workingBytes": 268435456,
+    "minimumDeviceBytes": 5000000000,
+    "recommended": true
+  },
+  {
+    "id": "qwen3-4b-q4-k-m",
+    "name": "Qwen3 4B",
+    "family": "Qwen3",
+    "parameters": "4B",
+    "quantization": "Q4_K_M",
+    "sourceUrl": "https://huggingface.co/ggml-org/Qwen3-4B-GGUF",
+    "downloadUrl": "https://huggingface.co/ggml-org/Qwen3-4B-GGUF/resolve/2f3b082b1356a6123f7ed71e65aea340da25d53c/Qwen3-4B-Q4_K_M.gguf",
+    "sha256": "ab27b9bfa375a178d6cba48f3ad892b94b7739659dcc7aae8058ce0ffed6b328",
+    "bytes": 2497280640,
+    "license": "Apache-2.0",
+    "contextTokens": 4096,
+    "kvBytesPerToken": 147456,
+    "workingBytes": 402653184,
+    "minimumDeviceBytes": 7000000000,
+    "recommended": false
+  }
+]

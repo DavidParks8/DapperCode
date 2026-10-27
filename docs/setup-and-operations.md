@@ -430,6 +430,10 @@ allowlist remains authoritative at runtime.
 
 ## Development
 
+For native offline iPhone usage, see [On this iPhone](on-device.md). A bridge is not needed for that
+mode. Its native build requires CMake, the pinned libgit2 build, and a rebuilt iOS application;
+Expo Go or a JavaScript-only update cannot add the native inference/Git libraries.
+
 Start Expo independently after the desktop app has configured the bridge:
 
 ```bash

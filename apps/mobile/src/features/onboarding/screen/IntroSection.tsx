@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import type { ReactNode } from 'react';
 import { Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
@@ -9,6 +10,7 @@ import type { OnboardingHeroAnimatedStyle, OnboardingTranslateAnimatedStyle } fr
 import type { createOnboardingStyles } from './styles';
 
 interface IntroSectionProps {
+  action?: ReactNode;
   styles: ReturnType<typeof createOnboardingStyles>;
   theme: AppTheme;
   introHeroAnimatedStyle: OnboardingHeroAnimatedStyle;
@@ -17,6 +19,7 @@ interface IntroSectionProps {
 }
 
 export function OnboardingIntroSection({
+  action,
   styles,
   theme,
   introHeroAnimatedStyle,
@@ -62,6 +65,7 @@ export function OnboardingIntroSection({
       </View>
 
       <Animated.View style={[styles.introFooter, introActionsAnimatedStyle]}>
+        {action}
         <ChoiceAction
           variant="primary"
           logo="dappercode"

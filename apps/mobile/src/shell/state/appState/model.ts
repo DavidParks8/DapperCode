@@ -4,6 +4,7 @@ import type {
   ApprovalMode,
   CollaborationMode,
 } from '@bridge/types/types';
+import type { ExecutionTarget } from '@shell/runtime/targets';
 import {
   APP_SETTINGS_VERSION,
   DEFAULT_WORKSPACE_CHAT_LIMIT,
@@ -47,6 +48,7 @@ export interface PushSettingsState {
 }
 
 export interface AppSettingsState {
+  preferredExecutionTarget: ExecutionTarget;
   defaultStartCwd: string | null;
   preferredAgentId: AgentId | null;
   agentSettings: AgentDefaultSettingsMap;
@@ -120,6 +122,7 @@ export type AppStateAction =
 
 export function createDefaultAppSettings(): AppSettingsState {
   return {
+    preferredExecutionTarget: 'bridge',
     defaultStartCwd: null,
     preferredAgentId: null,
     agentSettings: {},
@@ -282,6 +285,8 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
     }),
   );
   return {
+    preferredExecutionTarget:
+      record['preferredExecutionTarget'] === 'on-device' ? 'on-device' : 'bridge',
     defaultStartCwd: parsed.defaultStartCwd,
     preferredAgentId: parsed.preferredAgentId,
     agentSettings: parsed.agentSettings,

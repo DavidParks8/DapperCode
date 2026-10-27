@@ -16,6 +16,7 @@ import type { OnboardingScreenProps } from './types';
 export type { OnboardingBridgeProfileDraft, OnboardingMode } from './types';
 
 export function OnboardingScreen({
+  introAction,
   mode = 'initial',
   initialBridgeUrl,
   initialBridgeToken,
@@ -68,6 +69,7 @@ export function OnboardingScreen({
         >
           {controller.showIntroStep ? (
             <OnboardingIntroSection
+              action={introAction}
               styles={styles}
               theme={theme}
               introHeroAnimatedStyle={controller.introHeroAnimatedStyle}

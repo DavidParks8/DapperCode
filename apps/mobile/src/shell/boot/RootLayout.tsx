@@ -2,7 +2,7 @@ import 'react-native-gesture-handler';
 
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import { useEffect, useMemo } from 'react';
 import { StatusBar, useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -23,6 +23,9 @@ import { LoadingShell, PersistenceRecoveryShell } from '@shell/boot/AppShells';
 import { useAppBridgeLifecycle } from '@shell/boot/useAppBridgeLifecycle';
 import { useAppStoreReview } from '@shell/boot/useAppStoreReview';
 import { usePushNotificationsLifecycle } from '@shell/boot/usePushNotificationsLifecycle';
+import { useAppStateBootstrap } from './useAppStateBootstrap';
+import { executionTargetForRoute } from '@shell/runtime/targets';
+import { preferredExecutionTargetAtom } from '@shell/state/appState/settings';
 
 export function RootLayout() {
   const systemColorScheme = useColorScheme();
@@ -54,9 +57,10 @@ function RootNavigator({ theme, styles }: { theme: AppTheme; styles: AppStyles }
   const persistenceError = useAtomValue(appStatePersistenceErrorAtom);
   const chatSnapshotCache = useAtomValue(chatSnapshotCacheAtom);
   const bridgeProfiles = useAtomValue(bridgeProfilesAtom);
+  const preferredTarget = useAtomValue(preferredExecutionTargetAtom);
+  const pathname = usePathname();
 
-  usePushNotificationsLifecycle();
-  useAppBridgeLifecycle();
+  useAppStateBootstrap();
   useAppStoreReview();
 
   if (!settingsLoaded || chatSnapshotCache === undefined) {
@@ -69,15 +73,27 @@ function RootNavigator({ theme, styles }: { theme: AppTheme; styles: AppStyles }
 
   const hasProfiles = bridgeProfiles.length > 0;
   return (
-    <Stack screenOptions={createStackScreenOptions(theme)}>
-      <Stack.Screen name="index" />
-      <Stack.Protected guard={hasProfiles}>
-        <Stack.Screen name="profiles/[profileId]" />
-      </Stack.Protected>
-      <Stack.Protected guard={!hasProfiles}>
-        <Stack.Screen name="onboarding" />
-      </Stack.Protected>
-      <Stack.Screen name="+not-found" />
-    </Stack>
+    <>
+      {executionTargetForRoute(pathname, preferredTarget) === 'bridge' ? (
+        <BridgeRuntimeEffects />
+      ) : null}
+      <Stack screenOptions={createStackScreenOptions(theme)}>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="on-device" />
+        <Stack.Protected guard={hasProfiles}>
+          <Stack.Screen name="profiles/[profileId]" />
+        </Stack.Protected>
+        <Stack.Protected guard={!hasProfiles}>
+          <Stack.Screen name="onboarding" />
+        </Stack.Protected>
+        <Stack.Screen name="+not-found" />
+      </Stack>
+    </>
   );
+}
+
+function BridgeRuntimeEffects() {
+  usePushNotificationsLifecycle();
+  useAppBridgeLifecycle();
+  return null;
 }

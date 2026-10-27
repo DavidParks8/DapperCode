@@ -13,9 +13,10 @@
     "preandroid": "pnpm run mermaid:prepare",
     "android": "expo run:android",
     "prelint": "pnpm run mermaid:prepare",
-    "lint": "eslint src --ext .ts,.tsx --max-warnings=0 --cache --cache-strategy content --concurrency 4",
+    "lint": "eslint src modules/on-device-agent/tests --ext .ts,.tsx --max-warnings=0 --cache --cache-strategy content --concurrency 4",
     "pretypecheck": "pnpm run mermaid:prepare",
     "typecheck": "expo customize tsconfig.json && tsc --noEmit",
+    "typecheck:native": "tsc --noEmit -p modules/on-device-agent/tests/tsconfig.json",
     "prebuild": "pnpm run mermaid:prepare",
     "build": "expo export --platform all --output-dir dist",
     "pretest": "pnpm run mermaid:prepare",
@@ -52,6 +53,7 @@
     "expo-splash-screen": "~57.0.5",
     "expo-store-review": "~57.0.1",
     "jotai": "^2.20.2",
+    "llama.rn": "0.12.9",
     "mermaid": "11.16.1",
     "prismjs": "^1.30.0",
     "react": "19.2.3",
@@ -95,6 +97,9 @@
     "preset": "jest-expo",
     "setupFilesAfterEnv": [
       "<rootDir>/jest.setup.js"
+    ],
+    "modulePathIgnorePatterns": [
+      "<rootDir>/modules/on-device-agent/(?:ios/)?build/"
     ],
     "moduleNameMapper": {
       "^@bridge/(.*)$": "<rootDir>/src/bridge/$1",

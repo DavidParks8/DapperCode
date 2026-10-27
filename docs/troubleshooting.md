@@ -1,5 +1,27 @@
 # Troubleshooting
 
+## On-device Models or Workspaces
+
+- **Services unavailable/outdated:** rebuild the native iOS app with the current module and pods.
+  Do not reset local data or restart a desktop bridge. The error screen can return to desktop
+  connections without loading local services.
+- **Memory admission refused:** unload the current model, close memory-heavy apps, refresh memory,
+  or choose a smaller compatible catalog model. Simulator estimates do not certify phone support.
+- **Download paused or interrupted:** resume it in Model library. If verification was interrupted,
+  use **Verify download**. Hash/size failures remain unavailable until a valid artifact is verified.
+- **Context full:** start a new local conversation or request smaller file reads. History is not
+  silently truncated.
+- **Stopped/interrupted tool:** inspect files and Git state before retrying; an edit, commit, or
+  remote update may already have completed. Uncertain tools are not replayed at startup.
+- **GitHub not configured:** set the public OAuth client ID for an app with Device Flow enabled and
+  rebuild. Never add a client secret. Public clones and offline work do not require sign-in.
+- **Git authentication/push rejected:** verify connectivity, canonical HTTPS origin, account scope,
+  repository permissions, and branch rules. No redirects or force-push fallback are attempted.
+- **Persistence error:** retry saving. Invalid or unreadable local documents are preserved, not
+  replaced with empty conversations.
+
+See [on-device setup, boundaries, and validation](on-device.md).
+
 ## iOS 27 App Closes at Launch
 
 An iOS 27 crash containing `UIScene life cycle is required for apps built with this SDK`

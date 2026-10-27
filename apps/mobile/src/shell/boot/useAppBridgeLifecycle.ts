@@ -6,7 +6,6 @@ import { Platform } from 'react-native';
 import {
   createEmptyChatSnapshotCache,
   getChatSnapshotCacheGeneration,
-  loadChatSnapshotCache,
   saveChatSnapshotCache,
   updateChatSnapshotCache,
 } from '@shell/session/chatSnapshotCache';
@@ -18,10 +17,7 @@ import { bindPushForegroundPresence } from '@shell/push/presence';
 import { supportsNativePushPresence } from '@shell/session/appVisibility';
 import { bindAppWebSocketLifecycle } from '@shell/session/webSocketLifecycle';
 import { syncPushRegistration } from '@shell/push/controller';
-import { getActiveBridgeProfile } from '@shell/state/bridgeProfiles';
-import { appStateLoadedAtom, bridgeProfileStoreAtom } from '@shell/state/appState/atoms';
-import { initializeAppStateAtom } from '@shell/state/appState/actions';
-import { applyRestoredChatSnapshotAtom } from '@shell/state/chat/actions';
+import { appStateLoadedAtom } from '@shell/state/appState/atoms';
 import {
   activeChatAtom,
   chatSnapshotCacheAtom,
@@ -280,41 +276,6 @@ export function useAppBridgeLifecycle(): void {
       unsubscribeStatus();
     };
   }, [api, isOnboarding, ws]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadSettings = async () => {
-      try {
-        await store.set(initializeAppStateAtom);
-        if (cancelled) {
-          return;
-        }
-        const activeProfile = getActiveBridgeProfile(store.get(bridgeProfileStoreAtom));
-        const snapshotCache = activeProfile ? await loadChatSnapshotCache(activeProfile.id) : null;
-        if (cancelled) {
-          return;
-        }
-        const selectedSnapshot =
-          snapshotCache?.entries.find((entry) => entry.chat.id === snapshotCache.selectedChatId)
-            ?.chat ?? null;
-
-        store.set(chatSnapshotCacheAtom, snapshotCache);
-        store.set(applyRestoredChatSnapshotAtom, selectedSnapshot);
-      } catch {
-        // The typed persistence error remains available in the app-state atoms.
-      } finally {
-        if (!cancelled && store.get(chatSnapshotCacheAtom) === undefined) {
-          store.set(chatSnapshotCacheAtom, null);
-        }
-      }
-    };
-
-    void loadSettings();
-    return () => {
-      cancelled = true;
-    };
-  }, [store]);
 
   useEffect(() => {
     if (!api || !chatSnapshotCache || chatSnapshotCache.profileId !== activeBridgeProfileId) {
