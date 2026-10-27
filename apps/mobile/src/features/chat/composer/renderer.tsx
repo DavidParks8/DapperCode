@@ -7,7 +7,7 @@ import {
 } from '../state/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useMemo, type ComponentProps } from 'react';
-import { useSceneContentInsets } from '@shell/layout/useShellLayout';
+import { useSceneContentInsets, useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, Text, View, type LayoutChangeEvent } from 'react-native';
 import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
@@ -86,12 +86,20 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
   const queueActionKind = useAtomValue(queueActionKindAtom);
   const setComposerHeight = useSetAtom(composerHeightAtom);
   const contentInsets = useSceneContentInsets();
-  // The composer shares the transcript's readable column. Over a fold it moves to the trailing
-  // page so its controls never rest on the hinge.
+  const sceneInsets = useSceneHorizontalInsets();
+  // Use spare readable-column gutters to center below side rails without crossing safe areas.
+  const centeringOffset = Math.max(
+    -contentInsets.readable,
+    Math.min(contentInsets.readable, (sceneInsets.paddingRight - sceneInsets.paddingLeft) / 2),
+  );
+  // A fold still moves the controls onto the trailing page, clear of the hinge.
   const composerMargins =
     contentInsets.foldLeading > 0
       ? { marginLeft: contentInsets.foldLeading, marginRight: 0 }
-      : { marginLeft: contentInsets.readable, marginRight: contentInsets.readable };
+      : {
+          marginLeft: contentInsets.readable + centeringOffset,
+          marginRight: contentInsets.readable - centeringOffset,
+        };
   const bridgeRecoveryBannerButtonHitSlop = useMemo(
     () => computeHitSlop({ width: 160, height: 32 }),
     [],

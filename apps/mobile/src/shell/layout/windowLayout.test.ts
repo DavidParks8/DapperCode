@@ -6,6 +6,7 @@ import {
   SHEET_MAX_WIDTH,
   VERTICAL_BAR_SYSTEM_GAP,
   parseWindowTraits,
+  resolveHeaderInsets,
   resolveReadableColumnInset,
   resolveSheetMargins,
   resolveShellLayout,
@@ -177,6 +178,57 @@ describe('resolveVerticalBarFrame', () => {
     });
   });
 
+  it('uses the system bar region instead of centering in the wider safe-area inset', () => {
+    // Measured on the open Duo: the 84pt safe-area column is centered at x909, while UIKit's
+    // 48pt bar region and the system icons are centered at x903.
+    const nativeLayout = { x: 879, y: 124, width: 48, height: 511 };
+    const frame = resolveVerticalBarFrame(
+      { width: 951, height: 669 },
+      {
+        ...traits('regular'),
+        verticalBarEdge: 'trailing',
+        verticalBarLayout: nativeLayout,
+        occlusions: [{ x: 867, y: 0, width: 84, height: 124 }],
+      },
+      { top: 0, right: 84, bottom: 34, left: 0 },
+      'trailing',
+    );
+
+    expect(frame).toEqual({ x: 879, y: 132, width: 48, height: 503 });
+    expect(frame && frame.x + frame.width / 2).toBe(903);
+  });
+
+  it('uses the same system alignment on the leading edge and ignores stale out-of-window regions', () => {
+    const leading = { x: 24, y: 124, width: 48, height: 511 };
+    const frame = resolveVerticalBarFrame(
+      { width: 951, height: 669 },
+      { ...traits('regular'), verticalBarLayout: leading },
+      { top: 0, right: 0, bottom: 34, left: 84 },
+      'leading',
+    );
+    expect(frame).toEqual({ x: 24, y: 132, width: 48, height: 503 });
+    expect(
+      resolveVerticalBarFrame(
+        DUO_OUTER,
+        { ...closed, verticalBarLayout: { ...leading, x: 879 } },
+        insets,
+        'trailing',
+      ),
+    ).toEqual(resolveVerticalBarFrame(DUO_OUTER, closed, insets, 'trailing'));
+  });
+
+  it.each([
+    { x: 394, y: 174, width: 0, height: 470 },
+    { x: -24, y: 174, width: 48, height: 470 },
+    { x: 394, y: -8, width: 48, height: 470 },
+    { x: 394, y: 174, width: 48, height: -8 },
+    { x: 394, y: 174, width: 48, height: 600 },
+  ])('falls back while a native region does not fit the window: %p', (verticalBarLayout) => {
+    expect(
+      resolveVerticalBarFrame(DUO_OUTER, { ...closed, verticalBarLayout }, insets, 'trailing'),
+    ).toEqual(resolveVerticalBarFrame(DUO_OUTER, closed, insets, 'trailing'));
+  });
+
   it('ignores system items outside the column and mirrors to the leading edge', () => {
     expect(
       resolveVerticalBarFrame(DUO_OUTER, closed, { ...insets, left: 84, right: 0 }, 'leading'),
@@ -200,6 +252,26 @@ describe('resolveVerticalBarFrame', () => {
 });
 
 describe('content and sheet geometry', () => {
+  it('adds only horizontal corner clearance beyond the safe area and ignores stale regions', () => {
+    const window = { width: 951, height: 669 };
+    const headerLayout = { x: 16, y: 0, width: 851, height: 635 };
+    const reported = { ...traits('regular'), headerLayout };
+    const insets = { top: 0, left: 0, right: 84, bottom: 34 };
+    expect(resolveHeaderInsets(window, reported, insets)).toEqual({ left: 16, right: 0 });
+    expect(
+      resolveHeaderInsets(
+        window,
+        { ...reported, headerLayout: { ...headerLayout, x: 84 } },
+        { ...insets, left: 84, right: 0 },
+      ),
+    ).toEqual({ left: 0, right: 16 });
+    expect(resolveHeaderInsets(window, reported, { ...insets, left: 16 })).toEqual({
+      left: 0,
+      right: 0,
+    });
+    expect(resolveHeaderInsets(DUO_OUTER, reported, insets)).toEqual({ left: 0, right: 0 });
+  });
+
   it('only narrows content wider than the readable column', () => {
     expect(resolveReadableColumnInset(READABLE_COLUMN_WIDTH - 100)).toBe(0);
     expect(resolveReadableColumnInset(867)).toBe((867 - READABLE_COLUMN_WIDTH) / 2);
@@ -216,6 +288,35 @@ describe('content and sheet geometry', () => {
 });
 
 describe('parseWindowTraits', () => {
+  it('retains the native corner-aware header region and rejects malformed optional regions', () => {
+    const headerLayout = { x: 16, y: 0, width: 851, height: 635 };
+    expect(parseWindowTraits({ ...traits('regular'), headerLayout })?.headerLayout).toEqual(
+      headerLayout,
+    );
+    for (const width of [Number.NaN, Number.POSITIVE_INFINITY, '851', null]) {
+      expect(
+        parseWindowTraits({ ...traits('regular'), headerLayout: { ...headerLayout, width } })
+          ?.headerLayout,
+      ).toBeUndefined();
+    }
+  });
+
+  it('retains the native bar layout and ignores malformed optional layouts', () => {
+    const layout = { x: 879, y: 124, width: 48, height: 511 };
+    expect(
+      parseWindowTraits({
+        ...traits('regular'),
+        verticalBarLayout: layout,
+      })?.verticalBarLayout,
+    ).toEqual(layout);
+    expect(
+      parseWindowTraits({
+        ...traits('regular'),
+        verticalBarLayout: { ...layout, width: Number.NaN },
+      })?.verticalBarLayout,
+    ).toBeUndefined();
+  });
+
   it('accepts the native observer payload', () => {
     expect(
       parseWindowTraits({

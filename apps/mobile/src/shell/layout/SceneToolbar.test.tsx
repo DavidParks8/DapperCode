@@ -6,6 +6,12 @@ import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { queryRoot, type QueryNode } from '@shared/testing/foldableLayout';
 import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
+import { GlassSurface } from '@shared/ui/glass/GlassSurface';
+import {
+  getRenderedGlassViewProps,
+  setMockGlassEffectAPIAvailable,
+  setMockLiquidGlassAvailable,
+} from '@shared/testing/glassEffectMock';
 import { SelectionSheet } from '@shared/ui/SelectionSheet';
 import { windowTraitsAtom } from '@shell/state/layout/atoms';
 import {
@@ -164,6 +170,53 @@ describe('SceneVerticalToolbar', () => {
     act(() => tree.unmount());
   });
 
+  it.each([true, false])('centers round controls with native glass available: %s', (available) => {
+    setMockLiquidGlassAvailable(available);
+    setMockGlassEffectAPIAvailable(true);
+    const tree = renderToolbar(
+      {
+        ...DUO_CLOSED,
+        verticalBarLayout: { x: 394, y: 174, width: 48, height: 470 },
+      },
+      [item('menu', 'navigation'), item('git', 'action', { disabled: true })],
+    );
+    const bar = queryRoot(tree).findAll(
+      (node) => node.props['testID'] === 'scene-vertical-toolbar' && typeof node.type !== 'string',
+    )[0];
+    expect(StyleSheet.flatten(bar?.props['style'])).toMatchObject({
+      right: 24,
+      width: 48,
+      top: 182,
+    });
+    const surfaces = bar?.findAll((node) => node.type === GlassSurface) ?? [];
+    expect(surfaces).toHaveLength(2);
+    for (const surface of surfaces) {
+      expect(surface.props['role']).toBe('capsule');
+      expect(StyleSheet.flatten(surface.props['style'])).toMatchObject({
+        width: 48,
+        height: 48,
+        borderRadius: theme.radius.full,
+      });
+      // The glass material itself must not inherit the disabled button's opacity.
+      expect(StyleSheet.flatten(surface.props['style'])).not.toHaveProperty('opacity');
+    }
+    const glass = getRenderedGlassViewProps().filter((props) =>
+      props.testID?.startsWith('scene-toolbar-button-glass-'),
+    );
+    expect(glass.map((props) => props.glassEffectStyle)).toEqual([
+      available ? theme.glass.capsule.glassEffectStyle : 'none',
+      available ? theme.glass.capsule.glassEffectStyle : 'none',
+    ]);
+    if (!available) {
+      expect(StyleSheet.flatten(glass[0]?.style)).toMatchObject({
+        backgroundColor: theme.glass.capsule.fallbackBackgroundColor,
+      });
+    }
+    expect(glass.map((props) => props.isInteractive)).toEqual([true, false]);
+    expect(buttons(tree)[1]?.props['disabled']).toBe(true);
+    act(() => tree.unmount());
+  });
+
   it('collapses lower-priority items into a standard overflow menu when the column is short', () => {
     const onRename = jest.fn();
     // Only two 48pt slots fit below the status column on this short window.
@@ -181,6 +234,13 @@ describe('SceneVerticalToolbar', () => {
       'menu',
       'More',
     ]);
+    expect(
+      queryRoot(tree).findAll(
+        (node) =>
+          node.type === GlassSurface &&
+          node.props['testID'] === 'scene-toolbar-button-glass-overflow',
+      ),
+    ).toHaveLength(1);
     act(() => (buttons(tree)[1]?.props['onPress'] as () => void)());
     const sheet = tree.root.findByType(SelectionSheet);
     expect(sheet.props['visible']).toBe(true);

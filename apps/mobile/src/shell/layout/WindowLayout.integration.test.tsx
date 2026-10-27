@@ -1,6 +1,10 @@
 import { Provider, createStore } from 'jotai';
-import { Dimensions } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { Dimensions, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
+import {
+  SafeAreaInsetsContext,
+  SafeAreaProvider,
+  SafeAreaView,
+} from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { TABLET_SIDEBAR_WIDTH } from '@shell/boot/appConstants';
@@ -8,6 +12,8 @@ import { appSettingsAtom } from '@shell/state/appState/atoms';
 import { sidebarHiddenAtom } from '@shell/state/appState/settings';
 import { windowTraitsAtom } from '@shell/state/layout/atoms';
 import { createTestStore } from '@shell/state/testing';
+import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import { ChatHeader } from '../../features/chat/screen/ChatHeader';
 import {
   useSceneHorizontalInsets,
   useShellLayout,
@@ -16,6 +22,8 @@ import {
 } from './useShellLayout';
 import { WindowLayoutObserver } from './WindowLayoutObserver.native';
 import type { LayoutRect, ShellLayout } from './windowLayout';
+
+jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 
 // The iPhone Duo status bar and camera sit in a vertical column on the trailing edge.
 const DUO_TRAILING_INSET = 84;
@@ -50,6 +58,7 @@ const DUO_CLOSED = {
     { x: 382, y: 0, width: 84, height: 174 },
   ],
   statusBar: { x: 0, y: 0, width: 466, height: 2 },
+  verticalBarLayout: { x: 394, y: 174, width: 48, height: 470 },
 };
 const DUO_OPEN = {
   horizontalSizeClass: 'regular',
@@ -58,6 +67,8 @@ const DUO_OPEN = {
   divisions: [],
   occlusions: [{ x: 867, y: 0, width: 84, height: 124 }],
   statusBar: { x: 0, y: 0, width: 951, height: 2 },
+  verticalBarLayout: { x: 879, y: 124, width: 48, height: 511 },
+  headerLayout: { x: 16, y: 0, width: 851, height: 635 },
 };
 const BOOK_FOLD = { x: 455, y: 0, width: 41, height: 669 };
 
@@ -125,7 +136,7 @@ describe('iPhone Duo window layout', () => {
         fold: null,
       },
       insets: { paddingLeft: 0, paddingRight: DUO_TRAILING_INSET },
-      verticalBar: { x: 382, y: 182, width: 84, height: 678 - 20 - 182 },
+      verticalBar: { x: 394, y: 182, width: 48, height: 462 },
     });
 
     // Open in landscape: the sidebar is shown by default and owns the leading edge; the bars stay
@@ -140,7 +151,7 @@ describe('iPhone Duo window layout', () => {
       fold: null,
     });
     expect(observed?.insets).toEqual({ paddingLeft: 0, paddingRight: DUO_TRAILING_INSET });
-    expect(observed?.verticalBar?.y).toBe(132);
+    expect(observed?.verticalBar).toEqual({ x: 879, y: 132, width: 48, height: 503 });
 
     // Hiding the sidebar gives the chat the whole window, and the choice is remembered.
     act(() => store.set(sidebarHiddenAtom, true));
@@ -191,6 +202,65 @@ describe('iPhone Duo window layout', () => {
       sidebarMode: 'overlay',
       toolbarPlacement: 'trailing',
     });
+
+    act(() => tree.unmount());
+  });
+
+  it('keeps a compact header clear of corners through docking, safe-area changes, and laptop pose', () => {
+    const store = createTestStore();
+    store.set(sidebarHiddenAtom, true);
+    setWindowSize(951, 669);
+    const content = (top = 0, respectsTopSafeArea = true) => (
+      <SafeAreaInsetsContext.Provider value={{ top, left: 0, right: 84, bottom: 34 }}>
+        <Provider store={store}>
+          <AppThemeProvider theme={createAppTheme('dark')}>
+            <WindowLayoutObserver />
+            <ChatHeader title="Corner-aware title" respectsTopSafeArea={respectsTopSafeArea} />
+          </AppThemeProvider>
+        </Provider>
+      </SafeAreaInsetsContext.Provider>
+    );
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(content());
+    });
+    const safeAreaStyle = () =>
+      StyleSheet.flatten(tree.root.findByType(SafeAreaView).props['style'] as StyleProp<ViewStyle>);
+    const headerStyle = () =>
+      StyleSheet.flatten(tree.root.findByProps({ testID: 'chat-header-row' }).props['style']);
+
+    emitNativeTraits(tree, { ...DUO_OPEN, topBarInset: 24 });
+    expect(safeAreaStyle()?.paddingTop ?? 0).toBe(0);
+    expect(safeAreaStyle()).toMatchObject({ paddingRight: 84 });
+    expect(headerStyle()).toMatchObject({ paddingLeft: 32, minHeight: 48 });
+    expect(
+      StyleSheet.flatten(
+        tree.root.findByProps({ testID: 'chat-header-title-overflow' }).props['style'],
+      ),
+    ).toMatchObject({ height: 48 });
+
+    act(() => store.set(sidebarHiddenAtom, false));
+    expect(headerStyle()).toMatchObject({ paddingLeft: 16 });
+    act(() => store.set(sidebarHiddenAtom, true));
+    expect(headerStyle()).toMatchObject({ paddingLeft: 32 });
+
+    act(() => tree.update(content(47)));
+    expect(headerStyle()).toMatchObject({ paddingLeft: 16 });
+
+    act(() => tree.update(content(0, false)));
+    expect(headerStyle()).toMatchObject({ paddingLeft: 16 });
+    expect(tree.root.findByType(SafeAreaView).props['edges']).toEqual([]);
+
+    act(() => tree.update(content()));
+    expect(headerStyle()).toMatchObject({ paddingLeft: 32 });
+    emitNativeTraits(tree, {
+      ...DUO_OPEN,
+      verticalBarEdge: 'unspecified',
+      headerLayout: undefined,
+    });
+    expect(headerStyle()).toMatchObject({ paddingLeft: 16 });
+    emitNativeTraits(tree, DUO_OPEN);
+    expect(headerStyle()).toMatchObject({ paddingLeft: 32 });
 
     act(() => tree.unmount());
   });

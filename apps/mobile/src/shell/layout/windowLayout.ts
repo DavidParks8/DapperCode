@@ -26,6 +26,10 @@ export interface WindowTraits {
   readonly occlusions?: readonly LayoutRect[];
   /** The status bar, which shares a vertical bar's column when bars are vertical. */
   readonly statusBar?: LayoutRect | null;
+  /** UIKit's bar layout region, which need not be centered in the side safe-area inset. */
+  readonly verticalBarLayout?: LayoutRect;
+  /** Corner-aware horizontal content region while toolbar buttons occupy a side rail. */
+  readonly headerLayout?: LayoutRect;
 }
 
 export interface WindowSize {
@@ -139,8 +143,8 @@ export interface EdgeInsets {
 export const VERTICAL_BAR_SYSTEM_GAP = 8;
 
 /**
- * The column a vertical toolbar may occupy, in window points: the safe-area inset on the bar's
- * edge, below whatever the system already shows at the top of that column.
+ * The column a vertical toolbar may occupy, in window points: the native bar region, falling back
+ * to the safe-area inset, below whatever the system already shows at the top of that column.
  */
 export function resolveVerticalBarFrame(
   window: WindowSize,
@@ -148,20 +152,54 @@ export function resolveVerticalBarFrame(
   insets: EdgeInsets,
   edge: 'leading' | 'trailing',
 ): LayoutRect | null {
-  const width = edge === 'trailing' ? insets.right : insets.left;
+  const { verticalBarLayout, statusBar, occlusions } = traits ?? {};
+  const region =
+    verticalBarLayout && fitsWindow(verticalBarLayout, window) ? verticalBarLayout : null;
+  const width = region?.width ?? (edge === 'trailing' ? insets.right : insets.left);
   if (width <= 0) {
     return null;
   }
-  const x = edge === 'trailing' ? window.width - width : 0;
-  const systemItems = [traits?.statusBar ?? null, ...(traits?.occlusions ?? [])].filter(
-    (item): item is LayoutRect => item !== null && item.x < x + width && item.x + item.width > x,
+  const x = region?.x ?? (edge === 'trailing' ? window.width - width : 0);
+  const systemItems = [statusBar, ...(occlusions ?? [])].filter(
+    (item): item is LayoutRect =>
+      item !== undefined && item !== null && item.x < x + width && item.x + item.width > x,
   );
   const top = Math.max(
     insets.top,
+    region ? region.y + VERTICAL_BAR_SYSTEM_GAP : 0,
     ...systemItems.map((item) => item.y + item.height + VERTICAL_BAR_SYSTEM_GAP),
   );
-  const bottom = window.height - insets.bottom;
+  const bottom = Math.min(
+    window.height - insets.bottom,
+    region ? region.y + region.height : window.height,
+  );
   return bottom > top ? { x, y: top, width, height: bottom - top } : null;
+}
+
+function fitsWindow(rect: LayoutRect, window: WindowSize): boolean {
+  return (
+    rect.width > 0 &&
+    rect.height > 0 &&
+    rect.x >= 0 &&
+    rect.y >= 0 &&
+    rect.x + rect.width <= window.width &&
+    rect.y + rect.height <= window.height
+  );
+}
+
+export function resolveHeaderInsets(
+  window: WindowSize,
+  traits: WindowTraits | null,
+  insets: EdgeInsets,
+): Pick<EdgeInsets, 'left' | 'right'> {
+  const region = traits?.headerLayout;
+  if (!region || !fitsWindow(region, window) || region.y < insets.top) {
+    return { left: 0, right: 0 };
+  }
+  return {
+    left: Math.max(0, region.x - insets.left),
+    right: Math.max(0, window.width - region.x - region.width - insets.right),
+  };
 }
 
 export function parseWindowTraits(value: unknown): WindowTraits | null {
@@ -181,6 +219,10 @@ export function parseWindowTraits(value: unknown): WindowTraits | null {
     divisions: Array.isArray(divisions) ? divisions.filter(isLayoutRect) : [],
     occlusions: Array.isArray(occlusions) ? occlusions.filter(isLayoutRect) : [],
     statusBar: isLayoutRect(value['statusBar']) ? value['statusBar'] : null,
+    verticalBarLayout: isLayoutRect(value['verticalBarLayout'])
+      ? value['verticalBarLayout']
+      : undefined,
+    headerLayout: isLayoutRect(value['headerLayout']) ? value['headerLayout'] : undefined,
   };
 }
 

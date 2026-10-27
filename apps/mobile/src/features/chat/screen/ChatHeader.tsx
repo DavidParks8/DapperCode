@@ -9,7 +9,11 @@ import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { HorizontalFadeMask } from '@shared/ui/HorizontalFadeMask';
 import { useHorizontalOverflow } from '@shared/ui/useHorizontalOverflow';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
-import { useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
+import {
+  useHeaderInsets,
+  useSceneHorizontalInsets,
+  useShellLayout,
+} from '@shell/layout/useShellLayout';
 import { useNavigationToggleLabel } from '@shell/state/drawer/atoms';
 import {
   CIRCULAR_TOOLBAR_BUTTON_SIZE,
@@ -45,12 +49,22 @@ export function ChatHeader({
   const styles = useMemo(() => createStyles(theme), [theme]);
   const titleDisplay = title.trim() || 'New chat';
   const sceneInsets = useSceneHorizontalInsets();
+  const headerInsets = useHeaderInsets();
+  const { sidebarMode } = useShellLayout();
   const navigationLabel = useNavigationToggleLabel();
+  const leadingPadding = onOpenDrawer ? theme.spacing.xs : theme.spacing.lg;
 
   const header = (
     <SafeAreaView edges={respectsTopSafeArea ? ['top'] : []} style={sceneInsets}>
       <View
-        style={[styles.header, onOpenDrawer ? null : styles.headerWithoutLeadingButton]}
+        style={[
+          styles.header,
+          { paddingLeft: leadingPadding },
+          respectsTopSafeArea && {
+            paddingLeft: leadingPadding + (sidebarMode === 'docked' ? 0 : headerInsets.left),
+            paddingRight: theme.spacing.xs + headerInsets.right,
+          },
+        ]}
         testID="chat-header-row"
       >
         {onOpenDrawer ? (
@@ -179,9 +193,6 @@ const createStyles = (theme: AppTheme) =>
       // The selector row below is pulled up into this row's dead space, so the header has to win
       // touches in the overlap band or the leading button would lose its bottom edge.
       zIndex: 1,
-    },
-    headerWithoutLeadingButton: {
-      paddingLeft: theme.spacing.lg,
     },
     titleRow: {
       flexDirection: 'row',

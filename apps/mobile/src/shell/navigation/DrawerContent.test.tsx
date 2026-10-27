@@ -5,11 +5,14 @@ import {
   AccessibilityInfo,
   Alert,
   AppState,
+  Dimensions,
   Keyboard,
   Platform,
   RefreshControl,
   StyleSheet,
   Text,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -47,6 +50,11 @@ import { createDrawerContentStyles } from '@shell/navigation/drawerContentStyles
 import { routes } from '@shell/navigation/routes';
 import { DRAWER_CHAT_SUMMARY_PERSIST_DEBOUNCE_MS } from '@shell/navigation/useDrawerChatCollection';
 import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
+import {
+  CLOSED_DUO_SAFE_AREA,
+  CLOSED_DUO_TRAITS,
+  sizeWindowLikeClosedDuo,
+} from '@shared/testing/foldableLayout';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 jest.mock('react-native-gesture-handler', () =>
@@ -283,16 +291,15 @@ function createHarness({
 async function renderDrawer(
   harness: DrawerHarness,
   props: Partial<DrawerProbeProps> = {},
+  metrics = {
+    frame: { x: 0, y: 0, width: 390, height: 844 },
+    insets: { top: 47, left: 0, right: 0, bottom: 34 },
+  },
 ): Promise<ReactTestRenderer> {
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(
-      <SafeAreaProvider
-        initialMetrics={{
-          frame: { x: 0, y: 0, width: 390, height: 844 },
-          insets: { top: 47, left: 0, right: 0, bottom: 34 },
-        }}
-      >
+      <SafeAreaProvider initialMetrics={metrics}>
         <AppThemeProvider theme={theme}>
           <DrawerContentProbe
             api={harness.api}
@@ -401,6 +408,149 @@ describe('DrawerContent on iPhone Duo', () => {
     });
     expect(safeAreaProps(tree)['edges']).toEqual(['top', 'bottom', 'left']);
 
+    act(() => tree.unmount());
+  });
+});
+
+describe('DrawerContent vertical menu rail', () => {
+  let restoreWindow: () => void;
+
+  beforeEach(() => {
+    restoreWindow = sizeWindowLikeClosedDuo();
+  });
+
+  afterEach(() => {
+    restoreWindow();
+  });
+
+  function railButtons(tree: ReactTestRenderer): Queryable[] {
+    const rail = (tree.root as Queryable).findAll(
+      (node) => node.props['testID'] === 'scene-vertical-toolbar' && typeof node.type !== 'string',
+    )[0];
+    if (!rail) {
+      throw new Error('Expected the menu vertical toolbar');
+    }
+    return rail.findAll((node) => node.type === CircularToolbarButton);
+  }
+
+  it('moves close, selection, new chat, and settings into the rail without duplicate controls', async () => {
+    const harness = createHarness({ chats: [createChat()] });
+    const store = createDrawerStore(harness.api, harness.ws, { selectedChatId: 'thread' });
+    store.set(windowTraitsAtom, {
+      ...CLOSED_DUO_TRAITS,
+      headerLayout: { x: 16, y: 0, width: 366, height: 658 },
+    });
+    const onClose = jest.fn();
+    const tree = await renderDrawer(harness, { store, onClose }, CLOSED_DUO_SAFE_AREA);
+    const root = tree.root as Queryable;
+    const labels = ['Close session list', 'Select sessions', 'New chat', 'Open settings'];
+
+    const safeArea = root.findAll(
+      (node) => node.props['testID'] === 'drawer-safe-area' && typeof node.type !== 'string',
+    )[0];
+    expect(
+      StyleSheet.flatten(safeArea?.props['style'] as StyleProp<ViewStyle>)?.paddingTop ?? 0,
+    ).toBe(0);
+    const header = root.findAll(
+      (node) => node.props['testID'] === 'drawer-header' && typeof node.type !== 'string',
+    )[0];
+    expect(StyleSheet.flatten(header?.props['style'])).toMatchObject({
+      marginLeft: 16,
+      gap: 0,
+      minHeight: 52,
+    });
+    expect(railButtons(tree).map((button) => button.props['accessibilityLabel'])).toEqual(labels);
+    for (const label of labels) {
+      expect(
+        root.findAll(
+          (node) =>
+            node.type === CircularToolbarButton && node.props['accessibilityLabel'] === label,
+        ),
+      ).toHaveLength(1);
+    }
+    expect(hasText(root, 'Edit')).toBe(false);
+    await press(findByLabel(root, 'Close session list'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await press(findByLabel(root, 'New chat'));
+    expect(store.get(selectedChatIdAtom)).toBeNull();
+    await press(findByLabel(root, 'Open settings'));
+    expect(router.navigate).toHaveBeenCalledWith(routes.settings('profile-1'));
+    act(() => tree.unmount());
+  });
+
+  it('replaces the rail actions with Cancel while selecting and restores them after cancelling', async () => {
+    const harness = createHarness({ chats: [createChat()] });
+    const store = createDrawerStore(harness.api, harness.ws);
+    store.set(windowTraitsAtom, CLOSED_DUO_TRAITS);
+    const tree = await renderDrawer(harness, { store, onClose: jest.fn() }, CLOSED_DUO_SAFE_AREA);
+    const root = tree.root as Queryable;
+
+    await press(findByLabel(root, 'Select sessions'));
+    expect(railButtons(tree).map((button) => button.props['accessibilityLabel'])).toEqual([
+      'Cancel selecting sessions',
+    ]);
+    expect(findByLabel(root, 'Select all sessions')).toBeDefined();
+    expect(findByLabel(root, 'Delete selected sessions').props['disabled']).toBe(true);
+    for (const label of ['New chat', 'Open settings', 'Close session list']) {
+      expect(root.findAll((node) => node.props['accessibilityLabel'] === label)).toHaveLength(0);
+    }
+    await press(findByLabel(root, 'Select all sessions'));
+    expect(hasText(root, '1 session selected')).toBe(true);
+    await press(findByLabel(root, 'Cancel selecting sessions'));
+    expect(railButtons(tree).map((button) => button.props['accessibilityLabel'])).toEqual([
+      'Close session list',
+      'Select sessions',
+      'New chat',
+      'Open settings',
+    ]);
+    expect(hasText(root, 'Agent activity')).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('does not offer selection in an empty menu', async () => {
+    const harness = createHarness({ chats: [] });
+    const store = createDrawerStore(harness.api, harness.ws);
+    store.set(windowTraitsAtom, CLOSED_DUO_TRAITS);
+    const tree = await renderDrawer(harness, { store }, CLOSED_DUO_SAFE_AREA);
+
+    expect(railButtons(tree).map((button) => button.props['accessibilityLabel'])).toEqual([
+      'New chat',
+      'Open settings',
+    ]);
+    act(() => tree.unmount());
+  });
+
+  it('keeps actions inline when bars become horizontal or the menu is only a sidebar', async () => {
+    const harness = createHarness({ chats: [createChat()] });
+    const store = createDrawerStore(harness.api, harness.ws);
+    store.set(windowTraitsAtom, CLOSED_DUO_TRAITS);
+    const tree = await renderDrawer(harness, { store, onClose: jest.fn() }, CLOSED_DUO_SAFE_AREA);
+    const root = tree.root as Queryable;
+    expect(railButtons(tree)).toHaveLength(4);
+
+    for (const traits of [
+      { ...CLOSED_DUO_TRAITS, verticalBarEdge: 'unspecified' as const },
+      { ...CLOSED_DUO_TRAITS, horizontalSizeClass: 'regular' as const },
+      {
+        ...CLOSED_DUO_TRAITS,
+        horizontalSizeClass: 'regular' as const,
+        divisions: [{ x: 455, y: 0, width: 41, height: 669 }],
+      },
+    ]) {
+      act(() => {
+        Dimensions.set({
+          window: { width: 951, height: 669, scale: 3, fontScale: 1 },
+          screen: { width: 951, height: 669, scale: 3, fontScale: 1 },
+        });
+        store.set(windowTraitsAtom, traits);
+      });
+      expect(
+        root.findAll((node) => node.props['testID'] === 'scene-vertical-toolbar'),
+      ).toHaveLength(0);
+      expect(findByLabel(root, 'Select sessions')).toBeDefined();
+      expect(findByLabel(root, 'New chat')).toBeDefined();
+      expect(findByLabel(root, 'Open settings')).toBeDefined();
+    }
     act(() => tree.unmount());
   });
 });

@@ -4,6 +4,7 @@ import { useWindowDimensions } from 'react-native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 
 import {
+  resolveHeaderInsets,
   resolveReadableColumnInset,
   resolveSheetMargins,
   resolveShellLayout,
@@ -33,6 +34,14 @@ export function useVerticalBarFrame(): LayoutRect | null {
     return null;
   }
   return resolveVerticalBarFrame({ width, height }, traits, insets, toolbarPlacement);
+}
+
+/** Horizontal corner clearance beyond the rectangular safe area, without adding header height. */
+export function useHeaderInsets() {
+  const { width, height } = useWindowDimensions();
+  const traits = useAtomValue(windowTraitsAtom);
+  const insets = useContext(SafeAreaInsetsContext) ?? NO_INSETS;
+  return resolveHeaderInsets({ width, height }, traits, insets);
 }
 
 export interface SceneHorizontalInsets {

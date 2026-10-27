@@ -9,12 +9,15 @@ import type { Locator, Page } from '@playwright/test';
  */
 export const selectors = {
   drawer: (page: Page): Locator => page.getByTestId('drawer-glass-surface'),
+  drawerHeader: (page: Page): Locator => page.getByTestId('drawer-header'),
   drawerChatRow: (page: Page, chatId: string): Locator =>
     page.getByTestId(`drawer-chat-row-${chatId}`),
   drawerChatRows: (page: Page): Locator => page.locator('[data-testid^="drawer-chat-row-"]'),
   drawerNewChat: (page: Page): Locator => page.getByLabel('New chat').first(),
   drawerSearch: (page: Page): Locator => page.getByLabel('Search sessions'),
   drawerSettings: (page: Page): Locator => page.getByLabel('Open settings'),
+  sceneToolbarButtonGlass: (page: Page, key: string): Locator =>
+    page.getByTestId(`scene-toolbar-button-glass-${key}`),
   chatPreviewLink: (page: Page, url: string): Locator =>
     page.getByRole('button', { name: `Open ${url} in Browser`, exact: true }),
   browserReturnToChat: (page: Page): Locator => page.getByTestId('browser-return-to-chat'),

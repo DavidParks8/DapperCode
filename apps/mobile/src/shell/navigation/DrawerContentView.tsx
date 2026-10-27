@@ -11,7 +11,8 @@ import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { SelectionSheet, type SelectionSheetOption } from '@shared/ui/SelectionSheet';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { getDrawerFolderPickerLabels } from '@shell/navigation/drawerAttention';
-import { useShellLayout } from '@shell/layout/useShellLayout';
+import { useInlineToolbar } from '@shell/layout/SceneToolbar';
+import { useHeaderInsets, useShellLayout } from '@shell/layout/useShellLayout';
 import {
   createDrawerContentStyles,
   type DrawerContentStyles,
@@ -20,6 +21,7 @@ import { formatCompactCount } from '@shell/navigation/drawerContentHelpers';
 import type { DrawerScreen } from '@shell/navigation/drawerContentTypes';
 import { useDrawerContentAtoms } from '@shell/navigation/drawerContentViewContext';
 import { DrawerChatList } from '@shell/navigation/DrawerChatList';
+import { DrawerToolbar } from '@shell/navigation/DrawerToolbar';
 import {
   formatBulkDeleteLabel,
   formatSelectionSummary,
@@ -31,6 +33,7 @@ const CLEAR_SEARCH_HIT_SLOP = computeHitSlop({ width: 28, height: 28 });
 interface DrawerVisualProps {
   styles: DrawerContentStyles;
   theme: AppTheme;
+  inlineToolbar: boolean;
 }
 
 interface DrawerSelectionToolbarProps {
@@ -140,6 +143,7 @@ const DrawerFooter = memo(function DrawerFooter({
   handleOpenConnection,
   styles,
   theme,
+  inlineToolbar,
 }: DrawerFooterProps) {
   const atoms = useDrawerContentAtoms();
   const { totalChatCount, wsConnected } = useAtomValue(atoms.footerStateAtom);
@@ -194,17 +198,19 @@ const DrawerFooter = memo(function DrawerFooter({
         />
         <Text style={styles.footerBrowserText}>Browser</Text>
       </Pressable>
-      <CircularToolbarButton
-        accessibilityLabel="Open settings"
-        onPress={() => handleNavigate('Settings')}
-      >
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name="settings-outline"
-          size={18}
-          color={theme.colors.userBubble}
-        />
-      </CircularToolbarButton>
+      {inlineToolbar ? (
+        <CircularToolbarButton
+          accessibilityLabel="Open settings"
+          onPress={() => handleNavigate('Settings')}
+        >
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="settings-outline"
+            size={18}
+            color={theme.colors.userBubble}
+          />
+        </CircularToolbarButton>
+      ) : null}
     </View>
   );
 });
@@ -219,6 +225,7 @@ const DrawerHeader = memo(function DrawerHeader({
   handleNewChat,
   styles,
   theme,
+  inlineToolbar,
 }: DrawerHeaderProps) {
   const atoms = useDrawerContentAtoms();
   const {
@@ -236,6 +243,8 @@ const DrawerHeader = memo(function DrawerHeader({
   const clearSearch = useSetAtom(atoms.clearSearchAtom);
   const openFolderPicker = useSetAtom(atoms.openFolderPickerAtom);
   const setSearchQuery = useSetAtom(atoms.setSearchQueryAtom);
+  const headerInsets = useHeaderInsets();
+  const { sidebarSpansWindow } = useShellLayout();
   const attentionSummary =
     attentionCount === 0
       ? 'No requests'
@@ -245,7 +254,18 @@ const DrawerHeader = memo(function DrawerHeader({
 
   return (
     <View style={styles.header}>
-      <View style={styles.titleRow}>
+      <View
+        style={[
+          styles.titleRow,
+          {
+            marginLeft: headerInsets.left,
+            marginRight: sidebarSpansWindow ? headerInsets.right : 0,
+            // The controls have their own padding; reclaim the gaps instead of wrapping the title.
+            gap: Math.max(0, theme.spacing.sm - headerInsets.left),
+          },
+        ]}
+        testID="drawer-header"
+      >
         <View style={styles.titleCopy}>
           <Text style={styles.title}>
             {selectionMode ? formatSelectionTitle(selectedChatCount) : 'Agent activity'}
@@ -256,26 +276,30 @@ const DrawerHeader = memo(function DrawerHeader({
               : 'Ordered by what needs you next'}
           </Text>
         </View>
-        <DrawerSelectionButton styles={styles} />
-        {selectionMode ? null : (
-          <CircularToolbarButton accessibilityLabel="New chat" onPress={handleNewChat}>
-            <Ionicons
-              {...decorativeAccessibilityProps}
-              name="add"
-              size={24}
-              color={theme.colors.userBubble}
-            />
-          </CircularToolbarButton>
-        )}
-        {handleClose && !selectionMode ? (
-          <CircularToolbarButton accessibilityLabel="Close session list" onPress={handleClose}>
-            <Ionicons
-              {...decorativeAccessibilityProps}
-              name="chevron-forward"
-              size={22}
-              color={theme.colors.userBubble}
-            />
-          </CircularToolbarButton>
+        {inlineToolbar ? (
+          <>
+            <DrawerSelectionButton styles={styles} />
+            {selectionMode ? null : (
+              <CircularToolbarButton accessibilityLabel="New chat" onPress={handleNewChat}>
+                <Ionicons
+                  {...decorativeAccessibilityProps}
+                  name="add"
+                  size={24}
+                  color={theme.colors.userBubble}
+                />
+              </CircularToolbarButton>
+            )}
+            {handleClose && !selectionMode ? (
+              <CircularToolbarButton accessibilityLabel="Close session list" onPress={handleClose}>
+                <Ionicons
+                  {...decorativeAccessibilityProps}
+                  name="chevron-forward"
+                  size={22}
+                  color={theme.colors.userBubble}
+                />
+              </CircularToolbarButton>
+            ) : null}
+          </>
         ) : null}
       </View>
 
@@ -383,6 +407,7 @@ const DrawerBottomBar = memo(function DrawerBottomBar({
   handleOpenConnection,
   styles,
   theme,
+  inlineToolbar,
 }: DrawerBottomBarProps) {
   const atoms = useDrawerContentAtoms();
   const selectionMode = useAtomValue(atoms.selectionModeAtom);
@@ -394,6 +419,7 @@ const DrawerBottomBar = memo(function DrawerBottomBar({
       handleOpenConnection={handleOpenConnection}
       styles={styles}
       theme={theme}
+      inlineToolbar={inlineToolbar}
     />
   );
 });
@@ -460,6 +486,9 @@ export const DrawerContentView = memo(function DrawerContentView({
   const theme = useAppTheme();
   const styles = useMemo(() => createDrawerContentStyles(theme), [theme]);
   const { sidebarSpansWindow } = useShellLayout();
+  const horizontalToolbar = useInlineToolbar();
+  // Only a full-window menu reaches the system's bar column; sidebars keep their own controls.
+  const inlineToolbar = !sidebarSpansWindow || horizontalToolbar;
 
   return (
     <GlassSurface role="drawer" style={styles.container} testID="drawer-glass-surface">
@@ -474,6 +503,7 @@ export const DrawerContentView = memo(function DrawerContentView({
             handleNewChat={handleNewChat}
             styles={styles}
             theme={theme}
+            inlineToolbar={inlineToolbar}
           />
           <DrawerChatList
             handleDeleteChat={handleDeleteChat}
@@ -491,9 +521,17 @@ export const DrawerContentView = memo(function DrawerContentView({
           handleOpenConnection={handleOpenConnection}
           styles={styles}
           theme={theme}
+          inlineToolbar={inlineToolbar}
         />
       </SafeAreaView>
 
+      {!inlineToolbar ? (
+        <DrawerToolbar
+          handleClose={handleClose}
+          handleNewChat={handleNewChat}
+          handleNavigate={handleNavigate}
+        />
+      ) : null}
       <DrawerFolderPicker />
     </GlassSurface>
   );

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useAtomValue } from 'jotai';
 import { useState, type ReactNode } from 'react';
-import { View } from 'react-native';
+import { View, useWindowDimensions } from 'react-native';
 
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { useAppTheme } from '@shared/theme';
@@ -10,6 +10,7 @@ import {
   CircularToolbarButton,
 } from '@shared/ui/CircularToolbarButton';
 import { SelectionSheet } from '@shared/ui/SelectionSheet';
+import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { useShellLayout, useVerticalBarFrame } from '@shell/layout/useShellLayout';
 import { drawerCommandsAtom, useNavigationToggleLabel } from '@shell/state/drawer/atoms';
 
@@ -81,6 +82,7 @@ export function partitionToolbarItems(
 export function SceneVerticalToolbar({ items }: { items: readonly SceneToolbarItem[] }) {
   const frame = useVerticalBarFrame();
   const placement = useToolbarPlacement();
+  const { width: windowWidth } = useWindowDimensions();
   const theme = useAppTheme();
   const [overflowVisible, setOverflowVisible] = useState(false);
   if (!frame || items.length === 0) {
@@ -90,20 +92,32 @@ export function SceneVerticalToolbar({ items }: { items: readonly SceneToolbarIt
   const capacity = Math.floor((frame.height + VERTICAL_TOOLBAR_GAP) / slot);
   const { visible, overflow } = partitionToolbarItems(items, capacity);
   const renderButton = (item: SceneToolbarItem) => (
-    <CircularToolbarButton
+    <GlassSurface
       key={item.key}
-      accessibilityLabel={item.label}
-      accessibilityState={item.disabled ? { disabled: true } : undefined}
-      disabled={item.disabled}
-      onPress={item.onPress}
+      role="capsule"
+      isInteractive={!item.disabled}
+      style={{
+        width: CIRCULAR_TOOLBAR_BUTTON_SIZE,
+        height: CIRCULAR_TOOLBAR_BUTTON_SIZE,
+        borderRadius: theme.radius.full,
+        overflow: 'hidden',
+      }}
+      testID={`scene-toolbar-button-glass-${item.key}`}
     >
-      <Ionicons
-        {...decorativeAccessibilityProps}
-        name={item.icon}
-        size={20}
-        color={theme.colors.textPrimary}
-      />
-    </CircularToolbarButton>
+      <CircularToolbarButton
+        accessibilityLabel={item.label}
+        accessibilityState={item.disabled ? { disabled: true } : undefined}
+        disabled={item.disabled}
+        onPress={item.onPress}
+      >
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name={item.icon}
+          size={20}
+          color={theme.colors.textPrimary}
+        />
+      </CircularToolbarButton>
+    </GlassSurface>
   );
 
   return (
@@ -114,7 +128,8 @@ export function SceneVerticalToolbar({ items }: { items: readonly SceneToolbarIt
         top: frame.y,
         height: frame.height,
         width: frame.width,
-        [placement === 'leading' ? 'left' : 'right']: 0,
+        [placement === 'leading' ? 'left' : 'right']:
+          placement === 'leading' ? frame.x : windowWidth - frame.x - frame.width,
         alignItems: 'center',
         justifyContent: 'space-between',
         zIndex: 7,
@@ -123,19 +138,15 @@ export function SceneVerticalToolbar({ items }: { items: readonly SceneToolbarIt
     >
       <View style={{ alignItems: 'center', gap: VERTICAL_TOOLBAR_GAP }}>
         {visible.filter((item) => item.group !== 'bottom').map(renderButton)}
-        {overflow.length > 0 ? (
-          <CircularToolbarButton
-            accessibilityLabel={OVERFLOW_LABEL}
-            onPress={() => setOverflowVisible(true)}
-          >
-            <Ionicons
-              {...decorativeAccessibilityProps}
-              name="ellipsis-horizontal"
-              size={20}
-              color={theme.colors.textPrimary}
-            />
-          </CircularToolbarButton>
-        ) : null}
+        {overflow.length > 0
+          ? renderButton({
+              key: 'overflow',
+              label: OVERFLOW_LABEL,
+              icon: 'ellipsis-horizontal',
+              group: 'action',
+              onPress: () => setOverflowVisible(true),
+            })
+          : null}
       </View>
       <View style={{ alignItems: 'center', gap: VERTICAL_TOOLBAR_GAP }}>
         {visible.filter((item) => item.group === 'bottom').map(renderButton)}

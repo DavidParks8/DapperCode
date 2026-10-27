@@ -45,6 +45,12 @@ final class WindowLayoutObserverView: ExpoView {
     if let statusBar = window?.windowScene?.statusBarManager?.statusBarFrame, !statusBar.isEmpty {
       payload["statusBar"] = Self.dictionary(from: convert(statusBar, from: nil))
     }
+    if let frame = verticalBarLayout() {
+      payload["verticalBarLayout"] = Self.dictionary(from: frame)
+    }
+    if let frame = headerLayout() {
+      payload["headerLayout"] = Self.dictionary(from: frame)
+    }
     let next = payload as NSDictionary
     if lastPayload?.isEqual(next) == true { return }
     lastPayload = next
@@ -73,6 +79,30 @@ final class WindowLayoutObserverView: ExpoView {
     }
     #endif
     return []
+  }
+
+  private func verticalBarLayout() -> CGRect? {
+    #if canImport(UIKit, _version: 9127.0.85)
+    if #available(iOS 27.1, *) {
+      let edge: UIRectEdge
+      switch traitCollection.verticalBarEdge {
+      case .leading: edge = .left
+      case .trailing: edge = .right
+      default: return nil
+      }
+      return bounds.inset(by: edgeInsets(for: .bar(onEdge: edge, extent: 48)))
+    }
+    #endif
+    return nil
+  }
+
+  private func headerLayout() -> CGRect? {
+    #if canImport(UIKit, _version: 9127.0.85)
+    if #available(iOS 27.1, *), verticalBarEdge() != "unspecified" {
+      return bounds.inset(by: edgeInsets(for: .safeArea(cornerAdaptation: .horizontal)))
+    }
+    #endif
+    return nil
   }
 
   private static func name(of sizeClass: UIUserInterfaceSizeClass) -> String {

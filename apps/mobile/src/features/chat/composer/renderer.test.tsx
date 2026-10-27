@@ -1,6 +1,7 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import React from 'react';
-import { Dimensions, StyleSheet } from 'react-native';
+import { Dimensions, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { ReduceMotion } from 'react-native-reanimated';
 
@@ -118,6 +119,7 @@ function render(
   context: Omit<MainScreenComposerRendererContext, 'styles' | 'theme'>,
   overlay = false,
   store: AppStore = createTestStore(),
+  insets = { top: 0, right: 0, bottom: 0, left: 0 },
 ): ReactTestRenderer {
   const resultRef: { current: ReturnType<typeof useMainScreenComposerRenderer> | null } = {
     current: null,
@@ -127,9 +129,11 @@ function render(
     tree = renderer.create(
       withAppStore(
         store,
-        <AppThemeProvider theme={theme}>
-          <Harness context={context} overlay={overlay} resultRef={resultRef} />
-        </AppThemeProvider>,
+        <SafeAreaInsetsContext.Provider value={insets}>
+          <AppThemeProvider theme={theme}>
+            <Harness context={context} overlay={overlay} resultRef={resultRef} />
+          </AppThemeProvider>
+        </SafeAreaInsetsContext.Provider>,
       ),
     );
   });
@@ -143,7 +147,53 @@ function root(tree: ReactTestRenderer): QueryableInstance {
   return tree.root as QueryableInstance;
 }
 
+function composerStyle(tree: ReactTestRenderer) {
+  const composer = root(tree).findAll((node) => {
+    const style = StyleSheet.flatten(node.props['style'] as StyleProp<ViewStyle>);
+    return typeof style?.marginLeft === 'number' && typeof style.marginRight === 'number';
+  })[0];
+  return StyleSheet.flatten(composer?.props['style'] as StyleProp<ViewStyle>);
+}
+
 describe('mainScreenComposerRenderer suggestion surfaces', () => {
+  afterEach(() => {
+    act(() => {
+      Dimensions.set({
+        window: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+        screen: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+      });
+    });
+  });
+
+  it.each([
+    { width: 951, height: 669, left: 0, right: 84, marginLeft: 123.5, marginRight: 39.5 },
+    { width: 951, height: 669, left: 84, right: 0, marginLeft: 39.5, marginRight: 123.5 },
+    { width: 951, height: 669, left: 20, right: 84, marginLeft: 103.5, marginRight: 39.5 },
+    { width: 466, height: 678, left: 0, right: 84, marginLeft: 0, marginRight: 0 },
+  ])('centers the wide composer without shrinking narrow layouts: %p', (layout) => {
+    act(() => {
+      Dimensions.set({
+        window: { width: layout.width, height: layout.height, scale: 3, fontScale: 1 },
+        screen: { width: layout.width, height: layout.height, scale: 3, fontScale: 1 },
+      });
+    });
+    const store = createTestStore();
+    store.set(sidebarHiddenAtom, true);
+    for (const overlay of [true, false]) {
+      const tree = render(baseContext(), overlay, store, {
+        top: 0,
+        bottom: 34,
+        left: layout.left,
+        right: layout.right,
+      });
+      expect(composerStyle(tree)).toMatchObject({
+        marginLeft: layout.marginLeft,
+        marginRight: layout.marginRight,
+      });
+      act(() => tree.unmount());
+    }
+  });
+
   it('keeps the composer in the readable column and off a fold on wide windows', () => {
     act(() => {
       Dimensions.set({
@@ -154,16 +204,8 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
     const store = createTestStore();
     // A hidden sidebar gives the chat the whole 951pt window.
     store.set(sidebarHiddenAtom, true);
-    const overlayStyle = (tree: ReactTestRenderer) =>
-      StyleSheet.flatten(
-        root(tree).findAll((node) => {
-          const style = StyleSheet.flatten(node.props['style'] as never) as { position?: string };
-          return style?.position === 'absolute' && typeof node.props['onLayout'] === 'function';
-        })[0]?.props['style'] as never,
-      );
-
     const flat = render(baseContext(), true, store);
-    expect(overlayStyle(flat)).toMatchObject({
+    expect(composerStyle(flat)).toMatchObject({
       marginLeft: (951 - READABLE_COLUMN_WIDTH) / 2,
       marginRight: (951 - READABLE_COLUMN_WIDTH) / 2,
     });
@@ -175,8 +217,8 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
       verticalSizeClass: 'compact',
       divisions: [{ x: 455, y: 0, width: 41, height: 669 }],
     });
-    const folded = render(baseContext(), true, store);
-    expect(overlayStyle(folded)).toMatchObject({ marginLeft: 496, marginRight: 0 });
+    const folded = render(baseContext(), true, store, { top: 0, bottom: 34, left: 0, right: 84 });
+    expect(composerStyle(folded)).toMatchObject({ marginLeft: 496, marginRight: 0 });
     act(() => folded.unmount());
     act(() => {
       Dimensions.set({
