@@ -1,4 +1,4 @@
-import { EventType } from '@ag-ui/core';
+import { contentToText, EventType } from '@ag-ui/core';
 
 import { createAgUiThreadMessageState, type AgUiEventEnvelope } from '@bridge/agui/agUi';
 import {
@@ -52,7 +52,7 @@ describe('agUiStructuredAndTerminalReducers', () => {
     });
 
     const message = findMessage(state, 'tool-result:tool-1');
-    const text = message?.role === 'tool' ? message.content : '';
+    const text = message?.role === 'tool' ? contentToText(message.content) : '';
     expect(text.match(/file 3 body/g)).toHaveLength(1);
   });
 

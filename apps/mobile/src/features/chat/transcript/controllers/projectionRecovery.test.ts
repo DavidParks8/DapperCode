@@ -1,6 +1,6 @@
-import { EventType, type AGUIEvent } from '@ag-ui/core';
+import { EventType } from '@ag-ui/core';
 
-import { parseAgUiEventNotification } from '@bridge/agui/agUi';
+import { parseAgUiEventNotification, type AgUiEventEnvelope } from '@bridge/agui/agUi';
 import { MAX_MESSAGES_PER_THREAD } from '@bridge/agui/agUiMessagesState';
 import type { RawAcpSnapshot } from '@bridge/mapping/chatMapping';
 import { getMessageText } from '@bridge/messages';
@@ -53,7 +53,11 @@ function chat(messages: ChatMessage[], overrides: Partial<Chat> = {}): Chat {
   };
 }
 
-function apply(state: TestableThreadState, event: AGUIEvent, eventRunId = runId): void {
+function apply(
+  state: TestableThreadState,
+  event: AgUiEventEnvelope['event'],
+  eventRunId = runId,
+): void {
   const envelope = parseAgUiEventNotification({
     method: 'bridge/agui.event',
     params: { threadId, runId: eventRunId, event },

@@ -32,7 +32,12 @@ describe('generated Mermaid runtime asset', () => {
   });
 
   it('contains the pinned Mermaid version marker', () => {
-    expect(runtime).toMatch(/dappercode-mermaid-runtime 11\.16\.1 [a-f0-9]{64}/u);
+    expect(runtime).toMatch(/dappercode-mermaid-runtime 11\.17\.2 [a-f0-9]{64}/u);
+  });
+
+  it('embeds the patched sanitizer rather than the prebuilt sanitizer copy', () => {
+    expect(runtime).toContain('version="3.4.17"');
+    expect(runtime).not.toContain('version="3.4.12"');
   });
 
   it('executes the packaged runtime and returns a sanitized SVG for a valid diagram', async () => {

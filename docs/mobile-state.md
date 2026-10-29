@@ -24,6 +24,8 @@ lives under `apps/mobile/src/shell/state`, with feature-owned state under each f
 | `shell/state/commands.ts`                  | Screen-registered imperative entry points (replaces `useImperativeHandle` refs)                     |
 | `shell/state/theme.ts`                     | Theme derived from settings and the system colour scheme                                            |
 | `features/chat/state/*`                    | MainScreen screen state, grouped by domain, plus the reset registry                                 |
+| `shell/runtime/*`                         | Execution-target composition and target-switch controls, not transport implementations               |
+| `features/on-device/runtime/*`            | Scoped native owner, local turn/tool journal, preferences, drafts, and thread repository               |
 | `shell/state/testing.ts`                   | `createAppStore` helpers for tests (`createTestStore`, `createBridgeTestStore`, `withAppStore`)     |
 
 ## Conventions
@@ -47,7 +49,8 @@ lives under `apps/mobile/src/shell/state`, with feature-owned state under each f
 ## Navigation
 
 Expo Router is the only source of truth for navigation. Every screen has a profile-aware URL under
-`/profiles/[profileId]`; chats and sub-agent transcripts use dynamic path parameters. Use the typed
+`/profiles/[profileId]` for desktop mode; the isolated iOS subtree uses `/on-device`, with
+`/on-device/chat/[threadId]` for local conversations. Chats and sub-agent transcripts use dynamic path parameters. Use the typed
 builders in `shell/navigation/routes.ts`, clear nested detail history before selecting a profile or chat,
 use `router.push` for hierarchical drill-in screens, and use `router.back` for one-level dismissal.
 The one-shot new-chat handoff guard only prevents a superseded chat URL from rehydrating while `/new`
@@ -88,6 +91,16 @@ asynchronous boundaries even though native file mutations are synchronous. Brows
 local storage and never evaluate unsupported native `Paths` getters. The canonical native app-state
 document remains in SecureStore. Pass already-encoded profile paths to `File` as full URIs rather
 than separate path segments to avoid double-encoding their profile IDs.
+
+The shell-wide `preferredExecutionTargetAtom` stores the user's last explicit target preference,
+not the current route. Root composition resolves lifecycle ownership from the current URL and
+this cold-start preference. Generic state/cache hydration runs once independently of bridge effects.
+
+The local native owner is scoped to the `/on-device` provider and exposes synchronous revision
+subscriptions through `useSyncExternalStore`. It owns native contexts and serialized document writes;
+it never places native promises in atoms or reuses desktop turn/replay state. Local documents are
+atomically written in Application Support, separately from desktop profiles and chat caches.
+Interrupted tools are recovered as uncertain, not replayed. See [on-device mode](on-device.md).
 
 ## Testing
 

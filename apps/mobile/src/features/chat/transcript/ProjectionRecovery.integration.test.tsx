@@ -1,8 +1,8 @@
-import { EventType, type AGUIEvent } from '@ag-ui/core';
+import { EventType } from '@ag-ui/core';
 import { FlatList } from 'react-native';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
-import { parseAgUiEventNotification } from '@bridge/agui/agUi';
+import { parseAgUiEventNotification, type AgUiEventEnvelope } from '@bridge/agui/agUi';
 import { getMessageText } from '@bridge/messages';
 import type { Chat, ChatMessage as Message } from '@bridge/types/types';
 import { TestableThreadState } from '@shared/testing/TestableThreadState';
@@ -78,7 +78,11 @@ const baseProps: ChatTranscriptViewProps = {
   scrollRailEnabled: false,
 };
 
-function apply(state: TestableThreadState, event: AGUIEvent, eventRunId = runId): void {
+function apply(
+  state: TestableThreadState,
+  event: AgUiEventEnvelope['event'],
+  eventRunId = runId,
+): void {
   const envelope = parseAgUiEventNotification({
     method: 'bridge/agui.event',
     params: { threadId, runId: eventRunId, event },

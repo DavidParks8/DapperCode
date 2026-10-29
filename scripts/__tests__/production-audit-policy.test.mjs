@@ -35,13 +35,13 @@ const reviewed = {
   },
 };
 
-test('production audit accepts only the reviewed high-severity advisories', () => {
-  const result = runChecker(reviewed);
+test('production audit accepts a tree without high or critical advisories', () => {
+  const result = runChecker({});
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /2 reviewed high-severity advisories/);
+  assert.match(result.stdout, /no high or critical advisories/);
 });
 
-test('production audit rejects new, stale, or changed advisories', () => {
+test('production audit rejects all high and critical advisories, including former exceptions', () => {
   const unexpected = runChecker({
     ...reviewed,
     9999999: {
@@ -52,11 +52,12 @@ test('production audit rejects new, stale, or changed advisories', () => {
     },
   });
   assert.notEqual(unexpected.status, 0);
-  assert.match(unexpected.stderr, /unexpected: dangerous#9999999/);
+  assert.match(unexpected.stderr, /dangerous#9999999/);
 
-  const stale = runChecker({});
-  assert.notEqual(stale.status, 0);
-  assert.match(stale.stderr, /stale exceptions: image-size#1138808, image-size#1138809/);
+  const formerExceptions = runChecker(reviewed);
+  assert.notEqual(formerExceptions.status, 0);
+  assert.match(formerExceptions.stderr, /image-size#1138808@1\.2\.1/);
+  assert.match(formerExceptions.stderr, /image-size#1138809@1\.2\.1/);
 
   const changed = runChecker({
     ...reviewed,
@@ -66,7 +67,7 @@ test('production audit rejects new, stale, or changed advisories', () => {
     },
   });
   assert.notEqual(changed.status, 0);
-  assert.match(changed.stderr, /unexpected: image-size#1138808@2\.0\.2/);
+  assert.match(changed.stderr, /image-size#1138808@2\.0\.2/);
 
   const escalated = runChecker({
     ...reviewed,

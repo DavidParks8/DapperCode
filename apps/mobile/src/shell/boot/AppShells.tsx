@@ -10,6 +10,7 @@ import { appStatePersistenceErrorAtom } from '@shell/state/appState/atoms';
 import { saveBridgeProfileAtom } from '@shell/state/bridge/actions';
 import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
 import { OnboardingScreen } from '../../features/onboarding/screen/OnboardingScreen';
+import type { ReactNode } from 'react';
 import type { AppTheme } from '@shared/theme';
 import type { AppStyles } from '@shell/boot/appStyles';
 import type { BridgeProfile } from '@shell/state/bridgeProfiles';
@@ -59,6 +60,7 @@ export function PersistenceRecoveryShell({ styles }: ShellProps) {
 }
 
 interface ConnectionScreenProps {
+  introAction?: ReactNode;
   mode: ConnectionMode | 'initial';
   profileId?: string | null;
   /**
@@ -81,7 +83,12 @@ function initialWorkspaceIdForMode(
   return mode === 'edit' || mode === 'reconnect' ? (profile?.workspaceId ?? null) : null;
 }
 
-export function ConnectionScreen({ mode, profileId = null, onSaved }: ConnectionScreenProps) {
+export function ConnectionScreen({
+  mode,
+  profileId = null,
+  onSaved,
+  introAction,
+}: ConnectionScreenProps) {
   const router = useRouter();
   const activeBridgeProfile = useAtomValue(activeBridgeProfileAtom);
   const saveBridgeProfile = useSetAtom(saveBridgeProfileAtom);
@@ -99,6 +106,7 @@ export function ConnectionScreen({ mode, profileId = null, onSaved }: Connection
 
   return (
     <OnboardingScreen
+      introAction={introAction}
       mode={mode}
       initialBridgeUrl={initialUrl}
       initialBridgeToken={initialToken}

@@ -23,7 +23,7 @@
     "url": "git+https://github.com/DavidParks8/DapperCode.git"
   },
   "devDependencies": {
-    "@ag-ui/core": "0.0.57",
+    "@ag-ui/core": "1.0.3",
     "@playwright/test": "1.61.1",
     "@types/node": "^22.19.15",
     "@types/ws": "^8.18.1",
@@ -32,7 +32,7 @@
     "quicktype-core": "23.2.6",
     "typescript": "~6.0.3",
     "ws": "8.21.3",
-    "zod-to-json-schema": "^3.25.1"
+    "zod": "4.6.7"
   },
   "scripts": {
     "postinstall": "pnpm --filter @dappercode/mobile run mermaid:prepare",

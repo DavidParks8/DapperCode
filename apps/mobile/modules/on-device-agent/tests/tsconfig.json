@@ -1,0 +1,7 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "jest", "expo/types"]
+  },
+  "include": ["./*.tsx", "../../../expo-env.d.ts", "../../../src/shared/env.d.ts"]
+}

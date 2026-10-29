@@ -7,6 +7,7 @@ export interface OnboardingBridgeProfileDraft {
 }
 
 export interface OnboardingScreenProps {
+  introAction?: ReactNode;
   mode?: OnboardingMode;
   initialBridgeUrl?: string | null;
   initialBridgeToken?: string | null;
@@ -23,3 +24,4 @@ export type ConnectionCheck =
   | { kind: 'error'; message: string };
 
 export type OnboardingStep = 'intro' | 'connect';
+import type { ReactNode } from 'react';

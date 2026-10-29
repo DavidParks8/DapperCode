@@ -13,9 +13,10 @@
     "preandroid": "pnpm run mermaid:prepare",
     "android": "expo run:android",
     "prelint": "pnpm run mermaid:prepare",
-    "lint": "eslint src --ext .ts,.tsx --max-warnings=0 --cache --cache-strategy content --concurrency 4",
+    "lint": "eslint src modules/on-device-agent/tests --ext .ts,.tsx --max-warnings=0 --cache --cache-strategy content --concurrency 4",
     "pretypecheck": "pnpm run mermaid:prepare",
     "typecheck": "expo customize tsconfig.json && tsc --noEmit",
+    "typecheck:native": "tsc --noEmit -p modules/on-device-agent/tests/tsconfig.json",
     "prebuild": "pnpm run mermaid:prepare",
     "build": "expo export --platform all --output-dir dist",
     "pretest": "pnpm run mermaid:prepare",
@@ -26,7 +27,7 @@
     "test:watch": "jest --watch"
   },
   "dependencies": {
-    "@ag-ui/core": "0.0.57",
+    "@ag-ui/core": "1.0.3",
     "@expo/metro-runtime": "~57.0.16",
     "@expo/vector-icons": "15.0.3",
     "@gorhom/bottom-sheet": "^5.2.14",
@@ -52,7 +53,8 @@
     "expo-splash-screen": "~57.0.5",
     "expo-store-review": "~57.0.1",
     "jotai": "^2.20.2",
-    "mermaid": "11.16.1",
+    "llama.rn": "0.13.0-rc.8",
+    "mermaid": "11.17.2",
     "prismjs": "^1.30.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -65,7 +67,8 @@
     "react-native-svg": "15.15.4",
     "react-native-web": "0.21.2",
     "react-native-webview": "13.16.1",
-    "react-native-worklets": "0.10.0"
+    "react-native-worklets": "0.10.0",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@react-native/jest-preset": "0.86.2",
@@ -84,6 +87,7 @@
     "eslint-plugin-jest": "^29.16.0",
     "eslint-plugin-prettier": "^5.5.6",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "esbuild": "0.27.4",
     "globals": "^16.5.0",
     "jest": "^29.7.0",
     "jest-expo": "~57.0.2",
@@ -95,6 +99,9 @@
     "preset": "jest-expo",
     "setupFilesAfterEnv": [
       "<rootDir>/jest.setup.js"
+    ],
+    "modulePathIgnorePatterns": [
+      "<rootDir>/modules/on-device-agent/(?:ios/)?build/"
     ],
     "moduleNameMapper": {
       "^@bridge/(.*)$": "<rootDir>/src/bridge/$1",

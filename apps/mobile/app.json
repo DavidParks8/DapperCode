@@ -69,6 +69,14 @@
       "expo-secure-store",
       "expo-notifications",
       "expo-router",
+      "./plugins/withOnDeviceAgentNative",
+      [
+        "llama.rn",
+        {
+          "enableEntitlements": false,
+          "enableOpenCLAndHexagon": false
+        }
+      ],
       "./plugins/withIosSceneLifecycle",
       "./plugins/withIosBridgeTransportSecurity"
     ],

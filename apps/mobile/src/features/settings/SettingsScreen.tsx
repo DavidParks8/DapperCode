@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -276,7 +276,7 @@ function LegalSection({
   );
 }
 
-export function SettingsScreen() {
+export function SettingsScreen({ executionTargets }: { executionTargets?: ReactNode } = {}) {
   const theme = useAppTheme();
   const router = useRouter();
   const { profileId: routeProfileId } = useLocalSearchParams<{ profileId?: string }>();
@@ -377,6 +377,7 @@ export function SettingsScreen() {
             profileId={profileId}
             router={router}
           />
+          {executionTargets}
 
           <InstalledAgentsSection loading={loading} capabilities={capabilities} theme={theme} />
 

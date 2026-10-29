@@ -1,0 +1,4 @@
+module DapperGit [system] {
+  umbrella header "git2.h"
+  export *
+}

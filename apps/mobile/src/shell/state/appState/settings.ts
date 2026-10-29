@@ -27,6 +27,7 @@ function settingAtom<Key extends keyof AppSettingsState>(key: Key) {
 }
 
 export const defaultStartCwdAtom = settingAtom('defaultStartCwd');
+export const preferredExecutionTargetAtom = settingAtom('preferredExecutionTarget');
 export const preferredAgentIdAtom = settingAtom('preferredAgentId');
 export const agentSettingsAtom = settingAtom('agentSettings');
 export const approvalModeAtom = settingAtom('approvalMode');

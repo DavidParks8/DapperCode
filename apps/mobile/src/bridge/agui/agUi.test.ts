@@ -2,7 +2,7 @@ import { requireTestValue } from '@shared/testing/requireTestValue';
 import { EventType, type AGUIEvent } from '@ag-ui/core';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { EventSchemas } from '@ag-ui/core';
+import { EventSchema } from '@ag-ui/core/schemas';
 import { SUPPORTED_AG_UI_EVENT_TYPES } from '@bridge/agui/agUiMessages';
 
 import {
@@ -56,6 +56,59 @@ function reduceEvents(events: AGUIEvent[]): AgUiLiveAssistantMessages {
 }
 
 describe('AG-UI bridge notifications', () => {
+  it('preserves legacy optional-null envelopes and bridge replacement metadata', () => {
+    const parsed = parseAgUiEventNotification({
+      method: 'bridge/agui.event',
+      params: {
+        threadId: 'thread',
+        runId: 'run',
+        event: {
+          type: EventType.TEXT_MESSAGE_START,
+          messageId: 'replacement',
+          role: null,
+          rawEvent: null,
+          replacesMessageId: 'draft',
+        },
+      },
+    });
+    expect(parsed).not.toBeNull();
+    if (!parsed) {
+      throw new Error('Expected the compatible bridge envelope.');
+    }
+    const state = updateAgUiLiveAssistantMessages({}, parsed);
+    expect(state['thread']?.messages[0]).toMatchObject({
+      id: 'replacement',
+      role: 'assistant',
+    });
+    expect(state['thread']?.replacesMessageIdByMessageId).toEqual({ replacement: 'draft' });
+  });
+
+  it('projects AG-UI multipart tool text without changing existing string tool output', () => {
+    const parsed = parseAgUiEventNotification({
+      method: 'bridge/agui.event',
+      params: {
+        threadId: 'thread',
+        runId: 'run',
+        event: {
+          type: EventType.TOOL_CALL_RESULT,
+          messageId: 'result',
+          toolCallId: 'tool',
+          content: [{ type: 'text', text: 'actual tool result' }],
+        },
+      },
+    });
+    expect(parsed).not.toBeNull();
+    if (!parsed) {
+      throw new Error('Expected a multipart tool result.');
+    }
+    const state = updateAgUiLiveAssistantMessages({}, parsed);
+    expect(state['thread']?.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'tool', content: 'actual tool result' }),
+      ]),
+    );
+  });
+
   it('validates AG-UI fixture events and applies tool revision updates in order', () => {
     const manifest = JSON.parse(
       readFileSync(
@@ -66,11 +119,11 @@ describe('AG-UI bridge notifications', () => {
 
     expect(manifest.fixtures.agUiEvents).toHaveLength(15);
     for (const event of manifest.fixtures.agUiEvents) {
-      expect(EventSchemas.safeParse(event).success).toBe(true);
+      expect(EventSchema.safeParse(event).success).toBe(true);
     }
 
     const toolRevisionEvents = manifest.fixtures.toolRevisionEvents.map((event) =>
-      EventSchemas.parse(event),
+      EventSchema.parse(event),
     );
     const toolState = toolRevisionEvents.reduce(
       (state, event) =>
@@ -99,20 +152,27 @@ describe('AG-UI bridge notifications', () => {
   });
 
   it('handles current AG-UI event types and rejects deprecated thinking events', () => {
-    /* eslint-disable @typescript-eslint/no-deprecated -- This regression test verifies rejection of legacy event members. */
-    const deprecated = new Set<EventType>([
-      EventType.THINKING_START,
-      EventType.THINKING_END,
-      EventType.THINKING_TEXT_MESSAGE_START,
-      EventType.THINKING_TEXT_MESSAGE_CONTENT,
-      EventType.THINKING_TEXT_MESSAGE_END,
+    const deprecated = new Set([
+      'THINKING_START',
+      'THINKING_END',
+      'THINKING_TEXT_MESSAGE_START',
+      'THINKING_TEXT_MESSAGE_CONTENT',
+      'THINKING_TEXT_MESSAGE_END',
     ]);
     const current = new Set(
-      Object.values(EventType).filter((eventType) => !deprecated.has(eventType)),
+      Object.values(EventType).filter(
+        (eventType) =>
+          !deprecated.has(eventType) &&
+          ![
+            EventType.SUBAGENT_STARTED,
+            EventType.SUBAGENT_FINISHED,
+            EventType.SUBAGENT_ERROR,
+          ].includes(eventType),
+      ),
     );
     expect(SUPPORTED_AG_UI_EVENT_TYPES).toEqual(current);
     for (const eventType of deprecated) {
-      expect(SUPPORTED_AG_UI_EVENT_TYPES.has(eventType)).toBe(false);
+      expect(Array.from(SUPPORTED_AG_UI_EVENT_TYPES)).not.toContain(eventType);
       expect(
         parseAgUiEventNotification({
           method: 'bridge/agui.event',
@@ -120,16 +180,15 @@ describe('AG-UI bridge notifications', () => {
             threadId: 'thread',
             runId: 'run',
             event:
-              eventType === EventType.THINKING_START
+              eventType === 'THINKING_START'
                 ? { type: eventType, title: 'legacy' }
-                : eventType === EventType.THINKING_TEXT_MESSAGE_CONTENT
+                : eventType === 'THINKING_TEXT_MESSAGE_CONTENT'
                   ? { type: eventType, delta: 'legacy' }
                   : { type: eventType },
           },
         }),
       ).toBeNull();
     }
-    /* eslint-enable @typescript-eslint/no-deprecated */
   });
   it('parses canonical text events and projects them to the migration reducer', () => {
     expect(parseAgUiEventNotification(notification)).toEqual(notification.params);

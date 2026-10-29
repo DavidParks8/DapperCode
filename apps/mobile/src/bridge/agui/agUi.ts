@@ -1,4 +1,10 @@
-import { EventSchemas, EventType, type AGUIEvent } from '@ag-ui/core';
+import {
+  EventType,
+  omitOptionalNulls,
+  type AGUIEvent,
+  type TextMessageStartEvent,
+} from '@ag-ui/core';
+import { EventSchema } from '@ag-ui/core/schemas';
 
 import type { RpcNotification } from '@bridge/types/types';
 import { SUPPORTED_AG_UI_EVENT_TYPES } from '@bridge/agui/agUiMessagesState';
@@ -18,7 +24,9 @@ export interface AgUiEventEnvelope {
   threadId: string;
   runId: string;
   sourceTurnId?: string;
-  event: AGUIEvent;
+  event:
+    | Exclude<AGUIEvent, TextMessageStartEvent>
+    | (TextMessageStartEvent & { replacesMessageId?: string });
 }
 
 export function parseAgUiEventNotification(
@@ -31,7 +39,7 @@ export function parseAgUiEventNotification(
   const threadId = nonEmptyString(params?.['threadId']);
   const runId = nonEmptyString(params?.['runId']);
   const sourceTurnId = nonEmptyString(params?.['sourceTurnId']) ?? undefined;
-  const parsedEvent = EventSchemas.safeParse(params?.['event']);
+  const parsedEvent = EventSchema.safeParse(omitOptionalNulls(params?.['event'], 'Event'));
   if (!threadId || !runId || !parsedEvent.success) {
     return null;
   }

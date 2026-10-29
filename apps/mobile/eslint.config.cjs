@@ -80,6 +80,64 @@ module.exports = [
     },
   },
   {
+    files: ['src/bridge/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/on-device/**', 'llama.rn'],
+              message: 'Bridge implementations must not depend on the on-device runtime.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: [
+      'src/shared/**/*.{ts,tsx}',
+      'src/features/chat/**/*.{ts,tsx}',
+      'src/features/git/**/*.{ts,tsx}',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['llama.rn', '**/on-device/auth/**', '**/on-device/native/**'],
+              message:
+                'Shared consumers use runtime contracts, not native inference or authentication.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/features/on-device/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@bridge/client/**',
+                '@bridge/ws/**',
+                '**/bridge/client/**',
+                '**/bridge/ws/**',
+              ],
+              message: 'On-device implementations must not depend on concrete bridge transports.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Flat-config overrides cannot target individual callbacks; this exact adapter file and the two
     // rules affected by react-native-markdown-display's `any` styles argument are the narrowest scope.
     files: ['src/features/chat/message/markdownRules.tsx'],
@@ -121,6 +179,13 @@ module.exports = [
     },
   },
   prettierRecommended,
+  {
+    files: ['modules/on-device-agent/tests/*.tsx'],
+    rules: {
+      complexity: 'off',
+      '@typescript-eslint/require-await': 'off',
+    },
+  },
   {
     files: ['**/*.ts', '**/*.tsx'],
     rules: {

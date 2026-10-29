@@ -10,7 +10,7 @@ import {
 } from '../state/turn';
 import { screenSetter } from '../state/registry';
 import { activityAtom, pendingPlanImplementationPromptsAtom } from '../state/composer';
-import { EventType } from '@ag-ui/core';
+import { EventType, type CustomEvent } from '@ag-ui/core';
 
 import {
   type AgUiEventEnvelope,
@@ -138,7 +138,9 @@ export function processAgUiRunEvents(
     }
   }
 
-  function isTokenTotalsCustomEvent(envelope: AgUiEventEnvelope): boolean {
+  function isTokenTotalsCustomEvent(
+    envelope: AgUiEventEnvelope,
+  ): envelope is AgUiEventEnvelope & { event: CustomEvent } {
     return (
       envelope.event.type === EventType.CUSTOM &&
       envelope.event.name === 'dappercode.dev/tokenTotals'

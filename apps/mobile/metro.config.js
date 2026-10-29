@@ -3,6 +3,10 @@ const path = require('path');
 const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
+config.resolver.blockList = [].concat(
+  config.resolver.blockList ?? [],
+  /[/\\]modules[/\\]on-device-agent[/\\](?:ios[/\\])?build[/\\]/,
+);
 
 /**
  * Metro emits CommonJS, so a dependency whose `import` export condition uses `import.meta` produces

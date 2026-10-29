@@ -13,7 +13,7 @@ import {
   type AgUiThreadMessageState,
 } from '@bridge/agui/agUiMessagesState';
 import type { ChatMessage, ChatMessageSubAgentMeta } from '@bridge/types/types';
-import type { ToolCall } from '@ag-ui/core';
+import { contentToText, type ToolCall } from '@ag-ui/core';
 import { upsertMessage } from '@bridge/agui/agUiMessageMutations';
 import { upsertToolResult } from '@bridge/agui/agUiToolAndCustomEventReducers';
 import { attachToolMeta, withToolStructured } from '@bridge/toolMeta';
@@ -124,7 +124,7 @@ export function reduceToolContent(
   const structured = renderToolStructuredContent(value);
   const messageId = current.toolResultMessageIdByCallId[toolCallId] ?? `tool-result:${toolCallId}`;
   const existing = findMessage(current, messageId);
-  const existingText = existing?.role === 'tool' ? existing.content : '';
+  const existingText = existing?.role === 'tool' ? contentToText(existing.content) : '';
   const base = withoutPreviousStructuredText(
     existingText,
     current.structuredTextByCallId[toolCallId] ?? '',

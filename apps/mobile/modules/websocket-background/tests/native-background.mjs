@@ -159,12 +159,11 @@ export default async function scenario(e2e) {
       await e2e.run('xcrun', ['simctl', 'boot', simulator]);
       await e2e.run('xcrun', ['simctl', 'bootstatus', simulator, '-b'], { timeoutMs: 300_000 });
       await e2e.run('xcrun', ['simctl', 'install', simulator, app], { timeoutMs: 120_000 });
-      await e2e.run('xcrun', [
-        'simctl',
-        'install',
-        simulator,
-        path.join(e2e.runtimeDir, 'BackgroundHost.app'),
-      ], { timeoutMs: 120_000 });
+      await e2e.run(
+        'xcrun',
+        ['simctl', 'install', simulator, path.join(e2e.runtimeDir, 'BackgroundHost.app')],
+        { timeoutMs: 120_000 },
+      );
       nativeApp = await e2e.start(
         'xcrun',
         ['simctl', 'launch', '--console-pty', simulator, bundle],
@@ -185,10 +184,7 @@ export default async function scenario(e2e) {
       await e2e.waitForLog(nativeApp.label, /NATIVE_BACKGROUND_1/);
       // Drive the return without waiting for a background timer. Deliberately observe it late;
       // the native fixture, not host log delivery, measures the actual six-to-ten-second window.
-      await Promise.all([
-        returnToApp,
-        new Promise((resolve) => setTimeout(resolve, 11_000)),
-      ]);
+      await Promise.all([returnToApp, new Promise((resolve) => setTimeout(resolve, 11_000))]);
       await e2e.waitForLog(nativeApp.label, /NATIVE_FOREGROUND_1/);
       await e2e.check('return before ten seconds releases the budget', () => nativeApp.isRunning());
     });

@@ -42,6 +42,9 @@ import { chatSnapshotCacheAtom } from '@shell/state/chat/atoms';
 import { createTestStore, withAppStore } from '@shell/state/testing';
 import { themeAtom } from '@shell/state/theme';
 import { RootLayout } from '@shell/boot/RootLayout';
+import { useAppBridgeLifecycle } from '@shell/boot/useAppBridgeLifecycle';
+import { usePushNotificationsLifecycle } from '@shell/boot/usePushNotificationsLifecycle';
+import { router } from 'expo-router';
 
 function renderRoot(store = createTestStore()): ReactTestRenderer {
   let tree: ReactTestRenderer | undefined;
@@ -61,6 +64,7 @@ function jsonOf(tree: ReactTestRenderer): string {
 describe('RootLayout', () => {
   beforeEach(() => {
     mockRootStackProps = null;
+    jest.clearAllMocks();
   });
 
   it('shows the startup shell until persisted state and chat cache are ready', () => {
@@ -102,6 +106,19 @@ describe('RootLayout', () => {
       contentStyle: { backgroundColor: store.get(themeAtom).colors.bgMain },
     });
 
+    act(() => tree.unmount());
+  });
+
+  it('keeps bridge and push effects unmounted on local routes, then restores them on a desktop route', () => {
+    const store = createTestStore();
+    store.set(chatSnapshotCacheAtom, null);
+    act(() => router.replace('/on-device'));
+    const tree = renderRoot(store);
+    expect(useAppBridgeLifecycle).not.toHaveBeenCalled();
+    expect(usePushNotificationsLifecycle).not.toHaveBeenCalled();
+    act(() => router.replace('/profiles/profile-1/chats/new'));
+    expect(useAppBridgeLifecycle).toHaveBeenCalledTimes(1);
+    expect(usePushNotificationsLifecycle).toHaveBeenCalledTimes(1);
     act(() => tree.unmount());
   });
 });

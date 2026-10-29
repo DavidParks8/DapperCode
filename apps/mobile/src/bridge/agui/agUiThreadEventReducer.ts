@@ -1,4 +1,4 @@
-import { EventType } from '@ag-ui/core';
+import { contentToText, EventType } from '@ag-ui/core';
 import {
   appendText,
   appendToolResult,
@@ -50,7 +50,7 @@ function reduceTextMessageStartEvent(
     ? current
     : upsertMessage(
         current,
-        textMessage(event.messageId, event.role, '', event.name),
+        textMessage(event.messageId, event.role ?? 'assistant', '', event.name),
         envelope.runId,
         event.timestamp,
       );
@@ -310,7 +310,7 @@ function reduceToolCallResultEvent(
     envelope.runId,
     event.messageId,
     event.toolCallId,
-    event.content,
+    contentToText(event.content),
     event.timestamp,
   );
 }
