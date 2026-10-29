@@ -16,6 +16,7 @@ import {
   type ChatScrollRailJumpController,
 } from './scrollRail/jumpController';
 import {
+  CHAT_SCROLL_RAIL_CONTENT_CLEARANCE,
   CHAT_SCROLL_RAIL_REVEAL_MARGIN,
   type collectUserMessageAnchors,
 } from './scrollRail/geometry';
@@ -257,24 +258,29 @@ export function renderJumpToLatestButton(params: {
 
 /**
  * Inverted padding: bottom clears the top chrome plus a gutter; top clears the composer. The sides
- * keep messages in a readable column on wide windows.
+ * keep messages in a readable column on wide windows, clear of the rail pinned there.
  */
 export function useTranscriptContentLayout(
   baseStyle: StyleProp<ViewStyle>,
   insets: { top: number; bottom: number },
   gutter: number,
+  railPinnable: boolean,
 ): { messageListContentStyle: StyleProp<ViewStyle>; foldLeadingInset: number } {
   const { readable, foldLeading } = useSceneContentInsets();
+  const horizontal = Math.max(
+    gutter + readable,
+    railPinnable ? CHAT_SCROLL_RAIL_CONTENT_CLEARANCE : 0,
+  );
   const messageListContentStyle = useMemo(
     () => [
       baseStyle,
       {
         paddingTop: insets.bottom,
         paddingBottom: insets.top + gutter,
-        paddingHorizontal: gutter + readable,
+        paddingHorizontal: horizontal,
       },
     ],
-    [baseStyle, gutter, insets.bottom, insets.top, readable],
+    [baseStyle, gutter, horizontal, insets.bottom, insets.top],
   );
   return { messageListContentStyle, foldLeadingInset: foldLeading };
 }

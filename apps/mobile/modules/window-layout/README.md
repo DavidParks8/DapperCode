@@ -37,10 +37,12 @@ design guidance without branching on the device.
     uses spare column gutters to balance asymmetric side insets and center across the wide window,
     including beneath its rail, without shrinking narrow layouts or crossing safe areas. Folded
     layouts still keep it on the trailing page. Sheets cap at `SHEET_MAX_WIDTH` and center on wide
-    windows.
+    windows. On wide windows the transcript keeps its messages clear of the pinned message rail,
+    which spans only the visible transcript between the top chrome and the composer.
 
 Screens declare their icon buttons once as `SceneToolbarItem`s, grouped as `navigation`, `action`,
-or `bottom`. `SceneVerticalToolbar` renders them as round 48pt glass controls when bars are vertical,
+or `bottom`. `SceneVerticalToolbar` renders them as round 48pt glass controls, 12pt apart, when bars
+are vertical,
 using the shared themed fallback where native glass is unavailable. When the
 column runs out of room, lower-priority items collapse into a standard "More" (ellipsis)
 overflow menu; navigation never collapses. Screens whose root pads for safe areas wrap themselves

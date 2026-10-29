@@ -30,7 +30,7 @@ export interface SceneToolbarItem {
   readonly disabled?: boolean;
 }
 
-export const VERTICAL_TOOLBAR_GAP = 4;
+export const VERTICAL_TOOLBAR_GAP = 12;
 const OVERFLOW_LABEL = 'More';
 
 /**

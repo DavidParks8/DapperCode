@@ -1,5 +1,5 @@
 import { Provider, createStore } from 'jotai';
-import { Dimensions, StyleSheet } from 'react-native';
+import { Dimensions, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -165,6 +165,16 @@ describe('SceneVerticalToolbar', () => {
       'back',
     ]);
     expect(buttons(tree)[1]?.props['disabled']).toBe(true);
+    const groups =
+      bar?.findAll(
+        (node) =>
+          typeof StyleSheet.flatten(node.props['style'] as StyleProp<ViewStyle>)?.gap === 'number',
+      ) ?? [];
+    expect(groups.length).toBeGreaterThan(0);
+    for (const group of groups) {
+      // Separate round glass controls need visible separation instead of reading as one blob.
+      expect(StyleSheet.flatten(group.props['style'])).toMatchObject({ gap: 12 });
+    }
     act(() => (buttons(tree)[2]?.props['onPress'] as () => void)());
     expect(onBack).toHaveBeenCalledTimes(1);
     act(() => tree.unmount());
@@ -219,7 +229,7 @@ describe('SceneVerticalToolbar', () => {
 
   it('collapses lower-priority items into a standard overflow menu when the column is short', () => {
     const onRename = jest.fn();
-    // Only two 48pt slots fit below the status column on this short window.
+    // Only two 48pt slots and their 12pt gap fit below the status column on this short window.
     const tree = renderToolbar(
       DUO_CLOSED,
       [
@@ -227,7 +237,7 @@ describe('SceneVerticalToolbar', () => {
         item('rename', 'action', { onPress: onRename }),
         item('git', 'action'),
       ],
-      { width: 466, height: 174 + 8 + 100 + 20 },
+      { width: 466, height: 174 + 8 + 108 + 20 },
     );
 
     expect(buttons(tree).map((button) => button.props['accessibilityLabel'])).toEqual([

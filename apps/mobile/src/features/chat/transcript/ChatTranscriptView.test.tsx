@@ -15,6 +15,9 @@ import { ChatScrollRail } from './scrollRail/ChatScrollRail';
 import { JUMP_TO_LATEST_VISIBLE_SIZE } from './viewChrome';
 import {
   CHAT_SCROLL_RAIL_ACTIVATION_DELAY_MS,
+  CHAT_SCROLL_RAIL_COLLAPSED_ACTIVE_WIDTH,
+  CHAT_SCROLL_RAIL_CONTENT_CLEARANCE,
+  CHAT_SCROLL_RAIL_HORIZONTAL_PADDING,
   CHAT_SCROLL_RAIL_TOUCH_WIDTH,
 } from './scrollRail/geometry';
 import { mockGestureByTestId, resetMockGestures } from '@shared/testing/gestureHandlerMock';
@@ -778,6 +781,55 @@ describe('ChatTranscriptView magical scroll rail', () => {
     act(() => tree.unmount());
   });
 
+  it('keeps the pinned rail between the chrome and composer and clear of messages', () => {
+    const messages: Chat['messages'] = [
+      { id: 'u1', role: 'user', content: 'First', createdAt: '2026-08-01T00:00:00Z' },
+      { id: 'a1', role: 'assistant', content: 'Reply', createdAt: '2026-08-01T00:00:01Z' },
+      { id: 'u2', role: 'user', content: 'Second', createdAt: '2026-08-01T00:00:02Z' },
+    ];
+    const tree = render({ chat: makeChat({ messages }), topInset: 96, bottomInset: 88 });
+    act(() => getList(tree).props.onLayout({ nativeEvent: { layout: { height: 600 } } }));
+    const rail = tree.root.findAll(
+      (node) => Array.isArray(node.props['anchors']) && 'alwaysVisible' in node.props,
+    )[0];
+
+    expect(railPinned(tree)).toBe(true);
+    // The composer floats over the bottom of the list; the rail must not place ticks beside it.
+    expect(rail?.props['viewportHeight']).toBe(600 - 96 - 88);
+    const contentStyle = getList(tree).props.contentContainerStyle[1] as {
+      paddingHorizontal: number;
+    };
+    expect(contentStyle.paddingHorizontal).toBeGreaterThanOrEqual(
+      CHAT_SCROLL_RAIL_HORIZONTAL_PADDING +
+        CHAT_SCROLL_RAIL_COLLAPSED_ACTIVE_WIDTH +
+        theme.spacing.sm,
+    );
+    act(() => tree.unmount());
+
+    // Narrow overlay windows don't pin the rail, so they keep the compact transcript gutter.
+    act(() => {
+      Dimensions.set({
+        window: { width: 390, height: 844, scale: 3, fontScale: 1 },
+        screen: { width: 390, height: 844, scale: 3, fontScale: 1 },
+      });
+    });
+    try {
+      const narrow = render({ chat: makeChat({ messages }), topInset: 96, bottomInset: 88 });
+      expect(railPinned(narrow)).toBe(false);
+      expect(getList(narrow).props.contentContainerStyle[1]).toMatchObject({
+        paddingHorizontal: theme.spacing.lg,
+      });
+      act(() => narrow.unmount());
+    } finally {
+      act(() => {
+        Dimensions.set({
+          window: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+          screen: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+        });
+      });
+    }
+  });
+
   it('renders one fixed-pitch bar per user message and configures delayed edge activation', () => {
     const messages: Chat['messages'] = [
       { id: 'u1', role: 'user', content: 'First', createdAt: '2026-08-01T00:00:00Z' },
@@ -1332,8 +1384,8 @@ describe('ChatTranscriptView continuation', () => {
     expect(list.props.contentContainerStyle[1]).toEqual({
       paddingTop: 380,
       paddingBottom: theme.spacing.lg,
-      // Narrow windows keep only the transcript gutter; wide ones add a readable-column inset.
-      paddingHorizontal: theme.spacing.lg,
+      // The default test window is wide enough to dock the sidebar and pin the rail.
+      paddingHorizontal: CHAT_SCROLL_RAIL_CONTENT_CLEARANCE,
     });
     scroll(list, 320, 1100, 500);
     expect(autoScrollStateRef.current.shouldStickToBottom).toBe(true);
@@ -1662,7 +1714,7 @@ describe('ChatTranscriptView continuation', () => {
     expect(androidList.props.contentContainerStyle[1]).toEqual({
       paddingTop: 24,
       paddingBottom: 40 + theme.spacing.lg,
-      paddingHorizontal: theme.spacing.lg,
+      paddingHorizontal: CHAT_SCROLL_RAIL_CONTENT_CLEARANCE,
     });
     act(() => androidTree.unmount());
 
@@ -1677,7 +1729,7 @@ describe('ChatTranscriptView continuation', () => {
     expect(iosList.props.contentContainerStyle[1]).toEqual({
       paddingTop: 12,
       paddingBottom: 40 + theme.spacing.lg,
-      paddingHorizontal: theme.spacing.lg,
+      paddingHorizontal: CHAT_SCROLL_RAIL_CONTENT_CLEARANCE,
     });
     act(() => iosTree.unmount());
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOS });
@@ -1688,7 +1740,7 @@ describe('ChatTranscriptView continuation', () => {
     expect(getList(tree).props.contentContainerStyle[1]).toEqual({
       paddingTop: 0,
       paddingBottom: 24 + theme.spacing.lg,
-      paddingHorizontal: theme.spacing.lg,
+      paddingHorizontal: CHAT_SCROLL_RAIL_CONTENT_CLEARANCE,
     });
 
     update(tree, { topInset: 64 });
@@ -1696,7 +1748,7 @@ describe('ChatTranscriptView continuation', () => {
     expect(getList(tree).props.contentContainerStyle[1]).toEqual({
       paddingTop: 0,
       paddingBottom: 64 + theme.spacing.lg,
-      paddingHorizontal: theme.spacing.lg,
+      paddingHorizontal: CHAT_SCROLL_RAIL_CONTENT_CLEARANCE,
     });
     act(() => tree.unmount());
   });

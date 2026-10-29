@@ -361,7 +361,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     },
   ).current;
   const viewabilityConfig = useRef({ viewAreaCoveragePercentThreshold: 1 }).current;
-  const railViewportHeight = Math.max(0, viewportHeight - topInset);
+  const railViewportHeight = Math.max(0, viewportHeight - topInset - bottomInset);
   const railCapacity = railWindowCapacity(railViewportHeight);
   const handleRailInteractionStart = useCallback(() => {
     onScrollInteractionStart();
@@ -423,6 +423,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     styles.messageListContent,
     { top: topInset, bottom: bottomInset },
     theme.spacing.lg,
+    sidebarMode !== 'overlay',
   );
   const jumpToLatestHitSlop = useMemo(() => computeHitSlop(JUMP_TO_LATEST_VISIBLE_SIZE), []);
   const listBatchingConfig = resolveListBatchingConfig(
