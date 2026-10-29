@@ -146,6 +146,51 @@ beforeEach(() => {
     .mockImplementation(() => `00000000-0000-4000-8000-${String(++sequence).padStart(12, '0')}`);
 });
 
+describe('public GitHub OAuth configuration', () => {
+  const originalClientId = process.env.EXPO_PUBLIC_GITHUB_CLIENT_ID;
+
+  afterEach(() => {
+    if (originalClientId === undefined) {
+      delete process.env.EXPO_PUBLIC_GITHUB_CLIENT_ID;
+    } else {
+      process.env.EXPO_PUBLIC_GITHUB_CLIENT_ID = originalClientId;
+    }
+    jest.restoreAllMocks();
+  });
+
+  test.each([
+    [undefined, 'Ov23ctzKpdigHwQUbG8X'],
+    [' public-build-override ', 'public-build-override'],
+  ])(
+    'the configured UI state and device request use the same client ID for %s',
+    async (override, expected) => {
+      if (override === undefined) {
+        delete process.env.EXPO_PUBLIC_GITHUB_CLIENT_ID;
+      } else {
+        process.env.EXPO_PUBLIC_GITHUB_CLIENT_ID = override;
+      }
+      const request = jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Offline test'));
+      const h = harness();
+      expect(h.runtime.authConfigured()).toBe(true);
+      await expect(h.runtime.signIn(jest.fn())).rejects.toThrow();
+      expect(request).toHaveBeenCalledWith(
+        'https://github.com/login/device/code',
+        expect.objectContaining({ body: `client_id=${expected}&scope=repo` }),
+      );
+      expect(h.native.storeGitCredential).not.toHaveBeenCalled();
+    },
+  );
+
+  test('an explicitly empty build override disables sign-in without making a request', async () => {
+    process.env.EXPO_PUBLIC_GITHUB_CLIENT_ID = '';
+    const request = jest.spyOn(globalThis, 'fetch');
+    const h = harness();
+    expect(h.runtime.authConfigured()).toBe(false);
+    await expect(h.runtime.signIn(jest.fn())).rejects.toThrow('not configured');
+    expect(request).not.toHaveBeenCalled();
+  });
+});
+
 async function ready() {
   const h = harness();
   await h.runtime.initialize();

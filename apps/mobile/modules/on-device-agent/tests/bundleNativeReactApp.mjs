@@ -36,6 +36,7 @@ export async function bundleNativeReactApp(e2e, { entryFile, bundleId, name }) {
             .filter((key) => key.startsWith('EXPO_PUBLIC_'))
             .map((key) => [key, undefined]),
         ),
+        EXPO_PUBLIC_GITHUB_CLIENT_ID: '',
         EXPO_NO_DOTENV: '1',
       },
     },

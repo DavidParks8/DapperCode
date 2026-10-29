@@ -82,15 +82,22 @@ discarding history: start a new conversation or request smaller file chunks if a
 
 ## GitHub configuration
 
-Register a GitHub OAuth app with Device Flow enabled. Put its **public client ID** in
-`apps/mobile/.env` as `EXPO_PUBLIC_GITHUB_CLIENT_ID`, then rebuild the JavaScript/native application.
-Never include a client secret. A build without a client ID explicitly disables sign-in; public
-clones, local commits, and offline inference still work.
+DapperCode bundles its registered **public client ID**, so GitHub Device Flow sign-in is available
+without additional build configuration. No client secret is needed or included.
+
+For a fork, register your own GitHub OAuth app with Device Flow enabled and override
+`EXPO_PUBLIC_GITHUB_CLIENT_ID` in the build environment (or `apps/mobile/.env`). An explicitly empty
+value disables sign-in, including in isolated native test bundles. Rebuild the JavaScript bundle
+after changing this value; existing installed builds do not acquire it automatically. Public
+clones, local commits, and offline inference do not require sign-in.
 
 The user authorizes the displayed short-lived code on GitHub. The requested `repo` scope enables
 private clone/push. Tokens are held in a separate device-only Keychain service; JavaScript stores
 only an opaque credential reference, and models cannot read tokens. Credentials are restricted to
 the authorized HTTPS origin. Redirects are not followed.
+
+The current app does not refresh expiring GitHub tokens. If token expiration is enabled for the
+OAuth app, sign in again when GitHub expires the credential.
 
 Signing out removes the local credential, not GitHub's authorization. Revoke the OAuth application
 in GitHub account settings when necessary. Other authentication providers can implement the

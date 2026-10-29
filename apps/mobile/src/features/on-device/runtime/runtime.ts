@@ -23,6 +23,8 @@ export class OnDeviceRuntime {
   readonly downloads: ModelDownloadController;
   readonly loop: LocalAgentLoop;
   readonly authentication: GitHubAuthStrategy;
+  private readonly githubClientId =
+    process.env.EXPO_PUBLIC_GITHUB_CLIENT_ID?.trim() ?? 'Ov23ctzKpdigHwQUbG8X';
   private readonly listeners = new Set<() => void>();
   private revision = 0;
   private preferencesValue = emptyLocalPreferences();
@@ -48,7 +50,7 @@ export class OnDeviceRuntime {
       () => this.emit(),
     );
     this.authentication = new GitHubAuthStrategy({
-      clientId: process.env.EXPO_PUBLIC_GITHUB_CLIENT_ID ?? '',
+      clientId: this.githubClientId,
       credentials: {
         store: ({ host, accountId, username, token }) =>
           native.storeGitCredential(host, accountId, username, token),
@@ -95,7 +97,7 @@ export class OnDeviceRuntime {
     return this.failure ?? this.threads.persistenceError();
   }
   authConfigured(): boolean {
-    return Boolean(process.env.EXPO_PUBLIC_GITHUB_CLIENT_ID?.trim());
+    return Boolean(this.githubClientId);
   }
   workspaceActivity(): string | null {
     return this.workspaceOperationLabel;

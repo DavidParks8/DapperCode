@@ -110,9 +110,12 @@ and serializes the WDA ports. Its native model/workspace preparation does not ch
 Metro, or a desktop bridge. All fixture bundles disable `.env` loading and public environment
 overrides so they cannot inherit a user's configured bridge credentials.
 
-GitHub sign-in needs a public `EXPO_PUBLIC_GITHUB_CLIENT_ID` from an OAuth app with device
-authorization enabled. Never add a client secret. The current strategy requests `repo` scope for
-private clone/push access; signing out locally does not revoke the authorization at GitHub.
+GitHub sign-in uses the bundled public DapperCode client ID. Forks can override
+`EXPO_PUBLIC_GITHUB_CLIENT_ID` with their own Device Flow-enabled OAuth app, or set it empty to
+disable sign-in. Native fixture bundles explicitly disable it. Never add a client secret. The
+current strategy requests `repo` scope for private clone/push access; signing out locally does not
+revoke the authorization at GitHub. Expiring tokens require signing in again; refresh is not yet
+implemented.
 
 ## Dependencies and licenses
 
