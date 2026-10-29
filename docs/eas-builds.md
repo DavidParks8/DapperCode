@@ -106,10 +106,14 @@ production archive to TestFlight with one command:
 pnpm run release:latest
 ```
 
-This command requires macOS, Xcode, CocoaPods, and an authenticated EAS account. It uses a local
-EAS build so it is not blocked by the account's cloud iOS build quota, submits the resulting IPA,
-and removes the temporary archive afterward. Tracked working-tree changes must be committed
+This command requires macOS, Xcode 27.1 or newer, CocoaPods, CMake (`brew install cmake`), and an
+authenticated EAS account. CMake builds the on-device Git library during iOS prebuild. It uses a
+local EAS build so it is not blocked by the account's cloud iOS build quota, submits the resulting
+IPA, and removes the temporary archive afterward. Tracked working-tree changes must be committed
 beforehand; untracked local files are left untouched.
+
+When updating `esbuild` or `llama.rn`, update the matching version-scoped `allowBuilds` approval in
+`pnpm-workspace.yaml` too. A clean EAS install refuses unapproved dependency build scripts.
 
 Use `pnpm run release:latest --dry-run` to print the workflow without changing the checkout or
 starting a build.
