@@ -1,3 +1,4 @@
+import DapperGit
 import Foundation
 
 private struct GateError: LocalizedError {
@@ -18,6 +19,67 @@ private func rejected(_ name: String, containing: String, _ action: () throws ->
     return
   }
   throw GateError("\(name): operation unexpectedly succeeded.")
+}
+
+private func checkSeparateDiffs(repository: URL) throws {
+  let original = "ORIGINAL\n"
+  let staged = "STAGED_VERSION\n"
+  let file = repository.appendingPathComponent("hello.txt")
+  let clean = try NativeGit.diff(repository: repository)
+  try check(clean.diff.isEmpty && clean.originalBytes == 0, "clean repositories have no diff sections")
+  try staged.write(to: file, atomically: true, encoding: .utf8)
+  try NativeGit.stage(repository: repository, path: "hello.txt")
+  let stagedOnly = try NativeGit.diff(repository: repository)
+  try check(
+    stagedOnly.diff.contains("-ORIGINAL") && stagedOnly.diff.contains("+STAGED_VERSION") &&
+      !stagedOnly.diff.contains("Unstaged changes (index -> working tree)"),
+    "staged-only diffs show the content that will be committed")
+
+  try original.write(to: file, atomically: true, encoding: .utf8)
+  let status = try NativeGit.status(repository: repository)
+  try check(
+    status.files.contains { $0.path == "hello.txt" && $0.indexStatus == "M" && $0.worktreeStatus == "M" },
+    "reverting only the working file leaves both staged and unstaged changes")
+  let patch = try NativeGit.diff(repository: repository)
+  try check(
+    !patch.diff.isEmpty,
+    "staged content remains visible after reverting only the working file")
+  let sections = patch.diff.components(separatedBy: "Unstaged changes (index -> working tree)\n")
+  try check(
+    sections.count == 2 && sections[0].contains("Staged changes (HEAD -> index)") &&
+      sections[0].contains("-ORIGINAL") && sections[0].contains("+STAGED_VERSION") &&
+      sections[1].contains("-STAGED_VERSION") && sections[1].contains("+ORIGINAL"),
+    "opposing index and working-tree patches remain independently visible")
+  let limited = try NativeGit.diff(repository: repository, maximumBytes: 96)
+  try check(
+    limited.originalBytes == patch.diff.utf8.count && limited.returnedBytes <= 96 &&
+      limited.returnedBytes == limited.diff.utf8.count && limited.originalBytes > limited.returnedBytes,
+    "both diff sections and their labels share one output byte budget")
+
+  _ = try NativeGit.commit(
+    repository: repository, message: "test: preserve staged content",
+    authorName: "Native Fixture", authorEmail: "fixture@example.invalid")
+  let committed = try NativeGit.withRepository(repository) { repository -> String? in
+    var blob: OpaquePointer?
+    try NativeGit.requireSuccess(git_revparse_single(&blob, repository, "HEAD:hello.txt"), "Read committed fixture")
+    defer { git_object_free(blob) }
+    guard let bytes = git_blob_rawcontent(blob) else { throw GateError("The committed file is missing.") }
+    return String(data: Data(bytes: bytes, count: Int(git_blob_rawsize(blob))), encoding: .utf8)
+  }
+  try check(
+    committed == staged && (try String(contentsOf: file, encoding: .utf8)) == original,
+    "commit records the displayed index content without replacing the working file")
+  let unstagedOnly = try NativeGit.diff(repository: repository)
+  try check(
+    !unstagedOnly.diff.contains("Staged changes (HEAD -> index)") &&
+      unstagedOnly.diff.contains("Unstaged changes (index -> working tree)") &&
+      unstagedOnly.diff.contains("-STAGED_VERSION") && unstagedOnly.diff.contains("+ORIGINAL"),
+    "committing clears only the staged diff and retains the unstaged patch")
+  try "UNTRACKED_CONTENT\n".write(
+    to: repository.appendingPathComponent("untracked.txt"), atomically: true, encoding: .utf8)
+  try check(
+    try NativeGit.diff(repository: repository).diff.contains("+UNTRACKED_CONTENT"),
+    "unstaged diffs retain untracked file content")
 }
 
 private func runGitGate() throws {
@@ -72,6 +134,9 @@ private func runGitGate() throws {
   try check(initialStatus.branch == "main" && initialStatus.files.isEmpty, "structured Git status reports the active branch")
   let initialHistory = try NativeGit.history(repository: repository)
   try check(initialHistory.count == 1 && initialHistory[0].subject == "seed" && initialHistory[0].isHead, "native history reports the current commit")
+  let diffRepository = root.appendingPathComponent("diff-checkout")
+  try NativeGit.clone(remote: remote, destination: diffRepository, credential: credential)
+  try checkSeparateDiffs(repository: diffRepository)
   try rejected(
     "Git metadata cannot be staged through the file API", containing: "workspace-relative"
   ) {

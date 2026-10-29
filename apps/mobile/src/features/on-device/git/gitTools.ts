@@ -9,7 +9,12 @@ export const GIT_TOOL_DEFINITIONS = [
     {},
     [],
   ),
-  toolDefinition('git_diff', 'Read a bounded diff including staged and unstaged changes.', {}, []),
+  toolDefinition(
+    'git_diff',
+    'Read separately labelled staged (HEAD to index) and unstaged (index to working tree) patches within one shared output budget.',
+    {},
+    [],
+  ),
   toolDefinition('git_history', 'Read recent workspace commits.', {}, []),
   toolDefinition(
     'git_stage',

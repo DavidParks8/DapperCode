@@ -116,23 +116,33 @@ extension NativeGit {
       var options = git_diff_options()
       try requireSuccess(git_diff_options_init(&options, UInt32(GIT_DIFF_OPTIONS_VERSION)), "Initialize diff")
       options.flags = GIT_DIFF_INCLUDE_UNTRACKED.rawValue | GIT_DIFF_RECURSE_UNTRACKED_DIRS.rawValue | GIT_DIFF_SHOW_UNTRACKED_CONTENT.rawValue
-      var diff: OpaquePointer?
-      try requireSuccess(git_diff_tree_to_workdir_with_index(&diff, repository, tree, &options), "Read diff")
-      defer { git_diff_free(diff) }
+      var staged: OpaquePointer?
+      try requireSuccess(git_diff_tree_to_index(&staged, repository, tree, nil, &options), "Read staged diff")
+      defer { git_diff_free(staged) }
+      var unstaged: OpaquePointer?
+      try requireSuccess(git_diff_index_to_workdir(&unstaged, repository, nil, &options), "Read unstaged diff")
+      defer { git_diff_free(unstaged) }
       let collector = Unmanaged.passRetained(GitDiffCollector(limit: maximumBytes))
       defer { collector.release() }
-      try requireSuccess(git_diff_print(diff, GIT_DIFF_FORMAT_PATCH, { _, _, line, payload in
-        guard let line, let payload else { return GIT_EUSER.rawValue }
-        let collector = Unmanaged<GitDiffCollector>.fromOpaque(payload).takeUnretainedValue()
-        let origin = line.pointee.origin
-        if origin == 43 || origin == 45 || origin == 32 {
-          collector.append(Data([UInt8(bitPattern: origin)]))
-        }
-        if let content = line.pointee.content {
-          collector.append(content, count: line.pointee.content_len)
-        }
-        return 0
-      }, collector.toOpaque()), "Format diff")
+      for (label, diff) in [
+        ("Staged changes (HEAD -> index)", staged),
+        ("Unstaged changes (index -> working tree)", unstaged),
+      ] where git_diff_num_deltas(diff) > 0 {
+        collector.takeUnretainedValue().append(Data("\(label)\n".utf8))
+        try requireSuccess(git_diff_print(diff, GIT_DIFF_FORMAT_PATCH, { _, _, line, payload in
+          guard let line, let payload else { return GIT_EUSER.rawValue }
+          let collector = Unmanaged<GitDiffCollector>.fromOpaque(payload).takeUnretainedValue()
+          let origin = line.pointee.origin
+          if origin == 43 || origin == 45 || origin == 32 {
+            collector.append(Data([UInt8(bitPattern: origin)]))
+          }
+          if let content = line.pointee.content {
+            collector.append(content, count: line.pointee.content_len)
+          }
+          return 0
+        }, collector.toOpaque()), "Format diff")
+        collector.takeUnretainedValue().append(Data("\n".utf8))
+      }
       return try collector.takeUnretainedValue().result()
     }
   }

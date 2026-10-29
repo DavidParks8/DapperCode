@@ -89,6 +89,11 @@ rejection, credential redaction, branch switching, bounded diffs, cancellation/t
 and successful push. The fixture server runs Git on the test host;
 no Git executable or shell is shipped in the app.
 
+The Git regression also stages an edit, restores only the working file, and verifies that both
+opposing patches remain independently labelled under one output budget. It then commits and checks
+the actual committed blob and unchanged working file, along with clean, staged-only, unstaged-only,
+untracked, and UTF-8 truncation cases.
+
 ```bash
 node .agents/skills/local-e2e-validation/scripts/run.mjs \
   --evidence /absolute/path/to/new-git-evidence.jsonl \

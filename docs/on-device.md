@@ -69,6 +69,9 @@ discarding history: start a new conversation or request smaller file chunks if a
 - Git uses linked libgit2, not a Git executable. Hooks, shell commands, package managers,
   interpreters, test runners, downloaded executable plugins, and JIT workarounds are unavailable.
   SSH, submodule/LFS hydration, custom providers' private credentials, and force-push are out of scope.
+- Git diffs label staged (HEAD to index) and unstaged (index to working tree) patches separately.
+  Opposing changes are not collapsed away; only the staged content is committed. Both sections,
+  including their labels, share the reported output byte limit.
 - Local tools run without per-tool approval dialogs. Choose workspaces accordingly and review
   changes before pushing. Desktop approval settings are unchanged.
 - Stop waits for current work to settle. Git cancellation is cooperative; unresponsive transports
