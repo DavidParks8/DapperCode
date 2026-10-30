@@ -12,12 +12,21 @@ See [product setup and limitations](../../../../docs/on-device.md).
 - `ios/NativeGitRead.swift` and `ios/NativeGitMutations.swift` own bounded Git queries and index/branch
   operations. `GitNetworkOperation.swift` provides cooperative cancellation/progress; a small C
   boundary configures libgit2's 15-second connection and read/write timeouts.
+- `ios/NativeGitRemote.swift` owns fetch, fast-forward-only pull, `git init` (with an optional
+  HTTPS origin), branch creation, discard/restore, and origin/upstream/ahead/behind status.
 - `ios/WorkspaceStore.swift` and `WorkspaceFileTools.swift` own actor-serialized workspace
-  publication, containment, revision checks, and bounded UTF-8 operations.
+  publication, rename, deletion (atomically unpublished before removal), containment, revision
+  checks, bounded UTF-8 operations, and an in-memory per-workspace change token. The workspace root is
+  the empty path; `"."` is accepted as a root alias where the root is allowed.
+- `ios/NativeServiceError.swift` defines the stable error codes. Every workspace, Git, and credential
+  failure is described as `[ondevice:CODE] message`; `src/features/on-device/native/services.errors.ts`
+  maps Expo's wrapped rejections to `OnDeviceNativeError` with that code and a clean message.
 - `ios/ModelFileStore.swift` verifies size/SHA-256 before atomic ready publication.
   `RuntimeDocumentStore.swift` owns separate atomic, size-limited local journals/preferences.
-- The native ABI is versioned (currently 6). An old binary is rejected before loading model
-  variants that need the newer inference engine, including Bonsai 2's activation transforms.
+- The native ABI is versioned (currently 7: workspace rename/delete, change tokens, UI file
+  rename/delete, fetch/pull, init, branch creation, discard, remote-aware status, typed errors). An old
+  binary is rejected before loading model variants that need the newer inference engine, including
+  Bonsai 2's activation transforms.
 - `scripts/build-git.mjs` builds pinned libgit2 1.9.7 for iOS arm64 and simulator arm64/x86_64.
   The source archive is SHA-256 verified. HTTPS uses SecureTransport; SSH, the CLI, and tests are
   excluded from the app library. Unmodified upstream notices (including bundled dependency
@@ -89,6 +98,13 @@ rejection, credential redaction, branch switching, bounded diffs, cancellation/t
 and successful push. The fixture server runs Git on the test host;
 no Git executable or shell is shipped in the app.
 
+It then exercises branch creation and publication (upstream recording), ahead/behind counts,
+credential-origin-bound fetch, fast-forward pull, pull rejection for local conflicts and diverged
+histories (with the working tree and branch unchanged), typed non-fast-forward push rejection,
+per-file and all-file discard, `git init` with an origin followed by an initial pull, and cancelled
+fetch transfers. The remote confirmation verifies the fast-forwarded branch and that the rejected
+diverged commit never reached the remote.
+
 The Git regression also stages an edit, restores only the working file, and verifies that both
 opposing patches remain independently labelled under one output budget. It then commits and checks
 the actual committed blob and unchanged working file, along with clean, staged-only, unstaged-only,
@@ -98,6 +114,18 @@ untracked, and UTF-8 truncation cases.
 node .agents/skills/local-e2e-validation/scripts/run.mjs \
   --evidence /absolute/path/to/new-git-evidence.jsonl \
   apps/mobile/modules/on-device-agent/tests/native-git.mjs
+```
+
+The workspace scenario compiles the production workspace actor with its file and Git tools. Beyond
+containment, revisions, and search limits, it covers root listing with `''` and `"."`, typed error
+codes, total-size reads, change tokens, UI rename/delete, workspace rename/delete (no leftovers),
+non-repository status, `git init`, unborn-branch renaming, branch creation, staged counts, empty
+commit rejection, missing-origin rejection, and discard:
+
+```bash
+node .agents/skills/local-e2e-validation/scripts/run.mjs \
+  --evidence /absolute/path/to/new-workspace-evidence.jsonl \
+  apps/mobile/modules/on-device-agent/tests/native-workspaces.mjs
 ```
 
 The model-file scenario also exercises atomic local runtime documents, preservation on rejected

@@ -11,6 +11,7 @@ function port() {
       content: 'contents',
       revision,
       nextOffset: null,
+      totalBytes: 8,
     })),
     writeWorkspaceFile: jest.fn(async () => revision),
     editWorkspaceFile: jest.fn(async () => revision),
@@ -40,7 +41,13 @@ test('file tools bind the trusted workspace and return the native JSON result', 
     0,
     4096,
   );
-  expect(result).toEqual({ path: 'src/main.txt', content: 'contents', revision, nextOffset: null });
+  expect(result).toEqual({
+    path: 'src/main.txt',
+    content: 'contents',
+    revision,
+    nextOffset: null,
+    totalBytes: 8,
+  });
 });
 
 test('the model cannot select another workspace through extra arguments', async () => {

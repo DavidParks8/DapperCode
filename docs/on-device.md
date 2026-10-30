@@ -14,10 +14,13 @@ target, not a bridge profile or a localhost server. Android and web continue to 
    resumed, or removed; unverified weights cannot be loaded.
 3. Open **Workspaces** and clone an HTTPS repository. Public repositories need no account.
    Sign in under **GitHub and author** before cloning a private GitHub repository.
-   An empty file workspace is also available, but Git actions require a repository.
+   An empty file workspace is also available; **Initialize Git** on its Git page (optionally with
+   an HTTPS origin) to stage, commit, and later push or pull. Workspaces can be renamed or deleted;
+   deleting one removes its files but keeps conversations that used it readable.
 4. Set your Git author name/email, then start a **New local conversation**.
-5. After preparation, inference, file edits, search, diffs, staging, branches, history, and commits
-   work without internet. Push, cloning, sign-in, and new downloads require connectivity.
+5. After preparation, inference, file edits, search, diffs, staging, discarding, branch creation and
+   switching, history, and commits work without internet. Push, fetch, pull, cloning, sign-in, and
+   new downloads require connectivity.
 
 Existing desktop profiles and conversations are not migrated or deleted. The last explicitly
 selected target is restored at startup. Switching back settles local work and unloads its model
@@ -69,6 +72,20 @@ discarding history: start a new conversation or request smaller file chunks if a
 - Git uses linked libgit2, not a Git executable. Hooks, shell commands, package managers,
   interpreters, test runners, downloaded executable plugins, and JIT workarounds are unavailable.
   SSH, submodule/LFS hydration, custom providers' private credentials, and force-push are out of scope.
+- The workspace root is the empty path `''` everywhere (`'.'` is accepted as an alias for listing).
+  The Files page creates files in the open folder, shows the total size of large previews, renames or
+  deletes the open file, and refreshes when a native change token moves after agent edits.
+- Git status reports origin, upstream, ahead/behind counts, and staged-file counts. Push, fetch, and
+  pull are disabled without an origin; commit is disabled (and rejected natively) with nothing staged.
+- Pull fetches origin and only fast-forwards. Diverged histories (`GIT_NON_FAST_FORWARD`) and local
+  changes the update would overwrite (`GIT_CONFLICT`) are rejected before anything changes. Fetch and
+  pull share push's HTTPS-only, origin-bound credential, redirect, cancellation, and timeout rules.
+  The first push of a new branch records `origin/<branch>` as its upstream.
+- Discard restores working-tree files from the index (staged content is kept); discarding a single
+  untracked file deletes it, and discard-all removes untracked files only when asked.
+- Native failures reach the UI as `OnDeviceNativeError` values with stable codes (for example
+  `GIT_NOT_REPOSITORY`, `PATH_OUTSIDE_WORKSPACE`, `GIT_NO_ORIGIN`) and never include native exception
+  names or Swift source locations. These capabilities require on-device ABI 7.
 - Git diffs label staged (HEAD to index) and unstaged (index to working tree) patches separately.
   Opposing changes are not collapsed away; only the staged content is committed. Both sections,
   including their labels, share the reported output byte limit.

@@ -171,6 +171,29 @@ export class OnDeviceRuntime {
     this.emit();
   }
 
+  renameWorkspace(id: string, name: string): Promise<LocalWorkspace> {
+    return this.workspaceTask('Renaming workspace', async () => {
+      const workspace = await this.native.renameWorkspace(id, name);
+      await this.refreshWorkspaces();
+      return workspace;
+    });
+  }
+
+  /**
+   * Deletes a workspace's files. Conversations that reference it stay readable and project it as
+   * unavailable; a selected workspace is deselected so new conversations cannot target it.
+   */
+  deleteWorkspace(id: string): Promise<void> {
+    return this.workspaceTask('Deleting workspace', async () => {
+      await this.native.deleteWorkspace(id);
+      if (this.preferencesValue.workspaceId === id) {
+        this.preferencesValue = { ...this.preferencesValue, workspaceId: null };
+        await this.savePreferences();
+      }
+      await this.refreshWorkspaces();
+    });
+  }
+
   async cloneWorkspace(name: string, url: string): Promise<LocalWorkspace> {
     const account = this.preferencesValue.account;
     const parsed = new URL(url);

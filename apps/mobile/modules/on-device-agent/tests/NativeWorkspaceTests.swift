@@ -22,6 +22,22 @@ private func rejected(_ name: String, containing: String, _ action: () async thr
   throw GateError("\(name): operation unexpectedly succeeded.")
 }
 
+private func rejected(
+  _ name: String, code: NativeErrorCode, _ action: () async throws -> Void
+) async throws {
+  do {
+    try await action()
+  } catch let error as NativeCodedError {
+    try check(
+      error.code == code && error.localizedDescription.hasPrefix("[ondevice:\(code.rawValue)] "),
+      name)
+    return
+  } catch {
+    throw GateError("\(name): expected \(code.rawValue), got \(error.localizedDescription)")
+  }
+  throw GateError("\(name): operation unexpectedly succeeded.")
+}
+
 private func attemptWrite(_ store: WorkspaceStore, id: String, content: String, revision: String)
   async -> Result<String, Error>
 {
@@ -251,5 +267,178 @@ func runNativeGate() async throws {
   try check(
     boundedDirectories.truncated && boundedDirectories.visitedEntries == 2000,
     "empty directory trees cannot bypass search limits")
+  try await runLifecycleGate(store)
   print("NATIVE_WORKSPACE_PASS")
+}
+
+private func runLifecycleGate(_ store: WorkspaceStore) async throws {
+  let workspace = try await store.createWorkspace(name: "Lifecycle")
+  let id = workspace.workspace.id
+  try check(!workspace.isRepository, "new empty workspaces report no Git repository")
+  _ = try await store.writeFile(id, path: "README.md", content: "root\n", expectedRevision: nil)
+  _ = try await store.writeFile(id, path: "src/app.txt", content: "app\n", expectedRevision: nil)
+  let root = try await store.listFiles(id, path: "", limit: 10)
+  try check(
+    root.entries.map(\.name) == ["README.md", "src"],
+    "the workspace root lists with the empty path the Files browser uses")
+  let alias = try await store.listFiles(id, path: ".", limit: 10)
+  try check(alias.entries.map(\.name) == ["README.md", "src"], "\".\" is accepted as a root alias")
+  try await rejected("dot paths still cannot name files", code: .pathOutsideWorkspace) {
+    _ = try await store.readFile(id, path: ".", offset: 0, limit: 64)
+  }
+  try await rejected("traversal reports a typed containment error", code: .pathOutsideWorkspace) {
+    _ = try await store.listFiles(id, path: "../", limit: 10)
+  }
+  try await rejected("missing workspace IDs report a typed error", code: .workspaceRequired) {
+    _ = try await store.listFiles("", path: "", limit: 10)
+  }
+  try await rejected("malformed workspace IDs report a typed error", code: .workspaceInvalidID) {
+    _ = try await store.listFiles("not-a-workspace", path: "", limit: 10)
+  }
+  try await rejected("missing paths report a typed error", code: .pathNotFound) {
+    _ = try await store.readFile(id, path: "missing.txt", offset: 0, limit: 64)
+  }
+  try await rejected("unread overwrites report a revision conflict", code: .fileRevisionConflict) {
+    _ = try await store.writeFile(id, path: "README.md", content: "x", expectedRevision: nil)
+  }
+
+  let large = String(repeating: "z", count: 70_000)
+  _ = try await store.writeFile(id, path: "large.txt", content: large, expectedRevision: nil)
+  let preview = try await store.readFile(id, path: "large.txt", offset: 0, limit: 65_536)
+  try check(
+    preview.totalBytes == 70_000 && preview.nextOffset == 65_536,
+    "bounded reads report the total file size")
+
+  let before = try await store.changeToken(id)
+  _ = try await store.readFile(id, path: "README.md", offset: 0, limit: 64)
+  try check(try await store.changeToken(id) == before, "reads do not change the workspace token")
+  _ = try await store.writeFile(id, path: "notes.txt", content: "", expectedRevision: nil)
+  let afterWrite = try await store.changeToken(id)
+  try check(afterWrite != before, "tool writes change the workspace token")
+
+  try await store.renameEntry(id, path: "large.txt", destination: "docs/large.txt")
+  try check(
+    try await store.readFile(id, path: "docs/large.txt", offset: 0, limit: 8).totalBytes == 70_000,
+    "UI renames move files without a revision")
+  try await store.removeEntry(id, path: "docs/large.txt")
+  try await rejected("UI deletes remove the file", code: .pathNotFound) {
+    _ = try await store.readFile(id, path: "docs/large.txt", offset: 0, limit: 8)
+  }
+  try await rejected("UI deletes cannot remove the root", code: .invalidArgument) {
+    try await store.removeEntry(id, path: "")
+  }
+  try await rejected("UI deletes cannot touch Git metadata", code: .pathOutsideWorkspace) {
+    try await store.removeEntry(id, path: ".git")
+  }
+  try check(try await store.changeToken(id) != afterWrite, "UI file changes move the token")
+
+  try await rejected("Git status reports a typed non-repository state", code: .gitNotRepository) {
+    _ = try await store.gitStatus(id)
+  }
+  try await rejected("insecure init origins are rejected", code: .gitInsecureRemote) {
+    _ = try await store.gitInit(id, initialBranch: "main", origin: "http://example.invalid/r.git")
+  }
+  try await rejected("invalid initial branches are rejected", code: .gitBranchInvalid) {
+    _ = try await store.gitInit(id, initialBranch: "bad..name", origin: nil)
+  }
+  try await rejected("rejected inits leave no repository", code: .gitNotRepository) {
+    _ = try await store.gitStatus(id)
+  }
+  let initialized = try await store.gitInit(id, initialBranch: "trunk", origin: nil)
+  try check(initialized.isRepository, "git init marks the workspace as a repository")
+  try check(
+    try await store.listWorkspaces().first { $0.workspace.id == id }?.isRepository == true,
+    "workspace listings report initialized repositories")
+  try await rejected("repositories cannot be initialized twice", code: .gitAlreadyRepository) {
+    _ = try await store.gitInit(id, initialBranch: "main", origin: nil)
+  }
+  let unborn = try await store.gitStatus(id)
+  try check(
+    unborn.branch == "trunk" && unborn.remote.unborn && unborn.remote.origin == nil
+      && unborn.stagedFiles == 0 && unborn.payload["hasOrigin"] as? Bool == false,
+    "initialized repositories report the initial branch, no commits, and no origin")
+  try await rejected("empty commits are rejected with a typed error", code: .gitNothingToCommit) {
+    _ = try await store.gitCommit(id, message: "empty", name: "Fixture", email: "f@example.invalid")
+  }
+  try await rejected("fetch without an origin is rejected", code: .gitNoOrigin) {
+    try await store.gitFetch(id, credentialRef: nil)
+  }
+  try await rejected("pull without an origin is rejected", code: .gitNoOrigin) {
+    _ = try await store.gitPull(id, credentialRef: nil)
+  }
+  try await rejected("push without an origin is rejected", code: .gitNoOrigin) {
+    try await store.gitPush(id, credentialRef: nil)
+  }
+  try await rejected("branches need a commit unless checked out", code: .gitNoCommits) {
+    try await store.gitCreateBranch(id, name: "feature", checkout: false)
+  }
+  try await store.gitCreateBranch(id, name: "main", checkout: true)
+  try check(try await store.gitStatus(id).branch == "main", "unborn branch checkout renames it")
+  try await store.gitStage(id, path: nil)
+  let staged = try await store.gitStatus(id)
+  try check(staged.stagedFiles == 3, "status counts staged files")
+  _ = try await store.gitCommit(id, message: "initial", name: "Fixture", email: "f@example.invalid")
+  try await store.gitCreateBranch(id, name: "topic", checkout: true)
+  try check(try await store.gitStatus(id).branch == "topic", "new branches can be checked out")
+  try await rejected("duplicate branches are rejected", code: .gitBranchExists) {
+    try await store.gitCreateBranch(id, name: "topic", checkout: false)
+  }
+  try await rejected("invalid branch names are rejected", code: .gitBranchInvalid) {
+    try await store.gitCreateBranch(id, name: "-bad", checkout: false)
+  }
+
+  let readme = try await store.readFile(id, path: "README.md", offset: 0, limit: 64)
+  _ = try await store.writeFile(
+    id, path: "README.md", content: "changed\n", expectedRevision: readme.revision)
+  _ = try await store.writeFile(id, path: "scratch.txt", content: "new\n", expectedRevision: nil)
+  try await store.gitDiscard(id, path: "README.md", removeUntracked: false)
+  try check(
+    try await store.readFile(id, path: "README.md", offset: 0, limit: 64).content == "root\n",
+    "per-file discard restores the committed content")
+  try await store.gitDiscard(id, path: "scratch.txt", removeUntracked: false)
+  try await rejected("per-file discard deletes an untracked file", code: .pathNotFound) {
+    _ = try await store.readFile(id, path: "scratch.txt", offset: 0, limit: 64)
+  }
+  let app = try await store.readFile(id, path: "src/app.txt", offset: 0, limit: 64)
+  _ = try await store.writeFile(id, path: "src/app.txt", content: "edit\n", expectedRevision: app.revision)
+  _ = try await store.writeFile(id, path: "keep.txt", content: "keep\n", expectedRevision: nil)
+  try await store.gitDiscard(id, path: nil, removeUntracked: false)
+  let restoredApp = try await store.readFile(id, path: "src/app.txt", offset: 0, limit: 64)
+  let kept = try await store.readFile(id, path: "keep.txt", offset: 0, limit: 64)
+  try check(
+    restoredApp.content == "app\n" && kept.content == "keep\n",
+    "discard-all restores tracked files and keeps untracked files by default")
+  try await store.gitDiscard(id, path: nil, removeUntracked: true)
+  try await rejected("discard-all can remove untracked files", code: .pathNotFound) {
+    _ = try await store.readFile(id, path: "keep.txt", offset: 0, limit: 64)
+  }
+  try check(try await store.gitStatus(id).payload["clean"] as? Bool == true, "discard leaves a clean tree")
+  try await rejected("directories are not discarded wholesale", code: .invalidArgument) {
+    try await store.gitDiscard(id, path: "src", removeUntracked: false)
+  }
+
+  let renamed = try await store.renameWorkspace(id, name: "  Renamed lifecycle  ")
+  try check(renamed.workspace.name == "Renamed lifecycle", "workspace rename trims and persists the name")
+  try check(
+    try await WorkspaceStore().listWorkspaces().contains {
+      $0.workspace.id == id && $0.workspace.name == "Renamed lifecycle"
+    }, "renamed workspaces survive a new store instance")
+  try await rejected("invalid workspace names are rejected", code: .workspaceNameInvalid) {
+    _ = try await store.renameWorkspace(id, name: "   ")
+  }
+  try await store.deleteWorkspace(id)
+  try check(
+    !(try await store.listWorkspaces().contains { $0.workspace.id == id }),
+    "deleted workspaces disappear from listings")
+  try await rejected("deleted workspaces cannot be resolved", code: .workspaceNotFound) {
+    _ = try await store.listFiles(id, path: "", limit: 10)
+  }
+  try await rejected("deleted workspaces cannot be deleted again", code: .workspaceNotFound) {
+    try await store.deleteWorkspace(id)
+  }
+  let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+  let leftovers = try FileManager.default.contentsOfDirectory(
+    atPath: support.appendingPathComponent("OnDeviceAgent/workspaces").path)
+  try check(
+    !leftovers.contains { $0.hasPrefix(".trash-") || $0 == id }, "deletion leaves no workspace data")
 }

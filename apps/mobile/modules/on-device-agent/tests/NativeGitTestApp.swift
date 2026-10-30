@@ -21,6 +21,183 @@ private func rejected(_ name: String, containing: String, _ action: () throws ->
   throw GateError("\(name): operation unexpectedly succeeded.")
 }
 
+private func rejected(_ name: String, code: NativeErrorCode, _ action: () throws -> Void) throws {
+  do {
+    try action()
+  } catch let error as NativeCodedError {
+    guard error.code == code else {
+      throw GateError("\(name): expected \(code.rawValue), got \(error.code.rawValue): \(error.message)")
+    }
+    try check(error.localizedDescription.hasPrefix("[ondevice:\(code.rawValue)] "), name)
+    return
+  } catch {
+    throw GateError("\(name): expected \(code.rawValue), got \(error.localizedDescription)")
+  }
+  throw GateError("\(name): operation unexpectedly succeeded.")
+}
+
+private let author = (name: "Native Fixture", email: "fixture@example.invalid")
+
+private func write(_ repository: URL, _ path: String, _ content: String) throws {
+  try content.write(to: repository.appendingPathComponent(path), atomically: true, encoding: .utf8)
+}
+
+private func read(_ repository: URL, _ path: String) throws -> String {
+  try String(contentsOf: repository.appendingPathComponent(path), encoding: .utf8)
+}
+
+private func commitAll(_ repository: URL, _ message: String) throws {
+  try NativeGit.stageAll(repository: repository)
+  _ = try NativeGit.commit(
+    repository: repository, message: message, authorName: author.name, authorEmail: author.email)
+}
+
+private func head(_ repository: URL) throws -> String {
+  try NativeGit.history(repository: repository).first?.hash ?? ""
+}
+
+/// Fetch/pull, branch creation, discard, init, and ahead/behind against the authenticated HTTPS
+/// fixture. Uses the `sync` branch so the main-branch remote confirmation stays unchanged.
+private func runSyncGate(
+  root: URL, remote: String, credential: StoredGitCredential, otherOrigin: StoredGitCredential,
+  stalled: String
+) throws {
+  let first = root.appendingPathComponent("sync-a")
+  let second = root.appendingPathComponent("sync-b")
+  try NativeGit.clone(remote: remote, destination: first, credential: credential)
+  try NativeGit.clone(remote: remote, destination: second, credential: credential)
+  let tracked = try NativeGit.status(repository: first).remote
+  try check(
+    tracked.origin == remote && tracked.upstream == "origin/main" && tracked.ahead == 0
+      && tracked.behind == 0,
+    "clones report origin, upstream, and zero ahead/behind")
+
+  try NativeGit.createBranch(repository: first, name: "sync", checkout: true)
+  let branched = try NativeGit.status(repository: first)
+  try check(
+    branched.branch == "sync" && branched.remote.upstream == nil && branched.remote.ahead == nil,
+    "created branches are checked out without an upstream")
+  try rejected("existing branch names are rejected", code: .gitBranchExists) {
+    try NativeGit.createBranch(repository: first, name: "sync", checkout: false)
+  }
+  try rejected("invalid branch names are rejected", code: .gitBranchInvalid) {
+    try NativeGit.createBranch(repository: first, name: "bad..name", checkout: false)
+  }
+  try rejected("pulling an unpublished branch reports no upstream", code: .gitNoUpstream) {
+    _ = try NativeGit.pull(repository: first, credential: credential)
+  }
+  try write(first, "sync.txt", "ONE\n")
+  try commitAll(first, "sync: one")
+  try NativeGit.push(repository: first, credential: credential)
+  let published = try NativeGit.status(repository: first).remote
+  try check(
+    published.upstream == "origin/sync" && published.ahead == 0 && published.behind == 0,
+    "first push records the upstream branch")
+  try write(first, "sync.txt", "ONE\nLOCAL_AHEAD\n")
+  try commitAll(first, "sync: local")
+  try check(try NativeGit.status(repository: first).remote.ahead == 1, "status counts local commits ahead")
+  try NativeGit.push(repository: first, credential: credential)
+
+  try rejected("fetch credentials stay bound to origin", code: .gitCredentialOrigin) {
+    try NativeGit.fetch(repository: second, credential: otherOrigin)
+  }
+  try NativeGit.fetch(repository: second, credential: credential)
+  try check(
+    try NativeGit.branches(repository: second).contains { $0.name == "origin/sync" && $0.remote },
+    "fetch downloads new remote branches")
+  try NativeGit.switchBranch(repository: second, branch: "origin/sync")
+  try write(second, "sync.txt", "ONE\nLOCAL_AHEAD\nTWO\n")
+  try commitAll(second, "sync: two")
+  try NativeGit.push(repository: second, credential: credential)
+
+  let beforeConflict = try head(first)
+  try write(first, "sync.txt", "UNCOMMITTED\n")
+  try rejected("pull refuses to overwrite local changes", code: .gitConflict) {
+    _ = try NativeGit.pull(repository: first, credential: credential)
+  }
+  try check(
+    try read(first, "sync.txt") == "UNCOMMITTED\n" && (try head(first)) == beforeConflict,
+    "a rejected pull leaves the working tree and branch unchanged")
+  let behind = try NativeGit.status(repository: first).remote
+  try check(behind.behind == 1 && behind.ahead == 0, "fetched upstream commits are counted as behind")
+  try NativeGit.discard(repository: first, path: "sync.txt", removeUntracked: false)
+  try check(try read(first, "sync.txt") == "ONE\nLOCAL_AHEAD\n", "discard restores the indexed file")
+  let pulled = try NativeGit.pull(repository: first, credential: credential)
+  try check(
+    pulled.outcome == "fast-forwarded" && pulled.from == beforeConflict
+      && (try read(first, "sync.txt")) == "ONE\nLOCAL_AHEAD\nTWO\n"
+      && (try NativeGit.isClean(repository: first)),
+    "pull fast-forwards the branch and working tree")
+  let settled = try NativeGit.status(repository: first).remote
+  try check(settled.ahead == 0 && settled.behind == 0, "a fast-forwarded branch is in sync")
+  try check(
+    try NativeGit.pull(repository: first, credential: credential).outcome == "up-to-date",
+    "repeated pulls report up to date")
+
+  try write(first, "a-side.txt", "A\n")
+  try commitAll(first, "sync: a side")
+  try write(second, "b-side.txt", "B\n")
+  try commitAll(second, "sync: b side")
+  try NativeGit.push(repository: second, credential: credential)
+  let diverged = try head(first)
+  try rejected("diverged pulls are rejected without merging", code: .gitNonFastForward) {
+    _ = try NativeGit.pull(repository: first, credential: credential)
+  }
+  let split = try NativeGit.status(repository: first).remote
+  try check(
+    (try head(first)) == diverged && split.ahead == 1 && split.behind == 1
+      && !FileManager.default.fileExists(atPath: first.appendingPathComponent("b-side.txt").path),
+    "diverged branches report ahead and behind and stay unchanged")
+  try rejected("non-fast-forward pushes are rejected with a typed error", code: .gitNonFastForward) {
+    try NativeGit.push(repository: first, credential: credential)
+  }
+
+  try write(first, "a-side.txt", "EDITED\n")
+  try write(first, "untracked.txt", "U\n")
+  try NativeGit.discard(repository: first, path: nil, removeUntracked: false)
+  try check(
+    try read(first, "a-side.txt") == "A\n" && (try read(first, "untracked.txt")) == "U\n",
+    "discard-all restores tracked files and keeps untracked files")
+  try NativeGit.discard(repository: first, path: nil, removeUntracked: true)
+  try check(try NativeGit.isClean(repository: first), "discard-all can also remove untracked files")
+
+  let plain = root.appendingPathComponent("plain")
+  try FileManager.default.createDirectory(at: plain, withIntermediateDirectories: true)
+  try rejected("plain folders are not repositories", code: .gitNotRepository) {
+    _ = try NativeGit.status(repository: plain)
+  }
+  try NativeGit.initialize(repository: plain, initialBranch: "main", origin: remote)
+  let initialized = try NativeGit.status(repository: plain)
+  try check(
+    initialized.remote.unborn && initialized.remote.origin == remote && initialized.branch == "main",
+    "init records the initial branch and HTTPS origin")
+  try rejected("repositories cannot be initialized twice", code: .gitAlreadyRepository) {
+    try NativeGit.initialize(repository: plain, initialBranch: "main", origin: nil)
+  }
+  let adopted = try NativeGit.pull(repository: plain, credential: credential)
+  let adoptedStatus = try NativeGit.status(repository: plain)
+  try check(
+    adopted.outcome == "fast-forwarded" && adopted.from == nil
+      && (try read(plain, "hello.txt")) == "NATIVE_GIT_CHANGED\n"
+      && adoptedStatus.remote.upstream == "origin/main" && adoptedStatus.remote.behind == 0,
+    "pull adopts origin's branch into an initialized repository")
+
+  let unreachable = root.appendingPathComponent("stalled-init")
+  try FileManager.default.createDirectory(at: unreachable, withIntermediateDirectories: true)
+  try NativeGit.initialize(repository: unreachable, initialBranch: "main", origin: stalled)
+  DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+    GitNetworkOperation.shared.cancel()
+  }
+  let started = Date()
+  try rejected("cancelled fetches fail with a typed interruption", code: .gitTransferInterrupted) {
+    try NativeGit.fetch(repository: unreachable, credential: credential)
+  }
+  try check(
+    Date().timeIntervalSince(started) < 25
+      && GitNetworkOperation.shared.snapshot()["active"] as? Bool == false,
+    "cancelled fetches are bounded and release native transfer ownership")
+}
+
 private func checkSeparateDiffs(repository: URL) throws {
   let original = "ORIGINAL\n"
   let staged = "STAGED_VERSION\n"
@@ -222,6 +399,8 @@ private func runGitGate() throws {
   try check(
     try NativeGit.isClean(repository: repository),
     "authenticated push succeeds without changing the working tree")
+  try runSyncGate(
+    root: root, remote: remote, credential: credential, otherOrigin: otherOrigin, stalled: stalled)
   try String(repeating: "\u{1f642}", count: 100_000).write(to: repository.appendingPathComponent("hello.txt"), atomically: true, encoding: .utf8)
   let bounded = try NativeGit.diff(repository: repository)
   try check(bounded.returnedBytes <= 128 * 1024 && bounded.originalBytes > bounded.returnedBytes && bounded.diff.utf8.count == bounded.returnedBytes, "diff byte limits preserve valid UTF-8 and report omitted output")

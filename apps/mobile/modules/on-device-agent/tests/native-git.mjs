@@ -80,11 +80,13 @@ export default async function scenario(e2e) {
           '-import-objc-header',
           path.join(module, 'ios/GitNetworkConfiguration.h'),
           configuration,
+          path.join(module, 'ios/NativeServiceError.swift'),
           path.join(module, 'ios/GitCredentialStore.swift'),
           path.join(module, 'ios/NativeGit.swift'),
           path.join(module, 'ios/GitNetworkOperation.swift'),
           path.join(module, 'ios/NativeGitRead.swift'),
           path.join(module, 'ios/NativeGitMutations.swift'),
+          path.join(module, 'ios/NativeGitRemote.swift'),
           path.join(module, 'tests/NativeGitTestApp.swift'),
           path.join(module, 'tests/NativeTestHost.swift'),
           '-o',
@@ -231,6 +233,17 @@ extendedKeyUsage=serverAuth
       await e2e.check(
         'deleted and untracked files were not pushed',
         () => !tree.stdout.includes('delete.txt') && !tree.stdout.includes('other.txt'),
+      );
+      const synced = await git(['--git-dir', remote, 'show', 'sync:sync.txt']);
+      await e2e.expectEqual(
+        'fast-forwarded branch contents reached the remote',
+        synced.stdout,
+        'ONE\nLOCAL_AHEAD\nTWO\n',
+      );
+      const syncTree = await git(['--git-dir', remote, 'ls-tree', '--name-only', 'sync']);
+      await e2e.check(
+        'the rejected diverged commit was not pushed',
+        () => syncTree.stdout.includes('b-side.txt') && !syncTree.stdout.includes('a-side.txt'),
       );
       await server.stop();
     });
