@@ -6,14 +6,15 @@ import { Text } from 'react-native';
 import { isRecord } from '../../../src/shared/records';
 import { getOnDeviceNativeServices } from '../../../src/features/on-device/native/services';
 import { localModelDefinition } from '../../../src/features/on-device/models/catalog';
-import { ModelDownloadController } from '../../../src/features/on-device/models/downloads';
 import {
-  expoModelTransfers,
-  modelResumeStorage,
-} from '../../../src/features/on-device/models/expoDownloads';
-import type { ModelDownloadSnapshot } from '../../../src/features/on-device/models/downloads';
+  ModelDownloadController,
+  type ModelDownloadSnapshot,
+} from '../../../src/features/on-device/models/downloads';
+import type { LocalModelDefinition } from '../../../src/features/on-device/models/types';
 
 const checks: Record<string, boolean> = {};
+const marker = new File(Paths.document, 'native-download-phase.json');
+const phaseOutcome = new File(Paths.document, 'native-download-phase-a.json');
 const outcome = new File(Paths.document, 'native-download-result.json');
 
 function check(condition: unknown, label: string): asserts condition {
@@ -23,96 +24,167 @@ function check(condition: unknown, label: string): asserts condition {
   checks[label] = true;
 }
 
-async function run() {
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function until(label: string, predicate: () => boolean, timeoutMs = 60_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) {
+      throw new Error(`Timed out: ${label}`);
+    }
+    await sleep(100);
+  }
+}
+
+async function fixture(): Promise<LocalModelDefinition[]> {
   const raw: unknown = JSON.parse(await new File(Paths.document, 'download-fixture.json').text());
-  check(
-    isRecord(raw) &&
-      typeof raw['url'] === 'string' &&
-      typeof raw['sha256'] === 'string' &&
-      typeof raw['bytes'] === 'number',
-    'fixtureConfiguration',
-  );
+  if (
+    !isRecord(raw) ||
+    typeof raw['url'] !== 'string' ||
+    typeof raw['secondUrl'] !== 'string' ||
+    typeof raw['sha256'] !== 'string' ||
+    typeof raw['bytes'] !== 'number'
+  ) {
+    throw new Error('fixtureConfiguration');
+  }
   const base = localModelDefinition('qwen3-1.7b-q4-k-m');
-  const model = {
-    ...base,
-    id: 'native-download-fixture',
-    downloadUrl: raw['url'],
-    sha256: raw['sha256'],
-    bytes: raw['bytes'],
-  };
+  const model = { ...base, sha256: raw['sha256'], bytes: raw['bytes'] };
+  return [
+    { ...model, id: 'native-download-first', downloadUrl: raw['url'] },
+    { ...model, id: 'native-download-second', downloadUrl: raw['secondUrl'] },
+    { ...model, id: 'native-download-bad-hash', downloadUrl: raw['url'], sha256: '0'.repeat(64) },
+  ];
+}
+
+function controller(models: LocalModelDefinition[], events: ModelDownloadSnapshot[] = []) {
+  return new ModelDownloadController(models, getOnDeviceNativeServices(), (snapshot) => {
+    if (snapshot) {
+      events.push(snapshot);
+    }
+  });
+}
+
+/** First launch: concurrent transfers, independent pause/resume, then the app is terminated. */
+async function beforeTermination(models: LocalModelDefinition[]) {
+  const [first, second] = models as [LocalModelDefinition, LocalModelDefinition];
+  const native = getOnDeviceNativeServices();
+  const downloads = controller(models);
+  await Promise.all(models.map((model) => downloads.inspect(model.id)));
+  const started = await downloads.download(first.id);
+  check(
+    started.phase === 'downloading' && (await native.getDownloadedModelFile(first.id)) === null,
+    'downloadResolvesWhenStarted',
+  );
+  check((await downloads.download(second.id)).phase === 'downloading', 'secondStartsInParallel');
+  await until(
+    'both transfers progress',
+    () =>
+      downloads.snapshot(first.id).bytesWritten >= 64 * 1024 &&
+      downloads.snapshot(second.id).bytesWritten >= 64 * 1024,
+  );
+  check(
+    native.getModelDownload(first.id).state === 'running' &&
+      native.getModelDownload(second.id).state === 'running',
+    'concurrentNativeTransfers',
+  );
+  const paused = await downloads.pause(first.id);
+  check(paused.phase === 'paused' && paused.canResume && paused.bytesWritten > 0, 'nativePause');
+  check((await native.getDownloadedModelFile(first.id)) === null, 'pausedNotReady');
+  const secondBefore = downloads.snapshot(second.id).bytesWritten;
+  await sleep(1_500);
+  check(
+    downloads.snapshot(second.id).bytesWritten > secondBefore &&
+      downloads.snapshot(first.id).bytesWritten === paused.bytesWritten &&
+      downloads.snapshot(second.id).phase === 'downloading',
+    'pausingOneLeavesOtherRunning',
+  );
+  const restored = controller(models);
+  const checkpoint = await restored.inspect(first.id);
+  restored.dispose();
+  check(checkpoint.phase === 'paused' && checkpoint.canResume, 'restoredCheckpoint');
+  check((await downloads.resume(first.id)).phase === 'downloading', 'nativeResume');
+  check(
+    downloads.snapshot(second.id).bytesPerSecond !== null &&
+      downloads.snapshot(second.id).etaSeconds !== null,
+    'speedAndEta',
+  );
+  check(
+    downloads.snapshot(first.id).bytesWritten < first.bytes &&
+      downloads.snapshot(second.id).bytesWritten < second.bytes,
+    'transfersStillRunningAtTermination',
+  );
+  marker.write(JSON.stringify({ phase: 'terminate' }));
+  phaseOutcome.write(JSON.stringify({ status: 'terminate', checks }));
+}
+
+/** Second launch: the background session re-attaches or delivers what finished while closed. */
+async function afterRelaunch(models: LocalModelDefinition[]) {
+  const [first, second, bad] = models as [
+    LocalModelDefinition,
+    LocalModelDefinition,
+    LocalModelDefinition,
+  ];
   const native = getOnDeviceNativeServices();
   const events: ModelDownloadSnapshot[] = [];
-  const control: { pause: Promise<void> | null } = { pause: null };
-  const first = new ModelDownloadController(
-    [model],
-    native,
-    expoModelTransfers,
-    modelResumeStorage,
-    (state) => {
-      events.push(state);
-      if (
-        state.phase === 'downloading' &&
-        state.bytesWritten >= 64 * 1024 &&
-        state.bytesWritten < model.bytes &&
-        !control.pause
-      ) {
-        control.pause = first.pause();
-      }
-    },
-  );
-  const paused = await first.download(model.id);
-  check(control.pause !== null, 'pauseRequested');
-  await control.pause;
-  check(paused.phase === 'paused' && paused.canResume && paused.bytesWritten > 0, 'nativePause');
-  check((await native.getDownloadedModelFile(model.id)) === null, 'pausedNotReady');
-  const second = new ModelDownloadController(
-    [model],
-    native,
-    expoModelTransfers,
-    modelResumeStorage,
-    (state) => events.push(state),
-  );
-  const restored = await second.inspect(model.id);
-  check(restored.phase === 'paused' && restored.canResume, 'restoredCheckpoint');
-  const ready = await second.resume(model.id);
-  check(
-    ready.phase === 'ready' &&
-      ready.file?.sha256 === model.sha256 &&
-      ready.file.bytes === model.bytes,
-    'nativeResumeAndVerification',
-  );
+  const downloads = controller(models, events);
+  for (const model of [first, second]) {
+    const state = await downloads.inspect(model.id);
+    check(
+      state.phase === 'downloading' || (state.phase === 'paused' && state.verificationPending),
+      `reattached:${model.id}`,
+    );
+  }
+  await downloads.resumeLifecyclePaused();
+  for (const model of [first, second]) {
+    const ready = await downloads.settled(model.id);
+    check(
+      ready.phase === 'ready' &&
+        ready.file?.sha256 === model.sha256 &&
+        ready.file.bytes === model.bytes,
+      `survivedTermination:${model.id}`,
+    );
+  }
   check(
     events.some((state) => state.phase === 'verifying'),
     'verificationBeforeReady',
   );
-  const cold = new ModelDownloadController(
-    [model],
-    native,
-    expoModelTransfers,
-    modelResumeStorage,
-    () => {},
+  const cold = controller(models);
+  check((await cold.inspect(first.id)).phase === 'ready', 'coldReadyWithoutNetwork');
+  check(native.getModelDownload(first.id).state === 'idle', 'transferStateCleared');
+  await downloads.download(bad.id);
+  const rejected = await downloads.settled(bad.id);
+  check(
+    rejected.phase === 'error' && rejected.error?.includes('checksum'),
+    'checksumFailureVisible',
   );
-  check((await cold.inspect(model.id)).phase === 'ready', 'coldReadyWithoutNetwork');
-  const paths = await native.getModelFilePaths(model.id);
-  check(!new File(paths.resumeUri).exists, 'resumeMetadataRemoved');
-  const corrupted = { ...model, id: 'native-download-bad-hash', sha256: '0'.repeat(64) };
-  const bad = new ModelDownloadController(
-    [corrupted],
-    native,
-    expoModelTransfers,
-    modelResumeStorage,
-    () => {},
+  check((await native.getDownloadedModelFile(bad.id)) === null, 'checksumFailureNotReady');
+  const storage = await downloads.refreshStorage();
+  check(
+    storage.usedBytes >= 2 * first.bytes &&
+      storage.freeBytes > 0 &&
+      storage.capacityBytes >= storage.freeBytes &&
+      storage.models.some((entry) => entry.id === first.id),
+    'storageOverview',
   );
-  let rejected = false;
-  try {
-    await bad.download(corrupted.id);
-  } catch (error) {
-    rejected = error instanceof Error && error.message.includes('checksum');
+  await downloads.remove(first.id);
+  check(
+    downloads.snapshot(first.id).phase === 'not_downloaded' &&
+      (await cold.inspect(second.id)).phase === 'ready',
+    'nativeRemoval',
+  );
+  downloads.dispose();
+  cold.dispose();
+}
+
+async function run() {
+  const models = await fixture();
+  if (marker.exists) {
+    await afterRelaunch(models);
+    outcome.write(JSON.stringify({ status: 'pass', checks }));
+    return 'pass';
   }
-  check(rejected && bad.snapshot(corrupted.id).phase === 'error', 'checksumFailureVisible');
-  check((await native.getDownloadedModelFile(corrupted.id)) === null, 'checksumFailureNotReady');
-  await cold.remove(model.id);
-  check((await cold.inspect(model.id)).phase === 'not_downloaded', 'nativeRemoval');
+  await beforeTermination(models);
+  return 'terminate';
 }
 
 let started = false;
@@ -124,22 +196,15 @@ function DownloadGate() {
       return;
     }
     started = true;
-    void run().then(
-      () => {
-        outcome.write(JSON.stringify({ status: 'pass', checks }));
-        setStatus('pass');
-      },
-      (error: unknown) => {
-        outcome.write(
-          JSON.stringify({
-            status: 'fail',
-            checks,
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
-        setStatus('fail');
-      },
-    );
+    void run().then(setStatus, (error: unknown) => {
+      const failure = {
+        status: 'fail',
+        checks,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      (marker.exists ? outcome : phaseOutcome).write(JSON.stringify(failure));
+      setStatus('fail');
+    });
   }, []);
   return <Text>Native model transfers: {status}</Text>;
 }

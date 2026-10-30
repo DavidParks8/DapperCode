@@ -13,6 +13,7 @@ jest.mock('@shell/layout/useShellLayout', () => ({
 jest.mock('../runtime/OnDeviceProvider', () => ({ useOnDeviceRuntime: () => mockRuntime }));
 
 let mockPhysicalBytes = 16 * 1024 ** 3;
+let mockDownloadingId: string | null = null;
 const mockRuntime = {
   native: {
     getMemoryInfo: () => ({
@@ -22,13 +23,32 @@ const mockRuntime = {
     }),
   },
   downloads: {
-    snapshot: (id: string) => ({
-      phase: id === 'qwen3-1.7b-q4-k-m' ? 'ready' : 'not_downloaded',
-      bytesWritten: 0,
-      canResume: false,
-      verificationPending: false,
-      error: null,
-    }),
+    snapshot: (id: string) =>
+      id === mockDownloadingId
+        ? {
+            phase: 'downloading',
+            bytesWritten: 40 * 1024 ** 2,
+            totalBytes: 100 * 1024 ** 2,
+            bytesPerSecond: 2 * 1024 ** 2,
+            etaSeconds: 90,
+            verifiedBytes: 0,
+            canResume: false,
+            verificationPending: false,
+            error: null,
+          }
+        : {
+            phase: id === 'qwen3-1.7b-q4-k-m' ? 'ready' : 'not_downloaded',
+            bytesWritten: 0,
+            totalBytes: 0,
+            bytesPerSecond: null,
+            etaSeconds: null,
+            verifiedBytes: 0,
+            canResume: false,
+            verificationPending: false,
+            error: null,
+          },
+    pause: jest.fn(async () => undefined),
+    cancel: jest.fn(async () => undefined),
   },
   models: { snapshot: () => ({ modelId: null, phase: 'empty' }) },
   selectModel: jest.fn(async () => undefined),
@@ -47,7 +67,10 @@ beforeEach(() => {
   resetRouterMock();
   router.replace('/on-device/models');
   mockPhysicalBytes = 16 * 1024 ** 3;
+  mockDownloadingId = null;
   mockRuntime.selectModel.mockClear();
+  mockRuntime.downloads.pause.mockClear();
+  mockRuntime.downloads.cancel.mockClear();
 });
 
 test('family discovery shows modern families without quant actions and pushes the chosen family onto the stack', () => {
@@ -125,4 +148,22 @@ test('Prism-specific Bonsai packings are visible but cannot masquerade as usable
   expect(screen.getAllByText('Q2_0')).toHaveLength(2);
   expect(screen.getAllByRole('button', { name: 'Unavailable in this build' })).toHaveLength(4);
   expect(screen.getAllByRole('button', { name: 'Download' })).toHaveLength(2);
+});
+
+test('a running download shows byte progress and leaves other models usable', () => {
+  mockDownloadingId = 'qwen3-0.6b-q4-0';
+  render(<NavigationProbe />);
+  fireEvent.press(screen.getByRole('button', { name: 'Qwen3 model family' }));
+  expect(
+    screen.getByText('Downloading 40% · 0.04 GiB of 0.10 GiB · 2.0 MiB/s · 2 min left'),
+  ).toBeTruthy();
+  for (const name of ['Load and use', 'Delete download']) {
+    expect(screen.getByRole('button', { name }).props['accessibilityState']).toMatchObject({
+      disabled: false,
+    });
+  }
+  fireEvent.press(screen.getByRole('button', { name: 'Pause download' }));
+  expect(mockRuntime.downloads.pause).toHaveBeenCalledWith('qwen3-0.6b-q4-0');
+  fireEvent.press(screen.getByRole('button', { name: 'Cancel download' }));
+  expect(mockRuntime.downloads.cancel).toHaveBeenCalledWith('qwen3-0.6b-q4-0');
 });

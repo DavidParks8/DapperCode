@@ -14,9 +14,19 @@ See [product setup and limitations](../../../../docs/on-device.md).
   boundary configures libgit2's 15-second connection and read/write timeouts.
 - `ios/WorkspaceStore.swift` and `WorkspaceFileTools.swift` own actor-serialized workspace
   publication, containment, revision checks, and bounded UTF-8 operations.
-- `ios/ModelFileStore.swift` verifies size/SHA-256 before atomic ready publication.
+- `ios/ModelFileStore.swift` verifies size/SHA-256 before atomic ready publication. Hashing runs off
+  the store actor in 1 MiB chunks, reports progress (`getModelVerificationProgress`), and stops
+  cooperatively (`cancelModelVerification`) while keeping the staged file for a later retry. It also
+  reports model disk usage and free/total capacity (`getModelStorageInfo`).
+- `ios/ModelDownloadSession.swift` owns one background `URLSession`; each task's description is its
+  model ID, so several models transfer concurrently and keep running while the app is suspended.
+  `attachModelDownloads` adopts tasks that outlived the process. Completed files are moved to
+  `partial.gguf` by the delegate even when JavaScript is not running; pause and system interruptions
+  persist resume data (`resume.data`/`transfer.json`). `ModelDownloadAppDelegate.swift` recreates the
+  session when iOS relaunches the app for transfer events. Checkpoints from the earlier
+  JavaScript transfer (`resume.json`) are imported on the next resume.
   `RuntimeDocumentStore.swift` owns separate atomic, size-limited local journals/preferences.
-- The native ABI is versioned (currently 6). An old binary is rejected before loading model
+- The native ABI is versioned (currently 7). An old binary is rejected before loading model
   variants that need the newer inference engine, including Bonsai 2's activation transforms.
 - `scripts/build-git.mjs` builds pinned libgit2 1.9.7 for iOS arm64 and simulator arm64/x86_64.
   The source archive is SHA-256 verified. HTTPS uses SecureTransport; SSH, the CLI, and tests are
@@ -100,13 +110,27 @@ node .agents/skills/local-e2e-validation/scripts/run.mjs \
   apps/mobile/modules/on-device-agent/tests/native-git.mjs
 ```
 
-The model-file scenario also exercises atomic local runtime documents, preservation on rejected
-writes, prefix enumeration, and idempotent removal:
+The model-file scenario also exercises verification progress and cooperative cancellation (without
+blocking other models' file operations), the storage overview, atomic local runtime documents,
+preservation on rejected writes, prefix enumeration, and idempotent removal:
 
 ```bash
 node .agents/skills/local-e2e-validation/scripts/run.mjs \
   --evidence /absolute/path/to/new-storage-evidence.jsonl \
   apps/mobile/modules/on-device-agent/tests/native-model-files.mjs
+```
+
+The download scenario bundles the production `ModelDownloadController` against a local HTTPS
+fixture. It downloads two models concurrently, pauses one while the other continues, resumes with
+an HTTP Range request, then terminates the app mid-transfer and relaunches it. The background
+session must re-attach (or have delivered the finished file) without restarting either transfer,
+before verification, checksum rejection, the storage overview, and removal are checked. It needs the
+Release simulator build above:
+
+```bash
+node .agents/skills/local-e2e-validation/scripts/run.mjs \
+  --evidence /absolute/path/to/new-downloads-evidence.jsonl \
+  apps/mobile/modules/on-device-agent/tests/native-downloads.mjs
 ```
 
 `native-product.mjs` bundles the production router/screens behind an isolated fixture bootstrap.

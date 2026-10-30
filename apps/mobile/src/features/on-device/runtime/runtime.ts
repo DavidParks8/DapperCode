@@ -5,7 +5,6 @@ import type { LocalGitIdentity } from '../git/gitTools';
 import { LOCAL_MODEL_CATALOG, localModelDefinition } from '../models/catalog';
 import { ModelDownloadController } from '../models/downloads';
 import { loadNativeModelContext } from '../models/engine';
-import { expoModelTransfers, modelResumeStorage } from '../models/expoDownloads';
 import { LocalModelSession } from '../models/session';
 import type { OnDeviceNativeServices } from '../native/services.types';
 import { FILE_TOOL_DEFINITIONS } from '../workspaces/fileToolDefinitions';
@@ -42,13 +41,7 @@ export class OnDeviceRuntime {
   constructor(readonly native: OnDeviceNativeServices) {
     this.threads = new LocalThreadRepository(native, () => this.emit());
     this.models = new LocalModelSession(native, loadNativeModelContext, () => this.emit());
-    this.downloads = new ModelDownloadController(
-      LOCAL_MODEL_CATALOG,
-      native,
-      expoModelTransfers,
-      modelResumeStorage,
-      () => this.emit(),
-    );
+    this.downloads = new ModelDownloadController(LOCAL_MODEL_CATALOG, native, () => this.emit());
     this.authentication = new GitHubAuthStrategy({
       clientId: this.githubClientId,
       credentials: {
@@ -332,9 +325,12 @@ export class OnDeviceRuntime {
     const workspace = this.workspaceOperation
       ? await Promise.allSettled([this.workspaceOperation])
       : [];
+    // Model downloads run in a background URL session; disposal only stops progress polling.
+    if (dispose) {
+      this.downloads.dispose();
+    }
     const results = await Promise.allSettled([
       dispose ? this.models.dispose() : this.models.unload(),
-      this.downloads.pause(),
       this.flush(),
     ]);
     const failed = [...stopping, ...workspace, ...results].find(

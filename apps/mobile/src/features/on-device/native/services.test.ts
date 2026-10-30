@@ -7,7 +7,7 @@ jest.mock('expo', () => ({
 }));
 
 test('old native builds are rejected before exposing models requiring the updated engine', () => {
-  mockNativeLookup.mockReturnValue({ getAPIVersion: () => 5 });
+  mockNativeLookup.mockReturnValue({ getAPIVersion: () => ON_DEVICE_NATIVE_API_VERSION - 1 });
   expect(() => getOnDeviceNativeServices()).toThrow('Rebuild the native iOS app');
 });
 

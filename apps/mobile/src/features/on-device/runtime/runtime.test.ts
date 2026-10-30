@@ -10,10 +10,6 @@ import { OnDeviceRuntime } from './runtime';
 
 jest.mock('expo-crypto', () => ({ randomUUID: jest.fn() }));
 jest.mock('../models/engine', () => ({ loadNativeModelContext: jest.fn() }));
-jest.mock('../models/expoDownloads', () => ({
-  expoModelTransfers: { create: jest.fn(), restore: jest.fn() },
-  modelResumeStorage: { read: jest.fn(async () => null), write: jest.fn(), remove: jest.fn() },
-}));
 
 const modelId = 'qwen3-1.7b-q4-k-m';
 const reply: LocalModelReply = {
@@ -38,7 +34,7 @@ function deferred<T>() {
 function harness(documents = new Map<string, string>()) {
   const workspaces = [{ id: 'workspace-one', name: 'Workspace one' }];
   const native = {
-    getAPIVersion: jest.fn(() => 6),
+    getAPIVersion: jest.fn(() => 7),
     cancelGitTransfer: jest.fn(),
     getGitTransferProgress: jest.fn(() => ({
       active: false,
@@ -102,6 +98,33 @@ function harness(documents = new Map<string, string>()) {
       Parameters<OnDeviceNativeServices['finalizeModelDownload']>
     >(),
     removeModelFile: jest.fn(async () => undefined),
+    attachModelDownloads: jest.fn(async () => []),
+    startModelDownload: jest.fn<
+      ReturnType<OnDeviceNativeServices['startModelDownload']>,
+      Parameters<OnDeviceNativeServices['startModelDownload']>
+    >(),
+    pauseModelDownload: jest.fn<
+      ReturnType<OnDeviceNativeServices['pauseModelDownload']>,
+      Parameters<OnDeviceNativeServices['pauseModelDownload']>
+    >(),
+    cancelModelDownload: jest.fn(async () => undefined),
+    getModelDownload: jest.fn((id: string) => ({
+      id,
+      state: 'idle' as const,
+      bytesWritten: 0,
+      totalBytes: 0,
+      resumable: false,
+      interrupted: false,
+      error: null,
+    })),
+    getModelVerificationProgress: jest.fn(() => ({ active: false, completed: 0, total: 0 })),
+    cancelModelVerification: jest.fn(),
+    getModelStorageInfo: jest.fn(async () => ({
+      usedBytes: 0,
+      freeBytes: 0,
+      capacityBytes: 0,
+      models: [],
+    })),
     getWorkspaceGitStatus: jest.fn<
       ReturnType<OnDeviceNativeServices['getWorkspaceGitStatus']>,
       Parameters<OnDeviceNativeServices['getWorkspaceGitStatus']>

@@ -8,7 +8,8 @@ export const contract = { requiredPhases: ['bundle', 'serve', 'native-downloads'
 export default async function scenario(e2e) {
   const module = path.join(e2e.worktree, 'apps/mobile/modules/on-device-agent');
   const bundleId = 'dev.dappercode.native-downloads';
-  const bytes = Buffer.alloc(4 * 1024 * 1024, 0x35);
+  // Large enough (about 15 s per transfer at the fixture's rate) to outlive app termination.
+  const bytes = Buffer.alloc(12 * 1024 * 1024, 0x35);
   const sha256 = createHash('sha256').update(bytes).digest('hex');
   let app;
   let simulator;
@@ -22,7 +23,10 @@ export default async function scenario(e2e) {
         bundleId,
         name: 'NativeDownloads',
       });
-      await e2e.check('real Expo transfers and production controller are bundled', () => true);
+      await e2e.check(
+        'native background transfers and production controller are bundled',
+        () => true,
+      );
     });
     await e2e.phase('serve', async () => {
       const data = e2e.writeFile('data/model.gguf', bytes);
@@ -109,6 +113,7 @@ extendedKeyUsage=serverAuth
         'data/download-fixture.json',
         JSON.stringify({
           url: `https://127.0.0.1:${port}/model.gguf`,
+          secondUrl: `https://127.0.0.1:${port}/model-2.gguf`,
           bytes: bytes.length,
           sha256,
         }),
@@ -120,7 +125,6 @@ extendedKeyUsage=serverAuth
       await e2e.check('download fixture uses an isolated app and local TLS trust', () => true);
     });
     await e2e.phase('native-downloads', async () => {
-      await e2e.run('xcrun', ['simctl', 'launch', simulator, bundleId], { timeoutMs: 60_000 });
       const container = await e2e.run('xcrun', [
         'simctl',
         'get_app_container',
@@ -128,42 +132,79 @@ extendedKeyUsage=serverAuth
         bundleId,
         'data',
       ]);
-      const output = path.join(container.stdout.trim(), 'Documents/native-download-result.json');
-      let result;
-      await e2e.waitFor(
-        'native pause, restore, resume, and verification',
-        async () => {
-          const read = await e2e.run('cat', [output], { expectExitCodes: [0, 1] });
-          if (read.code !== 0) {
-            return false;
-          }
-          result = JSON.parse(read.stdout);
-          return result.status === 'pass' || result.status === 'fail';
-        },
-        { timeoutMs: 120_000, intervalMs: 500 },
-      );
-      await e2e.check('native transfer outcome', () => {
-        if (result.status !== 'pass') {
+      const documents = path.join(container.stdout.trim(), 'Documents');
+      const readOutcome = async (file) => {
+        const read = await e2e.run('cat', [path.join(documents, file)], {
+          expectExitCodes: [0, 1],
+        });
+        return read.code === 0 ? JSON.parse(read.stdout) : null;
+      };
+      const requireOutcome = (result, expected) => {
+        if (result.status !== expected) {
           throw new Error(
             `${result.error} Completed: ${Object.keys(result.checks ?? {}).join(', ')}`,
           );
         }
         return true;
-      });
-      await e2e.expectSubset('native transfer lifecycle', result.checks, {
+      };
+      await e2e.run('xcrun', ['simctl', 'launch', simulator, bundleId], { timeoutMs: 60_000 });
+      let first;
+      await e2e.waitFor(
+        'concurrent transfers, independent pause, and resume',
+        async () => {
+          first = await readOutcome('native-download-phase-a.json');
+          return first !== null;
+        },
+        { timeoutMs: 120_000, intervalMs: 250 },
+      );
+      await e2e.check('first launch outcome', () => requireOutcome(first, 'terminate'));
+      await e2e.expectSubset('parallel transfer lifecycle', first.checks, {
+        downloadResolvesWhenStarted: true,
+        secondStartsInParallel: true,
+        concurrentNativeTransfers: true,
         nativePause: true,
         pausedNotReady: true,
+        pausingOneLeavesOtherRunning: true,
         restoredCheckpoint: true,
-        nativeResumeAndVerification: true,
+        nativeResume: true,
+        speedAndEta: true,
+        transfersStillRunningAtTermination: true,
+      });
+      // Terminating (not force-quitting) leaves the background URL session running.
+      await e2e.run('xcrun', ['simctl', 'terminate', simulator, bundleId]);
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      await e2e.run('xcrun', ['simctl', 'launch', simulator, bundleId], { timeoutMs: 60_000 });
+      let result;
+      await e2e.waitFor(
+        'relaunch re-attachment, verification, and removal',
+        async () => {
+          result = await readOutcome('native-download-result.json');
+          return result !== null;
+        },
+        { timeoutMs: 180_000, intervalMs: 500 },
+      );
+      await e2e.check('relaunch outcome', () => requireOutcome(result, 'pass'));
+      await e2e.expectSubset('background transfer lifecycle', result.checks, {
+        'reattached:native-download-first': true,
+        'reattached:native-download-second': true,
+        'survivedTermination:native-download-first': true,
+        'survivedTermination:native-download-second': true,
         verificationBeforeReady: true,
         coldReadyWithoutNetwork: true,
-        resumeMetadataRemoved: true,
+        transferStateCleared: true,
         checksumFailureVisible: true,
         checksumFailureNotReady: true,
+        storageOverview: true,
         nativeRemoval: true,
       });
       await e2e.waitForLog('model-server', /MODEL_RANGE_REQUEST/);
       await e2e.check('resumption used an HTTP Range request', () => true);
+      const requests = e2e.readFile('logs/model-server.stdout.log');
+      await e2e.expectEqual(
+        'the unpaused transfer was never restarted across termination',
+        requests.match(/MODEL_REQUEST GET \/model-2\.gguf/g)?.length,
+        1,
+      );
       await server.stop();
     });
   } finally {

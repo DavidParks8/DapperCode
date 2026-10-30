@@ -10,8 +10,8 @@ target, not a bridge profile or a localhost server. Android and web continue to 
    Download a compatible quant and choose **Load and use**. Search and **Downloaded only** narrow
    the family list. Back returns from the quant page to the family list; selecting for an existing
    conversation returns directly to that conversation.
-   Downloads are pinned by revision, byte count, and SHA-256. Interrupted transfers can be paused,
-   resumed, or removed; unverified weights cannot be loaded.
+   Downloads are pinned by revision, byte count, and SHA-256; unverified weights cannot be loaded.
+   See [Model downloads](#model-downloads).
 3. Open **Workspaces** and clone an HTTPS repository. Public repositories need no account.
    Sign in under **GitHub and author** before cloning a private GitHub repository.
    An empty file workspace is also available, but Git actions require a repository.
@@ -22,6 +22,22 @@ target, not a bridge profile or a localhost server. Android and web continue to 
 Existing desktop profiles and conversations are not migrated or deleted. The last explicitly
 selected target is restored at startup. Switching back settles local work and unloads its model
 before desktop lifecycle effects are mounted.
+
+## Model downloads
+
+- Up to two models download at once; further downloads wait in a visible **Queued** state and
+  start automatically when a slot frees. Pause, resume, and cancel apply to one model at a time.
+- Download actions return as soon as the transfer is accepted, so other models stay usable while
+  it runs. Each card shows bytes transferred, speed, and remaining time (updated at most four
+  times a second), then SHA-256 verification progress. Verification can be paused (the downloaded
+  file is kept) or cancelled.
+- Transfers use an iOS background URL session: locking the phone or switching apps does not stop
+  them. If iOS terminates the app, a running transfer continues and is re-attached on the next
+  launch; a transfer that finished meanwhile is verified when the app becomes active. Force-quitting
+  from the app switcher makes iOS cancel the transfer; it resumes from its checkpoint next time.
+- Free-space checks reserve the bytes still needed by every queued or running transfer, plus a
+  64 MiB margin. Pause, cancel, and removal errors are shown on that model's card.
+- Cancel discards partial data but never deletes an installed model; **Delete download** does.
 
 ## Models and memory
 
@@ -76,8 +92,8 @@ discarding history: start a new conversation or request smaller file chunks if a
   changes before pushing. Desktop approval settings are unchanged.
 - Stop waits for current work to settle. Git cancellation is cooperative; unresponsive transports
   have a 15-second connection/read/write timeout. A cancelled push may already have reached its remote.
-- Backgrounding or a memory warning stops local work, pauses downloads, unloads the context, and
-  flushes drafts/history. There is no promise of continuous background inference on iOS.
+- Backgrounding or a memory warning stops local work, unloads the context, and flushes
+  drafts/history. Model downloads keep running in the background (see below). There is no promise of continuous background inference on iOS.
 - User turns and tool intent are journaled before execution. After an interrupted launch, uncertain
   tools are marked interrupted and are **never automatically replayed**. Inspect the workspace and,
   for push, the remote before retrying.
