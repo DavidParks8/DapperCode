@@ -8,6 +8,22 @@ import test from 'node:test';
 const rootDir = path.resolve(import.meta.dirname, '../..');
 const script = path.join(rootDir, 'scripts/release-latest.mts');
 
+test('release dependencies have explicit version-scoped build approval', () => {
+  const mobile = JSON.parse(readFileSync(path.join(rootDir, 'apps/mobile/package.json'), 'utf8'));
+  const result = spawnSync('pnpm', ['config', 'get', 'allowBuilds', '--json'], {
+    cwd: rootDir,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const approvals = JSON.parse(result.stdout);
+  for (const [name, version] of [
+    ['esbuild', mobile.devDependencies.esbuild],
+    ['llama.rn', mobile.dependencies['llama.rn']],
+  ]) {
+    assert.equal(approvals[`${name}@${version}`], true, `${name}@${version} needs build approval`);
+  }
+});
+
 test('release:latest dry run describes the complete release workflow', () => {
   const result = spawnSync(process.execPath, ['--experimental-strip-types', script, '--dry-run'], {
     cwd: rootDir,
