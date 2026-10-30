@@ -10,11 +10,20 @@ import { GIT_TOOL_DEFINITIONS } from '../../../src/features/on-device/git/gitToo
 import { LOCAL_AGENT_SYSTEM_PROMPT } from '../../../src/features/on-device/runtime/agentLoop';
 import { executeFileTool } from '../../../src/features/on-device/workspaces/fileTools';
 import { localModelDefinition } from '../../../src/features/on-device/models/catalog';
-import { requireModelMemory } from '../../../src/features/on-device/models/memory';
-import type { LocalModelDefinition } from '../../../src/features/on-device/models/types';
-import { modelFileSystemPath } from '../../../src/features/on-device/models/engine';
+import { promptFits } from '../../../src/features/on-device/models/contextWindow';
+import {
+  modelContextTokens,
+  requireModelMemory,
+} from '../../../src/features/on-device/models/memory';
+import { completionParams } from '../../../src/features/on-device/models/session';
+import type {
+  LocalModelDefinition,
+  LocalModelFile,
+} from '../../../src/features/on-device/models/types';
+import { nativeContextParams } from '../../../src/features/on-device/models/engine';
 
 const checks: Record<string, boolean> = {};
+const metrics: Record<string, number> = {};
 const outcome = new File(Paths.document, 'native-inference-result.json');
 
 function check(condition: unknown, name: string, detail = ''): asserts condition {
@@ -27,23 +36,18 @@ function check(condition: unknown, name: string, detail = ''): asserts condition
 
 async function withModel(
   model: LocalModelDefinition,
-  uri: string,
-  run: (context: LlamaContext) => Promise<void>,
+  file: LocalModelFile,
+  run: (context: LlamaContext, contextTokens: number) => Promise<void>,
 ) {
-  requireModelMemory(model, getOnDeviceNativeServices().getMemoryInfo());
+  const memory = getOnDeviceNativeServices().getMemoryInfo();
+  requireModelMemory(model, memory);
   check(true, 'nativeMemoryAdmission');
-  const context = await initLlama({
-    model: modelFileSystemPath(uri),
-    n_ctx: model.contextTokens,
-    n_batch: 128,
-    n_threads: 2,
-    n_gpu_layers: 0,
-    cache_type_k: 'f16',
-    cache_type_v: 'f16',
-    state_cache_budget_mb: 0,
-  });
+  // The production context parameters: admitted context size, threads, batch, one sequence, and
+  // prompt-state reuse.
+  const contextTokens = modelContextTokens(model, memory);
+  const context = await initLlama(nativeContextParams(model, file, { contextTokens, memory }));
   try {
-    await run(context);
+    await run(context, contextTokens);
   } finally {
     await context.release();
   }
@@ -73,27 +77,26 @@ async function exerciseInference() {
     },
   ];
   const tools = [...FILE_TOOL_DEFINITIONS, ...GIT_TOOL_DEFINITIONS];
-  await withModel(model, verified.uri, async (context) => {
+  await withModel(model, verified, async (context, contextTokens) => {
     check(Number.isFinite(context.id), 'nativeModelLoaded');
+    metrics['contextTokens'] = contextTokens;
+    // Production rounds format once and complete from that formatted prompt.
     const fullPrompt = await context.getFormattedChat(messages, null, {
       tools,
-      tool_choice: 'auto',
+      tool_choice: 'required',
       enable_thinking: false,
       reasoning_format: 'auto',
     });
     const promptTokens = (await context.tokenize(fullPrompt.prompt)).tokens.length;
+    metrics['promptTokens'] = promptTokens;
     check(
-      promptTokens + 544 <= model.contextTokens,
+      promptFits(promptTokens, contextTokens),
       'fullProductionToolBudget',
-      `${promptTokens} prompt tokens + 544 reserved > ${model.contextTokens}`,
+      `${promptTokens} prompt tokens do not leave the generation reserve in ${contextTokens}`,
     );
     const first = await context.completion({
-      messages,
-      tools,
-      tool_choice: 'required',
-      enable_thinking: false,
+      ...completionParams(fullPrompt, 128),
       temperature: 0,
-      n_predict: 128,
     });
     const calls = first.tool_calls ?? [];
     check(
@@ -147,14 +150,7 @@ async function exerciseInference() {
     check(formatted.prompt.includes('OFFLINE_TOOL_OK'), 'toolResultInPrompt');
     let chunks = 0;
     const second = await context.completion(
-      {
-        messages: continuation,
-        tools,
-        tool_choice: 'none',
-        enable_thinking: false,
-        temperature: 0,
-        n_predict: 128,
-      },
+      { ...completionParams(formatted, 128), temperature: 0 },
       () => {
         chunks += 1;
       },
@@ -165,6 +161,8 @@ async function exerciseInference() {
       JSON.stringify({ prompt: formatted.prompt, content: second.content, text: second.text }),
     );
     check(chunks > 0, 'nativeStreaming');
+    metrics['secondRoundCachedTokens'] = second.timings.cache_n;
+    metrics['secondRoundPromptTokens'] = second.timings.prompt_n;
     await context.clearCache();
     let stop: Promise<void> | undefined;
     const stopped = await context.completion(
@@ -189,7 +187,7 @@ async function exerciseInference() {
     check(stopped.interrupted && stopped.tokens_predicted < 512, 'nativeCancellation');
   });
   check(true, 'modelUnloaded');
-  await withModel(model, verified.uri, async (context) => {
+  await withModel(model, verified, async (context) => {
     check(Number.isFinite(context.id), 'modelReloaded');
   });
   const reference = await native.storeGitCredential(
@@ -217,7 +215,7 @@ function NativeInferenceGate() {
     outcome.write(JSON.stringify({ status: 'running' }));
     void exerciseInference().then(
       (memory) => {
-        outcome.write(JSON.stringify({ status: 'pass', checks, memory }));
+        outcome.write(JSON.stringify({ status: 'pass', checks, metrics, memory }));
         setStatus('pass');
       },
       (error: unknown) => {
