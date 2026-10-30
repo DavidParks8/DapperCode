@@ -118,3 +118,40 @@ test('retry waits for the failed runtime to finish disposing before constructing
   await screen.findByText('ready');
   expect(OnDeviceRuntime).toHaveBeenCalledTimes(2);
 });
+
+test('a remounted provider starts its runtime only after the previous one finishes starting and disposing', async () => {
+  const startup = deferred();
+  const first = runtimeDouble(() => startup.promise);
+  first.dispose.mockImplementation(() => startup.promise);
+  const second = runtimeDouble();
+  jest
+    .mocked(OnDeviceRuntime)
+    .mockImplementationOnce(() => first as unknown as OnDeviceRuntime)
+    .mockImplementationOnce(() => second as unknown as OnDeviceRuntime);
+  const view = render(
+    <OnDeviceProvider>
+      <Text>ready</Text>
+    </OnDeviceProvider>,
+  );
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  view.unmount();
+  render(
+    <OnDeviceProvider>
+      <Text>ready</Text>
+    </OnDeviceProvider>,
+  );
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(first.dispose).toHaveBeenCalledTimes(1);
+  expect(OnDeviceRuntime).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    startup.resolve();
+    await startup.promise;
+  });
+  await screen.findByText('ready');
+  expect(OnDeviceRuntime).toHaveBeenCalledTimes(2);
+  expect(second.initialize).toHaveBeenCalledTimes(1);
+});

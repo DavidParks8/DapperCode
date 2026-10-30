@@ -92,7 +92,9 @@ discarding history: start a new conversation or request smaller file chunks if a
   for push, the remote before retrying. Streamed text, tool results, and run settlement are
   coalesced into one write shortly afterwards (and on backgrounding).
 - Drafts are stored per conversation and written after a short typing pause; deleting a
-  conversation deletes its draft. Drafts saved inline by older builds are migrated on first launch.
+  conversation deletes its draft. Drafts saved inline by older builds stay in `preferences.json`
+  until their own draft document has been written, so a failed or skipped migration never loses
+  them.
 - Startup is not fail-closed. Damaged or unexpected conversation, draft, or settings files are
   moved to a `quarantine-…` name with their bytes unchanged (or skipped and left in place when they
   cannot be moved), a dismissible notice explains what happened, and the rest of the mode starts.

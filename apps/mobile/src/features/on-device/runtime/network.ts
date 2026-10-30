@@ -37,6 +37,7 @@ export class OnDeviceOfflineError extends Error {
 export class NetworkMonitor {
   private value: OnDeviceReachability = 'unknown';
   private unsubscribe: (() => void) | null = null;
+  private closed = false;
 
   constructor(
     private readonly port: OnDeviceNetworkPort,
@@ -47,12 +48,20 @@ export class NetworkMonitor {
     return this.value;
   }
 
+  /** Starts observing; a no-op once closed so a late start cannot leak a listener. */
   async start(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
     this.unsubscribe ??= this.port.subscribe((value) => this.set(value));
+    let value: OnDeviceReachability = 'unknown';
     try {
-      this.set(await this.port.current());
+      value = await this.port.current();
     } catch {
-      this.set('unknown');
+      value = 'unknown';
+    }
+    if (!this.closed) {
+      this.set(value);
     }
   }
 
@@ -64,6 +73,7 @@ export class NetworkMonitor {
   }
 
   close(): void {
+    this.closed = true;
     this.unsubscribe?.();
     this.unsubscribe = null;
   }

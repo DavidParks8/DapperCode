@@ -22,14 +22,18 @@ function parseDraft(raw: string): string {
 export interface LocalDraftRestore {
   setAside: number;
   leftInPlace: number;
-  /** True when inline legacy drafts were moved into draft documents. */
-  migrated: boolean;
 }
+
+/** Called once a legacy inline draft is durable elsewhere (or obsolete) and may be dropped. */
+export type LegacyDraftSettled = (threadId: string) => void;
 
 export class LocalDraftStore {
   private readonly values = new Map<string, string>();
   private readonly dirty = new Set<string>();
   private readonly failures = new Map<string, Error>();
+  /** Legacy inline drafts whose draft document has not been written yet. */
+  private readonly migrating = new Set<string>();
+  private legacySettled: LegacyDraftSettled = () => undefined;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private writes: Promise<void> = Promise.resolve();
 
@@ -71,6 +75,7 @@ export class LocalDraftStore {
   async remove(threadId: string): Promise<void> {
     this.values.delete(threadId);
     this.dirty.delete(threadId);
+    this.migrating.delete(threadId);
     await this.writes;
     await this.storage.removeRuntimeDocument(draftDocument(threadId));
     if (this.failures.delete(threadId)) {
@@ -104,30 +109,42 @@ export class LocalDraftStore {
 
   /**
    * Loads draft documents for known conversations, sets damaged ones aside, prunes drafts whose
-   * conversation was deleted, and moves inline legacy drafts into their own documents.
+   * conversation was deleted, and moves inline legacy drafts into their own documents. A legacy
+   * draft is reported as settled only after its document write succeeds (or when it is obsolete),
+   * so the caller keeps it in preferences until then.
    */
   async restore(
     known: ReadonlySet<string>,
     preserved: ReadonlySet<string>,
-    legacy: Record<string, string>,
+    legacy: Readonly<Record<string, string>>,
+    settled: LegacyDraftSettled,
   ): Promise<LocalDraftRestore> {
-    const result: LocalDraftRestore = { setAside: 0, leftInPlace: 0, migrated: false };
+    this.legacySettled = settled;
+    const result: LocalDraftRestore = { setAside: 0, leftInPlace: 0 };
+    const present = new Set<string>();
+    const unreadable = new Set<string>();
     for (const name of await this.storage.listRuntimeDocuments(DRAFT_PREFIX)) {
-      const outcome = await this.restoreDocument(name, known, preserved);
+      const outcome = await this.restoreDocument(name, known, preserved, present, unreadable);
       if (outcome !== 'loaded') {
         result[outcome] += 1;
       }
     }
-    const migrated = Object.entries(legacy).filter(
-      ([threadId, text]) => text && known.has(threadId) && !this.values.has(threadId),
-    );
-    for (const [threadId, text] of migrated) {
+    for (const [threadId, text] of Object.entries(legacy)) {
+      if (unreadable.has(threadId)) {
+        // Never overwrite a draft document that could not be read; keep the legacy copy.
+        continue;
+      }
+      const retained = known.has(threadId) || preserved.has(threadId);
+      if (!text || !retained || present.has(threadId) || this.values.has(threadId)) {
+        settled(threadId);
+        continue;
+      }
       this.values.set(threadId, text);
       this.dirty.add(threadId);
+      this.migrating.add(threadId);
     }
-    result.migrated = Object.keys(legacy).length > 0;
-    if (migrated.length > 0) {
-      // Failures stay recorded; the caller keeps the legacy copy until this succeeds.
+    if (this.migrating.size > 0) {
+      // Failures stay recorded and retried; unconfirmed legacy drafts stay in preferences.
       await this.flush().catch(() => undefined);
     }
     return result;
@@ -137,6 +154,8 @@ export class LocalDraftStore {
     name: string,
     known: ReadonlySet<string>,
     preserved: ReadonlySet<string>,
+    present: Set<string>,
+    unreadable: Set<string>,
   ): Promise<'loaded' | 'setAside' | 'leftInPlace'> {
     const threadId = /^draft-([a-f0-9-]+)\.json$/u.exec(name)?.[1];
     let valid = false;
@@ -149,7 +168,9 @@ export class LocalDraftStore {
       return (await quarantineDocument(this.storage, name)) ? 'setAside' : 'leftInPlace';
     }
     if (!known.has(threadId)) {
-      if (!preserved.has(threadId)) {
+      if (preserved.has(threadId)) {
+        present.add(threadId);
+      } else {
         await this.storage.removeRuntimeDocument(name).catch(() => undefined);
       }
       return 'loaded';
@@ -158,6 +179,7 @@ export class LocalDraftStore {
     try {
       raw = await this.storage.readRuntimeDocument(name);
     } catch {
+      unreadable.add(threadId);
       return 'leftInPlace';
     }
     try {
@@ -187,6 +209,9 @@ export class LocalDraftStore {
     );
     return write.then(
       () => {
+        if (this.migrating.delete(threadId)) {
+          this.legacySettled(threadId);
+        }
         if (this.failures.delete(threadId)) {
           this.changed();
         }

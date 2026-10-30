@@ -15,7 +15,12 @@ import { LocalAgentLoop } from './agentLoop';
 import { LocalDraftStore, type LocalDraftRestore } from './drafts';
 import { RuntimeSliceEmitter } from './emitter';
 import { NetworkMonitor, unknownNetwork, type OnDeviceNetworkPort } from './network';
-import { recoveryNotices, RuntimeIssueLog, type PersistenceFailure } from './issues';
+import {
+  recoveryNotices,
+  RuntimeIssueLog,
+  throwFirstRejection,
+  persistenceFailures,
+} from './issues';
 import { LocalPreferencesStore } from './preferences';
 import { ModelResidency } from './residency';
 import type { LocalPreferences } from './preferences';
@@ -60,6 +65,7 @@ export class OnDeviceRuntime {
   private backgrounded = false;
   private readonly residency: ModelResidency;
   private disposal: Promise<void> | null = null;
+  private disposing = false;
   private workspaceOperation: Promise<unknown> | null = null;
   private workspaceOperationLabel: string | null = null;
 
@@ -75,7 +81,12 @@ export class OnDeviceRuntime {
       }
     });
     this.issueLog = new RuntimeIssueLog(
-      () => this.persistenceFailures(),
+      () =>
+        persistenceFailures(
+          this.settings.failure(),
+          this.drafts.failure(),
+          this.threads.persistenceFailures(),
+        ),
       () => this.emitter.emit('issues'),
     );
     this.settings = new LocalPreferencesStore(native, (kind) =>
@@ -204,22 +215,6 @@ export class OnDeviceRuntime {
     this.issueLog.dismissTransient();
   }
 
-  private persistenceFailures(): PersistenceFailure[] {
-    const failures: PersistenceFailure[] = [];
-    const preferences = this.settings.failure();
-    if (preferences) {
-      failures.push({ id: 'persistence:preferences', error: preferences, threadId: null });
-    }
-    const drafts = this.drafts.failure();
-    if (drafts) {
-      failures.push({ id: 'persistence:drafts', error: drafts, threadId: null });
-    }
-    for (const [threadId, error] of this.threads.persistenceFailures()) {
-      failures.push({ id: `persistence:thread:${threadId}`, error, threadId });
-    }
-    return failures;
-  }
-
   /** Clears a settled conversation's last error and its operation issues. */
   async dismissThreadError(threadId: string): Promise<void> {
     this.issueLog.dismissThread(threadId);
@@ -233,15 +228,10 @@ export class OnDeviceRuntime {
   /** Rewrites every conversation, setting, and draft whose last write failed. */
   async retryPersistence(): Promise<void> {
     this.issueLog.restoreDismissed();
-    const results = await Promise.allSettled([
-      this.threads.retryPersistence(),
-      this.settings.flush(),
-      this.drafts.flush(),
-    ]);
-    this.issueLog.invalidate();
-    const failed = results.find((result) => result.status === 'rejected');
-    if (failed?.status === 'rejected') {
-      throw failed.reason;
+    try {
+      await this.persist(this.threads.retryPersistence());
+    } finally {
+      this.issueLog.invalidate();
     }
   }
 
@@ -288,22 +278,35 @@ export class OnDeviceRuntime {
     return this.initialization;
   }
 
+  /** Startup; each step stops early once disposal has begun so it never races a new owner. */
   private async restore(): Promise<void> {
     const settings = await this.settings.restore();
     if (settings.notice) {
       this.issueLog.recover(settings.notice);
     }
+    if (this.disposing) {
+      return;
+    }
     await this.threads.initialize();
+    if (this.disposing) {
+      return;
+    }
     const known = new Set(this.threads.list().map((thread) => thread.id));
-    let drafts: LocalDraftRestore = { setAside: 0, leftInPlace: 0, migrated: false };
+    let drafts: LocalDraftRestore = { setAside: 0, leftInPlace: 0 };
     try {
-      drafts = await this.drafts.restore(known, this.threads.recovery().ids, settings.legacyDrafts);
+      drafts = await this.drafts.restore(
+        known,
+        this.threads.recovery().ids,
+        this.settings.pendingLegacyDrafts(),
+        (threadId) => this.settings.settleLegacyDraft(threadId),
+      );
     } catch (error) {
       this.report(error);
     }
-    if (drafts.migrated && !this.drafts.failure()) {
-      await this.settings.save().catch(() => undefined);
+    if (this.disposing) {
+      return;
     }
+    await this.settings.flush().catch(() => undefined);
     for (const notice of recoveryNotices(this.threads.recovery(), drafts)) {
       this.issueLog.recover(notice);
     }
@@ -443,6 +446,7 @@ export class OnDeviceRuntime {
   async deleteThread(id: string): Promise<void> {
     await this.threads.remove(id);
     this.issueLog.dismissThread(id);
+    this.settings.settleLegacyDraft(id);
     await this.drafts.remove(id);
   }
 
@@ -530,19 +534,20 @@ export class OnDeviceRuntime {
   }
 
   dispose(): Promise<void> {
+    this.disposing = true;
     this.authentication.cancelSignIn();
     this.disposal ??= this.finishDisposal();
     return this.disposal;
   }
 
   private async finishDisposal(): Promise<void> {
+    if (this.initialization) {
+      await Promise.allSettled([this.initialization]);
+    }
     const previous = this.suspension ? await Promise.allSettled([this.suspension]) : [];
     try {
       await this.suspend('dispose');
-      const failed = previous.find((result) => result.status === 'rejected');
-      if (failed?.status === 'rejected') {
-        throw failed.reason;
-      }
+      throwFirstRejection(previous);
     } finally {
       this.networkMonitor.close();
       this.drafts.close();
@@ -592,12 +597,7 @@ export class OnDeviceRuntime {
       mode === 'memory' ? Promise.resolve() : this.downloads.pause(),
       this.flush(),
     ]);
-    const failed = [...stopping, ...workspace, ...results].find(
-      (result) => result.status === 'rejected',
-    );
-    if (failed?.status === 'rejected') {
-      throw failed.reason;
-    }
+    throwFirstRejection([...stopping, ...workspace, ...results]);
   }
 
   private resumeLifecycleDownload(): void {
@@ -620,15 +620,13 @@ export class OnDeviceRuntime {
   }
 
   /** Writes settings, drafts, and conversation progress that has not been saved yet. */
-  async flush(): Promise<void> {
-    const results = await Promise.allSettled([
-      this.settings.flush(),
-      this.drafts.flush(),
-      this.threads.flush(),
-    ]);
-    const failed = results.find((result) => result.status === 'rejected');
-    if (failed?.status === 'rejected') {
-      throw failed.reason;
-    }
+  flush(): Promise<void> {
+    return this.persist(this.threads.flush());
+  }
+
+  private async persist(threads: Promise<void>): Promise<void> {
+    const stores = await Promise.allSettled([this.drafts.flush(), threads]);
+    // Settings follow drafts so confirmed legacy inline drafts are dropped in the same pass.
+    throwFirstRejection([...stores, ...(await Promise.allSettled([this.settings.flush()]))]);
   }
 }

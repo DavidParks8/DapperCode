@@ -24,9 +24,15 @@ export function emptyLocalPreferences(): LocalPreferences {
   return { version: 1, workspaceId: null, modelId: null, account: null, author: null };
 }
 
-/** Keeps an empty `drafts` record so older builds can still read the document. */
-export function serializeLocalPreferences(preferences: LocalPreferences): string {
-  return JSON.stringify({ ...preferences, drafts: {} });
+/**
+ * Always writes a `drafts` record so older builds can still read the document. It holds only
+ * legacy inline drafts that have not yet been confirmed in their own draft documents.
+ */
+export function serializeLocalPreferences(
+  preferences: LocalPreferences,
+  legacyDrafts: Readonly<Record<string, string>> = {},
+): string {
+  return JSON.stringify({ ...preferences, drafts: legacyDrafts });
 }
 
 function nullable(value: unknown): string | null {
@@ -109,7 +115,6 @@ export function parseStoredLocalPreferences(raw: string | null): StoredLocalPref
 }
 
 export interface LocalPreferencesRestore {
-  legacyDrafts: Record<string, string>;
   /** A user-facing notice when damaged or unreadable settings were not loaded. */
   notice: string | null;
 }
@@ -121,6 +126,8 @@ export class LocalPreferencesStore {
   private dirty = false;
   private failureValue: Error | null = null;
   private writes: Promise<void> = Promise.resolve();
+  /** Inline drafts from older builds, kept in the document until each one is confirmed. */
+  private legacyDrafts: Record<string, string> = {};
 
   constructor(
     private readonly storage: LocalDocumentPort,
@@ -129,6 +136,20 @@ export class LocalPreferencesStore {
 
   get(): LocalPreferences {
     return this.value;
+  }
+
+  pendingLegacyDrafts(): Readonly<Record<string, string>> {
+    return this.legacyDrafts;
+  }
+
+  /** Drops a legacy inline draft once its draft document is durable or it is obsolete. */
+  settleLegacyDraft(threadId: string): void {
+    if (Object.hasOwn(this.legacyDrafts, threadId)) {
+      this.legacyDrafts = Object.fromEntries(
+        Object.entries(this.legacyDrafts).filter(([id]) => id !== threadId),
+      );
+      this.dirty = true;
+    }
   }
 
   failure(): Error | null {
@@ -141,7 +162,6 @@ export class LocalPreferencesStore {
       raw = await this.storage.readRuntimeDocument(PREFERENCES_DOCUMENT);
     } catch {
       return {
-        legacyDrafts: {},
         notice:
           'Local settings could not be read and were left in place. Setting changes will not be saved until the app restarts.',
       };
@@ -149,19 +169,18 @@ export class LocalPreferencesStore {
     try {
       const stored = parseStoredLocalPreferences(raw);
       this.value = stored.preferences;
+      this.legacyDrafts = stored.legacyDrafts;
       this.loaded = true;
-      return { legacyDrafts: stored.legacyDrafts, notice: null };
+      return { notice: null };
     } catch {
       if (await quarantineDocument(this.storage, PREFERENCES_DOCUMENT, raw)) {
         this.loaded = true;
         return {
-          legacyDrafts: {},
           notice:
             'Local settings were damaged and have been set aside with their data preserved. Choose your model, workspace, and GitHub account again.',
         };
       }
       return {
-        legacyDrafts: {},
         notice:
           'Local settings are damaged and could not be set aside, so they were left in place. Setting changes will not be saved until the app restarts.',
       };
@@ -182,7 +201,7 @@ export class LocalPreferencesStore {
         ),
       );
     }
-    const contents = serializeLocalPreferences(this.value);
+    const contents = serializeLocalPreferences(this.value, this.legacyDrafts);
     const write = this.writes.then(() =>
       this.storage.writeRuntimeDocument(PREFERENCES_DOCUMENT, contents),
     );
@@ -192,7 +211,7 @@ export class LocalPreferencesStore {
     );
     return write.then(
       () => {
-        if (contents === serializeLocalPreferences(this.value)) {
+        if (contents === serializeLocalPreferences(this.value, this.legacyDrafts)) {
           this.dirty = false;
         }
         if (this.failureValue) {

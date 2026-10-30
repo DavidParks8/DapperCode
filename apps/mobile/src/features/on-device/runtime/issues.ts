@@ -2,6 +2,30 @@ import type { OnDeviceIssue } from './types';
 
 const MAX_OPERATION_ISSUES = 5;
 
+export function persistenceFailures(
+  preferences: Error | null,
+  drafts: Error | null,
+  threads: ReadonlyMap<string, Error>,
+): PersistenceFailure[] {
+  return [
+    ...(preferences ? [{ id: 'persistence:preferences', error: preferences, threadId: null }] : []),
+    ...(drafts ? [{ id: 'persistence:drafts', error: drafts, threadId: null }] : []),
+    ...[...threads].map(([threadId, error]) => ({
+      id: `persistence:thread:${threadId}`,
+      error,
+      threadId,
+    })),
+  ];
+}
+
+/** Rethrows the first failure after every settled step has had a chance to run. */
+export function throwFirstRejection(results: readonly PromiseSettledResult<unknown>[]): void {
+  const failed = results.find((result) => result.status === 'rejected');
+  if (failed?.status === 'rejected') {
+    throw failed.reason;
+  }
+}
+
 interface SkippedDocuments {
   setAside: number;
   leftInPlace: number;

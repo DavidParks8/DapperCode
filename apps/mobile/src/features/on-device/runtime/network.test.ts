@@ -1,6 +1,6 @@
 import { requireOptionalNativeModule } from 'expo';
 import { createExpoNetwork } from './expoNetwork';
-import { reachability, unknownNetwork } from './network';
+import { NetworkMonitor, reachability, unknownNetwork } from './network';
 
 jest.mock('expo', () => ({ requireOptionalNativeModule: jest.fn(() => null) }));
 
@@ -18,4 +18,14 @@ test('binaries without the native network module never block network actions', a
   expect(createExpoNetwork()).toBe(unknownNetwork);
   expect(requireOptionalNativeModule).toHaveBeenCalledWith('ExpoNetwork');
   await expect(unknownNetwork.current()).resolves.toBe('unknown');
+});
+
+test('a monitor closed before it starts never registers a listener', async () => {
+  const port = { current: jest.fn(async () => 'online' as const), subscribe: jest.fn() };
+  const changed = jest.fn();
+  const monitor = new NetworkMonitor(port, changed);
+  monitor.close();
+  await monitor.start();
+  expect(port.subscribe).not.toHaveBeenCalled();
+  expect(changed).not.toHaveBeenCalled();
 });

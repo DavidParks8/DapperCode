@@ -820,3 +820,105 @@ describe('render granularity', () => {
     }
   });
 });
+
+describe('disposal during startup', () => {
+  test('waits for initialization, registers no network listener, and skips later startup work', async () => {
+    const network = fakeNetwork('online');
+    const h = harness();
+    const listing = deferred<string[]>();
+    h.native.listRuntimeDocuments.mockImplementationOnce(() => listing.promise);
+    const runtime = new OnDeviceRuntime(h.native, { network: network.port });
+    const initializing = runtime.initialize();
+    let disposed = false;
+    const disposal = runtime.dispose().then(() => {
+      disposed = true;
+    });
+    for (let tick = 0; tick < 10; tick += 1) {
+      await Promise.resolve();
+    }
+    expect(disposed).toBe(false);
+    listing.resolve([]);
+    await initializing;
+    await disposal;
+    expect(network.port.subscribe).not.toHaveBeenCalled();
+    expect(h.native.listWorkspaces).not.toHaveBeenCalled();
+    expect(h.native.listRuntimeDocuments).not.toHaveBeenCalledWith('draft-');
+  });
+});
+
+describe('legacy inline drafts are kept until their draft documents are written', () => {
+  async function legacyDocuments() {
+    const source = await ready();
+    await source.runtime.dispose();
+    const documents = new Map(source.documents);
+    documents.set(
+      'preferences.json',
+      JSON.stringify({
+        ...JSON.parse(documents.get('preferences.json') ?? '{}'),
+        drafts: { [source.thread.id]: 'legacy draft' },
+      }),
+    );
+    return { documents, id: source.thread.id };
+  }
+  const storedDrafts = (documents: Map<string, string>): unknown =>
+    JSON.parse(documents.get('preferences.json') ?? '{}').drafts;
+
+  test('a draft for a conversation that could not be read this launch is migrated, not erased', async () => {
+    const { documents, id } = await legacyDocuments();
+    const h = harness(documents);
+    const read = h.native.readRuntimeDocument.getMockImplementation();
+    h.native.readRuntimeDocument.mockImplementation(async (name: string) => {
+      if (name.startsWith('thread-')) {
+        throw new Error('Temporarily unreadable.');
+      }
+      return (await read?.(name)) ?? null;
+    });
+    await h.runtime.initialize();
+    expect(h.runtime.threads.list()).toEqual([]);
+    expect(documents.get(draftDocument(id))).toContain('legacy draft');
+    await h.runtime.selectWorkspace('workspace-one');
+    expect(storedDrafts(documents)).toEqual({});
+    await h.runtime.dispose();
+  });
+
+  test('a failed draft restore keeps legacy drafts through later settings saves', async () => {
+    const { documents, id } = await legacyDocuments();
+    const h = harness(documents);
+    const list = h.native.listRuntimeDocuments.getMockImplementation();
+    h.native.listRuntimeDocuments.mockImplementation(async (prefix: string) => {
+      if (prefix === 'draft-') {
+        throw new Error('Draft listing failed.');
+      }
+      return (await list?.(prefix)) ?? [];
+    });
+    await h.runtime.initialize();
+    await h.runtime.selectWorkspace('workspace-one');
+    await h.runtime.dispose();
+    expect(storedDrafts(documents)).toEqual({ [id]: 'legacy draft' });
+    expect(documents.has(draftDocument(id))).toBe(false);
+  });
+
+  test('a failed migration write keeps the legacy draft until a retry succeeds', async () => {
+    const { documents, id } = await legacyDocuments();
+    const h = harness(documents);
+    const write = h.native.writeRuntimeDocument.getMockImplementation();
+    let failDrafts = true;
+    h.native.writeRuntimeDocument.mockImplementation(async (name: string, value: string) => {
+      if (failDrafts && name.startsWith('draft-')) {
+        throw new Error('Disk full');
+      }
+      await write?.(name, value);
+    });
+    await h.runtime.initialize();
+    expect(h.runtime.issues()).toEqual([
+      expect.objectContaining({ id: 'persistence:drafts', retryable: true }),
+    ]);
+    await h.runtime.selectWorkspace('workspace-one');
+    expect(storedDrafts(documents)).toEqual({ [id]: 'legacy draft' });
+    failDrafts = false;
+    await h.runtime.retryPersistence();
+    expect(documents.get(draftDocument(id))).toContain('legacy draft');
+    expect(storedDrafts(documents)).toEqual({});
+    await h.runtime.dispose();
+  });
+});
