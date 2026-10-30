@@ -3,13 +3,26 @@ jest.mock('react-native-drawer-layout', () => {
   const React = jest.requireActual('react');
   const progress = { value: 0 };
   return {
-    Drawer: ({ children }: { children: ReactNode }) =>
-      React.createElement(React.Fragment, null, children),
+    Drawer: ({
+      children,
+      renderDrawerContent,
+    }: {
+      children: ReactNode;
+      renderDrawerContent: () => ReactNode;
+    }) => React.createElement(React.Fragment, null, children, renderDrawerContent()),
     DrawerProgressContext: React.createContext(progress),
     useDrawerProgress: () => progress,
   };
 });
-jest.mock('@shell/navigation/DrawerContent', () => ({ DrawerContent: () => null }));
+// The real drawer requires bridge clients; this double keeps that contract without its UI.
+jest.mock('@shell/navigation/DrawerContent', () => ({
+  DrawerContent: () => {
+    const { useBridgeApi, useBridgeWs } = jest.requireActual('@shell/state/bridge/hooks');
+    useBridgeApi();
+    useBridgeWs();
+    return null;
+  },
+}));
 jest.mock('react-native-webview', () => ({ WebView: () => null }));
 jest.mock('@shell/boot/AppShells', () => ({ ConnectionScreen: () => null }));
 
