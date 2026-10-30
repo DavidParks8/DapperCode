@@ -110,16 +110,16 @@ export class LocalModelSession {
 
   load(id: string): Promise<void> {
     if (this.disposed || this.unloading) {
-      return Promise.reject(new Error('The local model session is unavailable.'));
+      return Promise.reject(
+        new Error('The on-device model is shutting down. Try again in a moment.'),
+      );
     }
     const model = localModelDefinition(id);
-    if (this.loading && this.loadingEpoch === this.loadEpoch) {
-      if (this.loadingModelId === id) {
-        return this.loading;
-      }
-      return Promise.reject(new Error('Wait for the current model to finish loading.'));
+    if (this.loading && this.loadingEpoch === this.loadEpoch && this.loadingModelId === id) {
+      return this.loading;
     }
-    // A cancelled load still owns native memory until it settles; queue behind it.
+    // The latest request wins. A superseded or cancelled load still owns native memory until it
+    // settles, so the new load queues behind it.
     const previous = this.loading;
     const epoch = ++this.loadEpoch;
     this.loadingEpoch = epoch;
@@ -146,7 +146,7 @@ export class LocalModelSession {
   ): Promise<LocalModelReply> {
     if (this.disposed || this.loading || this.unloading || !this.current || this.generation) {
       return Promise.reject(
-        new Error('Load an available local model and wait for the active work to settle.'),
+        new Error('The on-device model is not ready yet. Wait for it to finish loading.'),
       );
     }
     const generation: Generation = {

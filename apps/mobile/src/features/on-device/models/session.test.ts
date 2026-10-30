@@ -231,7 +231,7 @@ test('disposal during loading waits for and releases the unpublished native cont
   expect(h.session.snapshot()).toMatchObject({ phase: 'empty', modelId: null, progress: 0 });
   h.loader.mock.calls[0]![3](99);
   expect(h.session.snapshot()).toMatchObject({ phase: 'empty', progress: 0 });
-  await expect(h.session.load(small.id)).rejects.toThrow('unavailable');
+  await expect(h.session.load(small.id)).rejects.toThrow('shutting down');
 });
 
 test('native stream snapshots are not duplicated or replaced with raw tool syntax', async () => {
@@ -461,4 +461,26 @@ test('an unverified artifact is refused before allocating any native model', asy
   });
   await expect(h.session.load(small.id)).rejects.toThrow('Download and verify');
   expect(h.loader).not.toHaveBeenCalled();
+});
+
+test('a newer load request supersedes an in-flight one instead of failing as busy', async () => {
+  const h = harness();
+  const pending = deferred<LocalModelContext>();
+  const started = deferred<void>();
+  h.loader.mockImplementationOnce(() => {
+    started.resolve();
+    return pending.promise;
+  });
+  const first = h.session.load(small.id);
+  expect(h.session.load(small.id)).toBe(first);
+  const superseded = first.catch((error: unknown) => error);
+  await started.promise;
+  const second = context();
+  h.loader.mockImplementationOnce(async () => second);
+  const latest = h.session.load(medium.id);
+  pending.resolve(h.initial);
+  expect(await superseded).toBeInstanceOf(LocalModelInterrupted);
+  await latest;
+  expect(h.initial.release).toHaveBeenCalledTimes(1);
+  expect(h.session.snapshot()).toMatchObject({ phase: 'ready', modelId: medium.id });
 });
