@@ -48,11 +48,16 @@ export class LocalBridgeWsClient extends HostBridgeWsClient {
     // There is no replay stream to reset for an in-process transport.
   }
 
-  override acknowledgeSnapshotRecovery(): boolean {
+  override acknowledgeSnapshotRecovery(
+    ...args: Parameters<HostBridgeWsClient['acknowledgeSnapshotRecovery']>
+  ): boolean {
+    void args;
     return false;
   }
 
-  override notify(): boolean {
+  override notify(...args: Parameters<HostBridgeWsClient['notify']>): boolean {
+    void args;
+    // Push presence and observations only matter to a remote bridge.
     return false;
   }
 

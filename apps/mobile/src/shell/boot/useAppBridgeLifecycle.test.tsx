@@ -96,6 +96,9 @@ import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
 import { useAppBridgeLifecycle } from '@shell/boot/useAppBridgeLifecycle';
 import { useAppStateBootstrap } from '@shell/boot/useAppStateBootstrap';
 import { consumeInterruptedChatCreationAtom } from '@shell/state/chat/actions';
+import { appStateSnapshotAtom } from '@shell/state/appState/atoms';
+import { localProfileAvailableAtom } from '@shell/state/bridge/atoms';
+import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 
 function Harness() {
   useAppStateBootstrap();
@@ -216,6 +219,42 @@ describe('useAppBridgeLifecycle route gates', () => {
     expect(mockBindPushForegroundPresence).toHaveBeenCalledWith(ws);
     expect(mockBindAppWebSocketLifecycle).toHaveBeenCalledWith(ws);
 
+    act(() => tree?.unmount());
+  });
+
+  it('skips socket lifecycle, presence, and push registration for the local profile', async () => {
+    const api = {
+      primeChats: jest.fn().mockResolvedValue(undefined),
+      rememberChat: jest.fn(),
+      setApprovalPolicy: jest.fn().mockResolvedValue(undefined),
+    } as unknown as HostBridgeApiClient;
+    const ws = {
+      isConnected: true,
+      onStatus: jest.fn(() => jest.fn()),
+    } as unknown as HostBridgeWsClient;
+    const store = createBridgeTestStore({ api, ws });
+    store.set(localProfileAvailableAtom, true);
+    const snapshot = store.get(appStateSnapshotAtom);
+    store.set(appStateSnapshotAtom, {
+      ...snapshot,
+      data: {
+        ...snapshot.data,
+        bridgeProfiles: { ...snapshot.data.bridgeProfiles, activeProfileId: LOCAL_PROFILE_ID },
+      },
+    });
+    router.replace('/profiles/on-device/chats/new');
+
+    let tree: ReactTestRenderer | undefined;
+    await act(async () => {
+      tree = renderer.create(withAppStore(store, <Harness />));
+      await Promise.resolve();
+    });
+
+    expect(mockBindAppWebSocketLifecycle).not.toHaveBeenCalled();
+    expect(mockBindPushForegroundPresence).not.toHaveBeenCalled();
+    expect(mockSyncPushRegistration).not.toHaveBeenCalled();
+    // Profile-agnostic lifecycles keep running against the local transport.
+    expect(mockBindCapabilities).toHaveBeenCalledWith(ws, expect.any(Function));
     act(() => tree?.unmount());
   });
 

@@ -341,8 +341,30 @@ export function localThreadSnapshot(
   }
   const running = thread.status === 'running' && thread.activeTurnId !== null;
   const turnId = running ? thread.activeTurnId : null;
+  const lastUser = [...thread.messages].reverse().find((message) => message.role === 'user');
   return {
     ...localThreadSummary(thread, context),
+    // Only the live turn is listed: it lets `interruptLatestTurn` find the run and lets the client
+    // confirm an accepted message. History itself comes from the snapshot below.
+    ...(turnId
+      ? {
+          turns: [
+            {
+              id: turnId,
+              status: 'inProgress',
+              items: lastUser
+                ? [
+                    {
+                      type: 'userMessage' as const,
+                      id: lastUser.id,
+                      content: [{ type: 'text', text: lastUser.content }],
+                    },
+                  ]
+                : [],
+            },
+          ],
+        }
+      : {}),
     acpSnapshot: {
       version: 2,
       timeline,
