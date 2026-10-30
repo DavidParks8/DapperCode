@@ -18,6 +18,7 @@ import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { motion } from '@shared/theme';
 import { isPendingChatId } from '@shell/session/interruptedChatCreation';
+import { activeProfileFeaturesAtom } from '@shell/state/bridge/atoms';
 import { QueuedMessageDockView } from './QueuedMessageDockView';
 import { ScheduledPromptDock } from '../workflow/ScheduledPromptDock';
 import type {
@@ -115,7 +116,10 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     queueActionKind === 'editStart' ||
     queueActionKind === 'editCommit' ||
     queueActionKind === 'editCancel';
-  const pasteDisabled = editingQueuedMessage || queueActionKind === 'editStart';
+  // Profiles without an attachment upload endpoint (the local profile) cannot attach or paste.
+  const attachmentsSupported = useAtomValue(activeProfileFeaturesAtom).attachments;
+  const pasteDisabled =
+    !attachmentsSupported || editingQueuedMessage || queueActionKind === 'editStart';
   const showStopButton =
     !isPendingChatId(selectedChat?.id) && (isTurnLoading || isTurnLikelyRunning || stoppingTurn);
 

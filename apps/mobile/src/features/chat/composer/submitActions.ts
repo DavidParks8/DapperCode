@@ -10,7 +10,7 @@ import type {
 import { interruptedChatCreationAtom } from '@shell/state/chat/atoms';
 import { interruptedCreationRetryId } from '@shell/session/interruptedChatCreation';
 import type { InterruptedChatCreation } from '@shell/session/interruptedChatCreation';
-import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
+import { activeProfileIdAtom } from '@shell/state/bridge/atoms';
 import { submissionScopeKey } from '../turn/controllers/submissionController';
 
 export type MainScreenComposerSubmitActionsContext = MainScreenSendMessageHandlerContext &
@@ -93,7 +93,7 @@ export function useMainScreenComposerSubmitActions(
   const pendingApproval = useAtomValue(pendingApprovalAtom);
   const pendingUserInputRequest = useAtomValue(pendingUserInputRequestAtom);
   const interrupted = useAtomValue(interruptedChatCreationAtom);
-  const activeBridgeProfileId = useAtomValue(activeBridgeProfileAtom)?.id ?? null;
+  const activeBridgeProfileId = useAtomValue(activeProfileIdAtom);
   const setError = useSetAtom(errorAtom);
   const queueActionItemId = useAtomValue(queueActionItemIdAtom);
   const setQueueActionItemId = useSetAtom(queueActionItemIdAtom);

@@ -16,7 +16,7 @@ import {
   type WorkspacePickerPurpose,
 } from '../../chat/helpers/helpers';
 import { defaultStartCwdAtom } from '@shell/state/appState/settings';
-import { activeBridgeProfileAtom, apiClientAtom } from '@shell/state/bridge/atoms';
+import { activeProfileIdAtom, apiClientAtom } from '@shell/state/bridge/atoms';
 import { routes } from '@shell/navigation/routes';
 import { getWorkspaceRouteIds, returnToChat } from './workspaceRouteNavigation';
 import {
@@ -86,7 +86,7 @@ function getFavoritesPersistence(profileId: string): MainScreenPersistenceContro
 export const loadWorkspaceFavoritesAtom = atom(
   null,
   async (get, set, options: WorkspaceResourceRevalidationOptions = {}): Promise<void> => {
-    const profileId = get(activeBridgeProfileAtom)?.id;
+    const profileId = get(activeProfileIdAtom);
     if (!profileId) {
       return;
     }
@@ -152,7 +152,7 @@ export const toggleWorkspaceFavoriteAtom = atom(
       return;
     }
 
-    const profileId = get(activeBridgeProfileAtom)?.id;
+    const profileId = get(activeProfileIdAtom);
     if (!profileId) {
       return;
     }

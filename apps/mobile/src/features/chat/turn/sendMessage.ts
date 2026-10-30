@@ -15,7 +15,7 @@ import { selectedCollaborationModeAtom, selectedEffortAtom } from '../state/mode
 import { screenSetter } from '../state/registry';
 import { activityAtom, showDelayedGenericRunningActivityAtom } from '../state/composer';
 import { interruptedChatCreationAtom } from '@shell/state/chat/atoms';
-import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
+import { activeProfileIdAtom } from '@shell/state/bridge/atoms';
 import {
   consumeInterruptedChatCreationAtom,
   replaceInterruptedChatSubmissionAtom,
@@ -388,7 +388,7 @@ export async function executeSendMessage(
       sendOptions: options,
       pendingMentionPaths,
       pendingLocalImagePaths,
-      sameProfile: store.get(activeBridgeProfileAtom)?.id === bridgeProfileId,
+      sameProfile: store.get(activeProfileIdAtom) === bridgeProfileId,
       targetChat: targetChatAtStart,
     });
   let interruptedPendingChatId = initialInterruptedPendingChatId;

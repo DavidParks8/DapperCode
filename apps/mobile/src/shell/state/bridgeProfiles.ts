@@ -1,4 +1,5 @@
 import { normalizeBridgeUrlInput } from '@shell/state/bridgeUrl';
+import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 
 export interface BridgeProfile {
   id: string;
@@ -11,6 +12,7 @@ export interface BridgeProfile {
 }
 
 export interface BridgeProfileStore {
+  /** A saved bridge profile id, or `LOCAL_PROFILE_ID` when the built-in local agent is active. */
   activeProfileId: string | null;
   profiles: BridgeProfile[];
 }
@@ -51,14 +53,8 @@ export function parseBridgeProfileStore(raw: string | null | undefined): BridgeP
           .map((entry) => normalizeBridgeProfile(entry))
           .filter((entry): entry is BridgeProfile => entry !== null)
       : [];
-    const activeProfileId =
-      typeof record.activeProfileId === 'string' &&
-      profiles.some((profile) => profile.id === record.activeProfileId)
-        ? record.activeProfileId
-        : null;
-
     return {
-      activeProfileId,
+      activeProfileId: resolveActiveProfileId(record.activeProfileId, profiles),
       profiles,
     };
   } catch {
@@ -124,7 +120,10 @@ export function setActiveBridgeProfile(
     };
   }
 
-  if (!store.profiles.some((profile) => profile.id === profileId)) {
+  if (
+    profileId !== LOCAL_PROFILE_ID &&
+    !store.profiles.some((profile) => profile.id === profileId)
+  ) {
     return sanitizeBridgeProfileStore(store);
   }
 
@@ -166,16 +165,24 @@ function sanitizeBridgeProfileStore(store: BridgeProfileStore): BridgeProfileSto
         .map((entry) => normalizeBridgeProfile(entry))
         .filter((entry): entry is BridgeProfile => entry !== null)
     : [];
-  const activeProfileId =
-    typeof store.activeProfileId === 'string' &&
-    profiles.some((profile) => profile.id === store.activeProfileId)
-      ? store.activeProfileId
-      : null;
-
   return {
-    activeProfileId,
+    activeProfileId: resolveActiveProfileId(store.activeProfileId, profiles),
     profiles,
   };
+}
+
+/**
+ * Keeps the active id only when it names a saved profile or the built-in local profile. Whether the
+ * local profile can actually open on this platform is decided at read time, so a store synced from
+ * an iPhone never resolves to the local agent on Android or web.
+ */
+function resolveActiveProfileId(value: unknown, profiles: BridgeProfile[]): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  return value === LOCAL_PROFILE_ID || profiles.some((profile) => profile.id === value)
+    ? value
+    : null;
 }
 
 function normalizeBridgeProfile(value: unknown): BridgeProfile | null {

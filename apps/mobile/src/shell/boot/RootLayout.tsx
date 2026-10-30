@@ -2,7 +2,7 @@ import 'react-native-gesture-handler';
 
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { Stack, usePathname } from 'expo-router';
+import { Stack } from 'expo-router';
 import { useEffect, useMemo } from 'react';
 import { StatusBar, useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -24,8 +24,8 @@ import { useAppBridgeLifecycle } from '@shell/boot/useAppBridgeLifecycle';
 import { useAppStoreReview } from '@shell/boot/useAppStoreReview';
 import { usePushNotificationsLifecycle } from '@shell/boot/usePushNotificationsLifecycle';
 import { useAppStateBootstrap } from './useAppStateBootstrap';
-import { executionTargetForRoute } from '@shell/runtime/targets';
-import { preferredExecutionTargetAtom } from '@shell/state/appState/settings';
+import { LocalRuntimeHost } from '@shell/runtime/LocalRuntimeHost';
+import { localProfileAvailableAtom } from '@shell/state/bridge/atoms';
 
 export function RootLayout() {
   const systemColorScheme = useColorScheme();
@@ -57,8 +57,7 @@ function RootNavigator({ theme, styles }: { theme: AppTheme; styles: AppStyles }
   const persistenceError = useAtomValue(appStatePersistenceErrorAtom);
   const chatSnapshotCache = useAtomValue(chatSnapshotCacheAtom);
   const bridgeProfiles = useAtomValue(bridgeProfilesAtom);
-  const preferredTarget = useAtomValue(preferredExecutionTargetAtom);
-  const pathname = usePathname();
+  const localProfileAvailable = useAtomValue(localProfileAvailableAtom);
 
   useAppStateBootstrap();
   useAppStoreReview();
@@ -71,27 +70,30 @@ function RootNavigator({ theme, styles }: { theme: AppTheme; styles: AppStyles }
     return <PersistenceRecoveryShell theme={theme} styles={styles} />;
   }
 
-  const hasProfiles = bridgeProfiles.length > 0;
+  const hasBridgeProfiles = bridgeProfiles.length > 0;
   return (
     <>
-      {executionTargetForRoute(pathname, preferredTarget) === 'bridge' ? (
-        <BridgeRuntimeEffects />
-      ) : null}
+      <BridgeRuntimeEffects />
       <Stack screenOptions={createStackScreenOptions(theme)}>
         <Stack.Screen name="index" />
         <Stack.Screen name="on-device" />
-        <Stack.Protected guard={hasProfiles}>
+        <Stack.Protected guard={hasBridgeProfiles || localProfileAvailable}>
           <Stack.Screen name="profiles/[profileId]" />
         </Stack.Protected>
-        <Stack.Protected guard={!hasProfiles}>
+        <Stack.Protected guard={!hasBridgeProfiles}>
           <Stack.Screen name="onboarding" />
         </Stack.Protected>
         <Stack.Screen name="+not-found" />
       </Stack>
+      <LocalRuntimeHost />
     </>
   );
 }
 
+/**
+ * Profile-scoped lifecycles. They run for every profile; bridge-only work (push registration,
+ * presence, socket foreground/background) is skipped inside them while the local profile is open.
+ */
 function BridgeRuntimeEffects() {
   usePushNotificationsLifecycle();
   useAppBridgeLifecycle();

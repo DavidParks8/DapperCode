@@ -7,7 +7,7 @@ import { useShellLayout } from '@shell/layout/useShellLayout';
 import { DrawerContent } from '@shell/navigation/DrawerContent';
 import { useDrawerForegroundSync } from '@shell/navigation/useDrawerForegroundSync';
 import { sidebarHiddenAtom } from '@shell/state/appState/settings';
-import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
+import { activeProfileIdAtom } from '@shell/state/bridge/atoms';
 import { drawerCommandsAtom, OPEN_NAVIGATION_LABEL } from '@shell/state/drawer/atoms';
 import { useAppTheme } from '@shared/theme';
 
@@ -49,7 +49,7 @@ function RouterDrawerContent({
   sidebarMode,
 }: DrawerContentComponentProps & { sidebarMode: ShellLayout['sidebarMode'] }) {
   const drawerStatus = useDrawerStatus();
-  const activeProfileId = useAtomValue(activeBridgeProfileAtom)?.id;
+  const activeProfileId = useAtomValue(activeProfileIdAtom);
   const setDrawerCommands = useSetAtom(drawerCommandsAtom);
   const store = useStore();
   const docked = sidebarMode === 'docked';

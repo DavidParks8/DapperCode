@@ -1,36 +1,23 @@
-import { useSetAtom } from 'jotai';
-import { useRouter } from 'expo-router';
-import { Platform } from 'react-native';
+import { useAtomValue } from 'jotai';
 
-import { dispatchDurableAppStateAtom } from '@shell/state/appState/actions';
 import { ChoiceAction } from '../../features/onboarding/ChoiceAction';
-import { useLocalOperation, LocalError } from '../../features/on-device/screens/ui';
+import { routes } from '@shell/navigation/routes';
+import { replaceRoot } from '@shell/navigation/routeNavigation';
+import { localProfileAvailableAtom } from '@shell/state/bridge/atoms';
+import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 
+/** Onboarding entry that opens the built-in local profile in the regular chat shell. */
 export function OnDeviceEntry() {
-  const router = useRouter();
-  const dispatch = useSetAtom(dispatchDurableAppStateAtom);
-  const operation = useLocalOperation();
-  if (Platform.OS !== 'ios') {
+  const available = useAtomValue(localProfileAvailableAtom);
+  if (!available) {
     return null;
   }
   return (
-    <>
-      <ChoiceAction
-        title="On this iPhone"
-        meta="Offline models with file and Git tools"
-        iconName="phone-portrait-outline"
-        loading={operation.busy}
-        onPress={() =>
-          operation.run(async () => {
-            await dispatch({
-              type: 'settings/update',
-              patch: { preferredExecutionTarget: 'on-device' },
-            });
-            router.replace('/on-device');
-          })
-        }
-      />
-      <LocalError message={operation.error} />
-    </>
+    <ChoiceAction
+      title="On this iPhone"
+      meta="Offline models with file and Git tools"
+      iconName="phone-portrait-outline"
+      onPress={() => replaceRoot(routes.newChat(LOCAL_PROFILE_ID))}
+    />
   );
 }

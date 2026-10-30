@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 
 import { WorkspacePicker } from './Picker';
 import { defaultStartCwdAtom } from '@shell/state/appState/settings';
+import { activeProfileFeaturesAtom } from '@shell/state/bridge/atoms';
 import {
   gitCheckoutParentPathAtom,
   resumeGitCheckoutAfterWorkspacePickerAtom,
@@ -60,6 +61,8 @@ export function WorkspacePickerScreen() {
   }, [revalidateResources, setResumeGitCheckout]);
 
   const isGitCheckoutDestination = purpose === 'git-checkout-destination';
+  const cloneAvailable =
+    useAtomValue(activeProfileFeaturesAtom).gitClone && !isGitCheckoutDestination;
 
   return (
     <WorkspacePicker
@@ -85,9 +88,9 @@ export function WorkspacePickerScreen() {
       onBrowsePath={(path) => void browsePath(path)}
       onSelectPath={(path) => selectWorkspace(path)}
       onToggleFavorite={(path) => toggleFavorite(path)}
-      actionLabel={isGitCheckoutDestination ? null : 'Clone Repo'}
-      actionDescription={isGitCheckoutDestination ? null : 'Into this workspace'}
-      onActionPress={isGitCheckoutDestination ? undefined : (path) => openGitCheckout(path)}
+      actionLabel={cloneAvailable ? 'Clone Repo' : null}
+      actionDescription={cloneAvailable ? 'Into this workspace' : null}
+      onActionPress={cloneAvailable ? (path) => openGitCheckout(path) : undefined}
       onClose={() => closePicker()}
     />
   );
