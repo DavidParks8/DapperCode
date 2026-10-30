@@ -188,9 +188,7 @@ export function LocalGitScreen() {
               title="Push current branch"
               disabled={busy}
               onPress={() =>
-                action('Pushing current branch', async (workspace) =>
-                  runtime.native.pushWorkspaceGit(workspace, await runtime.credential(workspace)),
-                )
+                action('Pushing current branch', (workspace) => runtime.pushWorkspace(workspace))
               }
             />
           </LocalCard>
