@@ -1,7 +1,9 @@
 import { useRouter } from 'expo-router';
 import type { ReactNode } from 'react';
 
+import { findLocalModelDefinition } from '../models/catalog';
 import { useOnDeviceRuntime } from '../runtime/OnDeviceProvider';
+import { localAgentStatus, localConversationReadiness } from '../runtime/status';
 import { LocalAction, LocalCard, LocalPage, LocalText, useLocalOperation } from './ui';
 
 export function OnDeviceHomeScreen({ executionTargets }: { executionTargets: ReactNode }) {
@@ -10,7 +12,24 @@ export function OnDeviceHomeScreen({ executionTargets }: { executionTargets: Rea
   const operation = useLocalOperation();
   const preferences = runtime.preferences();
   const workspace = runtime.workspaces().find((entry) => entry.id === preferences.workspaceId);
-  const model = runtime.models.snapshot();
+  const download =
+    preferences.modelId && findLocalModelDefinition(preferences.modelId)
+      ? runtime.downloads.snapshot(preferences.modelId)
+      : null;
+  const status = localAgentStatus({
+    run: runtime.loop.snapshot(),
+    model: runtime.models.snapshot(),
+    thread: null,
+    modelId: preferences.modelId,
+    download,
+    workspaceActivity: runtime.workspaceActivity(),
+  });
+  const readiness = localConversationReadiness({
+    modelId: preferences.modelId,
+    download,
+    workspaceId: preferences.workspaceId,
+    workspaces: runtime.workspaces(),
+  });
   const failure = runtime.error();
   return (
     <LocalPage
@@ -37,10 +56,8 @@ export function OnDeviceHomeScreen({ executionTargets }: { executionTargets: Rea
       ) : null}
       <LocalCard>
         <LocalText title>{workspace?.name ?? 'Choose a workspace'}</LocalText>
-        <LocalText>
-          {model.phase === 'ready' ? 'Model loaded' : 'Model not loaded'} ·{' '}
-          {preferences.modelId ?? 'No model selected'}
-        </LocalText>
+        <LocalText>{status.label}</LocalText>
+        {status.detail ? <LocalText>{status.detail}</LocalText> : null}
         <LocalAction
           title="Model library"
           testID="on-device-model-library"
@@ -52,7 +69,7 @@ export function OnDeviceHomeScreen({ executionTargets }: { executionTargets: Rea
         <LocalAction
           title="New local conversation"
           testID="on-device-new-chat"
-          disabled={operation.busy || !workspace || !preferences.modelId}
+          disabled={operation.busy || !readiness.canStart}
           onPress={() =>
             operation.run(async () => {
               const thread = await runtime.createThread();
@@ -63,6 +80,7 @@ export function OnDeviceHomeScreen({ executionTargets }: { executionTargets: Rea
             })
           }
         />
+        {readiness.reason ? <LocalText>{readiness.reason}</LocalText> : null}
       </LocalCard>
       <LocalText title>Local conversations</LocalText>
       {runtime.threads.list().map((thread) => (

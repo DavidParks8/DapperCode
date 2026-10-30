@@ -9,6 +9,8 @@ import { useKeyboardFrameTracking } from '../../chat/session/keyboardLayout';
 import { ChatTranscriptView } from '../../chat/transcript/ChatTranscriptView';
 import type { TranscriptDisplayItem } from '../../chat/transcript/messages';
 import type { AutoScrollState } from '../../chat/helpers/helpers';
+import { findLocalModelDefinition, localModelDisplayName } from '../models/catalog';
+import type { LocalToolApproval } from '../runtime/agentLoop';
 import { useOnDeviceRuntime } from '../runtime/OnDeviceProvider';
 import { localChatProjection } from '../runtime/chatProjection';
 import { localChatControls } from './chatControls';
@@ -51,7 +53,9 @@ export function LocalChatScreen() {
     runtime.loop.snapshot(),
     runtime.models.snapshot(),
     runtime.workspaceActivity(),
+    findLocalModelDefinition(thread.modelId) ? runtime.downloads.snapshot(thread.modelId) : null,
   );
+
   const jump = () => scroll.current?.scrollToOffset({ offset: 0, animated: true });
   return (
     <LocalPage title={thread.title} scroll={false}>
@@ -60,7 +64,19 @@ export function LocalChatScreen() {
           <LocalText>{controls.status}</LocalText>
           <GitTransferProgress watch={controls.isLoading} />
           <LocalError
-            message={operation.error ?? stop.error ?? runtime.error()?.message ?? thread.lastError}
+            message={
+              operation.error ??
+              stop.error ??
+              runtime.error()?.message ??
+              thread.lastError ??
+              controls.statusDetail
+            }
+          />
+          <LocalTurnActions
+            approval={controls.approval}
+            canRetry={controls.canRetry}
+            busy={operation.busy}
+            onRetry={() => operation.run(() => runtime.retryTurn(threadId))}
           />
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <LocalAction
@@ -130,11 +146,60 @@ export function LocalChatScreen() {
           keyboardVisible={keyboardVisible}
           footer={
             <LocalText>
-              {thread.modelId} · {workspace?.name ?? 'Workspace unavailable'}
+              {localModelDisplayName(thread.modelId)} · {workspace?.name ?? 'Workspace unavailable'}
             </LocalText>
           }
         />
       </View>
     </LocalPage>
   );
+}
+
+function LocalTurnActions({
+  approval,
+  canRetry,
+  busy,
+  onRetry,
+}: {
+  approval: LocalToolApproval | null;
+  canRetry: boolean;
+  busy: boolean;
+  onRetry: () => void;
+}) {
+  const runtime = useOnDeviceRuntime();
+  const decide = (approved: boolean) => {
+    if (!approval) {
+      return;
+    }
+    try {
+      runtime.loop.resolveApproval(approval.callId, approved);
+    } catch (error) {
+      runtime.report(error);
+    }
+  };
+  if (approval) {
+    return (
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <LocalAction
+          title={`Allow: ${approval.summary}`}
+          testID="on-device-approve-tool"
+          onPress={() => decide(true)}
+        />
+        <LocalAction
+          title="Decline"
+          destructive
+          testID="on-device-decline-tool"
+          onPress={() => decide(false)}
+        />
+      </View>
+    );
+  }
+  return canRetry ? (
+    <LocalAction
+      title="Retry last turn"
+      testID="on-device-retry-turn"
+      disabled={busy}
+      onPress={onRetry}
+    />
+  ) : null;
 }

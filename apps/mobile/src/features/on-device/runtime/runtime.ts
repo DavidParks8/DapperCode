@@ -1,6 +1,6 @@
 import { GitHubAuthStrategy } from '../auth/github';
 import type { GitDeviceAuthorization } from '../auth/strategy';
-import { executeGitTool, GIT_TOOL_DEFINITIONS, isGitTool } from '../git/gitTools';
+import { executeGitTool, GIT_TOOL_DEFINITIONS, gitToolApproval, isGitTool } from '../git/gitTools';
 import type { LocalGitIdentity } from '../git/gitTools';
 import { LOCAL_MODEL_CATALOG, localModelDefinition } from '../models/catalog';
 import { ModelDownloadController } from '../models/downloads';
@@ -78,6 +78,7 @@ export class OnDeviceRuntime {
         return Promise.reject(new Error('The model requested a tool that is not available.'));
       },
       () => this.emit(),
+      gitToolApproval,
     );
   }
 
@@ -138,6 +139,13 @@ export class OnDeviceRuntime {
       return Promise.reject(new Error('Wait for on-device operations to settle before sending.'));
     }
     return this.loop.send(id, text, submissionId, accepted);
+  }
+
+  retryTurn(id: string): Promise<LocalThread> {
+    if (this.workspaceOperation || this.suspension || this.disposal) {
+      return Promise.reject(new Error('Wait for on-device operations to settle before retrying.'));
+    }
+    return this.loop.retry(id);
   }
 
   initialize(): Promise<void> {

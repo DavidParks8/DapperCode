@@ -93,7 +93,10 @@ function harness(documents = new Map<string, string>()) {
       verificationBytes: null,
       availableBytes: 32 * 1024 ** 3,
     })),
-    getDownloadedModelFile: jest.fn(async (id: string) => {
+    getDownloadedModelFile: jest.fn<
+      ReturnType<OnDeviceNativeServices['getDownloadedModelFile']>,
+      Parameters<OnDeviceNativeServices['getDownloadedModelFile']>
+    >(async (id: string) => {
       const model = localModelDefinition(id);
       return { id, uri: `file:///models/${id}.gguf`, bytes: model.bytes, sha256: model.sha256 };
     }),
@@ -373,5 +376,102 @@ test('Git account credentials are origin-bound and author settings survive a new
     account: null,
     author: { name: 'Offline Author', email: 'author@example.invalid' },
   });
+  await h.runtime.dispose();
+});
+
+function controlsFor(h: Awaited<ReturnType<typeof ready>>) {
+  return localChatControls(
+    h.runtime.threads.get(h.thread.id),
+    h.runtime.loop.snapshot(),
+    h.runtime.models.snapshot(),
+    h.runtime.workspaceActivity(),
+    h.runtime.downloads.snapshot(modelId),
+  );
+}
+
+async function settle(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100 && !condition(); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  expect(condition()).toBe(true);
+}
+
+test('Stop during a model load settles the turn promptly, shows load progress, and keeps the draft', async () => {
+  const h = await ready();
+  await h.runtime.models.unload();
+  const pending = deferred<LocalModelContext>();
+  jest.mocked(loadNativeModelContext).mockImplementationOnce(async (_m, _f, _o, progress) => {
+    progress(37);
+    return pending.promise;
+  });
+  const accepted = jest.fn();
+  const running = h.runtime.sendMessage(h.thread.id, 'Hello', 'submission', accepted);
+  await settle(() => h.runtime.models.snapshot().progress === 37);
+  expect(controlsFor(h)).toMatchObject({
+    status: 'Loading Qwen3 1.7B Q4_K_M · 37%',
+    progress: 37,
+    showStopButton: true,
+  });
+  await h.runtime.stop();
+  await running;
+  expect(accepted).not.toHaveBeenCalled();
+  expect(h.runtime.threads.get(h.thread.id).messages).toHaveLength(0);
+  expect(controlsFor(h)).toMatchObject({ showStopButton: false, isLoading: false });
+  const late = { ...h.context, release: jest.fn(async () => undefined) };
+  pending.resolve(late);
+  await settle(() => h.runtime.models.snapshot().phase === 'empty');
+  expect(late.release).toHaveBeenCalledTimes(1);
+  await h.runtime.dispose();
+});
+
+test('a model that fails to load is reported as an error, never as ready', async () => {
+  const h = await ready();
+  await h.runtime.models.unload();
+  h.native.getDownloadedModelFile.mockResolvedValueOnce(null);
+  await expect(
+    h.runtime.sendMessage(h.thread.id, 'Hello', 'submission', jest.fn()),
+  ).rejects.toThrow('Download and verify');
+  const controls = controlsFor(h);
+  expect(controls).toMatchObject({
+    status: "Couldn't load Qwen3 1.7B Q4_K_M",
+    statusKind: 'error',
+    statusDetail: 'Download and verify this catalog model before loading it.',
+    canRetry: false,
+  });
+  expect(controls.status).not.toMatch(/ready/i);
+  await h.runtime.dispose();
+});
+
+test('a model-initiated push waits for approval and a decline never reaches the network', async () => {
+  const h = await ready();
+  h.context.completion.mockResolvedValueOnce({
+    ...reply,
+    content: '',
+    tool_calls: [{ id: 'push', type: 'function', function: { name: 'git_push', arguments: '{}' } }],
+  });
+  const running = h.runtime.sendMessage(h.thread.id, 'Push my work', 'submission', jest.fn());
+  await settle(() => h.runtime.loop.snapshot().phase === 'approval');
+  const controls = controlsFor(h);
+  expect(controls.status).toBe('Waiting for your approval · Push the current branch to its remote');
+  expect(controls.approval).toMatchObject({ toolName: 'git_push' });
+  h.runtime.loop.resolveApproval(controls.approval!.callId, false);
+  await running;
+  expect(h.native.pushWorkspaceGit).not.toHaveBeenCalled();
+  expect(h.runtime.threads.get(h.thread.id).status).toBe('complete');
+  await h.runtime.dispose();
+});
+
+test('a failed turn can be retried through the runtime without resending the message', async () => {
+  const h = await ready();
+  h.context.completion.mockRejectedValueOnce(new Error('Decode failed'));
+  await expect(
+    h.runtime.sendMessage(h.thread.id, 'Explain', 'submission', jest.fn()),
+  ).rejects.toThrow('Decode failed');
+  expect(controlsFor(h)).toMatchObject({ canRetry: true, status: 'Local turn failed' });
+  expect(h.runtime.models.snapshot().phase).toBe('ready');
+  const retried = await h.runtime.retryTurn(h.thread.id);
+  expect(retried.status).toBe('complete');
+  expect(retried.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+  expect(loadNativeModelContext).toHaveBeenCalledTimes(1);
   await h.runtime.dispose();
 });
