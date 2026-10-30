@@ -1,6 +1,6 @@
 import { GitHubAuthStrategy } from '../auth/github';
 import type { GitDeviceAuthorization } from '../auth/strategy';
-import { executeGitTool, GIT_TOOL_DEFINITIONS, isGitTool } from '../git/gitTools';
+import { gitToolApproval } from '../git/gitTools';
 import type { LocalGitIdentity } from '../git/gitTools';
 import { LOCAL_MODEL_CATALOG, localModelDefinition } from '../models/catalog';
 import { ModelDownloadController, type ModelDownloadSnapshot } from '../models/downloads';
@@ -8,12 +8,11 @@ import { loadNativeModelContext } from '../models/engine';
 import { expoModelTransfers, modelResumeStorage } from '../models/expoDownloads';
 import { LocalModelSession } from '../models/session';
 import type { OnDeviceNativeServices } from '../native/services.types';
-import { FILE_TOOL_DEFINITIONS } from '../workspaces/fileToolDefinitions';
-import { executeFileTool, isFileTool } from '../workspaces/fileTools';
 import type { LocalWorkspace } from '../workspaces/types';
 import { LocalAgentLoop } from './agentLoop';
 import { LocalDraftStore, type LocalDraftRestore } from './drafts';
 import { RuntimeSliceEmitter } from './emitter';
+import { LOCAL_TOOL_DEFINITIONS, localToolExecutor } from './localTools';
 import { NetworkMonitor, unknownNetwork, type OnDeviceNetworkPort } from './network';
 import {
   recoveryNotices,
@@ -130,24 +129,14 @@ export class OnDeviceRuntime {
     this.loop = new LocalAgentLoop(
       this.threads,
       this.models,
-      [...FILE_TOOL_DEFINITIONS, ...GIT_TOOL_DEFINITIONS],
-      (workspace, name, input) => {
-        if (isFileTool(name)) {
-          return executeFileTool(workspace, name, input, native);
-        }
-        if (isGitTool(name)) {
-          return executeGitTool(
-            workspace,
-            name,
-            input,
-            native,
-            () => this.settings.get().author,
-            (id) => this.credential(id),
-          );
-        }
-        return Promise.reject(new Error('The model requested a tool that is not available.'));
-      },
+      LOCAL_TOOL_DEFINITIONS,
+      localToolExecutor(
+        native,
+        () => this.settings.get().author,
+        (id) => this.credential(id),
+      ),
       () => this.emitter.emit('loop'),
+      gitToolApproval,
     );
     this.residency = new ModelResidency({
       models: this.models,
@@ -268,6 +257,14 @@ export class OnDeviceRuntime {
       throw new Error('Wait for on-device operations to settle before sending.');
     }
     return this.loop.send(id, text, submissionId, accepted);
+  }
+
+  async retryTurn(id: string): Promise<LocalThread> {
+    await this.residency.settled();
+    if (this.workspaceOperation || this.suspension || this.disposal) {
+      throw new Error('Wait for on-device operations to settle before retrying.');
+    }
+    return this.loop.retry(id);
   }
 
   initialize(): Promise<void> {

@@ -6,7 +6,14 @@ import {
   LocalToolInputError,
   text,
 } from '../runtime/toolArguments';
-import { FILE_TOOL_DEFINITIONS, type FileToolName } from './fileToolDefinitions';
+import {
+  FILE_TOOL_DEFINITIONS,
+  type FileToolName,
+  LIST_DIRECTORY_DEFAULT_LIMIT,
+  LIST_DIRECTORY_MAX_LIMIT,
+  READ_FILE_DEFAULT_BYTES,
+  READ_FILE_MAX_BYTES,
+} from './fileToolDefinitions';
 
 export type FileToolPort = Pick<
   OnDeviceNativeServices,
@@ -35,7 +42,7 @@ export async function executeFileTool(
       return native.listWorkspaceFiles(
         workspaceId,
         args['path'] === undefined ? '' : text(args, 'path', 4096, 0),
-        integer(args, 'limit', 64, 1, 1000),
+        integer(args, 'limit', LIST_DIRECTORY_DEFAULT_LIMIT, 1, LIST_DIRECTORY_MAX_LIMIT),
       );
     }
     case 'read_file': {
@@ -44,7 +51,7 @@ export async function executeFileTool(
         workspaceId,
         text(args, 'path'),
         integer(args, 'offset', 0, 0, 4 * 1024 * 1024),
-        integer(args, 'limit', 4096, 1, 65_536),
+        integer(args, 'limit', READ_FILE_DEFAULT_BYTES, 1, READ_FILE_MAX_BYTES),
       );
     }
     case 'write_file': {

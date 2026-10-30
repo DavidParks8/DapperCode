@@ -30,7 +30,7 @@ const mockRuntime = {
       error: null,
     }),
   },
-  models: { snapshot: () => ({ modelId: null, phase: 'empty' }) },
+  models: { snapshot: () => ({ modelId: null, phase: 'empty' }), resident: () => null },
   selectModel: jest.fn(async () => undefined),
   error: () => null,
 };

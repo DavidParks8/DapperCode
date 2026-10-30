@@ -40,6 +40,7 @@ const mockRuntime = {
   workspaces: () => [{ id: 'workspace', name: 'Workspace' }],
   loop: { snapshot: () => ({ phase: 'idle', threadId: null }) },
   models: { snapshot: () => ({ phase: 'empty', modelId: null }) },
+  downloads: { snapshot: () => ({ phase: 'ready', bytesWritten: 0 }) },
   workspaceActivity: () => null,
   issues: jest.fn((): OnDeviceIssue[] => []),
   dismissIssue: jest.fn(),
