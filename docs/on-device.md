@@ -76,11 +76,31 @@ discarding history: start a new conversation or request smaller file chunks if a
   changes before pushing. Desktop approval settings are unchanged.
 - Stop waits for current work to settle. Git cancellation is cooperative; unresponsive transports
   have a 15-second connection/read/write timeout. A cancelled push may already have reached its remote.
-- Backgrounding or a memory warning stops local work, pauses downloads, unloads the context, and
-  flushes drafts/history. There is no promise of continuous background inference on iOS.
+- Only moving to the **background** stops local work, pauses downloads, unloads the context, and
+  flushes drafts/history. Transient `inactive` states (Control Center, Notification Center, the app
+  switcher, calls, Face ID, system alerts) do not interrupt anything. On return, a download paused
+  by backgrounding resumes (once the network is reachable) and the previously loaded model is
+  reloaded if memory admission still passes. Interrupted turns are not resumed or replayed. There
+  is no promise of continuous background inference on iOS.
+- A memory warning stops local work and unloads the context but leaves downloads running.
+- Unrelated actions never stop a running conversation. Selecting the already-loaded model,
+  choosing a workspace for new conversations, deleting an unrelated download, and signing out (when
+  no Git transfer is active) proceed alongside the run. Actions that would replace or remove the
+  model a run is using are rejected with an explanation instead of silently stopping it.
 - User turns and tool intent are journaled before execution. After an interrupted launch, uncertain
   tools are marked interrupted and are **never automatically replayed**. Inspect the workspace and,
-  for push, the remote before retrying.
+  for push, the remote before retrying. Streamed text, tool results, and run settlement are
+  coalesced into one write shortly afterwards (and on backgrounding).
+- Drafts are stored per conversation and written after a short typing pause; deleting a
+  conversation deletes its draft. Drafts saved inline by older builds are migrated on first launch.
+- Startup is not fail-closed. Damaged or unexpected conversation, draft, or settings files are
+  moved to a `quarantine-…` name with their bytes unchanged (or skipped and left in place when they
+  cannot be moved), a dismissible notice explains what happened, and the rest of the mode starts.
+- Problems are reported as typed issues: persistence failures (retryable, cleared by a later
+  successful write), transient operation failures, and startup recovery notices. All are
+  dismissible and several can be shown at once.
+- Network reachability is observed with `expo-network`. When the device is known to be offline,
+  clone, push, sign-in, and model downloads fail immediately with a friendly message.
 - There is no automatic desktop/cloud fallback or synchronization of local workspaces.
 
 ## GitHub configuration

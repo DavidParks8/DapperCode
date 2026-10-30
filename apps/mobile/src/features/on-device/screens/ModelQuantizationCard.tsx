@@ -134,8 +134,8 @@ function DownloadActions({
             download.verificationPending
               ? runtime.downloads.verify(model.id)
               : download.canResume
-                ? runtime.downloads.resume(model.id)
-                : runtime.downloads.download(model.id),
+                ? runtime.resumeModelDownload(model.id)
+                : runtime.downloadModel(model.id),
           )
         }
       />

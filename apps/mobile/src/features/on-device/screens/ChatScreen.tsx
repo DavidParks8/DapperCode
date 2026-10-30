@@ -1,6 +1,6 @@
 import { randomUUID } from 'expo-crypto';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { View, type FlatList } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -11,15 +11,23 @@ import type { TranscriptDisplayItem } from '../../chat/transcript/messages';
 import type { AutoScrollState } from '../../chat/helpers/helpers';
 import { useOnDeviceRuntime } from '../runtime/OnDeviceProvider';
 import { localChatProjection } from '../runtime/chatProjection';
+import type { OnDeviceRuntimeSlice } from '../runtime/types';
 import { localChatControls } from './chatControls';
 import { GitTransferProgress } from './GitTransferProgress';
 import { LocalAction, LocalError, LocalPage, LocalText, useLocalOperation } from './ui';
 
 const NO_THREAD_STATUSES = new Map();
 const noAction = () => undefined;
+const CHAT_SLICES: readonly OnDeviceRuntimeSlice[] = [
+  'threads',
+  'loop',
+  'models',
+  'workspaces',
+  'issues',
+];
 
 export function LocalChatScreen() {
-  const runtime = useOnDeviceRuntime();
+  const runtime = useOnDeviceRuntime(CHAT_SLICES);
   const { threadId = '' } = useLocalSearchParams<{ threadId: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -36,7 +44,13 @@ export function LocalChatScreen() {
     isUserInteracting: false,
     isMomentumScrolling: false,
   });
-  if (!thread) {
+  const workspace = runtime.workspaces().find((entry) => entry.id === thread?.workspaceId);
+  const workspaceName = workspace?.name ?? 'Unavailable workspace';
+  const chat = useMemo(
+    () => (thread ? localChatProjection(thread, workspaceName) : null),
+    [thread, workspaceName],
+  );
+  if (!thread || !chat) {
     return (
       <LocalPage
         title="Local conversation"
@@ -44,8 +58,19 @@ export function LocalChatScreen() {
       />
     );
   }
-  const workspace = runtime.workspaces().find((entry) => entry.id === thread.workspaceId);
-  const chat = localChatProjection(thread, workspace?.name ?? 'Unavailable workspace');
+  const issues = runtime
+    .issues()
+    .filter((issue) => issue.threadId === null || issue.threadId === threadId);
+  const errors = [
+    ...new Set(
+      [
+        operation.error,
+        stop.error,
+        ...issues.map((issue) => issue.message),
+        thread.lastError,
+      ].filter((message): message is string => Boolean(message)),
+    ),
+  ];
   const controls = localChatControls(
     thread,
     runtime.loop.snapshot(),
@@ -59,9 +84,22 @@ export function LocalChatScreen() {
         <View style={{ paddingHorizontal: 16, gap: 8 }}>
           <LocalText>{controls.status}</LocalText>
           <GitTransferProgress watch={controls.isLoading} />
-          <LocalError
-            message={operation.error ?? stop.error ?? runtime.error()?.message ?? thread.lastError}
-          />
+          {errors.map((message) => (
+            <LocalError key={message} message={message} />
+          ))}
+          {issues.length > 0 || (thread.lastError && thread.status !== 'running') ? (
+            <LocalAction
+              title="Dismiss"
+              onPress={() => {
+                for (const issue of issues) {
+                  runtime.dismissIssue(issue.id);
+                }
+                void runtime
+                  .dismissThreadError(threadId)
+                  .catch((failure: unknown) => runtime.report(failure, threadId));
+              }}
+            />
+          ) : null}
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <LocalAction
               title="Model"
