@@ -389,6 +389,57 @@ test('retry continues after completed tools and never replays them', async () =>
   expect(continued.filter((message) => message.role === 'user')).toHaveLength(1);
 });
 
+test('retry after stopping a partial answer that followed a tool regenerates only that answer', async () => {
+  const h = await harness();
+  const answer = deferred<LocalModelReply>();
+  const streaming = deferred<void>();
+  h.model.generate
+    .mockResolvedValueOnce(call('read_file', { path: 'a.txt' }))
+    .mockImplementationOnce((_messages, _tools, update) => {
+      update({ content: 'Partial ans', reasoning: '' });
+      streaming.resolve();
+      return answer.promise;
+    })
+    .mockResolvedValueOnce(response('Complete answer.'));
+  h.model.stop.mockImplementation(async () => {
+    answer.reject(new LocalModelInterrupted());
+  });
+  const running = h.loop.send(h.thread.id, 'Read a.txt', 'request-one');
+  await streaming.promise;
+  await h.loop.stop();
+  const stopped = await running;
+  expect(stopped.status).toBe('interrupted');
+  expect(stopped.messages.at(-1)).toMatchObject({ role: 'assistant', content: 'Partial ans' });
+  const retried = await h.loop.retry(h.thread.id);
+  expect(h.execute).toHaveBeenCalledTimes(1);
+  expect(h.model.generate.mock.calls[2]?.[0].at(-1)).toMatchObject({
+    role: 'tool',
+    name: 'read_file',
+  });
+  expect(retried.messages.map((message) => message.role)).toEqual([
+    'user',
+    'assistant',
+    'tool',
+    'assistant',
+  ]);
+  expect(retried.messages.at(-1)?.content).toBe('Complete answer.');
+});
+
+test('retry after an output-limited answer that followed a tool does not keep the truncated text', async () => {
+  const h = await harness();
+  h.model.generate
+    .mockResolvedValueOnce(call('read_file', { path: 'a.txt' }))
+    .mockResolvedValueOnce({ ...response('<tool_call>{"name": "write_fi'), stopped_limit: 1 })
+    .mockResolvedValueOnce(response('Complete answer.'));
+  const limited = await h.loop.send(h.thread.id, 'Read a.txt', 'request-one');
+  expect(limited).toMatchObject({ status: 'interrupted' });
+  const retried = await h.loop.retry(h.thread.id);
+  expect(h.model.generate.mock.calls[2]?.[0].at(-1)).toMatchObject({ role: 'tool' });
+  expect(JSON.stringify(h.model.generate.mock.calls[2]?.[0])).not.toContain('write_fi');
+  expect(retried.messages.filter((message) => message.role === 'assistant')).toHaveLength(2);
+  expect(retried.messages.at(-1)?.content).toBe('Complete answer.');
+});
+
 test('long write_file payloads reach the tool intact', async () => {
   const h = await harness();
   const content = 'const value = 1;\n'.repeat(2000);

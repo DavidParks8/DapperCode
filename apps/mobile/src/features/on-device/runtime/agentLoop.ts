@@ -65,8 +65,9 @@ class LocalStepLimit extends Error {}
 
 /**
  * The history a retry continues from, or null when the thread has no failed or interrupted turn.
- * Answer-only attempts after the last user message are regenerated. Once a tool ran, its recorded
- * results are kept so the model continues from them; tools are never replayed.
+ * Answer-only attempts after the last tool activity (or the user message) are regenerated. Tool
+ * calls and their recorded results are kept so the model continues from them; tools are never
+ * replayed.
  */
 export function retryableLocalMessages(thread: LocalThread): LocalMessage[] | null {
   if (thread.status !== 'failed' && thread.status !== 'interrupted') {
@@ -82,12 +83,16 @@ export function retryableLocalMessages(thread: LocalThread): LocalMessage[] | nu
     return null;
   }
   const turn = thread.messages.slice(lastUser + 1);
-  if (!turn.some((message) => message.role === 'tool' || message.toolCalls?.length)) {
-    return thread.messages.slice(0, lastUser + 1);
-  }
+  let lastToolActivity = -1;
+  turn.forEach((message, index) => {
+    if (message.role === 'tool' || message.toolCalls?.length) {
+      lastToolActivity = index;
+    }
+  });
+  // A partial or truncated final answer after the last tool activity is regenerated, not kept.
   return [
     ...thread.messages.slice(0, lastUser + 1),
-    ...turn.filter((message) => !emptyAnswer(message)),
+    ...turn.slice(0, lastToolActivity + 1).filter((message) => !emptyAnswer(message)),
   ];
 }
 
