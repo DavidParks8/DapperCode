@@ -43,7 +43,10 @@ cd apps/mobile/ios
 pod install
 ```
 
-Do not enable JIT or optional increased-memory entitlements to make a model appear compatible.
+The config plugin adds Apple's `com.apple.developer.kernel.increased-memory-limit` entitlement, a
+self-service capability for apps that need a larger memory limit. It does not change admission:
+models are admitted only against a fresh `os_proc_available_memory()` measurement. Do not enable
+JIT, extended virtual addressing, or other entitlements to make a model appear compatible.
 Physical iPhone measurements are still required before publishing model/RAM compatibility claims.
 The native memory API is advisory; a simulator's host memory is not an iPhone memory budget.
 
