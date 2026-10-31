@@ -29,6 +29,12 @@ export class FakeAgentPort implements LocalAgentPort {
     modelId: null,
   };
   runValue: LocalRunSnapshot = IDLE;
+  modelValue: ReturnType<LocalAgentPort['modelSession']> = {
+    phase: 'empty',
+    modelId: null,
+    progress: 0,
+    error: null,
+  };
   sendError: Error | null = null;
   private counter = 0;
   private pending: {
@@ -182,6 +188,33 @@ export class FakeAgentPort implements LocalAgentPort {
     this.runValue = { ...this.runValue, phase: 'stopping' };
     this.emit();
     this.settle(threadId, 'interrupted', 'Stopped. Completed edits are preserved.');
+  };
+
+  modelSession = () => this.modelValue;
+
+  /** Changes the resident model state, as loading progress and failures do. */
+  setModel(update: Partial<ReturnType<LocalAgentPort['modelSession']>>): void {
+    this.modelValue = { ...this.modelValue, ...update };
+    this.emit();
+  }
+
+  retryTurn = (id: string) => {
+    this.calls.push(`retry:${id}`);
+    const thread = this.threadMap.get(id);
+    if (!thread || (thread.status !== 'failed' && thread.status !== 'interrupted')) {
+      return Promise.reject(new Error('This conversation has no failed or stopped turn to retry.'));
+    }
+    const turnId = `turn-${String(++this.counter)}`;
+    this.runValue = { phase: 'preparing', threadId: id, turnId, toolName: null, approval: null };
+    this.change(id, (current) => ({
+      ...current,
+      status: 'running',
+      activeTurnId: turnId,
+      lastError: null,
+    }));
+    return new Promise<LocalThread>((resolve, reject) => {
+      this.pending = { resolve, reject };
+    });
   };
 
   readonly approvals: { callId: string; approved: boolean }[] = [];

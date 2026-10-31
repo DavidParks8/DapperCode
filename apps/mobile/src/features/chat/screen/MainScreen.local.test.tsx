@@ -12,7 +12,7 @@ jest.mock('../message/ChatMessage', () => ({
 }));
 jest.mock('./AtomGlyph', () => ({ AtomGlyph: () => null }));
 
-import { AppState, FlatList, TextInput } from 'react-native';
+import { AppState, FlatList, Text, TextInput } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -29,6 +29,7 @@ import { localProfileAvailableAtom } from '@shell/state/bridge/atoms';
 import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import { localAgentPresenceAtom } from '@shell/state/local/atoms';
 import { MainScreen } from './MainScreen';
 import { selectedChatIdAtom } from '../state/session';
 
@@ -63,6 +64,31 @@ function transcript(root: Node): string[] {
 
 function labeled(root: Node, label: string): Node | undefined {
   return root.findAll((node) => node.props['accessibilityLabel'] === label)[0];
+}
+
+function texts(root: Node): string[] {
+  return root
+    .findAllByType(Text)
+    .flatMap((node) =>
+      ([] as unknown[])
+        .concat(node.props['children'])
+        .filter((child): child is string => typeof child === 'string'),
+    );
+}
+
+function hasText(root: Node, text: string): boolean {
+  return texts(root).some((entry) => entry.includes(text));
+}
+
+async function press(node: Node | undefined): Promise<void> {
+  if (!node) {
+    throw new Error('Missing control');
+  }
+  await act(async () => {
+    (node.props['onPress'] as () => void)();
+    await flush();
+  });
+  await settle();
 }
 
 async function renderLocalMain() {
@@ -181,6 +207,138 @@ describe('MainScreen on the local profile', () => {
     expect(transcript(root)).toEqual(
       expect.arrayContaining(['Explain the workspace', 'The workspace holds a demo app.']),
     );
+    act(() => tree.unmount());
+  });
+
+  it('shows what the local run is doing: model load progress, generating, then the tool', async () => {
+    const { tree, root, port } = await renderLocalMain();
+    await submit(root, 'Read the README');
+    const [thread] = port.threads();
+
+    await act(async () => {
+      port.setModel({ phase: 'loading', modelId: 'qwen3-1.7b-q4-k-m', progress: 42 });
+      await flush();
+    });
+    await settle();
+    expect(hasText(root, 'Loading Qwen3 1.7B')).toBe(true);
+    expect(hasText(root, ' · 42%')).toBe(true);
+    expect(labeled(root, 'Stop agent')).toBeTruthy();
+
+    await act(async () => {
+      port.setModel({ phase: 'ready', progress: 100 });
+      port.streamAssistant(thread!.id, 'assistant-1', 'Let me look.');
+      await flush();
+    });
+    await settle();
+    expect(hasText(root, 'Generating')).toBe(true);
+    expect(hasText(root, 'Loading Qwen3 1.7B')).toBe(false);
+
+    await act(async () => {
+      port.startTool(thread!.id, 'assistant-1', 'call-1', 'read_file', '{"path":"README.md"}');
+      await flush();
+    });
+    await settle();
+    expect(hasText(root, 'Reading README.md')).toBe(true);
+
+    await act(async () => {
+      port.finishTool(thread!.id, 'call-1', '{"content":"hi"}', 'completed');
+      port.streamAssistant(thread!.id, 'assistant-2', 'It says hi.');
+      port.settle(thread!.id, 'complete');
+      await flush();
+    });
+    await settle();
+    expect(hasText(root, 'Reading README.md')).toBe(false);
+    expect(hasText(root, 'Generating')).toBe(false);
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    act(() => tree.unmount());
+  });
+
+  it('surfaces a failed local turn in the composer and retries it in place', async () => {
+    const { tree, root, port } = await renderLocalMain();
+    await submit(root, 'Add a license');
+    const [thread] = port.threads();
+    await act(async () => {
+      port.settle(thread!.id, 'failed', 'The local context window is full.');
+      await flush();
+    });
+    await settle();
+
+    const failure = root.findAll((node) => node.props['testID'] === 'composer-turn-failure')[0];
+    expect(failure).toBeTruthy();
+    expect(hasText(root, 'The local context window is full.')).toBe(true);
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+
+    await press(labeled(root, 'Retry turn'));
+
+    expect(port.calls).toContain(`retry:${thread!.id}`);
+    expect(port.thread(thread!.id)?.status).toBe('running');
+    expect(
+      port.thread(thread!.id)?.messages.filter((message) => message.role === 'user'),
+    ).toHaveLength(1);
+    expect(labeled(root, 'Retry turn')).toBeUndefined();
+    expect(hasText(root, 'The local context window is full.')).toBe(false);
+    expect(labeled(root, 'Stop agent')).toBeTruthy();
+
+    await act(async () => {
+      port.streamAssistant(thread!.id, 'assistant-1', 'Added LICENSE.');
+      port.settle(thread!.id, 'complete');
+      await flush();
+    });
+    await settle();
+    expect(transcript(root)).toContain('Added LICENSE.');
+    expect(labeled(root, 'Retry turn')).toBeUndefined();
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    act(() => tree.unmount());
+  });
+
+  it('answers a local tool approval from the shared banner, including Deny', async () => {
+    const { tree, root, port } = await renderLocalMain();
+    await submit(root, 'Push my branch');
+    const [thread] = port.threads();
+    await act(async () => {
+      port.requestApproval(thread!.id, 'call-push', 'git_push', 'Push main to origin');
+      await flush();
+    });
+    await settle();
+    expect(hasText(root, 'Push main to origin')).toBe(true);
+
+    await press(labeled(root, 'Deny'));
+
+    expect(port.approvals).toEqual([{ callId: 'call-push', approved: false }]);
+    expect(labeled(root, 'Deny')).toBeUndefined();
+    expect(labeled(root, 'Stop agent')).toBeTruthy();
+    act(() => tree.unmount());
+  });
+
+  it('explains why a new local chat cannot start and offers the next step', async () => {
+    const { tree, root, store } = await renderLocalMain();
+    await act(async () => {
+      store.set(localAgentPresenceAtom, {
+        status: { label: 'Choose a model', kind: 'attention' },
+        readiness: {
+          reason: 'Download Qwen3 1.7B Q4_K_M to start a conversation.',
+          action: 'download-model',
+        },
+        defaultWorkspacePath: null,
+      });
+      await flush();
+    });
+    await settle();
+    expect(hasText(root, 'Download Qwen3 1.7B Q4_K_M to start a conversation.')).toBe(true);
+    expect(labeled(root, 'Get a model')).toBeTruthy();
+    expect(labeled(root, 'Use suggestion: Write tests')).toBeUndefined();
+
+    await act(async () => {
+      store.set(localAgentPresenceAtom, {
+        status: { label: 'Qwen3 1.7B Q4_K_M · loads when you send', kind: 'ready' },
+        readiness: null,
+        defaultWorkspacePath: null,
+      });
+      await flush();
+    });
+    await settle();
+    expect(labeled(root, 'Get a model')).toBeUndefined();
+    expect(labeled(root, 'Use suggestion: Write tests')).toBeTruthy();
     act(() => tree.unmount());
   });
 });

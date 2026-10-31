@@ -4,7 +4,12 @@ import { LocalModelInterrupted } from '../models/session';
 import type { LocalModelSession } from '../models/session';
 import { FILE_TOOL_DEFINITIONS } from '../workspaces/fileToolDefinitions';
 import { gitToolApproval } from '../git/gitTools';
-import { LocalAgentLoop, type LocalRunSnapshot, type LocalToolExecutor } from './agentLoop';
+import {
+  LocalAgentLoop,
+  localConversationTitle,
+  type LocalRunSnapshot,
+  type LocalToolExecutor,
+} from './agentLoop';
 import { LocalThreadRepository, type LocalDocumentPort } from './threads';
 import { parseLocalThread, threadDocument } from './threadCodec';
 
@@ -283,6 +288,18 @@ test('tool budgets settle visibly and give every unexecuted call an interrupted 
   expect(results).toHaveLength(33);
   expect(results.filter((message) => message.tool?.status === 'interrupted')).toHaveLength(1);
   expect(new Set(results.map((message) => message.tool?.callId)).size).toBe(33);
+});
+
+test('titles a conversation from its first message without cutting a word in half', async () => {
+  const h = await harness();
+  const settled = await h.loop.send(
+    h.thread.id,
+    'Refactor the math utilities into a class with tests and documentation for every method',
+    'request-one',
+  );
+  expect(settled.title).toBe('Refactor the math utilities into a class with tests and…');
+  expect(localConversationTitle('  Fix the build\nThen run tests  ')).toBe('Fix the build');
+  expect(localConversationTitle('x'.repeat(80))).toBe(`${'x'.repeat(59)}…`);
 });
 
 test('a thread cannot change the workspace captured by an active run', async () => {

@@ -17,6 +17,7 @@ import {
   type RotatingWorkingPhrase,
 } from '../helpers/helpers';
 import { areChatStatusMapsEquivalent } from '../state/chatState';
+import { useAccessibilityAnnouncement } from '@shared/accessibility';
 import {
   resolveDisplayedActivity,
   resolveVisibleActivity,
@@ -119,6 +120,14 @@ function useRotatingWorkingTitle(
     phraseRef.current = next;
     return next?.phrase ?? null;
   }, [activeTurnId, chatUpdatedAt, isGenericRunningActivity, title]);
+}
+
+function resolveAnnouncedActivity(
+  activity: ReturnType<typeof resolveDisplayedActivity>,
+  isGenericRunningActivity: boolean,
+): string | null {
+  const named = activity.tone === 'running' && !isGenericRunningActivity;
+  return named || activity.tone === 'complete' ? activity.title : null;
 }
 
 function resolveShowActivity(
@@ -293,6 +302,12 @@ export function useMainScreenHeaderActivityViewModel(
     activeTurnId,
     setShowDelayedGenericRunningActivity,
   ]);
+
+  // Named phases (loading a model, reading a file) and completion are announced; generic "Working"
+  // and progress details are not, so VoiceOver hears each phase once. Failures announce as alerts.
+  useAccessibilityAnnouncement(
+    resolveAnnouncedActivity(resolvedActivity, isGenericRunningActivity),
+  );
 
   const activityDetail = displayedActivity.detail;
   const showActivity = resolveShowActivity(

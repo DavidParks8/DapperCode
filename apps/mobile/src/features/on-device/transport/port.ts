@@ -4,6 +4,7 @@ import type {
   GitHistoryResponse,
   GitStatusResponse,
 } from '@bridge/types/types';
+import type { LocalModelSessionSnapshot } from '../models/session';
 import type { LocalModelDefinition } from '../models/types';
 import type { LocalRunSnapshot } from '../runtime/agentLoop';
 import type { LocalThread } from '../runtime/types';
@@ -39,6 +40,13 @@ export interface LocalAgentPort {
    */
   send(id: string, text: string, submissionId: string, accepted: () => void): Promise<LocalThread>;
   stop(): Promise<void>;
+  /**
+   * Continues the last failed or interrupted turn of a settled thread without replaying any tool.
+   * Settles when the run settles; the thread reports `running` once it has started.
+   */
+  retryTurn(id: string): Promise<LocalThread>;
+  /** The resident model's lifecycle, which the run activity (load progress, errors) reports. */
+  modelSession(): Pick<LocalModelSessionSnapshot, 'phase' | 'modelId' | 'progress' | 'error'>;
   /** Answers the pending tool approval in `run().approval`. */
   resolveApproval(callId: string, approved: boolean): void;
   git: LocalGitPort;

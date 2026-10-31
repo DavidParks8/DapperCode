@@ -1,13 +1,21 @@
 import { EventType } from '@ag-ui/core';
 
 import { parseAgUiEventNotification } from '@bridge/agui/agUi';
+import { toPendingApproval } from '../../chat/helpers/status';
 import { mapChat, toRawThread } from '@bridge/mapping/chatMapping';
 import { OnDeviceNativeError } from '../native/services.errors';
 import { OnDeviceOfflineError } from '../runtime/network';
 import type { LocalNotification } from './events';
-import { LocalBridgeServer, LocalRpcError, LOCAL_IMPLEMENTED_METHODS } from './server';
+import { RUN_ACTIVITY_EVENT_NAME, type RunActivity } from '@bridge/runActivity';
+import { TURN_RETRY_METHOD } from '../../chat/turn/turnRetry';
+import {
+  LocalBridgeServer,
+  LocalRpcError,
+  LOCAL_IMPLEMENTED_METHODS,
+  LOCAL_TURN_RETRY_METHOD,
+} from './server';
 import { FakeAgentPort } from './testing';
-import { LOCAL_AGENT_ID, LOCAL_WORKSPACE_ROOT } from './wire';
+import { describeLocalTool, LOCAL_AGENT_ID, LOCAL_WORKSPACE_ROOT } from './wire';
 
 const DEMO = `${LOCAL_WORKSPACE_ROOT}/Demo`;
 
@@ -76,6 +84,11 @@ describe('LocalBridgeServer', () => {
     expect(error.code).toBe(-32601);
     expect(error.data).toEqual({ error: 'unsupported_on_device', method });
     expect(LOCAL_IMPLEMENTED_METHODS).not.toContain(method);
+  });
+
+  it('answers the shell retry action with the same method name', () => {
+    expect(LOCAL_TURN_RETRY_METHOD).toBe(TURN_RETRY_METHOD);
+    expect(LOCAL_IMPLEMENTED_METHODS).toContain(TURN_RETRY_METHOD);
   });
 
   it('creates chats in the requested workspace and model, idempotently per submission', async () => {
@@ -179,11 +192,13 @@ describe('LocalBridgeServer', () => {
 
     expect(events().map((event) => event.type)).toEqual([
       EventType.RUN_STARTED,
+      EventType.CUSTOM,
       EventType.REASONING_MESSAGE_START,
       EventType.REASONING_MESSAGE_CONTENT,
       EventType.REASONING_MESSAGE_END,
       EventType.TEXT_MESSAGE_START,
       EventType.TEXT_MESSAGE_CONTENT,
+      EventType.CUSTOM,
       EventType.REASONING_MESSAGE_START,
       EventType.REASONING_MESSAGE_CONTENT,
       EventType.TEXT_MESSAGE_CONTENT,
@@ -191,6 +206,7 @@ describe('LocalBridgeServer', () => {
       EventType.TEXT_MESSAGE_END,
       EventType.TOOL_CALL_START,
       EventType.TOOL_CALL_ARGS,
+      EventType.CUSTOM,
       EventType.CUSTOM,
       EventType.CUSTOM,
       EventType.TOOL_CALL_END,
@@ -203,6 +219,113 @@ describe('LocalBridgeServer', () => {
     expect(deltas.join('')).toBe('Hello there');
     const start = events().find((event) => event.type === EventType.TOOL_CALL_START);
     expect(start).toMatchObject({ toolCallId: 'call-1', toolCallName: 'Write a.txt' });
+  });
+
+  it('names each phase of a run as activity: loading progress, generating, and the tool', async () => {
+    const { server, port, events } = setup();
+    const threadId = await createChat(server);
+    await server.request('bridge/thread/queue/send', {
+      threadId,
+      submissionId: 'submit-1',
+      content: 'Hello',
+      turnStart: {},
+    });
+    port.setModel({ phase: 'loading', modelId: 'qwen3-1.7b-q4-k-m', progress: 12.6 });
+    port.setModel({ progress: 12.9 });
+    port.setModel({ progress: 57 });
+    port.setModel({ phase: 'ready', progress: 100 });
+    port.streamAssistant(threadId, 'assistant-1', 'Reading');
+    port.startTool(threadId, 'assistant-1', 'call-1', 'read_file', '{"path":"src/app.ts"}');
+    port.finishTool(threadId, 'call-1', '{"content":"x"}', 'completed');
+    port.streamAssistant(threadId, 'assistant-2', 'Done.');
+    port.settle(threadId, 'complete');
+
+    const activity = events().flatMap((event) =>
+      event.type === EventType.CUSTOM && event.name === RUN_ACTIVITY_EVENT_NAME
+        ? [event.value as RunActivity]
+        : [],
+    );
+    expect(activity).toEqual([
+      { title: 'Preparing' },
+      { title: 'Loading Qwen3 1.7B', detail: '12%' },
+      { title: 'Loading Qwen3 1.7B', detail: '57%' },
+      { title: 'Preparing' },
+      { title: 'Generating' },
+      { title: 'Reading src/app.ts' },
+      { title: 'Generating' },
+    ]);
+    expect(events().at(-1)?.type).toBe(EventType.RUN_FINISHED);
+  });
+
+  it('continues a failed turn in place through bridge/turn/retry', async () => {
+    const { server, port, events } = setup();
+    const threadId = await createChat(server);
+    await server.request('bridge/thread/queue/send', {
+      threadId,
+      submissionId: 'submit-1',
+      content: 'Add a license',
+      turnStart: {},
+    });
+    port.settle(threadId, 'failed', 'The local context window is full.');
+
+    const { thread } = (await server.request('thread/read', { threadId, includeTurns: true })) as {
+      thread: unknown;
+    };
+    const failed = mapChat(toRawThread(thread));
+    expect(failed.status).toBe('error');
+    expect(failed.lastError).toBe('The local context window is full.');
+
+    const response = (await server.request(LOCAL_TURN_RETRY_METHOD, { threadId })) as {
+      turn: { id: string };
+    };
+    expect(response.turn.id).toBe(port.thread(threadId)?.activeTurnId);
+    expect(port.calls).toContain(`retry:${threadId}`);
+    expect(
+      port.thread(threadId)?.messages.filter((message) => message.role === 'user'),
+    ).toHaveLength(1);
+    const runs = events().filter((event) => event.type === EventType.RUN_STARTED);
+    expect(runs).toHaveLength(2);
+
+    const busy = await rpcError(server.request(LOCAL_TURN_RETRY_METHOD, { threadId }));
+    expect(busy.data.error).toBe('on_device_busy');
+    port.settle(threadId, 'complete');
+    const nothing = await rpcError(server.request(LOCAL_TURN_RETRY_METHOD, { threadId }));
+    expect(nothing.code).toBe(-32602);
+  });
+
+  it('titles local tools with their subject and marks interrupted ones as interrupted', async () => {
+    expect(describeLocalTool('search_files', '{"query":"TODO"}')).toEqual({
+      kind: 'search',
+      title: 'Search “TODO”',
+      activity: 'Searching “TODO”',
+    });
+    expect(describeLocalTool('list_directory', '{"path":"."}').title).toBe('List workspace root');
+    expect(describeLocalTool('custom_tool', null)).toMatchObject({
+      activity: 'Running custom tool',
+    });
+
+    const { server, port } = setup();
+    const threadId = await createChat(server);
+    await server.request('bridge/thread/queue/send', { threadId, content: 'Edit it' });
+    port.streamAssistant(threadId, 'assistant-1', '');
+    port.startTool(threadId, 'assistant-1', 'call-1', 'edit_file', '{"path":"src/app.ts"}');
+    await port.stop();
+    const tool = port.thread(threadId)?.messages.find((message) => message.tool);
+    port.put({
+      ...port.thread(threadId)!,
+      messages: port
+        .thread(threadId)!
+        .messages.map((message) =>
+          message.id === tool?.id && message.tool
+            ? { ...message, tool: { ...message.tool, status: 'interrupted' as const } }
+            : message,
+        ),
+    });
+    const { thread } = (await server.request('thread/read', { threadId })) as { thread: unknown };
+    const chat = mapChat(toRawThread(thread));
+    expect(chat.messages.find((message) => message.role === 'tool')?.toolMeta).toMatchObject({
+      title: 'Edit src/app.ts · Interrupted',
+    });
   });
 
   it('stops the active turn and reports it as an interrupted run', async () => {
@@ -253,6 +376,12 @@ describe('LocalBridgeServer', () => {
       threadId,
       title: 'Push the current branch to origin',
       options: [{ id: 'allow-once' }, { id: 'reject-once' }],
+    });
+    // The shell drops approvals it cannot parse, which would leave the run waiting forever.
+    expect(toPendingApproval(requested?.params)).toMatchObject({
+      requestId: 'call-push',
+      kind: 'commandExecution',
+      command: 'Push the current branch to origin',
     });
     expect(await server.request('bridge/approvals/list')).toEqual([requested?.params]);
     await expect(

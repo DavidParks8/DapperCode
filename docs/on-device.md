@@ -265,7 +265,7 @@ the local profile. `LocalBridgeWsClient` is connected from creation until dispos
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Session      | `bridge/capabilities/read`, `bridge/health/read`, `thread/approvalPolicy/set` (accepted, no approvals locally)                                                     |
 | Chats        | `thread/list`, `thread/loaded/list`, `bridge/thread/list/stream/start`/`cancel`, `thread/read`, `thread/start`, `bridge/thread/create`, `thread/name/update`, `thread/delete`, `thread/config/set` (model), `thread/resume` |
-| Turns        | `bridge/thread/queue/send`, `turn/start`, `turn/interrupt`, `bridge/thread/queue/read`, `bridge/thread/schedules/read` (always empty)                              |
+| Turns        | `bridge/thread/queue/send`, `turn/start`, `turn/interrupt`, `bridge/turn/retry` (local only), `bridge/thread/queue/read`, `bridge/thread/schedules/read` (always empty) |
 | Models       | `model/list` (downloaded, runnable catalog models)                                                                                                                |
 | Workspaces   | `bridge/workspaces/list`, `bridge/fs/list` (workspace roots only)                                                                                                 |
 | Attention    | `bridge/approvals/list`, `bridge/approvals/resolve` (the loop's pending tool approval, such as a push), `bridge/userInput/list` (always empty)                     |
@@ -276,7 +276,14 @@ Every other method rejects with JSON-RPC `-32601` and `data.error = 'unsupported
 `on_device_model_required`, `on_device_workspace_required`, `on_device_busy`, `on_device_offline`,
 `on_device_not_repository`, and `on_device_failed`; typed native failures also carry
 `data.nativeCode`. A tool approval requested by the agent loop is sent as
-`bridge/approval.requested`/`bridge/approval.resolved`, so the shared approval banner answers it. Only one local chat runs at a time; there is no queue or steering.
+`bridge/approval.requested`/`bridge/approval.resolved` with the bridge's `commandExecution` kind
+(the banner shows the tool's summary as the command), so the shared approval banner answers it,
+including Deny. Only one local chat runs at a time; there is no queue or steering.
+
+`bridge/turn/retry` (`transport/retry.ts`) continues a failed or interrupted turn in place through
+`runtime.retryTurn`, without resending the user message or replaying tools. It resolves with the new
+turn id once the run has started. A failed thread's snapshot lists its last turn as `failed` with
+the runtime's message, so a reopened chat shows the failure.
 
 Local workspaces are presented as `/On this iPhone/<name>` paths (duplicate names gain an id
 suffix). A chat's model is an ACP config option (`id: 'model'`), so the existing model sheet changes
@@ -288,9 +295,30 @@ model when the composer sends none or a desktop path.
 - Wire capabilities (`localCapabilities()`): one agent, `threadDelete` only; steer, fork, plan mode,
   review, browser preview, bridge UI surfaces, and fast mode are false, so the shell hides them.
 - Client profile features (`activeProfileFeaturesAtom`): `attachments`, `pushNotifications`,
-  `connectionSettings`, and `gitClone` are false for the local profile. The composer disables
-  attach/paste, the workspace picker hides **Clone Repo**, and Settings hides notifications and
-  approvals.
+  `connectionSettings`, `gitClone`, and `browserPreview` are false for the local profile. The
+  composer disables attach/paste, the workspace picker hides **Clone Repo**, the drawer hides
+  **Browser**, and Settings hides notifications and approvals. `turnRetry` is true only for the
+  local profile: the composer's failure alert then offers **Retry**, which calls
+  `bridge/turn/retry` (`features/chat/turn/turnRetry.ts`).
+- The agent mode chip is hidden once the agent's capabilities are known and it offers a single
+  mode (no plan mode and no advertised ACP modes), which is the case for the local agent.
+
+### Status, readiness, and activity
+
+- `LocalRuntimeHost` publishes `localAgentPresenceAtom` (`shell/runtime/localAgentPresence.ts`):
+  the agent status line from `localAgentStatus` and new-chat readiness from
+  `localConversationReadiness`, using the same model and workspace fallbacks as the server. It is
+  null for desktop profiles. The drawer footer shows the status line (with a dot for ready, busy,
+  attention, and error), and the empty new chat shows the readiness reason with **Get a model**
+  (Settings) when no model is usable; suggestions are hidden until a chat can start. When the
+  local new-chat workspace is unset, the host seeds it with the workspace the agent would use.
+- Run phases stream as the `dappercode.dev/activity` custom AG-UI event (`bridge/runActivity.ts`):
+  `Preparing`, `Loading <model> · N%`, `Generating`, the running tool's action (for example
+  `Reading README.md`, from `describeLocalTool`), `Stopping`, and `Saving`. The shell shows the
+  title (and detail) in the transcript activity row instead of a rotating working phrase and
+  announces each named phase (progress is not re-announced).
+- Tool titles come from `describeLocalTool`; an interrupted tool keeps the wire's `failed` status
+  but its title ends with `· Interrupted`.
 
 ### Streaming
 
@@ -305,11 +333,9 @@ draft is corrected by that reload.
 
 ### Extension points for the next tracks
 
-- **Chat parity** (activity, tool titles, errors, retry): tool kinds and titles come from
-  `describeLocalTool` in `transport/wire.ts`. Run failures arrive as `RUN_ERROR` with the runtime's
-  message; add richer error data in `events.ts` `finish()` and in `server.ts` error reasons rather than
-  branching in `MainScreen`. Runtime phases (`preparing`, model loading progress) can be streamed as
-  `ACTIVITY_SNAPSHOT`/custom events from the projector.
+- **Chat parity** (activity, tool titles, errors, retry): implemented as described above. Run
+  failures arrive as `RUN_ERROR` with the runtime's message; add richer error data in `events.ts`
+  `finish()` and in `server.ts` error reasons rather than branching in `MainScreen`.
 - **Git, workspaces, files**: add methods to `createLocalGitHandlers` or the server handler table and
   to `LocalAgentPort`. Implementing `bridge/git/clone` (native clone exists) means flipping
   `gitClone` in `activeProfileFeaturesAtom`. `bridge/fs/list` currently lists workspace roots only.

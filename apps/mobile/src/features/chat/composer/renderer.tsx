@@ -21,6 +21,7 @@ import { isPendingChatId } from '@shell/session/interruptedChatCreation';
 import { activeProfileFeaturesAtom } from '@shell/state/bridge/atoms';
 import { QueuedMessageDockView } from './QueuedMessageDockView';
 import { ScheduledPromptDock } from '../workflow/ScheduledPromptDock';
+import { useFailedTurnRetry, type FailedTurnRetry } from '../turn/turnRetry';
 import type {
   MainScreenWorkflowQueueStateContext,
   MainScreenWorkflowQueueStateResult,
@@ -120,8 +121,9 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
   const attachmentsSupported = useAtomValue(activeProfileFeaturesAtom).attachments;
   const pasteDisabled =
     !attachmentsSupported || editingQueuedMessage || queueActionKind === 'editStart';
-  const showStopButton =
-    !isPendingChatId(selectedChat?.id) && (isTurnLoading || isTurnLikelyRunning || stoppingTurn);
+  const turnActive = isTurnLoading || isTurnLikelyRunning || stoppingTurn;
+  const showStopButton = !isPendingChatId(selectedChat?.id) && turnActive;
+  const failedTurnRetry = useFailedTurnRetry({ selectedChat, visibleError, running: turnActive });
 
   const renderComposer = (overlay: boolean) => (
     <View
@@ -134,7 +136,12 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         !overlay && !keyboardVisible ? styles.composerContainerResting : null,
       ]}
     >
-      <ComposerErrorAlert visibleError={visibleError} styles={styles} />
+      <ComposerErrorAlert
+        visibleError={visibleError}
+        retry={failedTurnRetry}
+        styles={styles}
+        theme={theme}
+      />
       <BridgeRecoveryBannerView
         showBridgeRecoveryBanner={showBridgeRecoveryBanner}
         onOpenBridgeRecoveryGuide={onOpenBridgeRecoveryGuide}
@@ -235,11 +242,51 @@ export type MainScreenComposerRendererResult = ReturnType<typeof useMainScreenCo
 
 function ComposerErrorAlert({
   visibleError,
+  retry,
   styles,
+  theme,
 }: {
   visibleError: string | null;
+  retry: FailedTurnRetry | null;
   styles: MainScreenComposerRendererContext['styles'];
+  theme: MainScreenComposerRendererContext['theme'];
 }) {
+  if (retry) {
+    return (
+      <View style={styles.errorAlertWithAction} testID="composer-turn-failure">
+        <Text
+          accessibilityRole="alert"
+          accessibilityLiveRegion="assertive"
+          style={styles.errorAlertMessage}
+          numberOfLines={4}
+        >
+          {retry.message}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Retry turn"
+          accessibilityHint="Continues the failed turn without sending your message again."
+          accessibilityState={{ disabled: retry.retrying, busy: retry.retrying }}
+          disabled={retry.retrying}
+          onPress={retry.retry}
+          hitSlop={computeHitSlop({ width: 72, height: 32 })}
+          style={({ pressed }) => [
+            styles.errorAlertAction,
+            pressed && styles.errorAlertActionPressed,
+          ]}
+          testID="composer-retry-turn"
+        >
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="refresh"
+            size={14}
+            color={theme.colors.textPrimary}
+          />
+          <Text style={styles.errorAlertActionText}>{retry.retrying ? 'Retrying…' : 'Retry'}</Text>
+        </Pressable>
+      </View>
+    );
+  }
   if (!visibleError) {
     return null;
   }

@@ -8,6 +8,7 @@ import { failure, LOCAL_RPC_ERROR, LocalRpcError } from './errors';
 import { LocalEventProjector, type LocalNotification } from './events';
 import { LocalApprovalRelay } from './approvals';
 import { createLocalGitHandlers } from './gitHandlers';
+import { LOCAL_TURN_RETRY_METHOD, startLocalRetry } from './retry';
 import { readParam, readRecord, type RpcParams } from './params';
 import type { LocalAgentPort } from './port';
 import {
@@ -16,6 +17,7 @@ import {
   LOCAL_WORKSPACE_ROOT,
   localCapabilities,
   localModelDisplayName,
+  localRunActivity,
   localWorkspaceIdForPath,
   localWorkspacePaths,
   localThreadSnapshot,
@@ -35,6 +37,8 @@ export interface LocalRpcEndpoint {
 }
 
 type Params = RpcParams;
+
+export { LOCAL_TURN_RETRY_METHOD } from './retry';
 
 type Handler = (params: Params) => unknown;
 
@@ -60,6 +64,7 @@ export const LOCAL_IMPLEMENTED_METHODS = [
   'thread/resume',
   'turn/start',
   'turn/interrupt',
+  LOCAL_TURN_RETRY_METHOD,
   'bridge/thread/queue/send',
   'bridge/thread/queue/read',
   'bridge/thread/schedules/read',
@@ -119,7 +124,10 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
   private dirty = false;
 
   constructor(private readonly port: LocalAgentPort) {
-    this.projector = new LocalEventProjector(() => this.context());
+    this.projector = new LocalEventProjector(
+      () => this.context(),
+      (thread) => localRunActivity(thread, this.port.run(), this.port.modelSession()),
+    );
     this.approvals = new LocalApprovalRelay(port);
     this.handlers = this.createHandlers();
   }
@@ -524,6 +532,10 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
           await port.stop();
         }
         return { ok: true };
+      },
+      [LOCAL_TURN_RETRY_METHOD]: async (params) => {
+        const thread = this.requireThread(params);
+        return { turn: { id: await startLocalRetry(port, thread) } };
       },
       'bridge/thread/queue/send': async (params) => {
         const thread = this.requireThread(params);

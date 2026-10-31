@@ -71,6 +71,8 @@ export interface ActiveProfileFeatures {
   gitClone: boolean;
   /** The desktop preview browser, which proxies through the bridge host. */
   browserPreview: boolean;
+  /** Continuing a failed turn in place (`bridge/turn/retry`) instead of resending it. */
+  turnRetry: boolean;
 }
 
 export const activeProfileFeaturesAtom = atom<ActiveProfileFeatures>((get) => {
@@ -81,6 +83,7 @@ export const activeProfileFeaturesAtom = atom<ActiveProfileFeatures>((get) => {
     connectionSettings: !local,
     gitClone: !local,
     browserPreview: !local,
+    turnRetry: local,
   };
 });
 

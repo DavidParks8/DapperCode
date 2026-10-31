@@ -1,5 +1,6 @@
 import { EventType } from '@ag-ui/core';
 
+import { RUN_ACTIVITY_EVENT_NAME, type RunActivity } from '@bridge/runActivity';
 import { TOOL_META_EVENT_NAME } from '@bridge/toolMeta';
 import type { LocalMessage, LocalThread } from '../runtime/types';
 import {
@@ -22,6 +23,8 @@ interface RunTrack {
   openText: Set<string>;
   openReasoning: Set<string>;
   endedTools: Set<string>;
+  /** The last activity sent, as `title|detail`, so unchanged phases are not re-sent. */
+  activity: string | null;
 }
 
 const TERMINAL_TOOL_STATUSES = new Set(['completed', 'failed', 'interrupted']);
@@ -39,7 +42,10 @@ export class LocalEventProjector {
   private readonly seen = new Map<string, LocalThread>();
   private readonly runs = new Map<string, RunTrack>();
 
-  constructor(private readonly context: () => LocalThreadProjectionContext) {}
+  constructor(
+    private readonly context: () => LocalThreadProjectionContext,
+    private readonly activity: (thread: LocalThread) => RunActivity | null = () => null,
+  ) {}
 
   /** Records the current state as already delivered, without emitting anything. */
   prime(threads: readonly LocalThread[]): void {
@@ -64,6 +70,12 @@ export class LocalEventProjector {
         this.seen.set(thread.id, thread);
       }
     }
+    for (const thread of threads) {
+      const run = this.runs.get(thread.id);
+      if (run) {
+        this.diffActivity(thread, run, notifications);
+      }
+    }
     for (const id of [...this.seen.keys()]) {
       if (!current.has(id)) {
         this.seen.delete(id);
@@ -81,6 +93,7 @@ export class LocalEventProjector {
       openText: new Set(),
       openReasoning: new Set(),
       endedTools: new Set(),
+      activity: null,
     };
   }
 
@@ -162,6 +175,27 @@ export class LocalEventProjector {
       submissionId !== null &&
       submissionId !== previous.lastSubmissionId;
     return missedRun ? `submission-${submissionId}` : null;
+  }
+
+  /**
+   * Streams what the run is doing (model loading progress, generating, the running tool) whenever
+   * it changes. Runtime phases change without thread changes, so this runs on every diff.
+   */
+  private diffActivity(thread: LocalThread, run: RunTrack, out: LocalNotification[]): void {
+    const activity = this.activity(thread);
+    if (!activity) {
+      return;
+    }
+    const key = `${activity.title}|${activity.detail ?? ''}`;
+    if (key === run.activity) {
+      return;
+    }
+    run.activity = key;
+    this.emit(out, thread.id, run, {
+      type: EventType.CUSTOM,
+      name: RUN_ACTIVITY_EVENT_NAME,
+      value: activity,
+    });
   }
 
   private diffAssistant(

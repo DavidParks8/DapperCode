@@ -15,6 +15,7 @@ import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { useAppTheme } from '@shared/theme';
 import { createStyles } from '../styles/styles';
 import { useSceneContentInsets } from '@shell/layout/useShellLayout';
+import type { NewChatReadiness } from './newChatReadiness';
 
 const SUGGESTIONS = [
   { label: 'Explain the codebase', prompt: 'Explain the current codebase structure' },
@@ -39,7 +40,9 @@ export function ComposeView({
   topInset,
   onSuggestion,
   onOpenWorkspacePicker,
+  readiness = null,
 }: {
+  readiness?: NewChatReadiness | null;
   startWorkspaceLabel: string;
   keyboardVisible: boolean;
   bottomInset: number;
@@ -112,22 +115,53 @@ export function ComposeView({
           </View>
         </GlassSurface>
       </Pressable>
-      <View style={styles.suggestions}>
-        {SUGGESTIONS.map((suggestion) => (
-          <Pressable
-            key={suggestion.label}
-            style={({ pressed }) => [
-              styles.suggestionCard,
-              pressed && styles.suggestionCardPressed,
-            ]}
-            onPress={() => onSuggestion(suggestion.prompt)}
-            accessibilityRole="button"
-            accessibilityLabel={`Use suggestion: ${suggestion.label}`}
-          >
-            <Text style={styles.suggestionText}>{suggestion.label}</Text>
-          </Pressable>
-        ))}
-      </View>
+      {readiness ? (
+        <View style={styles.composeReadiness} testID="compose-readiness">
+          <Text style={styles.composeReadinessText} accessibilityLiveRegion="polite">
+            {readiness.reason}
+          </Text>
+          {readiness.action ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={readiness.action.label}
+              accessibilityHint={readiness.action.hint}
+              onPress={readiness.action.onPress}
+              style={({ pressed }) => [
+                styles.composeReadinessAction,
+                pressed && styles.composeReadinessActionPressed,
+              ]}
+              testID="compose-readiness-action"
+            >
+              <Ionicons
+                {...decorativeAccessibilityProps}
+                name="download-outline"
+                size={17}
+                color={theme.colors.accentText}
+              />
+              <Text style={styles.composeReadinessActionText}>{readiness.action.label}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+      {/* Suggestions would only fail until the agent is ready to start a chat. */}
+      {readiness ? null : (
+        <View style={styles.suggestions}>
+          {SUGGESTIONS.map((suggestion) => (
+            <Pressable
+              key={suggestion.label}
+              style={({ pressed }) => [
+                styles.suggestionCard,
+                pressed && styles.suggestionCardPressed,
+              ]}
+              onPress={() => onSuggestion(suggestion.prompt)}
+              accessibilityRole="button"
+              accessibilityLabel={`Use suggestion: ${suggestion.label}`}
+            >
+              <Text style={styles.suggestionText}>{suggestion.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
     </ScrollView>
   );
 }
