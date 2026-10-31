@@ -11,7 +11,7 @@ public class OnDeviceAgentModule: Module {
   public func definition() -> ModuleDefinition {
     Name("OnDeviceAgent")
 
-    Function("getAPIVersion") { 8 }
+    Function("getAPIVersion") { 9 }
 
     // Clone, fetch, pull, and push progress is pushed as throttled events (API 8); the snapshot
     // function stays for a single read when a listener attaches mid-transfer.
@@ -69,6 +69,11 @@ public class OnDeviceAgentModule: Module {
 
     AsyncFunction("getWorkspaceChangeToken") { (id: String) in
       try await self.workspaces.changeToken(id)
+    }
+
+    // Allocated workspace size for the picker, measured off the workspace actor (API 9).
+    AsyncFunction("getWorkspaceSize") { (id: String) in
+      try await self.workspaces.workspaceSize(id).payload
     }
 
     AsyncFunction("listWorkspaceFiles") { (id: String, path: String, limit: Int) in

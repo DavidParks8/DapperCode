@@ -5,7 +5,7 @@ import { normalizeWorkspacePath } from '../../chat/helpers/helpers';
 import { screenAtom } from '../../chat/state/registry';
 import { workspaceHostClientAtom } from '../api/atoms';
 import { describeHostError } from '../api/errors';
-import type { ManagedWorkspaceSummary } from '../api/protocol';
+import type { ManagedWorkspaceState, ManagedWorkspaceSummary } from '../api/protocol';
 import { refreshWorkspaceRootsAtom, selectWorkspaceAtom } from './workspaceActions';
 import { returnToChat } from './workspaceRouteNavigation';
 
@@ -17,26 +17,25 @@ import { returnToChat } from './workspaceRouteNavigation';
 export const managedWorkspacesAtom = screenAtom<ManagedWorkspaceSummary[] | null>(null);
 export const managedWorkspacesLoadingAtom = screenAtom(false);
 export const managedWorkspacesErrorAtom = screenAtom<string | null>(null);
-/** Changed-file counts of Git workspaces by path; a missing path has no known state yet. */
-export const managedWorkspaceChangesAtom = screenAtom<Readonly<Record<string, number>>>(() => ({}));
+/** Working-tree states and sizes by workspace path; a missing path has no known state yet. */
+export const managedWorkspaceStatesAtom = screenAtom<
+  Readonly<Record<string, ManagedWorkspaceState>>
+>(() => ({}));
 
 /**
- * Loads working-tree states after the list, so the picker never waits on a Git status read. The
- * previous states stay on screen until the new ones arrive.
+ * Loads working-tree states and sizes after the list, so the picker never waits on a Git status
+ * read or a size walk. The previous states stay on screen until the new ones arrive.
  */
-export const loadManagedWorkspaceChangesAtom = atom(null, async (get, set): Promise<void> => {
+export const loadManagedWorkspaceStatesAtom = atom(null, async (get, set): Promise<void> => {
   const host = get(workspaceHostClientAtom);
   if (!host) {
     return;
   }
   try {
     const { states } = await host.workspaceStates();
-    set(
-      managedWorkspaceChangesAtom,
-      Object.fromEntries(states.map((state) => [state.path, state.changedFiles])),
-    );
+    set(managedWorkspaceStatesAtom, Object.fromEntries(states.map((state) => [state.path, state])));
   } catch {
-    // Working-tree state is supplementary; rows keep showing branch and remote without it.
+    // State and size are supplementary; rows keep showing branch and remote without them.
   }
 });
 
@@ -49,7 +48,7 @@ export const loadManagedWorkspacesAtom = atom(null, async (get, set): Promise<vo
   try {
     const { workspaces } = await host.listWorkspaces();
     set(managedWorkspacesAtom, workspaces);
-    void set(loadManagedWorkspaceChangesAtom);
+    void set(loadManagedWorkspaceStatesAtom);
   } catch (error) {
     set(managedWorkspacesErrorAtom, describeHostError(error, 'Could not load workspaces.'));
   } finally {

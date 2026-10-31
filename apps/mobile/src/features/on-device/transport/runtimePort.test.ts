@@ -141,6 +141,45 @@ describe('the local transport over the real on-device runtime', () => {
     expect(fake.gitProgressListeners.size).toBe(0);
   });
 
+  it('reports native workspace sizes with Git state and measures again only after a change', async () => {
+    const { fake, server } = await setup({
+      workspaces: [
+        { id: 'ws-one', name: 'Demo', isRepository: true },
+        { id: 'ws-two', name: 'Notes', isRepository: false },
+      ],
+      files: { 'ws-one:README.md': 'hello', 'ws-one:src/app.ts': 'x'.repeat(2000) },
+    });
+    const measured = () => fake.calls.filter((call) => call.startsWith('getWorkspaceSize'));
+    const notes = {
+      path: `${LOCAL_WORKSPACE_ROOT}/Notes`,
+      changedFiles: null,
+      size: { bytes: 0, files: 0, truncated: false },
+    };
+    await expect(server.request('workspace/states', {})).resolves.toEqual({
+      states: [
+        { path: DEMO, changedFiles: 0, size: { bytes: 2005, files: 2, truncated: false } },
+        notes,
+      ],
+    });
+    expect(measured().sort()).toEqual([
+      'getWorkspaceSize:["ws-one"]',
+      'getWorkspaceSize:["ws-two"]',
+    ]);
+
+    // Unchanged workspaces are served from the cache without another native walk.
+    await server.request('workspace/states', {});
+    expect(measured()).toHaveLength(2);
+
+    await server.request('workspace/files/create', { cwd: DEMO, path: 'NOTES.md' });
+    await expect(server.request('workspace/states', {})).resolves.toEqual({
+      states: [
+        { path: DEMO, changedFiles: 0, size: { bytes: 2005, files: 3, truncated: false } },
+        notes,
+      ],
+    });
+    expect(measured()).toHaveLength(4);
+  });
+
   it('reports load progress before the run starts and records the message only after the load', async () => {
     const { runtime, events, activities, createChat, send } = await setup();
     const threadId = await createChat();

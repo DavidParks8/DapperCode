@@ -158,6 +158,9 @@ and that prompt is passed straight to completion.
   `onGitTransferProgress` event (ABI 8): once when a transfer begins, is cancelled, or ends, and at
   most every 100 ms (plus the final object) while objects arrive. `getGitTransferProgress` remains for
   a single read.
+- `getWorkspaceSize` (ABI 9) returns `{ bytes, files, truncated }` for a workspace: allocated bytes
+  of its regular files, Git metadata included. It never follows symbolic links, stays inside the
+  workspace, and stops after 50,000 entries or 2 seconds with `truncated: true`.
 - Git diffs label staged (HEAD to index) and unstaged (index to working tree) patches separately.
   Opposing changes are not collapsed away; only the staged content is committed. Both sections,
   including their labels, share the reported output byte limit.
@@ -405,10 +408,13 @@ The shared screens serve the local profile through the transport; nothing branch
 - **Workspace picker** (`picker/ManagedView.tsx`, `managedWorkspaces`): a flat list from
   `workspace/list` with branch and origin, tap to use, touch-and-hold to rename or browse files,
   swipe to delete, plus **New workspace** and **Clone repository**. After the list renders,
-  `workspace/states` adds each repository's working tree (**Clean** or **N changed**) in one
-  request; the transport caches each count until the workspace's change token moves, so reopening
-  the picker reads Git status only for workspaces that changed. Workspace size is not shown: no
-  native API reports a folder's size yet. The workspace in use carries a checkmark and
+  `workspace/states` adds each repository's working tree (**Clean** or **N changed**) and every
+  workspace's size (for example "main · Clean · 42 MB") in one request; the transport caches both
+  until the workspace's change token moves, so reopening the picker reads Git status and walks the
+  folder only for workspaces that changed. A failed part is retried on the next open. Size is
+  native `getWorkspaceSize` (ABI 9): allocated bytes including `.git`, symlinks never followed,
+  bounded to 50,000 entries or 2 seconds off the workspace actor; a bounded walk reads
+  "Over 42 MB". The workspace in use carries a checkmark and
   `accessibilityState.selected`; tapping it does nothing and its menu has no **Use** action.
   Choosing a workspace also calls
   `workspace/select`, so the runtime's remembered workspace (first-run setup, new-chat fallback)

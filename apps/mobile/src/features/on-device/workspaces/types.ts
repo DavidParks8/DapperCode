@@ -7,6 +7,16 @@ export interface LocalWorkspace {
   isRepository: boolean;
 }
 
+/** Disk usage of a workspace, Git metadata included. */
+export interface LocalWorkspaceSize {
+  /** Allocated bytes of the workspace's regular files. */
+  bytes: number;
+  /** Regular files counted. */
+  files: number;
+  /** The measurement stopped at its entry or time bound, so `bytes` is a lower bound. */
+  truncated: boolean;
+}
+
 /** The workspace root is always the empty path. */
 export const LOCAL_WORKSPACE_ROOT = '';
 

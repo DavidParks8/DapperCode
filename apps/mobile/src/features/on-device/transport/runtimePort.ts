@@ -124,6 +124,7 @@ export function createRuntimeAgentPort(runtime: OnDeviceRuntime): LocalAgentPort
       },
       cancelTransfer: () => native.cancelGitTransfer(),
       changeToken: (id) => native.getWorkspaceChangeToken(id),
+      size: (id) => native.getWorkspaceSize(id),
       metadata: async (id) => {
         const [branches, origin] = await Promise.allSettled([
           native.getWorkspaceGitBranches(id),

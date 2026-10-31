@@ -4,7 +4,7 @@ import { localModelDefinition } from '../models/catalog';
 import { localConversationTitle, type LocalRunSnapshot } from '../runtime/agentLoop';
 import type { LocalMessage, LocalThread } from '../runtime/types';
 import { OnDeviceNativeError } from '../native/services.errors';
-import type { LocalWorkspace } from '../workspaces/types';
+import type { LocalWorkspace, LocalWorkspaceSize } from '../workspaces/types';
 import type { LocalAgentPort, LocalFilesPort, LocalGitPort, LocalWorkspaceAdminPort } from './port';
 
 /** A typed native failure, as the native module reports it, for tests outside `on-device`. */
@@ -141,6 +141,8 @@ export class FakeAgentPort implements LocalAgentPort {
   networkValue: 'online' | 'offline' | 'unknown' = 'online';
   /** Workspace files keyed by `${workspaceId}:${path}`; directories are implied by their files. */
   readonly fileMap = new Map<string, string>();
+  /** Measured sizes by workspace id; other workspaces are measured from `fileMap`. */
+  readonly workspaceSizes = new Map<string, LocalWorkspaceSize>();
   readonly workspaceAdmin: LocalWorkspaceAdminPort = {
     create: async (name) => {
       this.calls.push(`workspace.create:${name}`);
@@ -182,6 +184,19 @@ export class FakeAgentPort implements LocalAgentPort {
       this.calls.push('workspace.cancelTransfer');
     },
     changeToken: async (id) => `token-${id}-${String(this.fileMap.size)}`,
+    size: async (id) => {
+      this.calls.push(`workspace.size:${id}`);
+      const measured = this.workspaceSizes.get(id);
+      if (measured) {
+        return measured;
+      }
+      const contents = [...this.fileMap].filter(([key]) => key.startsWith(`${id}:`));
+      return {
+        bytes: contents.reduce((total, [, content]) => total + content.length, 0),
+        files: contents.length,
+        truncated: false,
+      };
+    },
     metadata: async () => ({ branch: 'main', origin: 'https://github.com/acme/demo.git' }),
   };
   readonly files: LocalFilesPort = {

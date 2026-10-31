@@ -9,6 +9,7 @@ import type {
   LocalGitPullResult,
   LocalGitStatus,
   LocalWorkspace,
+  LocalWorkspaceSize,
 } from '../workspaces/types';
 
 /**
@@ -82,6 +83,8 @@ export interface LocalWorkspaceAdminPort {
   ): () => void;
   cancelTransfer(): void;
   changeToken(id: string): Promise<string>;
+  /** Bounded allocated size of the workspace, Git metadata included. */
+  size(id: string): Promise<LocalWorkspaceSize>;
   /** Current branch and origin URL; both null for workspaces without Git. */
   metadata(id: string): Promise<{ branch: string | null; origin: string | null }>;
 }
