@@ -222,6 +222,65 @@ describe('useAppBridgeLifecycle route gates', () => {
     act(() => tree?.unmount());
   });
 
+  it('restores the local profile chat cache on relaunch instead of overwriting it', async () => {
+    const at = new Date().toISOString();
+    const localChat: Chat = {
+      id: 'local-thread-1',
+      title: 'Explain the README',
+      status: 'complete',
+      createdAt: at,
+      updatedAt: at,
+      statusUpdatedAt: at,
+      lastMessagePreview: 'It is a fixture.',
+      messages: [{ id: 'm1', role: 'user', content: 'Explain the README', createdAt: at }],
+    };
+    const saved = updateChatSnapshotCache(
+      createEmptyChatSnapshotCache(LOCAL_PROFILE_ID),
+      localChat.id,
+      localChat,
+    );
+    jest
+      .mocked(loadChatSnapshotCache)
+      .mockImplementationOnce(async (profileId) =>
+        profileId === LOCAL_PROFILE_ID ? saved : createEmptyChatSnapshotCache(profileId),
+      );
+    const api = {
+      primeChats: jest.fn().mockResolvedValue(undefined),
+      rememberChat: jest.fn(),
+      setApprovalPolicy: jest.fn().mockResolvedValue(undefined),
+    } as unknown as HostBridgeApiClient;
+    const ws = {
+      isConnected: true,
+      onStatus: jest.fn(() => jest.fn()),
+    } as unknown as HostBridgeWsClient;
+    const store = createBridgeTestStore({ api, ws });
+    store.set(localProfileAvailableAtom, true);
+    const snapshot = store.get(appStateSnapshotAtom);
+    store.set(appStateSnapshotAtom, {
+      ...snapshot,
+      data: {
+        ...snapshot.data,
+        bridgeProfiles: { ...snapshot.data.bridgeProfiles, activeProfileId: LOCAL_PROFILE_ID },
+      },
+    });
+    router.replace('/');
+
+    let tree: ReactTestRenderer | undefined;
+    await act(async () => {
+      tree = renderer.create(withAppStore(store, <Harness />));
+      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(loadChatSnapshotCache).toHaveBeenCalledWith(LOCAL_PROFILE_ID);
+    expect(store.get(chatSnapshotCacheAtom)?.selectedChatId).toBe(localChat.id);
+    expect(store.get(selectedChatIdAtom)).toBe(localChat.id);
+    for (const [written] of jest.mocked(saveChatSnapshotCache).mock.calls) {
+      expect(written.entries.map((entry) => entry.chat.id)).toContain(localChat.id);
+    }
+    act(() => tree?.unmount());
+  });
+
   it('skips socket lifecycle, presence, and push registration for the local profile', async () => {
     const api = {
       primeChats: jest.fn().mockResolvedValue(undefined),

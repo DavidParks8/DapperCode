@@ -87,6 +87,15 @@ describe('LocalRuntimeHost', () => {
     act(() => tree.unmount());
   });
 
+  it('never covers onboarding with local runtime pages', () => {
+    const store = storeWith(LOCAL_PROFILE_ID);
+    act(() => router.replace('/onboarding'));
+    const tree = render(store);
+    expect((tree as unknown as { toJSON: () => unknown }).toJSON()).toBeNull();
+    expect(store.get(localRuntimeAtom)).toBeNull();
+    act(() => tree.unmount());
+  });
+
   it('keeps the runtime for legacy on-device screens and never mounts where unsupported', () => {
     const store = storeWith('bridge-1');
     act(() => router.replace('/on-device/models'));

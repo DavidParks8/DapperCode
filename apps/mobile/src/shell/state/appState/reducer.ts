@@ -87,6 +87,7 @@ function reduceProfileAction(state: AppStateData, action: ProfileAction): AppSta
     }
     case 'profiles/switch': {
       if (
+        action.profileId !== null &&
         action.profileId !== LOCAL_PROFILE_ID &&
         !state.bridgeProfiles.profiles.some((profile) => profile.id === action.profileId)
       ) {

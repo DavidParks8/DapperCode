@@ -233,6 +233,8 @@ MainScreen / drawer / Git / picker ── HostBridgeApiClient ── HostBridgeW
   `activeProfileAtom`/`activeProfileIdAtom` for anything profile-scoped (routes, caches, drawer).
 - Migration: a persisted `settings.preferredExecutionTarget === 'on-device'` becomes
   `activeProfileId = 'on-device'` when app state loads, and the setting no longer exists.
+- Startup restores the chat snapshot cache of the resolved active profile, including the local
+  profile, so a relaunch reopens the last local chat.
 - `defaultStartCwdAtom` keeps a separate `localDefaultStartCwd`, so local workspace paths never
   become a desktop bridge's new-chat path.
 - Routes are the regular `/profiles/on-device/(drawer)/chats/…` routes. `/on-device` and
@@ -243,7 +245,8 @@ MainScreen / drawer / Git / picker ── HostBridgeApiClient ── HostBridgeW
 `shell/runtime/LocalRuntimeHost.tsx`, mounted once by `RootLayout`, owns the single
 `OnDeviceRuntime` through `OnDeviceProvider` while the local profile is open or a legacy
 `/on-device/*` screen is shown. While the runtime starts or fails, the provider's page covers the
-shell (its recovery actions are ordinary profile switches). When ready, the host publishes
+shell (its recovery actions are ordinary profile switches; with no desktop profile, the local
+profile is closed before onboarding opens, and the host never renders over `/onboarding`). When ready, the host publishes
 `localRuntimeAtom` and a `LocalBridgeWsClient` in `localTransportAtom`; `wsClientAtom` returns that
 transport for the local profile, and `ProfileRouteBoundary` keeps local routes in their loading
 state until it exists. Leaving the profile unmounts the host, which disposes the transport and the
@@ -265,13 +268,15 @@ the local profile. `LocalBridgeWsClient` is connected from creation until dispos
 | Turns        | `bridge/thread/queue/send`, `turn/start`, `turn/interrupt`, `bridge/thread/queue/read`, `bridge/thread/schedules/read` (always empty)                              |
 | Models       | `model/list` (downloaded, runnable catalog models)                                                                                                                |
 | Workspaces   | `bridge/workspaces/list`, `bridge/fs/list` (workspace roots only)                                                                                                 |
-| Attention    | `bridge/approvals/list`, `bridge/userInput/list` (always empty)                                                                                                   |
+| Attention    | `bridge/approvals/list`, `bridge/approvals/resolve` (the loop's pending tool approval, such as a push), `bridge/userInput/list` (always empty)                     |
 | Git          | `bridge/git/status`, `diff`, `history`, `branches`, `stage`, `stageAll`, `unstage`, `unstageAll`, `commit`, `switch`, `push`                                     |
 
 Every other method rejects with JSON-RPC `-32601` and `data.error = 'unsupported_on_device'`
 (surfaced as `RpcRequestError`). Other stable `data.error` reasons are `thread_not_found`,
-`on_device_model_required`, `on_device_workspace_required`, `on_device_busy`, and
-`on_device_failed`. Only one local chat runs at a time; there is no queue or steering.
+`on_device_model_required`, `on_device_workspace_required`, `on_device_busy`, `on_device_offline`,
+`on_device_not_repository`, and `on_device_failed`; typed native failures also carry
+`data.nativeCode`. A tool approval requested by the agent loop is sent as
+`bridge/approval.requested`/`bridge/approval.resolved`, so the shared approval banner answers it. Only one local chat runs at a time; there is no queue or steering.
 
 Local workspaces are presented as `/On this iPhone/<name>` paths (duplicate names gain an id
 suffix). A chat's model is an ACP config option (`id: 'model'`), so the existing model sheet changes

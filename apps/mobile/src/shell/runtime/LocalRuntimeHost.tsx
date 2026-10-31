@@ -30,7 +30,12 @@ export function LocalRuntimeHost() {
   const available = useAtomValue(localProfileAvailableAtom);
   const localProfile = useAtomValue(activeProfileIsLocalAtom);
   const pathname = usePathname();
-  if (!available || !(localProfile || isLegacyOnDevicePath(pathname))) {
+  // Onboarding never shows local runtime pages, even while a local selection is being closed.
+  if (
+    !available ||
+    pathname === '/onboarding' ||
+    !(localProfile || isLegacyOnDevicePath(pathname))
+  ) {
     return null;
   }
   return (

@@ -110,7 +110,8 @@ export type AppStateAction =
       collaborationMode: CollaborationMode;
     }
   | { type: 'profiles/save'; draft: BridgeProfileDraft }
-  | { type: 'profiles/switch'; profileId: string }
+  /** `null` closes the active profile, for example when leaving the local profile with no bridge. */
+  | { type: 'profiles/switch'; profileId: string | null }
   | { type: 'push/update'; patch: Partial<Pick<PushSettingsState, 'optedOut' | 'events'>> }
   | { type: 'push/ensure-registration'; profileId: string; registrationId: string }
   | {
