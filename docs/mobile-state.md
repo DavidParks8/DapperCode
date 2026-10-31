@@ -28,7 +28,7 @@ lives under `apps/mobile/src/shell/state`, with feature-owned state under each f
 | `shell/state/theme.ts`                     | Theme derived from settings and the system colour scheme                                            |
 | `features/chat/state/*`                    | MainScreen screen state, grouped by domain, plus the reset registry                                 |
 | `shell/runtime/*`                         | Local runtime host, startup recovery page, `LocalBridgeWsClient` adapter, and local support detection |
-| `features/on-device/runtime/*`            | Scoped native owner, local turn/tool journal, preferences, drafts, and thread repository               |
+| `features/on-device/runtime/*`            | Scoped native owner, local turn/tool journal, preferences, legacy draft reader, and thread repository |
 | `shell/state/testing.ts`                   | `createAppStore` helpers for tests (`createTestStore`, `createBridgeTestStore`, `withAppStore`)     |
 
 ## Conventions

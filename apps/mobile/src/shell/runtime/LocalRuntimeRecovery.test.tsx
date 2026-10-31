@@ -44,6 +44,8 @@ function runtimeDouble(initialize: () => Promise<void>) {
     dispose: jest.fn(async () => undefined),
     subscribe: jest.fn(() => () => undefined),
     version: jest.fn(() => 0),
+    legacyDrafts: () => new Map(),
+    issues: () => [],
   };
 }
 

@@ -185,14 +185,20 @@ and that prompt is passed straight to completion.
   for push, the remote before retrying. Streamed text, tool results, and run settlement are
   coalesced into one write shortly afterwards (and on backgrounding).
 - Composer drafts are the shared chat drafts, stored per profile and chat exactly like desktop
-  chats. The runtime still restores (or quarantines) per-conversation draft documents written by
-  older builds and deletes them with their conversation, but no screen writes them any more.
+  chats; the runtime never writes drafts. Unsent drafts from older builds (inline in
+  `preferences.json` or in per-conversation `draft-…` documents) are imported once into the
+  composer's store for the matching local chat before any local chat opens
+  (`shell/runtime/localDraftImport.ts`). The runtime removes its copies only after that write
+  succeeds, so a failed import is retried at the next start and never loses text. A chat that
+  already has a newer composer draft keeps it; the older text is set aside with its bytes preserved
+  and a notice. Deleting a conversation also deletes any legacy draft it still has.
 - Startup is not fail-closed. Damaged or unexpected conversation, draft, or settings files are
   moved to a `quarantine-…` name with their bytes unchanged (or skipped and left in place when they
   cannot be moved), a dismissible notice explains what happened, and the rest of the mode starts.
 - Problems are reported as typed issues: persistence failures (retryable, cleared by a later
   successful write), transient operation failures, and startup recovery notices. All are
-  dismissible and several can be shown at once.
+  dismissible and several can be shown at once. Settings → On this iPhone lists them, the drawer
+  status points there, and VoiceOver announces each new issue once.
 - Network reachability is observed with `expo-network`. When the device is known to be offline,
   clone, push, sign-in, and model downloads fail immediately with a friendly message.
 - There is no automatic desktop/cloud fallback or synchronization of local workspaces.
