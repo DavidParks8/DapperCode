@@ -188,6 +188,25 @@ and that prompt is passed straight to completion.
   tools are marked interrupted and are **never automatically replayed**. Inspect the workspace and,
   for push, the remote before retrying. Streamed text, tool results, and run settlement are
   coalesced into one write shortly afterwards (and on backgrounding).
+- Conversations are stored append-first (`runtime/threads.ts`, `runtime/threadJournal.ts`) using
+  only the native runtime-document store. `thread-<id>.json` is the base: the whole conversation
+  plus `segment`, the last journal position it contains. Each save after that writes one small
+  `threadseg-<id>-<position>.json` segment holding only what changed (conversation fields, updated
+  or new messages, removed message ids), so a tool turn writes a few hundred bytes per journal step
+  regardless of conversation length. A segment is durable before the step it journals continues.
+  The journal is compacted into a new base when a run settles, when a change would exceed a 512 KiB
+  segment, or when the journal reaches 64 segments or the base's size (at least 256 KiB); every
+  document stays far below the native 8 MiB limit. The base is written first and the segments it
+  contains are removed afterwards, so a crash at any point replays to the same conversation.
+- At startup, the contiguous segments after the base are replayed; segments the base already
+  contains (an interrupted compaction) are discarded. A damaged, unreadable, or out-of-order segment
+  ends the replay: it and every later segment are set aside with their bytes preserved, the
+  conversation opens at the last good step, and its next write is a new base positioned past every
+  set-aside segment, so no name is ever reused. A damaged base is set aside together with its
+  segments. Whole-conversation documents from older builds are read as a base at position 0 and
+  are never rewritten just to migrate them; older builds never list segments, so they still open
+  the base. Deleting a conversation removes the base first and then its segments; segments left
+  without a base by an interrupted delete are discarded at the next start.
 - Composer drafts are the shared chat drafts, stored per profile and chat exactly like desktop
   chats; the runtime never writes drafts. Unsent drafts from older builds (inline in
   `preferences.json` or in per-conversation `draft-…` documents) are imported once into the

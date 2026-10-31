@@ -11,7 +11,9 @@ import {
   type LocalToolExecutor,
 } from './agentLoop';
 import { LocalThreadRepository, type LocalDocumentPort } from './threads';
-import { parseLocalThread, threadDocument } from './threadCodec';
+import { storedLocalThread } from './testing';
+import { threadDocument } from './threadCodec';
+import { utf8Bytes } from './threadJournal';
 
 jest.mock('expo-crypto', () => ({ randomUUID: jest.fn() }));
 
@@ -102,7 +104,7 @@ test('real run ordering persists user input and tool intent before executing and
   const h = await harness();
   h.model.generate.mockResolvedValueOnce(response('', ['read_file']));
   h.execute.mockImplementation(async () => {
-    const durable: unknown = JSON.parse(h.contents.get(threadDocument(h.thread.id)) ?? 'null');
+    const durable = storedLocalThread(h.contents, h.thread.id);
     expect(durable).toMatchObject({
       status: 'running',
       messages: expect.arrayContaining([
@@ -216,6 +218,8 @@ test('recovery never replays pending edits and supplies results for unadmitted t
   const running = h.loop.send(h.thread.id, 'Change files', 'request-one');
   await started.promise;
   const snapshot = new Map(h.contents);
+  // The intent is durable as journal segments after the base, not as a rewritten conversation.
+  expect([...snapshot.keys()].filter((name) => name.startsWith('threadseg-'))).not.toEqual([]);
   const recoveredStorage = {
     ...h.storage,
     readRuntimeDocument: async (name: string) => snapshot.get(name) ?? null,
@@ -243,6 +247,53 @@ test('recovery never replays pending edits and supplies results for unadmitted t
   await running;
 });
 
+test('a tool turn appends journal segments whose size does not grow with the conversation', async () => {
+  const turn = async (history: number) => {
+    const h = await harness();
+    h.threads.change(h.thread.id, (thread) => ({
+      ...thread,
+      messages: Array.from({ length: history }, (_, index) => ({
+        id: `history-${String(index).padStart(4, '0')}`,
+        role: 'user' as const,
+        content: 'x'.repeat(1024),
+        createdAt: thread.createdAt,
+      })),
+    }));
+    await h.threads.save(h.thread.id);
+    await h.threads.flush();
+    const historyBytes = utf8Bytes(h.contents.get(threadDocument(h.thread.id)) ?? '');
+    h.storage.writeRuntimeDocument.mockClear();
+    h.model.generate.mockResolvedValueOnce(response('', ['read_file']));
+    const finished = await h.loop.send(h.thread.id, 'Read main.txt', 'request-one');
+    await h.threads.flush();
+    const writes = h.storage.writeRuntimeDocument.mock.calls.map(([name, value]) => ({
+      name,
+      bytes: utf8Bytes(value),
+    }));
+    expect(storedLocalThread(h.contents, h.thread.id)).toEqual(finished);
+    return {
+      historyBytes,
+      segments: writes.filter((write) => write.name.startsWith('threadseg-')),
+      bases: writes.filter((write) => write.name === threadDocument(h.thread.id)),
+    };
+  };
+  const small = await turn(1);
+  const large = await turn(300);
+  expect(large.historyBytes).toBeGreaterThan(300 * 1024);
+  // User turn, tool-call intent, and tool invocation each append one segment before execution.
+  expect(large.segments).toHaveLength(3);
+  const total = (writes: { bytes: number }[]) =>
+    writes.reduce((sum, write) => sum + write.bytes, 0);
+  const journaled = total(large.segments);
+  // Only timestamps that happen to change within the same millisecond may differ.
+  expect(Math.abs(journaled - total(small.segments))).toBeLessThan(128);
+  expect(journaled).toBeLessThan(4 * 1024);
+  // Previously each of those journal saves rewrote the whole conversation; now only the settled
+  // run is compacted, once.
+  expect(large.bases).toHaveLength(1);
+  expect(journaled * 50).toBeLessThan(large.historyBytes);
+});
+
 test('old duplicate submissions remain idempotent after newer successful messages', async () => {
   const h = await harness();
   await h.loop.send(h.thread.id, 'First', 'request-one');
@@ -258,8 +309,7 @@ test('a tool cannot execute if its durable intent write fails', async () => {
   const h = await harness();
   h.model.generate.mockResolvedValueOnce(response('', ['write_file']));
   h.storage.writeRuntimeDocument.mockImplementation(async (name, value) => {
-    const thread = parseLocalThread(value, h.thread.id);
-    if (thread.messages.some((message) => message.tool?.status === 'pending')) {
+    if (value.includes('"status":"pending"')) {
       throw new Error('Intent persistence failed.');
     }
     h.contents.set(name, value);

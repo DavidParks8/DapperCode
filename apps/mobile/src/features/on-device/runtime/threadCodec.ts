@@ -87,44 +87,103 @@ function message(value: unknown): LocalMessage {
   return parsed;
 }
 
-export function parseLocalThread(raw: string, expectedId: string): LocalThread {
-  let value: unknown;
+export function parseLocalMessage(value: unknown): LocalMessage {
+  return message(value);
+}
+
+export const LOCAL_THREAD_HEADER_KEYS = [
+  'title',
+  'workspaceId',
+  'modelId',
+  'createdAt',
+  'updatedAt',
+  'status',
+  'activeTurnId',
+  'lastSubmissionId',
+  'lastError',
+] as const;
+
+export type LocalThreadHeaderKey = (typeof LOCAL_THREAD_HEADER_KEYS)[number];
+export type LocalThreadHeader = Pick<LocalThread, LocalThreadHeaderKey>;
+
+function status(value: unknown): LocalThread['status'] {
+  if (
+    value !== 'idle' &&
+    value !== 'running' &&
+    value !== 'complete' &&
+    value !== 'interrupted' &&
+    value !== 'failed'
+  ) {
+    throw new Error('The local conversation status is invalid.');
+  }
+  return value;
+}
+
+/** Validates one conversation-level field, as stored in a base document or a journal segment. */
+export function parseLocalThreadField(
+  key: LocalThreadHeaderKey,
+  value: unknown,
+): LocalThreadHeader[LocalThreadHeaderKey] {
+  switch (key) {
+    case 'status':
+      return status(value);
+    case 'activeTurnId':
+    case 'lastSubmissionId':
+    case 'lastError':
+      return nullableText(value);
+    default:
+      return text(value);
+  }
+}
+
+export function parseLocalJson(raw: string): unknown {
   try {
-    value = JSON.parse(raw);
+    return JSON.parse(raw);
   } catch (error) {
     if (error instanceof SyntaxError) {
       throw new Error('The local conversation is damaged. Its file has been preserved.');
     }
     throw error;
   }
-  const item = record(value);
+}
+
+/**
+ * Reads a conversation base document: a whole-thread document from older builds, or a compacted
+ * base whose `segment` records the last journal segment it already contains (0 when absent).
+ */
+export function parseLocalThreadBase(
+  raw: string,
+  expectedId: string,
+): { thread: LocalThread; sequence: number } {
+  const item = record(parseLocalJson(raw));
   if (item['version'] !== 1 || item['id'] !== expectedId || !Array.isArray(item['messages'])) {
     throw new Error('The local conversation version or identity is invalid.');
   }
-  const status = item['status'];
-  if (
-    status !== 'idle' &&
-    status !== 'running' &&
-    status !== 'complete' &&
-    status !== 'interrupted' &&
-    status !== 'failed'
-  ) {
-    throw new Error('The local conversation status is invalid.');
+  const sequence = item['segment'] ?? 0;
+  if (typeof sequence !== 'number' || !Number.isSafeInteger(sequence) || sequence < 0) {
+    throw new Error('The local conversation journal position is invalid.');
   }
   return {
-    version: 1,
-    id: expectedId,
-    title: text(item['title']),
-    workspaceId: text(item['workspaceId']),
-    modelId: text(item['modelId']),
-    createdAt: text(item['createdAt']),
-    updatedAt: text(item['updatedAt']),
-    status,
-    activeTurnId: nullableText(item['activeTurnId']),
-    lastSubmissionId: nullableText(item['lastSubmissionId']),
-    lastError: nullableText(item['lastError']),
-    messages: item['messages'].map(message),
+    sequence,
+    thread: {
+      version: 1,
+      id: expectedId,
+      title: text(item['title']),
+      workspaceId: text(item['workspaceId']),
+      modelId: text(item['modelId']),
+      createdAt: text(item['createdAt']),
+      updatedAt: text(item['updatedAt']),
+      status: status(item['status']),
+      activeTurnId: nullableText(item['activeTurnId']),
+      lastSubmissionId: nullableText(item['lastSubmissionId']),
+      lastError: nullableText(item['lastError']),
+      messages: item['messages'].map(message),
+    },
   };
+}
+
+export function parseLocalThread(raw: string, expectedId: string): LocalThread {
+  return parseLocalThreadBase(raw, expectedId).thread;
 }
 
 export function recoverLocalThread(thread: LocalThread): LocalThread {
