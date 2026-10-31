@@ -1,7 +1,4 @@
 {
   "platforms": ["apple"],
-  "apple": {
-    "modules": ["OnDeviceAgentModule"],
-    "appDelegateSubscribers": ["ModelDownloadAppDelegate"]
-  }
+  "apple": { "modules": ["OnDeviceAgentModule"] }
 }

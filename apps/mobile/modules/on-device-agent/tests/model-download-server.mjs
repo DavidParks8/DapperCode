@@ -48,6 +48,7 @@ const server = https.createServer(
       offset = next;
       if (offset === data.length) {
         clearInterval(timer);
+        console.log(`MODEL_RESPONSE_COMPLETE ${request.url}`);
         response.end();
       }
     }, 20);

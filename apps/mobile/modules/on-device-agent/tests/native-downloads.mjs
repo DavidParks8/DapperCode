@@ -172,7 +172,44 @@ extendedKeyUsage=serverAuth
       });
       // Terminating (not force-quitting) leaves the background URL session running.
       await e2e.run('xcrun', ['simctl', 'terminate', simulator, bundleId]);
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      await e2e.waitFor(
+        'both transfers finish while the app is not running',
+        () => {
+          const log = e2e.readFile('logs/model-server.stdout.log');
+          return (
+            log.includes('MODEL_RESPONSE_COMPLETE /model.gguf') &&
+            log.includes('MODEL_RESPONSE_COMPLETE /model-2.gguf')
+          );
+        },
+        { timeoutMs: 120_000, intervalMs: 500 },
+      );
+      let events = '';
+      await e2e.waitFor(
+        'iOS relaunches the app to deliver finished transfers',
+        async () => {
+          const shown = await e2e.run('xcrun', [
+            'simctl',
+            'spawn',
+            simulator,
+            'log',
+            'show',
+            '--style',
+            'compact',
+            '--last',
+            '10m',
+            '--predicate',
+            'subsystem == "dev.dappercode.on-device-agent"',
+          ]);
+          events = shown.stdout;
+          return events.includes('MODEL_DOWNLOAD_EVENTS_COMPLETED');
+        },
+        { timeoutMs: 120_000, intervalMs: 2_000 },
+      );
+      await e2e.expectMatch(
+        'the system background-session completion handler is released',
+        events,
+        /MODEL_DOWNLOAD_EVENTS_COMPLETED system completion handler called/,
+      );
       await e2e.run('xcrun', ['simctl', 'launch', simulator, bundleId], { timeoutMs: 60_000 });
       let result;
       await e2e.waitFor(
@@ -181,7 +218,7 @@ extendedKeyUsage=serverAuth
           result = await readOutcome('native-download-result.json');
           return result !== null;
         },
-        { timeoutMs: 180_000, intervalMs: 500 },
+        { timeoutMs: 240_000, intervalMs: 500 },
       );
       await e2e.check('relaunch outcome', () => requireOutcome(result, 'pass'));
       await e2e.expectSubset('background transfer lifecycle', result.checks, {
@@ -194,6 +231,10 @@ extendedKeyUsage=serverAuth
         transferStateCleared: true,
         checksumFailureVisible: true,
         checksumFailureNotReady: true,
+        checksumFailureDiscardsStagedFile: true,
+        pauseFailureReleasesTransfer: true,
+        pauseFailureCanRestart: true,
+        pauseFailureCancelled: true,
         storageOverview: true,
         nativeRemoval: true,
       });

@@ -66,6 +66,10 @@ func runNativeGate() async throws {
   try await rejected("incorrect model sizes are refused", containing: "size does not match") {
     _ = try await store.finalize(id, sha256: checksum(data), expectedBytes: Int64(data.count + 1))
   }
+  try check(
+    try await store.paths(id).verificationBytes == nil,
+    "a size mismatch discards the staged download")
+  try data.write(to: partial)
   try await rejected("incorrect model checksums are refused", containing: "checksum does not match")
   {
     _ = try await store.finalize(
@@ -73,6 +77,10 @@ func runNativeGate() async throws {
   }
   try check(
     try await store.downloaded(id) == nil, "failed verification cannot create a ready record")
+  try check(
+    try await store.paths(id).verificationBytes == nil,
+    "a checksum mismatch discards the staged download instead of re-verifying it later")
+  try data.write(to: partial)
   let completed = try await store.finalize(
     id, sha256: checksum(data), expectedBytes: Int64(data.count))
   guard let readyURL = URL(string: completed.1) else { throw GateError("Invalid ready model URI.") }

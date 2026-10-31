@@ -180,18 +180,31 @@ final class ModelDownloadSession: NSObject, URLSessionDownloadDelegate, @uncheck
       return try snapshot(id)
     }
     let data = await task.cancelByProducingResumeData()
-    let record = lock.withLock { records[id] }
-    if let data, var checkpoint = try Self.checkpoint(id) {
-      checkpoint.bytesWritten = record?.bytesWritten ?? checkpoint.bytesWritten
+    // The task is finished either way; never leave a record pointing at it.
+    let paused = lock.withLock { () -> Record? in
+      guard records[id]?.task === task else { return nil }
+      return records.removeValue(forKey: id)
+    }
+    guard let data else {
+      try? FileManager.default.removeItem(at: container.appendingPathComponent("transfer.json"))
+      return try snapshot(id)
+    }
+    do {
+      var checkpoint =
+        try Self.checkpoint(id)
+        ?? TransferCheckpoint(
+          url: task.originalRequest?.url?.absoluteString ?? "", bytesWritten: 0,
+          totalBytes: paused?.totalBytes ?? 0, interrupted: false, error: nil)
+      checkpoint.bytesWritten = paused?.bytesWritten ?? checkpoint.bytesWritten
       checkpoint.interrupted = false
       checkpoint.error = nil
       try data.write(to: container.appendingPathComponent("resume.data"), options: .atomic)
       try Self.writeCheckpoint(container, checkpoint)
-    } else if data == nil {
-      try? FileManager.default.removeItem(at: container.appendingPathComponent("transfer.json"))
-    }
-    lock.withLock {
-      if records[id]?.task === task { records.removeValue(forKey: id) }
+    } catch {
+      record(
+        failure: "The paused download could not be saved. Restart it. (\(error.localizedDescription))",
+        for: id)
+      throw error
     }
     return try snapshot(id)
   }

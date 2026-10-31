@@ -584,3 +584,53 @@ test('pauseAll pauses running and queued work for every model', async () => {
   expect(controller.snapshot('model-c')).toMatchObject({ phase: 'not_downloaded' });
   expect(h.native.startModelDownload).toHaveBeenCalledTimes(2);
 });
+
+test('a failed native pause that ended the transfer releases its slot and reservation', async () => {
+  const h = harness();
+  h.setAvailable(64 * 1024 * 1024 + 3 * BYTES);
+  const controller = h.create();
+  await controller.download('model-a');
+  await controller.download('model-b');
+  await controller.download('model-c');
+  h.native.pauseModelDownload.mockImplementationOnce(async (id: string) => {
+    h.transfers.set(id, {
+      ...idle(id),
+      state: 'failed',
+      error: 'The paused download could not be saved. Restart it.',
+    });
+    throw new Error('Disk full.');
+  });
+  await expect(controller.pause('model-a')).resolves.toMatchObject({
+    phase: 'error',
+    canResume: false,
+    error: 'Disk full.',
+  });
+  expect(controller.snapshot('model-c').phase).toBe('downloading');
+  await expect(controller.refreshStorage()).resolves.toMatchObject({ reservedBytes: 2 * BYTES });
+  await tick();
+  expect(controller.snapshot('model-a')).toMatchObject({ phase: 'error', error: 'Disk full.' });
+});
+
+test('a checksum mismatch is not re-verified on later activations', async () => {
+  const h = harness(['model-a']);
+  h.native.finalizeModelDownload.mockImplementation(async (id: string) => {
+    h.staged.delete(id);
+    throw new Error('The model checksum does not match the catalog. Restart the download.');
+  });
+  h.staged.add('model-a');
+  const controller = h.create();
+  await controller.inspect('model-a');
+  await controller.resumeLifecyclePaused();
+  await expect(controller.settled('model-a')).resolves.toMatchObject({
+    phase: 'error',
+    verificationPending: false,
+  });
+  await controller.resumeLifecyclePaused();
+  const relaunched = h.create();
+  await expect(relaunched.inspect('model-a')).resolves.toMatchObject({
+    phase: 'not_downloaded',
+    verificationPending: false,
+  });
+  await relaunched.resumeLifecyclePaused();
+  expect(h.native.finalizeModelDownload).toHaveBeenCalledTimes(1);
+});

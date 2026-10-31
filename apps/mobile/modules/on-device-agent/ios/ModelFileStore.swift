@@ -198,6 +198,7 @@ actor ModelFileStore {
     let partial = container.appendingPathComponent("partial.gguf")
     let source = fileManager.fileExists(atPath: verifyingFile.path) ? verifyingFile : partial
     guard try ModelStorage.size(source) == expectedBytes else {
+      discardStaged(container)
       throw ModelFileError(
         "The model download size does not match the catalog. Restart the download.")
     }
@@ -208,6 +209,8 @@ actor ModelFileStore {
       try ModelFileStore.checksum(source, token: token)
     }.value
     guard digest == sha256 else {
+      // A corrupt file can never pass, so it is not kept for another (multi-GB) verification.
+      discardStaged(container)
       throw ModelFileError("The model checksum does not match the catalog. Restart the download.")
     }
     guard !fileManager.fileExists(atPath: ready.path) else {
@@ -222,6 +225,12 @@ actor ModelFileStore {
       to: verifying.appendingPathComponent("model.json"), options: .atomic)
     try fileManager.moveItem(at: verifying, to: ready)
     return (record, ready.appendingPathComponent("model.gguf").absoluteString)
+  }
+
+  private func discardStaged(_ container: URL) {
+    for name in ["partial.gguf", "verifying"] {
+      try? fileManager.removeItem(at: container.appendingPathComponent(name))
+    }
   }
 
   func remove(_ id: String) throws {

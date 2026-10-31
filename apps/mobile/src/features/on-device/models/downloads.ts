@@ -16,6 +16,7 @@ import type {
   NativeModelTransfer,
 } from './downloadState';
 import { DownloadEntries } from './downloadEntries';
+import { settlePauseFailure, settleVerification } from './downloadOutcomes';
 import type { DownloadEntry } from './downloadEntries';
 import type { LocalModelDefinition, LocalModelFile } from './types';
 
@@ -403,8 +404,7 @@ export class ModelDownloadController {
           });
         }
       } catch (error) {
-        entry.job = 'transferring';
-        this.entries.publish(entry, { error: message(error) });
+        settlePauseFailure(entry, this.native, this.entries, error);
       } finally {
         this.drain();
       }
@@ -459,33 +459,15 @@ export class ModelDownloadController {
       interrupted: false,
       error: null,
     });
-    const run = (async () => {
-      try {
-        const file = validateModelFile(
-          model,
-          await this.native.finalizeModelDownload(model.id, model.sha256, model.bytes),
-        );
-        entry.job = null;
-        entry.request = null;
-        this.ready(entry, file);
-        void this.refreshStorage().catch(() => undefined);
-      } catch (error) {
-        const request = entry.request;
-        entry.request = null;
-        if (request === 'cancel') {
-          await this.discard(entry);
-          return;
-        }
-        entry.job = null;
-        this.entries.publish(entry, {
-          phase: request === 'pause' ? 'paused' : 'error',
-          verifiedBytes: 0,
-          ...NO_RATE,
-          error: request === 'pause' ? null : message(error),
-        });
+    entry.pending = settleVerification(entry, this.native, this.entries).then((outcome) => {
+      if (outcome === 'cancel') {
+        return this.discard(entry);
       }
-    })();
-    entry.pending = run;
+      if (outcome === 'ready') {
+        void this.refreshStorage().catch(() => undefined);
+      }
+      return undefined;
+    });
   }
 
   private ensurePolling(): void {

@@ -22,8 +22,14 @@ See [product setup and limitations](../../../../docs/on-device.md).
   model ID, so several models transfer concurrently and keep running while the app is suspended.
   `attachModelDownloads` adopts tasks that outlived the process. Completed files are moved to
   `partial.gguf` by the delegate even when JavaScript is not running; pause and system interruptions
-  persist resume data (`resume.data`/`transfer.json`). `ModelDownloadAppDelegate.swift` recreates the
-  session when iOS relaunches the app for transfer events. Checkpoints from the earlier
+  persist resume data (`resume.data`/`transfer.json`). When iOS relaunches the app for transfer events,
+  `ModelDownloadEvents.swift` recreates the session and takes the system completion handler
+  directly: `plugins/withOnDeviceAgentNative.js` adds an `AppDelegate` override ahead of Expo's
+  subscriber aggregation, because in SDK 57 expo-file-system's handler and
+  `EXLegacyAppDelegateWrapper` never complete their share for another library's session, so the
+  aggregated handler would never reach iOS. A checksum or size mismatch deletes the staged file so
+  a corrupt download is not re-verified on every activation. A pause whose checkpoint cannot be
+  written releases the transfer and records the failure. Checkpoints from the earlier
   JavaScript transfer (`resume.json`) are imported on the next resume.
   `RuntimeDocumentStore.swift` owns separate atomic, size-limited local journals/preferences.
 - The native ABI is versioned (currently 7). An old binary is rejected before loading model
@@ -127,7 +133,10 @@ The download scenario bundles the production `ModelDownloadController` against a
 fixture. It downloads two models concurrently, pauses one while the other continues, resumes with
 an HTTP Range request, then terminates the app mid-transfer and relaunches it. The background
 session must re-attach (or have delivered the finished file) without restarting either transfer,
-before verification, checksum rejection, the storage overview, and removal are checked. It needs the
+before verification, checksum rejection (which discards the staged file), the storage overview,
+removal, and a pause whose checkpoint cannot be written are checked. While the app is terminated,
+the scenario waits for iOS to relaunch it in the background and asserts (from the simulator log)
+that the system's background-session completion handler is called. It needs the
 Release simulator build above:
 
 ```bash

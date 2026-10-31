@@ -1,7 +1,7 @@
 import { registerRootComponent } from 'expo';
-import { File, Paths } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
 import { useEffect, useState } from 'react';
-import { Text } from 'react-native';
+import { AppState, Text } from 'react-native';
 
 import { isRecord } from '../../../src/shared/records';
 import { getOnDeviceNativeServices } from '../../../src/features/on-device/native/services';
@@ -53,6 +53,7 @@ async function fixture(): Promise<LocalModelDefinition[]> {
     { ...model, id: 'native-download-first', downloadUrl: raw['url'] },
     { ...model, id: 'native-download-second', downloadUrl: raw['secondUrl'] },
     { ...model, id: 'native-download-bad-hash', downloadUrl: raw['url'], sha256: '0'.repeat(64) },
+    { ...model, id: 'native-download-pause-failure', downloadUrl: raw['url'] },
   ];
 }
 
@@ -117,14 +118,44 @@ async function beforeTermination(models: LocalModelDefinition[]) {
   phaseOutcome.write(JSON.stringify({ status: 'terminate', checks }));
 }
 
+/** A pause whose checkpoint cannot be written must not leave a phantom running transfer. */
+async function pauseFailureReleasesTransfer(
+  downloads: ModelDownloadController,
+  model: LocalModelDefinition,
+) {
+  const native = getOnDeviceNativeServices();
+  await downloads.download(model.id);
+  await until(
+    'pause-failure transfer progresses',
+    () => downloads.snapshot(model.id).bytesWritten >= 64 * 1024,
+  );
+  const partial = (await native.getModelFilePaths(model.id)).partialUri;
+  const blocker = new Directory(partial.replace(/partial\.gguf$/, 'resume.data'));
+  blocker.create();
+  new File(blocker, 'occupied').write('x');
+  const failed = await downloads.pause(model.id);
+  check(
+    failed.phase === 'error' &&
+      failed.error !== null &&
+      native.getModelDownload(model.id).state !== 'running',
+    'pauseFailureReleasesTransfer',
+  );
+  check((await downloads.download(model.id)).phase === 'downloading', 'pauseFailureCanRestart');
+  check((await downloads.cancel(model.id)).phase === 'not_downloaded', 'pauseFailureCancelled');
+}
+
 /** Second launch: the background session re-attaches or delivers what finished while closed. */
 async function afterRelaunch(models: LocalModelDefinition[]) {
-  const [first, second, bad] = models as [
+  const [first, second, bad, pauseFailure] = models as [
+    LocalModelDefinition,
     LocalModelDefinition,
     LocalModelDefinition,
     LocalModelDefinition,
   ];
   const native = getOnDeviceNativeServices();
+  // iOS may relaunch the app in the background to deliver finished transfers; work starts once a
+  // person opens it, because transfers created in the background are discretionary.
+  await until('app is active', () => AppState.currentState === 'active', 300_000);
   const events: ModelDownloadSnapshot[] = [];
   const downloads = controller(models, events);
   for (const model of [first, second]) {
@@ -158,6 +189,12 @@ async function afterRelaunch(models: LocalModelDefinition[]) {
     'checksumFailureVisible',
   );
   check((await native.getDownloadedModelFile(bad.id)) === null, 'checksumFailureNotReady');
+  check(
+    (await native.getModelFilePaths(bad.id)).verificationBytes === null &&
+      !rejected.verificationPending,
+    'checksumFailureDiscardsStagedFile',
+  );
+  await pauseFailureReleasesTransfer(downloads, pauseFailure);
   const storage = await downloads.refreshStorage();
   check(
     storage.usedBytes >= 2 * first.bytes &&
