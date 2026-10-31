@@ -19,6 +19,8 @@ const EMPTY_MODEL_SESSION = {
   contextTokens: null,
 } as const;
 
+const NO_ISSUES: readonly never[] = [];
+
 export function createFakeSetupRuntime(initial: FakeSetupRuntimeState) {
   let state = initial;
   let version = 0;
@@ -31,6 +33,7 @@ export function createFakeSetupRuntime(initial: FakeSetupRuntimeState) {
     version: () => version,
     preferences: () => ({ modelId: state.modelId, workspaceId: state.workspaceId }),
     workspaces: () => state.workspaces,
+    issues: () => NO_ISSUES,
     models: {
       snapshot: () => EMPTY_MODEL_SESSION,
       resident: () => null,

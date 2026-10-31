@@ -220,6 +220,8 @@ export interface FakeNativeOptions {
   workspaces?: LocalWorkspace[];
   /** Workspace files keyed by `${workspaceId}:${relativePath}`. */
   files?: Record<string, string>;
+  /** Runtime documents (conversations, drafts, preferences) present at startup. */
+  documents?: Record<string, string>;
 }
 
 function idleTransfer(id: string): NativeModelTransfer {
@@ -262,12 +264,13 @@ function gitStatus(): LocalGitStatus {
  * memory that shrinks while `llama` holds a model. Every call is recorded in `calls`.
  */
 export function createFakeOnDeviceNative(llama: FakeLlama, options: FakeNativeOptions = {}) {
-  const documents = new Map<string, string>();
+  const documents = new Map(Object.entries(options.documents ?? {}));
   const files = new Map(Object.entries(options.files ?? {}));
   const transfers = new Map<string, NativeModelTransfer>();
   const staged = new Set<string>();
   const installed = new Set(options.downloaded ?? []);
   const calls: string[] = [];
+  let writeFailure: string | null = null;
   const memory = {
     physicalBytes: options.physicalBytes ?? 8 * 1024 * MiB,
     availableBytes: options.availableBytes ?? 6 * 1024 * MiB,
@@ -414,6 +417,9 @@ export function createFakeOnDeviceNative(llama: FakeLlama, options: FakeNativeOp
     }),
     readRuntimeDocument: async (name) => documents.get(name) ?? null,
     writeRuntimeDocument: async (name, content) => {
+      if (writeFailure) {
+        throw new OnDeviceNativeError('STORAGE_FAILURE', writeFailure);
+      }
       documents.set(name, content);
     },
     listRuntimeDocuments: async (prefix) =>
@@ -459,6 +465,10 @@ export function createFakeOnDeviceNative(llama: FakeLlama, options: FakeNativeOp
       if (current) {
         transfers.set(id, { ...current, bytesWritten });
       }
+    },
+    /** Makes runtime document writes fail with `message` until called with null. */
+    failRuntimeWrites(message: string | null): void {
+      writeFailure = message;
     },
     /** Finishes a background transfer: the file is staged for verification. */
     completeDownload(id: string): void {

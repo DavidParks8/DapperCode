@@ -49,9 +49,11 @@ import type { LocalContextLoader } from '../../features/on-device/models/engine'
 import {
   createFakeOnDeviceNative,
   FakeLlama,
+  type FakeNativeOptions,
   type FakeOnDeviceNative,
 } from '../../features/on-device/runtime/testing';
 import { MainScreen } from '../../features/chat/screen/MainScreen';
+import { LocalProfileSection } from '../../features/settings/LocalProfileSection';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { DrawerContent } from '@shell/navigation/DrawerContent';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
@@ -189,6 +191,7 @@ function ProfileScreens() {
     <>
       <DrawerContent active />
       <MainScreen />
+      <LocalProfileSection />
     </>
   ) : null;
 }
@@ -216,9 +219,9 @@ function setActiveProfile(store: ReturnType<typeof createTestStore>, activeProfi
   });
 }
 
-async function renderShell() {
+async function renderShell(options: FakeNativeOptions = {}) {
   mockLlama = new FakeLlama();
-  mockNative = createFakeOnDeviceNative(mockLlama, { downloaded: [QWEN] });
+  mockNative = createFakeOnDeviceNative(mockLlama, { downloaded: [QWEN], ...options });
   const data = createDefaultAppStateData();
   data.bridgeProfiles = {
     activeProfileId: LOCAL_PROFILE_ID,
@@ -461,6 +464,34 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
       (node) => node.props['testID'] === `drawer-chat-row-${thread!.id}`,
     );
     expect(rows.length).toBeGreaterThan(0);
+    act(() => tree.unmount());
+  });
+
+  it('surfaces set-aside files and failed writes in the drawer and Settings until resolved', async () => {
+    const { tree, root, runtime } = await renderShell({
+      documents: { 'thread-00000000-0000-4000-8000-000000000999.json': '{damaged' },
+    });
+    // A damaged conversation no longer blocks the profile; the notice says what happened.
+    const notice = '1 damaged local conversation was set aside with its data preserved.';
+    expect(hasText(root, notice)).toBe(true);
+    expect(drawerStatus(root)).toBe('1 issue needs attention');
+    await press(root, 'Dismiss');
+    expect(hasText(root, notice)).toBe(false);
+    expect(drawerStatus(root)).toBe('Qwen3 1.7B Q4_K_M · loads when you send');
+
+    // A failed write stays visible with a retry instead of being lost or mislabeled.
+    mockNative.failRuntimeWrites('The disk is full.');
+    await act(async () => {
+      await runtime.selectWorkspace('ws-one').catch(() => undefined);
+      await flush();
+    });
+    await settle();
+    expect(hasText(root, 'The disk is full.')).toBe(true);
+    expect(drawerStatus(root)).toBe('1 issue needs attention');
+    mockNative.failRuntimeWrites(null);
+    await press(root, 'Retry saving');
+    expect(hasText(root, 'The disk is full.')).toBe(false);
+    expect(drawerStatus(root)).toBe('Qwen3 1.7B Q4_K_M · loads when you send');
     act(() => tree.unmount());
   });
 });
