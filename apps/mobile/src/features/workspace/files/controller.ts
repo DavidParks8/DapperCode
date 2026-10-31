@@ -155,26 +155,54 @@ export function useWorkspaceFiles({ host, cwd, focused }: UseWorkspaceFilesArgs)
     [cwd, host],
   );
 
-  const reloadFromDisk = useCallback(async () => {
-    const current = fileRef.current;
-    if (!current) {
-      return;
-    }
-    try {
-      const next = await readFile(current.path);
-      if (mountedRef.current && next) {
-        setFile(next);
+  /** Updates the open file and its ref together, so in-flight reads see the latest draft. */
+  const updateFile = useCallback(
+    (update: (current: OpenWorkspaceFile | null) => OpenWorkspaceFile | null) => {
+      const next = update(fileRef.current);
+      fileRef.current = next;
+      setFile(next);
+    },
+    [],
+  );
+
+  /**
+   * Re-reads the open file. A background reload (`force: false`) only applies when, after the
+   * read, the same file is still open with no unsaved edits and no save landed meanwhile;
+   * otherwise edits are kept and the file is flagged as changed on disk. `force` is for explicit
+   * user choices such as Discard edits.
+   */
+  const reloadFromDisk = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      const current = fileRef.current;
+      if (!current) {
+        return;
+      }
+      try {
+        const next = await readFile(current.path);
+        const latest = fileRef.current;
+        if (!mountedRef.current || !next || !latest || latest.path !== current.path) {
+          return;
+        }
+        if (!force && latest.revision !== current.revision) {
+          return;
+        }
+        if (!force && latest.draft !== latest.original) {
+          setChangedOnDisk(true);
+          return;
+        }
+        updateFile(() => next);
         setConflict(false);
         setChangedOnDisk(false);
         setUnsavedBlocked(false);
         setError(null);
+      } catch (reason) {
+        if (mountedRef.current) {
+          setError(describeHostError(reason, 'Could not reload the file.'));
+        }
       }
-    } catch (reason) {
-      if (mountedRef.current) {
-        setError(describeHostError(reason, 'Could not reload the file.'));
-      }
-    }
-  }, [readFile]);
+    },
+    [readFile, updateFile],
+  );
 
   const refresh = useCallback(async () => {
     tokenRef.current = await readToken();
@@ -243,7 +271,7 @@ export function useWorkspaceFiles({ host, cwd, focused }: UseWorkspaceFilesArgs)
       try {
         const next = await readFile(entry.path);
         if (mountedRef.current && next) {
-          setFile(next);
+          updateFile(() => next);
           setConflict(false);
           setChangedOnDisk(false);
           setUnsavedBlocked(false);
@@ -259,13 +287,16 @@ export function useWorkspaceFiles({ host, cwd, focused }: UseWorkspaceFilesArgs)
         }
       }
     },
-    [readFile],
+    [readFile, updateFile],
   );
 
-  const setDraft = useCallback((draft: string) => {
-    setFile((current) => (current && !current.truncated ? { ...current, draft } : current));
-    setUnsavedBlocked(false);
-  }, []);
+  const setDraft = useCallback(
+    (draft: string) => {
+      updateFile((current) => (current && !current.truncated ? { ...current, draft } : current));
+      setUnsavedBlocked(false);
+    },
+    [updateFile],
+  );
 
   /** Closes the editor; refused (and explained) while there are unsaved edits. */
   const closeFile = useCallback((): boolean => {
@@ -274,13 +305,13 @@ export function useWorkspaceFiles({ host, cwd, focused }: UseWorkspaceFilesArgs)
       setUnsavedBlocked(true);
       return false;
     }
-    setFile(null);
+    updateFile(() => null);
     setConflict(false);
     setChangedOnDisk(false);
     setUnsavedBlocked(false);
     setError(null);
     return true;
-  }, []);
+  }, [updateFile]);
 
   const write = useCallback(
     async (revision: string) => {
@@ -293,7 +324,7 @@ export function useWorkspaceFiles({ host, cwd, focused }: UseWorkspaceFilesArgs)
         const saved = await host.writeFile(cwd, current.path, current.draft, revision);
         tokenRef.current = await readToken();
         if (mountedRef.current) {
-          setFile((latest) =>
+          updateFile((latest) =>
             latest && latest.path === current.path
               ? {
                   ...latest,
@@ -325,7 +356,7 @@ export function useWorkspaceFiles({ host, cwd, focused }: UseWorkspaceFilesArgs)
         }
       }
     },
-    [cwd, host, loadDirectory, readToken],
+    [cwd, host, loadDirectory, readToken, updateFile],
   );
 
   const save = useCallback(async () => {
@@ -350,12 +381,12 @@ export function useWorkspaceFiles({ host, cwd, focused }: UseWorkspaceFilesArgs)
 
   /** Drops unsaved edits and shows the file as it is on disk. */
   const discardEdits = useCallback(async () => {
-    setFile((current) => (current ? { ...current, draft: current.original } : current));
+    updateFile((current) => (current ? { ...current, draft: current.original } : current));
     setUnsavedBlocked(false);
     if (changedOnDisk || conflict) {
-      await reloadFromDisk();
+      await reloadFromDisk({ force: true });
     }
-  }, [changedOnDisk, conflict, reloadFromDisk]);
+  }, [changedOnDisk, conflict, reloadFromDisk, updateFile]);
 
   const mutate = useCallback(
     async (

@@ -267,6 +267,92 @@ describe('WorkspaceFilesScreen', () => {
     expect(text(root)).toContain('AGENT.md');
   });
 
+  /** Holds the next file read until the test releases it, like a slow native read. */
+  function gateNextRead(port: FakeAgentPort) {
+    const read = port.files.read;
+    let release: () => void = () => undefined;
+    let started = false;
+    port.files.read = (...args) => {
+      port.files.read = read;
+      started = true;
+      return new Promise((resolve, reject) => {
+        release = () => {
+          read(...args).then(resolve, reject);
+        };
+      });
+    };
+    return { release: () => release(), started: () => started };
+  }
+
+  async function pollOnce(): Promise<void> {
+    await act(async () => {
+      jest.advanceTimersByTime(FILES_CHANGE_POLL_MS);
+      await flush();
+    });
+  }
+
+  it('keeps edits typed while a background reload is in flight', async () => {
+    jest.useFakeTimers({ doNotFake: ['setTimeout', 'queueMicrotask', 'nextTick'] });
+    const port = seeded();
+    const { root } = await renderFiles(port);
+    await invoke(control(root, 'Open README.md'));
+
+    // The agent rewrites the file; the poll sees a new token and starts reloading it.
+    port.fileMap.set('ws-one:README.md', '# Rewritten by the agent\n');
+    port.fileMap.set('ws-one:AGENT.md', 'token bump');
+    const gate = gateNextRead(port);
+    await pollOnce();
+    expect(gate.started()).toBe(true);
+
+    await invoke(input(root, 'files-editor'), 'onChangeText', '# Demo\nMy edit\n');
+    await act(async () => {
+      gate.release();
+      await flush();
+    });
+
+    expect(input(root, 'files-editor').props['value']).toBe('# Demo\nMy edit\n');
+    expect(
+      find(root, (node) => node.props['testID'] === 'files-dirty-indicator', 'dirty dot'),
+    ).toBeDefined();
+    expect(text(root)).toContain('This file changed on disk while you were editing.');
+    expect(preventRemove).toHaveBeenLastCalledWith(true, expect.any(Function));
+  });
+
+  it('does not reopen a file that was closed while a background reload was in flight', async () => {
+    jest.useFakeTimers({ doNotFake: ['setTimeout', 'queueMicrotask', 'nextTick'] });
+    const port = seeded();
+    const { root } = await renderFiles(port);
+    await invoke(control(root, 'Open README.md'));
+
+    port.fileMap.set('ws-one:README.md', '# Rewritten by the agent\n');
+    port.fileMap.set('ws-one:AGENT.md', 'token bump');
+    const gate = gateNextRead(port);
+    await pollOnce();
+    expect(gate.started()).toBe(true);
+
+    await invoke(control(root, 'files-back'));
+    expect(root.findAll((node) => node.props['testID'] === 'files-editor')).toHaveLength(0);
+    await act(async () => {
+      gate.release();
+      await flush();
+    });
+
+    expect(root.findAll((node) => node.props['testID'] === 'files-editor')).toHaveLength(0);
+    const title = find(root, (node) => node.props['testID'] === 'files-title', 'title');
+    expect(text(title)).toBe('Demo');
+  });
+
+  it('still reloads an unedited open file after the agent changes it', async () => {
+    jest.useFakeTimers({ doNotFake: ['setTimeout', 'queueMicrotask', 'nextTick'] });
+    const port = seeded();
+    const { root } = await renderFiles(port);
+    await invoke(control(root, 'Open README.md'));
+    port.fileMap.set('ws-one:README.md', '# Rewritten by the agent\n');
+    port.fileMap.set('ws-one:AGENT.md', 'token bump');
+    await pollOnce();
+    expect(input(root, 'files-editor').props['value']).toBe('# Rewritten by the agent\n');
+  });
+
   it('explains a missing workspace instead of showing a native error', async () => {
     const { root } = await renderFiles(new FakeAgentPort(), null);
     expect(text(root)).toContain('Choose a workspace');
