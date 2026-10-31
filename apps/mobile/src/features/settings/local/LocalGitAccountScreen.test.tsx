@@ -112,6 +112,19 @@ describe('Git & GitHub settings', () => {
     expect(screen.getByLabelText('GitHub sign-in, Unavailable')).toBeTruthy();
     expect(screen.queryByText(/EXPO_PUBLIC|client id|OAuth|rebuild/i)).toBeNull();
     expect(screen.queryByTestId('settings-local-github-sign-in')).toBeNull();
+
+    act(() =>
+      runtime.setPreferences({
+        account: {
+          providerId: 'github',
+          host: 'github.com',
+          id: '1',
+          login: 'ada',
+          credentialRef: 'r',
+        },
+      }),
+    );
+    expect(screen.getByTestId('settings-local-github-sign-out')).toBeTruthy();
   });
 
   it('signs out in place without a confirmation dialog', async () => {

@@ -70,17 +70,6 @@ function GitHubSection() {
         : null,
   );
 
-  if (!runtime.authConfigured()) {
-    return (
-      <SettingsGroup
-        title="GitHub"
-        footer="GitHub sign-in isn’t available in this version of the app. Public repositories and local commits still work."
-      >
-        <SettingsRow label="GitHub sign-in" value="Unavailable" />
-      </SettingsGroup>
-    );
-  }
-
   if (account) {
     return (
       <>
@@ -107,6 +96,17 @@ function GitHubSection() {
           />
         </SettingsGroup>
       </>
+    );
+  }
+
+  if (!runtime.authConfigured()) {
+    return (
+      <SettingsGroup
+        title="GitHub"
+        footer="GitHub sign-in isn’t available in this version of the app. Public repositories and local commits still work."
+      >
+        <SettingsRow label="GitHub sign-in" value="Unavailable" />
+      </SettingsGroup>
     );
   }
 
