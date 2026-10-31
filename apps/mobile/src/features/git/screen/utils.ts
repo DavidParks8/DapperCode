@@ -172,16 +172,33 @@ export function formatDiffLineNumber(value: number | null): string {
   return String(value);
 }
 
-export function formatStatusCode(code: string): string {
-  if (!code) {
-    return '??';
-  }
-  if (code === '??') {
-    return code;
-  }
+export type ChangeTone = 'added' | 'modified' | 'deleted' | 'renamed' | 'conflict';
 
-  const normalized = code.replace(/ /g, '·');
-  return normalized.trim() ? normalized : '··';
+const CHANGE_LABELS: Record<string, { label: string; tone: ChangeTone }> = {
+  A: { label: 'Added', tone: 'added' },
+  M: { label: 'Modified', tone: 'modified' },
+  D: { label: 'Deleted', tone: 'deleted' },
+  R: { label: 'Renamed', tone: 'renamed' },
+  C: { label: 'Copied', tone: 'added' },
+  T: { label: 'Type changed', tone: 'modified' },
+  U: { label: 'Conflict', tone: 'conflict' },
+};
+
+/** A person-readable label for a porcelain status pair such as `??`, ` M`, or `R `. */
+export function describeChange(entry: Pick<ChangedFileEntry, 'code' | 'untracked'>): {
+  label: string;
+  tone: ChangeTone;
+} {
+  if (entry.untracked || entry.code === '??') {
+    return { label: 'New', tone: 'added' };
+  }
+  const index = entry.code[0] ?? ' ';
+  const worktree = entry.code[1] ?? ' ';
+  if (index === 'U' || worktree === 'U' || entry.code === 'AA' || entry.code === 'DD') {
+    return { label: 'Conflict', tone: 'conflict' };
+  }
+  const significant = index !== ' ' && index !== '?' ? index : worktree;
+  return CHANGE_LABELS[significant] ?? { label: 'Changed', tone: 'modified' };
 }
 
 export function getDiffFileLookupKeys(file: UnifiedDiffFile): string[] {

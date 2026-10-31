@@ -24,6 +24,8 @@ jest.mock('@shell/navigation/DrawerContent', () => ({
     return DrawerProfileRow({ styles: { row: {}, rowPressed: {}, label: {}, value: {} } });
   },
 }));
+// The workspace picker route is only navigated to here; its content has its own tests.
+jest.mock('../../features/workspace/picker/Screen', () => ({ WorkspacePickerScreen: () => null }));
 jest.mock('react-native-webview', () => ({ WebView: () => null }));
 jest.mock('@shell/boot/AppShells', () => ({ ConnectionScreen: () => null }));
 
@@ -162,7 +164,7 @@ describe('profile switching', () => {
     expect(screen.getByText('Choose or clone a workspace for the agent to work in.')).toBeTruthy();
 
     fireEvent.press(screen.getByLabelText('2. Clone or create a workspace, Required'));
-    expect(result.getPathname()).toBe(LOCAL_SETUP_DESTINATIONS.workspaces);
+    expect(result.getPathname()).toBe('/profiles/on-device/chats/new/workspace-picker');
     act(() => {
       router.back();
     });

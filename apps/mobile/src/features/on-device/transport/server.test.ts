@@ -68,7 +68,7 @@ describe('LocalBridgeServer', () => {
     'bridge/thread/fork',
     'thread/snapshot/page',
     'bridge/browser/session/create',
-    'bridge/git/clone',
+    'bridge/ui/present',
     'bridge/userInput/resolve',
   ])('rejects %s as unsupported on this iPhone instead of crashing', async (method) => {
     const { server } = setup();

@@ -1,7 +1,6 @@
 import { atom } from 'jotai';
 import { router } from 'expo-router';
 
-import type { HostBridgeApiClient } from '@bridge/client/client';
 import type { FileSystemListResponse, WorkspaceListResponse } from '@bridge/types/types';
 import { MainScreenPersistenceController } from '../../chat/session/controllers/persistenceController';
 import {
@@ -16,8 +15,15 @@ import {
   type WorkspacePickerPurpose,
 } from '../../chat/helpers/helpers';
 import { defaultStartCwdAtom } from '@shell/state/appState/settings';
-import { activeProfileIdAtom, apiClientAtom } from '@shell/state/bridge/atoms';
+import {
+  activeProfileFeaturesAtom,
+  activeProfileIdAtom,
+  apiClientAtom,
+} from '@shell/state/bridge/atoms';
 import { routes } from '@shell/navigation/routes';
+import { describeHostError } from '../api/errors';
+import { httpsRemoteError } from '../api/remoteUrl';
+import { sharedBrowseRequest } from './browseRequests';
 import { getWorkspaceRouteIds, returnToChat } from './workspaceRouteNavigation';
 import {
   shouldUseFreshResource,
@@ -270,36 +276,6 @@ export const revalidateWorkspacePickerResourcesAtom = atom(
   },
 );
 
-const browseRequestsByApi = new WeakMap<
-  HostBridgeApiClient,
-  Map<string, Promise<FileSystemListResponse>>
->();
-
-/** Single-flights identical directory listings so concurrent callers (e.g. opening the picker
- *  while a background revalidation is in flight) share one network request per bridge client. */
-function sharedBrowseRequest(
-  api: HostBridgeApiClient,
-  key: string,
-  fetcher: () => Promise<FileSystemListResponse>,
-): Promise<FileSystemListResponse> {
-  let requests = browseRequestsByApi.get(api);
-  if (!requests) {
-    requests = new Map();
-    browseRequestsByApi.set(api, requests);
-  }
-  const existing = requests.get(key);
-  if (existing) {
-    return existing;
-  }
-  const request = fetcher().finally(() => {
-    if (requests?.get(key) === request) {
-      requests.delete(key);
-    }
-  });
-  requests.set(key, request);
-  return request;
-}
-
 export const browseWorkspacePathAtom = atom(
   null,
   async (get, set, path: string | null | undefined): Promise<void> => {
@@ -441,12 +417,14 @@ export const openWorkspacePickerAtom = atom(
       router.replace(routes.onboarding);
       return;
     }
-    const initialPath =
-      normalizeWorkspacePath(initialPathOverride) ??
-      normalizeWorkspacePath(get(defaultStartCwdAtom)) ??
-      get(workspaceBrowsePathAtom) ??
-      get(workspaceBridgeRootAtom) ??
-      null;
+    // App-managed workspaces are a flat list, so the picker always shows the root listing.
+    const initialPath = get(activeProfileFeaturesAtom).managedWorkspaces
+      ? null
+      : (normalizeWorkspacePath(initialPathOverride) ??
+        normalizeWorkspacePath(get(defaultStartCwdAtom)) ??
+        get(workspaceBrowsePathAtom) ??
+        get(workspaceBridgeRootAtom) ??
+        null);
     set(workspacePickerPurposeAtom, purpose);
     router.push(routes.workspacePicker(profileId, chatId));
     void set(browseWorkspacePathAtom, initialPath);
@@ -562,6 +540,11 @@ export const submitGitCheckoutAtom = atom(null, async (get, set): Promise<void> 
     set(gitCheckoutErrorAtom, 'Paste an HTTPS or SSH repository URL first.');
     return;
   }
+  const urlError = get(activeProfileFeaturesAtom).managedWorkspaces ? httpsRemoteError(url) : null;
+  if (urlError) {
+    set(gitCheckoutErrorAtom, urlError);
+    return;
+  }
   if (!directoryName) {
     set(gitCheckoutErrorAtom, 'Choose a valid folder name for the cloned repo.');
     return;
@@ -598,7 +581,7 @@ export const submitGitCheckoutAtom = atom(null, async (get, set): Promise<void> 
       router.dismissTo(routes.chat(profileId, chatId));
     }
   } catch (err) {
-    set(gitCheckoutErrorAtom, (err as Error).message);
+    set(gitCheckoutErrorAtom, describeHostError(err, 'The repository could not be cloned.'));
   } finally {
     set(gitCheckoutCloningAtom, false);
   }

@@ -8,6 +8,7 @@ import { failure, LOCAL_RPC_ERROR, LocalRpcError } from './errors';
 import { LocalEventProjector, type LocalNotification } from './events';
 import { LocalApprovalRelay } from './approvals';
 import { createLocalGitHandlers } from './gitHandlers';
+import { createLocalWorkspaceHandlers, LOCAL_WORKSPACE_METHODS } from './workspaceHandlers';
 import { readParam, readRecord, type RpcParams } from './params';
 import type { LocalAgentPort } from './port';
 import {
@@ -80,6 +81,7 @@ export const LOCAL_IMPLEMENTED_METHODS = [
   'bridge/git/commit',
   'bridge/git/switch',
   'bridge/git/push',
+  ...LOCAL_WORKSPACE_METHODS,
 ] as const;
 
 function emptyQueue(threadId: string): BridgeThreadQueueState {
@@ -571,6 +573,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
       'bridge/approvals/resolve': (params) => this.approvals.resolve(params),
       'bridge/userInput/list': () => [],
       ...createLocalGitHandlers(port, (params) => this.gitWorkspace(params)),
+      ...createLocalWorkspaceHandlers(port, (params) => this.gitWorkspace(params)),
     };
     return handlers;
   }

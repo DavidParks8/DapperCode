@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { useSetAtom } from 'jotai';
 import { useMemo, useState } from 'react';
 import {
   Pressable,
@@ -12,6 +13,7 @@ import {
 } from 'react-native';
 
 import { SettingsGroup, SettingsRow } from '../../features/settings/SettingsList';
+import { openWorkspaceModalAtom } from '../../features/workspace/state/workspaceActions';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import { useAppTheme, type AppTheme } from '@shared/theme';
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
@@ -117,6 +119,7 @@ export function LocalSetupGuide() {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const setup = useLocalSetup();
+  const openWorkspacePicker = useSetAtom(openWorkspaceModalAtom);
   if (!setup || setup.readiness.canStart) {
     return null;
   }
@@ -136,7 +139,7 @@ export function LocalSetupGuide() {
           label="2. Clone or create a workspace"
           value={STEP_VALUE[setup.workspace]}
           accessory="chevron"
-          onPress={() => router.push(LOCAL_SETUP_DESTINATIONS.workspaces)}
+          onPress={() => openWorkspacePicker()}
         />
       </SettingsGroup>
     </View>

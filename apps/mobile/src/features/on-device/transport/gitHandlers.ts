@@ -1,3 +1,7 @@
+import type { GitStatusWithRemote } from '../../workspace/api/protocol';
+import { WORKSPACE_HOST_METHODS } from '../../workspace/api/protocol';
+import { httpsRemoteError } from '../../workspace/api/remoteUrl';
+import type { LocalGitStatus } from '../workspaces/types';
 import { LOCAL_RPC_ERROR, LocalRpcError } from './errors';
 import type { LocalAgentPort } from './port';
 import { readParam, type RpcParams } from './params';
@@ -14,6 +18,60 @@ function required(params: RpcParams, key: string, message: string): string {
   return value;
 }
 
+function invalid(message: string): LocalRpcError {
+  return new LocalRpcError(LOCAL_RPC_ERROR.invalidParams, message, { error: 'on_device_failed' });
+}
+
+/** `## main...origin/main [ahead 1, behind 2]`, the header `git status --short --branch` prints. */
+function porcelainHeader(status: LocalGitStatus): string {
+  const branch = status.unborn
+    ? `No commits yet on ${status.branch}`
+    : status.detached
+      ? 'HEAD (no branch)'
+      : status.branch;
+  const counts = [
+    status.ahead ? `ahead ${String(status.ahead)}` : null,
+    status.behind ? `behind ${String(status.behind)}` : null,
+  ].filter(Boolean);
+  const upstream = status.upstream ? `...${status.upstream}` : '';
+  return `## ${branch}${upstream}${counts.length ? ` [${counts.join(', ')}]` : ''}`;
+}
+
+/**
+ * Shapes native status like the bridge's: untracked files count as unstaged (so they can be
+ * staged), `raw` carries the porcelain branch header, and `remote` adds origin and reachability.
+ */
+export function bridgeGitStatus(
+  status: LocalGitStatus,
+  network: 'online' | 'offline' | 'unknown',
+): GitStatusWithRemote {
+  const files = status.files.map((file) => ({
+    ...file,
+    unstaged: file.unstaged || file.untracked,
+  }));
+  return {
+    branch: status.branch,
+    clean: status.clean,
+    raw: [porcelainHeader(status), status.raw].filter(Boolean).join('\n'),
+    files,
+    truncated: status.truncated,
+    totalFiles: status.totalFiles,
+    omittedFiles: status.omittedFiles,
+    maxFiles: status.maxFiles,
+    maxBytes: status.maxBytes,
+    remote: {
+      hasOrigin: status.hasOrigin,
+      origin: status.origin,
+      upstream: status.upstream,
+      ahead: status.ahead,
+      behind: status.behind,
+      detached: status.detached,
+      unborn: status.unborn,
+      network,
+    },
+  };
+}
+
 /**
  * `bridge/git/*` handlers backed by the native workspace Git services. Responses match the bridge
  * types in `@bridge/types/git` so the shared Git screen renders local workspaces unchanged.
@@ -22,7 +80,7 @@ export function createLocalGitHandlers(port: LocalAgentPort, workspace: ResolveW
   return {
     'bridge/git/status': async (params: RpcParams) => {
       const { id, cwd } = await workspace(params);
-      return { ...(await port.git.status(id)), cwd };
+      return { ...bridgeGitStatus(await port.git.status(id), port.network()), cwd };
     },
     'bridge/git/diff': async (params: RpcParams) => {
       const { id, cwd } = await workspace(params);
@@ -86,6 +144,37 @@ export function createLocalGitHandlers(port: LocalAgentPort, workspace: ResolveW
       const { id, cwd } = await workspace(params);
       await port.git.push(id);
       return { ...GIT_OK, pushed: true, cwd };
+    },
+    [WORKSPACE_HOST_METHODS.gitFetch]: async (params: RpcParams) => {
+      const { id, cwd } = await workspace(params);
+      await port.git.fetch(id);
+      return { fetched: true, cwd };
+    },
+    [WORKSPACE_HOST_METHODS.gitPull]: async (params: RpcParams) => {
+      const { id, cwd } = await workspace(params);
+      return { ...(await port.git.pull(id)), cwd };
+    },
+    [WORKSPACE_HOST_METHODS.gitInit]: async (params: RpcParams) => {
+      const { id, cwd } = await workspace(params);
+      const origin = readParam(params, 'origin');
+      const originError = origin ? httpsRemoteError(origin) : null;
+      if (originError) {
+        throw invalid(originError);
+      }
+      const initialized = await port.git.init(id, readParam(params, 'branch') ?? 'main', origin);
+      return { path: cwd, name: initialized.name, isRepository: initialized.isRepository };
+    },
+    [WORKSPACE_HOST_METHODS.gitDiscard]: async (params: RpcParams) => {
+      const { id, cwd } = await workspace(params);
+      const path = readParam(params, 'path');
+      await port.git.discard(id, path, params['includeUntracked'] === true);
+      return { discarded: true, cwd, path };
+    },
+    [WORKSPACE_HOST_METHODS.gitBranchCreate]: async (params: RpcParams) => {
+      const { id, cwd } = await workspace(params);
+      const name = required(params, 'name', 'Enter a branch name.');
+      await port.git.createBranch(id, name);
+      return { created: true, branch: name, cwd };
     },
   } satisfies Record<string, (params: RpcParams) => Promise<unknown>>;
 }
