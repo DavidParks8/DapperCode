@@ -38,6 +38,12 @@ export class FakeAgentPort implements LocalAgentPort {
     modelId: null,
   };
   runValue: LocalRunSnapshot = IDLE;
+  modelValue: ReturnType<LocalAgentPort['modelSession']> = {
+    phase: 'empty',
+    modelId: null,
+    progress: 0,
+    error: null,
+  };
   sendError: Error | null = null;
   private counter = 0;
   private pending: {
@@ -282,28 +288,34 @@ export class FakeAgentPort implements LocalAgentPort {
     this.emit();
   };
 
+  /**
+   * Like the real loop, a run first loads its model (`preparing`, thread not yet running) and only
+   * then records the user message. With `holdModelLoad`, the load waits for `finishModelLoad` or
+   * `failModelLoad`; otherwise it completes immediately after the `preparing` notification.
+   */
+  holdModelLoad = false;
+  private loading: { threadId: string; begin: () => void } | null = null;
+
   send = (id: string, text: string, submissionId: string, accepted: () => void) => {
     this.calls.push(`send:${id}:${text}`);
     if (this.sendError) {
       return Promise.reject(this.sendError);
     }
     const turnId = `turn-${String(++this.counter)}`;
-    this.runValue = { phase: 'preparing', threadId: id, turnId, toolName: null, approval: null };
-    this.change(id, (thread) => ({
-      ...thread,
-      status: 'running',
-      activeTurnId: turnId,
-      lastSubmissionId: submissionId,
-      lastError: null,
-      title: thread.messages.length === 0 ? text.slice(0, 60) : thread.title,
-      messages: [
-        ...thread.messages,
-        { id: `user-${submissionId}`, role: 'user', content: text, createdAt: this.now() },
-      ],
-    }));
-    accepted();
-    return new Promise<LocalThread>((resolve, reject) => {
-      this.pending = { resolve, reject };
+    return this.startRun(id, turnId, () => {
+      this.change(id, (thread) => ({
+        ...thread,
+        status: 'running',
+        activeTurnId: turnId,
+        lastSubmissionId: submissionId,
+        lastError: null,
+        title: thread.messages.length === 0 ? text.slice(0, 60) : thread.title,
+        messages: [
+          ...thread.messages,
+          { id: `user-${submissionId}`, role: 'user', content: text, createdAt: this.now() },
+        ],
+      }));
+      accepted();
     });
   };
 
@@ -315,8 +327,88 @@ export class FakeAgentPort implements LocalAgentPort {
     }
     this.runValue = { ...this.runValue, phase: 'stopping' };
     this.emit();
+    if (this.loading) {
+      // A stopped load abandons the run without recording anything, as the real loop does.
+      this.loading = null;
+      const thread = this.threadMap.get(threadId);
+      this.endRun((pending) => {
+        if (thread) {
+          pending?.resolve(thread);
+        }
+      });
+      return;
+    }
     this.settle(threadId, 'interrupted', 'Stopped. Completed edits are preserved.');
   };
+
+  modelSession = () => this.modelValue;
+
+  /** Changes the resident model state, as loading progress and failures do. */
+  setModel(update: Partial<ReturnType<LocalAgentPort['modelSession']>>): void {
+    this.modelValue = { ...this.modelValue, ...update };
+    this.emit();
+  }
+
+  /** Completes a held model load: the run records its turn and the thread starts running. */
+  finishModelLoad(): void {
+    const loading = this.loading;
+    this.loading = null;
+    loading?.begin();
+  }
+
+  /** Fails a held model load, leaving history untouched apart from `lastError`. */
+  failModelLoad(message: string): void {
+    const loading = this.loading;
+    if (!loading) {
+      return;
+    }
+    this.loading = null;
+    this.change(loading.threadId, (thread) => ({ ...thread, lastError: message }));
+    this.endRun((pending) => pending?.reject(new Error(message)));
+  }
+
+  retryTurn = (id: string) => {
+    this.calls.push(`retry:${id}`);
+    const thread = this.threadMap.get(id);
+    if (!thread || (thread.status !== 'failed' && thread.status !== 'interrupted')) {
+      return Promise.reject(new Error('This conversation has no failed or stopped turn to retry.'));
+    }
+    const turnId = `turn-${String(++this.counter)}`;
+    return this.startRun(id, turnId, () => {
+      this.change(id, (current) => ({
+        ...current,
+        status: 'running',
+        activeTurnId: turnId,
+        lastError: null,
+      }));
+    });
+  };
+
+  private startRun(id: string, turnId: string, begin: () => void): Promise<LocalThread> {
+    this.runValue = { phase: 'preparing', threadId: id, turnId, toolName: null, approval: null };
+    const promise = new Promise<LocalThread>((resolve, reject) => {
+      this.pending = { resolve, reject };
+    });
+    this.emit();
+    if (this.holdModelLoad) {
+      this.loading = { threadId: id, begin };
+    } else {
+      begin();
+    }
+    return promise;
+  }
+
+  private endRun(
+    settle: (
+      pending: { resolve: (t: LocalThread) => void; reject: (e: Error) => void } | null,
+    ) => void,
+  ): void {
+    this.runValue = IDLE;
+    this.emit();
+    const pending = this.pending;
+    this.pending = null;
+    settle(pending);
+  }
 
   readonly approvals: { callId: string; approved: boolean }[] = [];
 

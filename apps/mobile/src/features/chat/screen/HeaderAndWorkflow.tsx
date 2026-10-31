@@ -180,6 +180,8 @@ function SessionMetaRow(props: {
     activeEffortLabel,
     openCollaborationModeMenu,
     collaborationModeLabel,
+    collaborationModeOptions,
+    activeAgentSupports,
     showAgentThreadChip,
     openAgentThreadSelector,
     agentThreadChipLabel,
@@ -239,17 +241,20 @@ function SessionMetaRow(props: {
             onPress={openEffortModal}
           />
         ) : null}
-        <SessionMetaChip
-          styles={styles}
-          theme={theme}
-          baseStyle={styles.modeChip}
-          label={`Agent mode, ${collaborationModeLabel}`}
-          displayText={collaborationModeLabel}
-          iconName="map-outline"
-          accessibilityRole="button"
-          hitSlop={hitSlop}
-          onPress={openCollaborationModeMenu}
-        />
+        {/* Once the agent's capabilities are known, a single mode is not a choice. */}
+        {collaborationModeOptions.length > 1 || !activeAgentSupports ? (
+          <SessionMetaChip
+            styles={styles}
+            theme={theme}
+            baseStyle={styles.modeChip}
+            label={`Agent mode, ${collaborationModeLabel}`}
+            displayText={collaborationModeLabel}
+            iconName="map-outline"
+            accessibilityRole="button"
+            hitSlop={hitSlop}
+            onPress={openCollaborationModeMenu}
+          />
+        ) : null}
         {showAgentThreadChip ? (
           <SessionMetaChip
             styles={styles}

@@ -1,6 +1,8 @@
 import { EventType } from '@ag-ui/core';
 
+import { RUN_ACTIVITY_EVENT_NAME, type RunActivity } from '@bridge/runActivity';
 import { TOOL_META_EVENT_NAME } from '@bridge/toolMeta';
+import type { LocalRunSnapshot } from '../runtime/agentLoop';
 import type { LocalMessage, LocalThread } from '../runtime/types';
 import {
   describeLocalToolMessage,
@@ -22,6 +24,8 @@ interface RunTrack {
   openText: Set<string>;
   openReasoning: Set<string>;
   endedTools: Set<string>;
+  /** The last activity sent, as `title|detail`, so unchanged phases are not re-sent. */
+  activity: string | null;
 }
 
 const TERMINAL_TOOL_STATUSES = new Set(['completed', 'failed', 'interrupted']);
@@ -38,13 +42,27 @@ const TERMINAL_TOOL_STATUSES = new Set(['completed', 'failed', 'interrupted']);
 export class LocalEventProjector {
   private readonly seen = new Map<string, LocalThread>();
   private readonly runs = new Map<string, RunTrack>();
+  /** The most recent turn tracked per thread, so a settled turn never reports loading again. */
+  private readonly lastTurn = new Map<string, string>();
+  /** The last loading activity sent for a run that has not started yet. */
+  private loading: string | null = null;
 
-  constructor(private readonly context: () => LocalThreadProjectionContext) {}
+  constructor(
+    private readonly context: () => LocalThreadProjectionContext,
+    private readonly activity: (thread: LocalThread) => RunActivity | null = () => null,
+    private readonly run: () => Pick<LocalRunSnapshot, 'phase' | 'threadId' | 'turnId'> = () => ({
+      phase: 'idle',
+      threadId: null,
+      turnId: null,
+    }),
+  ) {}
 
   /** Records the current state as already delivered, without emitting anything. */
   prime(threads: readonly LocalThread[]): void {
     this.seen.clear();
     this.runs.clear();
+    this.lastTurn.clear();
+    this.loading = null;
     for (const thread of threads) {
       this.seen.set(thread.id, thread);
       if (thread.status === 'running' && thread.activeTurnId) {
@@ -64,10 +82,18 @@ export class LocalEventProjector {
         this.seen.set(thread.id, thread);
       }
     }
+    this.diffLoadingActivity(threads, notifications);
+    for (const thread of threads) {
+      const run = this.runs.get(thread.id);
+      if (run) {
+        this.diffActivity(thread, run, notifications);
+      }
+    }
     for (const id of [...this.seen.keys()]) {
       if (!current.has(id)) {
         this.seen.delete(id);
         this.runs.delete(id);
+        this.lastTurn.delete(id);
         notifications.push({ method: 'thread/deleted', params: { threadId: id } });
       }
     }
@@ -75,12 +101,14 @@ export class LocalEventProjector {
   }
 
   private track(threadId: string, turnId: string): RunTrack {
+    this.lastTurn.set(threadId, turnId);
     return {
       turnId,
       runId: localRunId(threadId, turnId),
       openText: new Set(),
       openReasoning: new Set(),
       endedTools: new Set(),
+      activity: null,
     };
   }
 
@@ -119,6 +147,47 @@ export class LocalEventProjector {
   }
 
   /**
+   * The loop loads the model before it records the user message, so for a while the thread is not
+   * running yet and has no run. Its activity (load progress, cancelling the load) is still sent,
+   * keyed by the turn the loop will start, while the shell waits for the send to be accepted. A
+   * failed load then reaches the shell as the rejected send, keeping the unsent draft.
+   */
+  private diffLoadingActivity(threads: readonly LocalThread[], out: LocalNotification[]): void {
+    const live = this.run();
+    const thread = live.threadId ? threads.find((entry) => entry.id === live.threadId) : undefined;
+    const loading =
+      thread !== undefined &&
+      live.turnId !== null &&
+      thread.status !== 'running' &&
+      (live.phase === 'preparing' || live.phase === 'stopping') &&
+      this.lastTurn.get(thread.id) !== live.turnId;
+    if (!loading || !live.turnId) {
+      this.loading = null;
+      return;
+    }
+    const activity = this.activity(thread);
+    const key = activity ? `${live.turnId}|${activity.title}|${activity.detail ?? ''}` : null;
+    if (!activity || key === this.loading) {
+      return;
+    }
+    this.loading = key;
+    out.push({
+      method: 'bridge/agui.event',
+      params: {
+        threadId: thread.id,
+        runId: localRunId(thread.id, live.turnId),
+        sourceTurnId: live.turnId,
+        event: {
+          type: EventType.CUSTOM,
+          name: RUN_ACTIVITY_EVENT_NAME,
+          value: activity,
+          timestamp: Date.now(),
+        },
+      },
+    });
+  }
+
+  /**
    * Starts tracking a run when the thread enters a new turn. A run that started and settled
    * between two observations is still reported, keyed by its submission.
    */
@@ -136,6 +205,10 @@ export class LocalEventProjector {
       this.finish(thread, current, out);
     }
     const run = this.track(thread.id, turnId);
+    // Continue from the activity already sent while the model loaded instead of repeating it.
+    if (this.loading?.startsWith(`${turnId}|`)) {
+      run.activity = this.loading.slice(turnId.length + 1);
+    }
     this.runs.set(thread.id, run);
     this.emit(out, thread.id, run, {
       type: EventType.RUN_STARTED,
@@ -162,6 +235,27 @@ export class LocalEventProjector {
       submissionId !== null &&
       submissionId !== previous.lastSubmissionId;
     return missedRun ? `submission-${submissionId}` : null;
+  }
+
+  /**
+   * Streams what the run is doing (model loading progress, generating, the running tool) whenever
+   * it changes. Runtime phases change without thread changes, so this runs on every diff.
+   */
+  private diffActivity(thread: LocalThread, run: RunTrack, out: LocalNotification[]): void {
+    const activity = this.activity(thread);
+    if (!activity) {
+      return;
+    }
+    const key = `${activity.title}|${activity.detail ?? ''}`;
+    if (key === run.activity) {
+      return;
+    }
+    run.activity = key;
+    this.emit(out, thread.id, run, {
+      type: EventType.CUSTOM,
+      name: RUN_ACTIVITY_EVENT_NAME,
+      value: activity,
+    });
   }
 
   private diffAssistant(

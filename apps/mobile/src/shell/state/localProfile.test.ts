@@ -96,6 +96,7 @@ describe('local profile state', () => {
       connectionSettings: false,
       gitClone: true,
       browserPreview: false,
+      turnRetry: true,
       managedWorkspaces: true,
       workspaceFiles: true,
       gitSync: true,
@@ -117,6 +118,7 @@ describe('local profile state', () => {
     expect(unsupported.get(activeProfileAtom)).toBeNull();
     expect(unsupported.get(shellProfilesAtom).map((profile) => profile.id)).toEqual(['bridge-1']);
     expect(storeWith('bridge-1', true).get(activeProfileFeaturesAtom).attachments).toBe(true);
+    expect(storeWith('bridge-1', true).get(activeProfileFeaturesAtom).turnRetry).toBe(false);
   });
 
   it.each(['android', 'web', 'macos'])('never detects local support on %s', (platform) => {

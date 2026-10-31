@@ -77,6 +77,33 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
       fontWeight: '600',
       lineHeight: 18,
     },
+    composeReadiness: {
+      alignItems: 'center',
+      gap: theme.spacing.md,
+      maxWidth: 320,
+      marginBottom: theme.spacing.xl,
+    },
+    composeReadinessText: {
+      ...theme.typography.body,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+    },
+    composeReadinessAction: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.xs,
+      minHeight: 44,
+      borderRadius: theme.radius.full,
+      borderCurve: 'continuous',
+      backgroundColor: theme.colors.accent,
+      paddingHorizontal: theme.spacing.lg,
+    },
+    composeReadinessActionPressed: { backgroundColor: theme.colors.accentPressed },
+    composeReadinessActionText: {
+      ...theme.typography.body,
+      color: theme.colors.accentText,
+      fontWeight: '600',
+    },
     messageListShell: { flex: 1 },
     messageList: {
       flex: 1,
@@ -297,5 +324,45 @@ export const createMainScreenConversationStyles = (theme: AppTheme) =>
       boxShadow: theme.isDark
         ? '0 8px 20px rgba(0, 0, 0, 0.28)'
         : '0 8px 18px rgba(15, 31, 54, 0.12)',
+    },
+    errorAlertWithAction: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+      alignSelf: 'stretch',
+      backgroundColor: theme.colors.bgElevated,
+      borderColor: theme.colors.errorBorder,
+      borderRadius: theme.radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      marginHorizontal: theme.spacing.lg,
+      paddingLeft: theme.spacing.lg,
+      paddingRight: theme.spacing.sm,
+      paddingVertical: theme.spacing.xs,
+      boxShadow: theme.isDark
+        ? '0 8px 20px rgba(0, 0, 0, 0.28)'
+        : '0 8px 18px rgba(15, 31, 54, 0.12)',
+    },
+    errorAlertMessage: {
+      ...theme.typography.caption,
+      color: theme.colors.error,
+      flex: 1,
+    },
+    errorAlertAction: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.xs,
+      minHeight: 32,
+      borderRadius: theme.radius.full,
+      borderCurve: 'continuous',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.borderHighlight,
+      backgroundColor: theme.colors.bgItem,
+      paddingHorizontal: theme.spacing.md,
+    },
+    errorAlertActionPressed: { backgroundColor: theme.colors.bgInput },
+    errorAlertActionText: {
+      ...theme.typography.caption,
+      color: theme.colors.textPrimary,
+      fontWeight: '700',
     },
   }) as const;

@@ -71,6 +71,8 @@ export interface ActiveProfileFeatures {
   gitClone: boolean;
   /** The desktop preview browser, which proxies through the bridge host. */
   browserPreview: boolean;
+  /** Continuing a failed turn in place (`bridge/turn/retry`) instead of resending it. */
+  turnRetry: boolean;
   /**
    * Workspaces are a flat, app-managed list rather than host folders: the picker creates, renames,
    * and deletes them, clones go into a new workspace over HTTPS, and clone progress can be read
@@ -97,6 +99,7 @@ export const activeProfileFeaturesAtom = atom<ActiveProfileFeatures>((get) => {
     connectionSettings: !local,
     gitClone: true,
     browserPreview: !local,
+    turnRetry: local,
     managedWorkspaces: local,
     workspaceFiles: local,
     gitSync: local,

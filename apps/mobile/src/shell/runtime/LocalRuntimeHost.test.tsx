@@ -1,7 +1,49 @@
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 jest.mock('../../features/on-device/runtime/OnDeviceProvider', () => {
   const React = jest.requireActual('react');
-  const runtime = { id: 'runtime' };
+  const listeners = new Set<() => void>();
+  const state = {
+    downloaded: true,
+    workspaces: [{ id: 'ws-one', name: 'Demo', isRepository: true }],
+  };
+  const runtime = {
+    id: 'runtime',
+    preferences: () => ({ modelId: 'qwen3-1.7b-q4-k-m', workspaceId: null }),
+    threads: { list: () => [] },
+    downloads: {
+      snapshot: () => ({ phase: state.downloaded ? 'ready' : 'idle', bytesWritten: 0 }),
+    },
+    workspaces: () => state.workspaces,
+    loop: {
+      snapshot: () => ({
+        phase: 'idle',
+        threadId: null,
+        turnId: null,
+        toolName: null,
+        approval: null,
+      }),
+    },
+    models: {
+      snapshot: () => ({
+        phase: 'empty',
+        modelId: null,
+        progress: 0,
+        error: null,
+        contextTokens: null,
+      }),
+    },
+    workspaceActivity: () => null,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    change: (update: Partial<typeof state>) => {
+      Object.assign(state, update);
+      for (const listener of [...listeners]) {
+        listener();
+      }
+    },
+  };
   return {
     mockRuntime: runtime,
     OnDeviceProvider: ({ children }: { children: unknown }) =>
@@ -20,7 +62,12 @@ import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import { createDefaultAppStateData } from '@shell/state/appState';
 import { appStateSnapshotAtom } from '@shell/state/appState/atoms';
 import { localProfileAvailableAtom, wsClientAtom } from '@shell/state/bridge/atoms';
-import { localRuntimeAtom, localTransportAtom } from '@shell/state/local/atoms';
+import { defaultStartCwdAtom } from '@shell/state/appState/settings';
+import {
+  localAgentPresenceAtom,
+  localRuntimeAtom,
+  localTransportAtom,
+} from '@shell/state/local/atoms';
 import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 import { createTestStore, withAppStore } from '@shell/state/testing';
 import { LocalRuntimeHost } from './LocalRuntimeHost';
@@ -78,12 +125,39 @@ describe('LocalRuntimeHost', () => {
     const transport = store.get(localTransportAtom);
     expect(transport?.isConnected).toBe(true);
     expect(store.get(wsClientAtom)).toBe(transport);
-    expect(store.get(localRuntimeAtom)).toEqual({ id: 'runtime' });
+    expect(store.get(localRuntimeAtom)).toMatchObject({ id: 'runtime' });
 
     act(() => setActive(store, 'bridge-1'));
     expect(store.get(localTransportAtom)).toBeNull();
     expect(store.get(localRuntimeAtom)).toBeNull();
     expect(transport?.isConnected).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('publishes the local agent status and new-chat readiness, and seeds the workspace', () => {
+    const { mockRuntime } = jest.requireMock<{
+      mockRuntime: { change: (update: Record<string, unknown>) => void };
+    }>('../../features/on-device/runtime/OnDeviceProvider');
+    const store = storeWith(LOCAL_PROFILE_ID);
+    const tree = render(store);
+
+    expect(store.get(defaultStartCwdAtom)).toBe('/On this iPhone/Demo');
+    expect(store.get(localAgentPresenceAtom)).toEqual({
+      status: { label: 'Qwen3 1.7B Q4_K_M · loads when you send', kind: 'ready' },
+      readiness: null,
+      defaultWorkspacePath: '/On this iPhone/Demo',
+    });
+
+    act(() => mockRuntime.change({ downloaded: false }));
+    expect(store.get(localAgentPresenceAtom)?.readiness).toEqual({
+      reason: 'Download Qwen3 1.7B Q4_K_M to start a conversation.',
+      action: 'download-model',
+    });
+    expect(store.get(localAgentPresenceAtom)?.status.kind).toBe('attention');
+
+    act(() => setActive(store, 'bridge-1'));
+    expect(store.get(localAgentPresenceAtom)).toBeNull();
+    act(() => mockRuntime.change({ downloaded: true }));
     act(() => tree.unmount());
   });
 

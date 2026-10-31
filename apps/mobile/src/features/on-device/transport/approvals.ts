@@ -76,13 +76,16 @@ export class LocalApprovalRelay {
     return {
       requestId: approval.callId,
       agentId: LOCAL_AGENT_ID,
-      kind: 'toolCall',
+      // The shell's approval banner understands the bridge's two kinds; a gated local tool (a push)
+      // is a command the agent wants to run, shown by its summary.
+      kind: 'commandExecution',
       threadId: approval.threadId,
       turnId: approval.turnId,
       itemId: approval.callId,
       title: approval.summary,
       message: approval.summary,
-      reason: approval.summary,
+      command: approval.summary,
+      reason: 'It runs on this iPhone and reaches the network. Nothing runs until you allow it.',
       requestedAt: new Date().toISOString(),
       options: [
         { id: LOCAL_APPROVAL_ALLOW, label: 'Allow', kind: 'AllowOnce' },

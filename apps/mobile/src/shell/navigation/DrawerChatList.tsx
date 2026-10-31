@@ -244,6 +244,15 @@ export const DrawerChatList = memo(function DrawerChatList({
                   ? controlAccessibilityState({ checked: isChecked })
                   : controlAccessibilityState({ selected: isSelected })
               }
+              // One VoiceOver stop per session: deleting is a custom action, not a separate control.
+              accessibilityActions={
+                selectionMode ? undefined : [{ name: 'delete', label: `Delete ${chatTitle}` }]
+              }
+              onAccessibilityAction={(event) => {
+                if (event.nativeEvent.actionName === 'delete') {
+                  void handleDeleteChat(item.chat.id);
+                }
+              }}
               onPress={() =>
                 selectionMode ? toggleChatSelection(item.chat.id) : handleSelectChat(item.chat.id)
               }
