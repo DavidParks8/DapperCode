@@ -154,7 +154,7 @@ describe('AG-UI bridge notifications', () => {
     expect(toolResult?.content).not.toContain('terminal-1');
   });
 
-  it('accepts every bridge tool status, including interrupted, without remapping it', () => {
+  it('reads interrupted tools from a flag that keeps installed clients on failed', () => {
     const manifest = JSON.parse(
       readFileSync(
         path.resolve(__dirname, '../../../../../contracts/bridge-rpc/v2/manifest.json'),
@@ -162,10 +162,21 @@ describe('AG-UI bridge notifications', () => {
       ),
     ) as ContractManifest;
 
-    expect(manifest.fixtures.toolMetaStatuses).toContain('interrupted');
+    expect(manifest.fixtures.toolMetaStatuses).not.toContain('interrupted');
     for (const status of manifest.fixtures.toolMetaStatuses) {
       expect(toToolStatus(status)).toBe(status);
     }
+
+    // The parser shipped before `interrupted` existed: unknown statuses fall back to `pending`,
+    // which would leave a cancelled call "Waiting to run" forever.
+    const installedParser = (value: unknown) =>
+      ['pending', 'in_progress', 'completed', 'failed'].find((status) => status === value) ??
+      'pending';
+    const fixture = manifest.fixtures.interruptedToolMeta as {
+      value: { status: unknown; interrupted: unknown };
+    };
+    expect(installedParser(fixture.value.status)).toBe('failed');
+    expect(fixture.value.interrupted).toBe(true);
 
     const event = EventSchema.parse(manifest.fixtures.interruptedToolMeta);
     const state = updateAgUiLiveAssistantMessages({}, { threadId: 'thread', runId: 'run', event });

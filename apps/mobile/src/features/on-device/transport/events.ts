@@ -319,7 +319,7 @@ export class LocalEventProjector {
         value: {
           toolCallId: tool.callId,
           kind: described.kind,
-          status: localToolStatus(tool.status),
+          ...localToolStatus(tool.status),
           title: described.title,
           startedAtMs: Date.parse(tool.startedAt),
           ...(tool.completedAt ? { completedAtMs: Date.parse(tool.completedAt) } : {}),

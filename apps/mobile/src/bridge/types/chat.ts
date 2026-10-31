@@ -72,8 +72,10 @@ export type ChatToolKind =
   | 'other';
 
 /**
- * ACP's tool statuses plus the bridge-owned `interrupted`: a call still active when the user
- * cancelled its run. It is terminal but not a failure.
+ * ACP's tool statuses plus the client-side `interrupted`: a call still active when the user
+ * cancelled its run. The wire keeps ACP's `failed` and adds `interrupted: true` (installed clients
+ * map unknown statuses to `pending`); `parseToolMeta` folds the flag into this status. It is
+ * terminal but not a failure.
  */
 export type ChatToolStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'interrupted';
 

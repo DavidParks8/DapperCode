@@ -189,14 +189,20 @@ and that prompt is passed straight to completion.
   for push, the remote before retrying. Streamed text, tool results, and run settlement are
   coalesced into one write shortly afterwards (and on backgrounding).
 - Composer drafts are the shared chat drafts, stored per profile and chat exactly like desktop
-  chats. The runtime still restores (or quarantines) per-conversation draft documents written by
-  older builds and deletes them with their conversation, but no screen writes them any more.
+  chats; the runtime never writes drafts. Unsent drafts from older builds (inline in
+  `preferences.json` or in per-conversation `draft-…` documents) are imported once into the
+  composer's store for the matching local chat before any local chat opens
+  (`shell/runtime/localDraftImport.ts`). The runtime removes its copies only after that write
+  succeeds, so a failed import is retried at the next start and never loses text. A chat that
+  already has a newer composer draft keeps it; the older text is set aside with its bytes preserved
+  and a notice. Deleting a conversation also deletes any legacy draft it still has.
 - Startup is not fail-closed. Damaged or unexpected conversation, draft, or settings files are
   moved to a `quarantine-…` name with their bytes unchanged (or skipped and left in place when they
   cannot be moved), a dismissible notice explains what happened, and the rest of the mode starts.
 - Problems are reported as typed issues: persistence failures (retryable, cleared by a later
   successful write), transient operation failures, and startup recovery notices. All are
-  dismissible and several can be shown at once.
+  dismissible and several can be shown at once. Settings → On this iPhone lists them, the drawer
+  status points there, and VoiceOver announces each new issue once.
 - Network reachability is observed with `expo-network`. When the device is known to be offline,
   clone, push, sign-in, and model downloads fail immediately with a friendly message.
 - There is no automatic desktop/cloud fallback or synchronization of local workspaces.
@@ -286,19 +292,19 @@ the local profile. `LocalBridgeWsClient` is connected from creation until dispos
 
 `LOCAL_IMPLEMENTED_METHODS` in `transport/server.ts` is authoritative:
 
-| Area       | Methods                                                                                                                                                                                                                                             |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Session    | `bridge/capabilities/read`, `bridge/health/read`, `thread/approvalPolicy/set` (accepted, no approvals locally)                                                                                                                                      |
-| Chats      | `thread/list`, `thread/loaded/list`, `bridge/thread/list/stream/start`/`cancel`, `thread/read`, `thread/start`, `bridge/thread/create`, `thread/name/update`, `thread/delete`, `thread/config/set` (model), `thread/resume`                         |
-| Turns      | `bridge/thread/queue/send`, `turn/start`, `turn/interrupt`, `bridge/turn/retry` (local only), `bridge/thread/queue/read`, `bridge/thread/schedules/read` (always empty)                                                                             |
-| Models     | `model/list` (downloaded, runnable catalog models with load state in `description` and the new-chat model as `isDefault`)                                                                                                                           |
-| Workspaces | `bridge/workspaces/list`, `bridge/fs/list` (workspace roots only), `bridge/git/clone` (HTTPS, into a new workspace)                                                                                                                                 |
-| Attention  | `bridge/approvals/list`, `bridge/approvals/resolve` (the loop's pending tool approval, such as a push), `bridge/userInput/list` (always empty)                                                                                                      |
-| Git        | `bridge/git/status`, `diff`, `history`, `branches`, `stage`, `stageAll`, `unstage`, `unstageAll`, `commit`, `switch`, `push`                                                                                                                        |
-| Extensions | `workspace/list`, `select`, `create`, `rename`, `delete`, `changeToken`, `clone/progress`, `clone/cancel`, `workspace/git/fetch`, `pull`, `init`, `discard`, `branch/create`, `workspace/files/list`, `read`, `write`, `create`, `rename`, `remove` |
+| Area         | Methods                                                                                                                                                           |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session      | `bridge/capabilities/read`, `bridge/health/read`, `thread/approvalPolicy/set` (accepted, no approvals locally)                                                     |
+| Chats        | `thread/list`, `thread/loaded/list`, `bridge/thread/list/stream/start`/`cancel`, `thread/read`, `thread/start`, `bridge/thread/create`, `thread/name/update`, `thread/delete`, `thread/config/set` (model), `thread/resume` |
+| Turns        | `bridge/thread/queue/send`, `turn/start`, `turn/interrupt`, `bridge/turn/retry` (local only), `bridge/thread/queue/read`, `bridge/thread/schedules/read` (always empty) |
+| Models       | `model/list` (downloaded, runnable catalog models with load state in `description` and the new-chat model as `isDefault`)                                         |
+| Workspaces   | `bridge/workspaces/list`, `bridge/fs/list` (workspace roots only), `bridge/git/clone` (HTTPS, into a new workspace)                                               |
+| Attention    | `bridge/approvals/list`, `bridge/approvals/resolve` (the loop's pending tool approval, such as a push), `bridge/userInput/list` (always empty)                     |
+| Git          | `bridge/git/status`, `diff`, `history`, `branches`, `stage`, `stageAll`, `unstage`, `unstageAll`, `commit`, `switch`, `push`                                     |
+| Extensions   | `workspace/list`, `select`, `create`, `rename`, `delete`, `changeToken`, `clone/progress`, `clone/cancel`, `workspace/git/fetch`, `pull`, `init`, `discard`, `branch/create`, `workspace/files/list`, `read`, `write`, `create`, `rename`, `remove` |
 
 The transport forwards each native progress event as the host notification
-`workspace/clone/progressChanged` (params match `workspace/clone/progress`), while the server is
+`workspace/clone/progressChanged` (params match `workspace/clone/progress`) while the server is
 started.
 
 Every other method rejects with JSON-RPC `-32601` and `data.error = 'unsupported_on_device'`
@@ -356,8 +362,8 @@ model when the composer sends none or a desktop path.
   generic "Working" from the shell does not replace a reported phase. VoiceOver hears reported
   phases (not progress) and the completion of a turn the screen watched running, never the
   shell's own transitions such as opening a settled chat.
-- Tool titles come from `describeLocalTool`. An interrupted tool uses the bridge's `interrupted`
-  tool status (the snapshot keeps `failed` plus `interrupted: true`, as the Rust bridge does), so the
+- Tool titles come from `describeLocalTool`. Like the Rust bridge, an interrupted tool keeps the
+  wire's `failed` status and adds `interrupted: true` (in `tool-meta` and the snapshot), so the
   transcript shows it neutrally, for example "Stopped editing src/app.ts".
 
 ### Streaming
@@ -407,6 +413,7 @@ The shared screens serve the local profile through the transport; nothing branch
   `workspace/changeToken`, so agent edits appear without re-entering; a dirty file that changes on
   disk is flagged and a stale save offers **Overwrite** or **Discard edits**. Files over 64 KiB open
   read-only with their total size.
+
 
 ### Extension points for the next tracks
 

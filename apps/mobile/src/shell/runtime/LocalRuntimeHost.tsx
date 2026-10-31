@@ -1,7 +1,7 @@
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { usePathname } from 'expo-router';
 import { useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, StyleSheet, View } from 'react-native';
 
 import {
   OnDeviceProvider,
@@ -22,6 +22,7 @@ import {
   sameLocalAgentPresence,
 } from './localAgentPresence';
 import { LocalBridgeWsClient } from './LocalBridgeWsClient';
+import { importLegacyLocalDrafts } from './localDraftImport';
 import { LocalRuntimeRecovery } from './LocalRuntimeRecovery';
 
 /**
@@ -46,6 +47,7 @@ export function LocalRuntimeHost() {
       <OnDeviceProvider fallback={(startup) => <LocalRuntimeRecovery {...startup} />}>
         <LocalTransportBinder />
         <LocalPresencePublisher />
+        <LocalIssueAnnouncer />
       </OnDeviceProvider>
     </View>
   );
@@ -56,18 +58,67 @@ function LocalTransportBinder() {
   const setRuntime = useSetAtom(localRuntimeAtom);
   const setTransport = useSetAtom(localTransportAtom);
   useEffect(() => {
-    const transport = new LocalBridgeWsClient(
-      new LocalBridgeServer(createRuntimeAgentPort(runtime)),
-    );
-    transport.connect();
-    setRuntime(runtime);
-    setTransport(transport);
+    let active = true;
+    let transport: LocalBridgeWsClient | null = null;
+    const publish = () => {
+      if (!active) {
+        return;
+      }
+      transport = new LocalBridgeWsClient(new LocalBridgeServer(createRuntimeAgentPort(runtime)));
+      transport.connect();
+      setRuntime(runtime);
+      setTransport(transport);
+    };
+    if (runtime.legacyDrafts().size === 0) {
+      publish();
+    } else {
+      // Chats open only once the transport exists, so no composer can overwrite the import.
+      void importLegacyLocalDrafts(runtime)
+        .catch((error: unknown) =>
+          runtime.report(
+            new Error(
+              `Unsent drafts from an earlier version could not be moved into your chats and were kept on this iPhone. ${error instanceof Error ? error.message : ''}`.trim(),
+            ),
+          ),
+        )
+        .finally(publish);
+    }
     return () => {
+      active = false;
       setTransport(null);
       setRuntime(null);
-      transport.dispose();
+      transport?.dispose();
     };
   }, [runtime, setRuntime, setTransport]);
+  return null;
+}
+
+/**
+ * Tells VoiceOver about each runtime issue once when it appears (again only if it clears and
+ * recurs). The drawer status and Settings keep showing it until it is retried or dismissed.
+ */
+function LocalIssueAnnouncer() {
+  const runtime = useOnDeviceRuntime();
+  useEffect(() => {
+    const announced = new Set<string>();
+    const announce = () => {
+      const issues = runtime.issues();
+      const current = new Set(issues.map((issue) => issue.id));
+      for (const id of announced) {
+        if (!current.has(id)) {
+          announced.delete(id);
+        }
+      }
+      for (const issue of issues) {
+        if (!announced.has(issue.id)) {
+          announced.add(issue.id);
+          AccessibilityInfo.announceForAccessibility(`On this iPhone: ${issue.message}`);
+        }
+      }
+    };
+    announce();
+    return runtime.subscribe(announce, ['issues']);
+  }, [runtime]);
   return null;
 }
 

@@ -137,7 +137,7 @@ pub struct SnapshotTool {
     /// its `<task …>` result lands, which for a foreground task is when it has already finished.
     pub subagent: bool,
     /// The run was cancelled while this call was still active. ACP has no cancelled tool status,
-    /// so the call keeps `Failed` for its lifecycle while the wire reports it as interrupted.
+    /// so the call keeps `Failed` (on the wire too) and this flag marks it as interrupted.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub interrupted: bool,
 }

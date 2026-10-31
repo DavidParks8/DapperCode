@@ -175,25 +175,22 @@ function toolArgument(argumentsJson: string | null, key: string): string | null 
   }
 }
 
-export function localToolStatus(
-  status: NonNullable<LocalMessage['tool']>['status'],
-): ChatToolStatus {
-  switch (status) {
-    case 'running':
-      return 'in_progress';
-    default:
-      return status;
-  }
-}
-
-/** Like the bridge snapshot, an interrupted call keeps ACP's `failed` plus the flag. */
-function localSnapshotToolStatus(status: NonNullable<LocalMessage['tool']>['status']): {
-  status: string;
+/**
+ * A local tool status on the wire, as the Rust bridge sends it: an interrupted call keeps ACP's
+ * `failed` status (installed clients map unknown statuses to `pending`) plus `interrupted: true`.
+ */
+export function localToolStatus(status: NonNullable<LocalMessage['tool']>['status']): {
+  status: Exclude<ChatToolStatus, 'interrupted'>;
   interrupted?: true;
 } {
-  return status === 'interrupted'
-    ? { status: 'failed', interrupted: true }
-    : { status: localToolStatus(status) };
+  switch (status) {
+    case 'running':
+      return { status: 'in_progress' };
+    case 'interrupted':
+      return { status: 'failed', interrupted: true };
+    default:
+      return { status };
+  }
 }
 
 function toolArguments(thread: LocalThread, callId: string): string | null {
@@ -422,7 +419,7 @@ export function localThreadSnapshot(
       id: tool.callId,
       generation: null,
       kind: described.kind,
-      ...localSnapshotToolStatus(tool.status),
+      ...localToolStatus(tool.status),
       title: described.title,
       startedAtMs: Date.parse(tool.startedAt),
       completedAtMs: tool.completedAt ? Date.parse(tool.completedAt) : null,
