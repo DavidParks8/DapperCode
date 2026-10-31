@@ -29,6 +29,8 @@ import { localProfileAvailableAtom } from '@shell/state/bridge/atoms';
 import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import { router } from 'expo-router';
+import { LOCAL_SETUP_DESTINATIONS } from '@shell/profiles/localSetup';
 import { localAgentPresenceAtom } from '@shell/state/local/atoms';
 import { MainScreen } from './MainScreen';
 import { selectedChatIdAtom } from '../state/session';
@@ -368,6 +370,8 @@ describe('MainScreen on the local profile', () => {
     expect(hasText(root, 'Download Qwen3 1.7B Q4_K_M to start a conversation.')).toBe(true);
     expect(labeled(root, 'Get a model')).toBeTruthy();
     expect(labeled(root, 'Use suggestion: Write tests')).toBeUndefined();
+    await press(labeled(root, 'Get a model'));
+    expect(router.push).toHaveBeenCalledWith(LOCAL_SETUP_DESTINATIONS.models);
 
     await act(async () => {
       store.set(localAgentPresenceAtom, {

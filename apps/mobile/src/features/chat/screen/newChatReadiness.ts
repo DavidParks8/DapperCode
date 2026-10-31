@@ -2,8 +2,7 @@ import { router } from 'expo-router';
 import { useAtomValue } from 'jotai';
 import { useCallback } from 'react';
 
-import { routes } from '@shell/navigation/routes';
-import { activeProfileIdAtom } from '@shell/state/bridge/atoms';
+import { LOCAL_SETUP_DESTINATIONS } from '@shell/profiles/localSetup';
 import { localAgentPresenceAtom } from '@shell/state/local/atoms';
 
 export interface NewChatReadiness {
@@ -20,12 +19,10 @@ export interface NewChatReadiness {
  */
 export function useNewChatReadiness(): NewChatReadiness | null {
   const presence = useAtomValue(localAgentPresenceAtom);
-  const profileId = useAtomValue(activeProfileIdAtom);
+  // The same model setup destination the profile switcher's setup steps open.
   const openModels = useCallback(() => {
-    if (profileId) {
-      router.push(routes.settings(profileId));
-    }
-  }, [profileId]);
+    router.push(LOCAL_SETUP_DESTINATIONS.models);
+  }, []);
   const readiness = presence?.readiness;
   if (!readiness) {
     return null;
@@ -36,7 +33,7 @@ export function useNewChatReadiness(): NewChatReadiness | null {
     action: needsModel
       ? {
           label: 'Get a model',
-          hint: 'Opens Settings to download or choose a model for this iPhone.',
+          hint: 'Opens the model library to download or choose a model for this iPhone.',
           onPress: openModels,
         }
       : null,

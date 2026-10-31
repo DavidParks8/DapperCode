@@ -15,6 +15,7 @@ import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { useAppTheme } from '@shared/theme';
 import { createStyles } from '../styles/styles';
 import { useSceneContentInsets } from '@shell/layout/useShellLayout';
+import { NewChatRunTarget } from '@shell/profiles/ProfileSwitcher';
 import type { NewChatReadiness } from './newChatReadiness';
 
 const SUGGESTIONS = [
@@ -81,6 +82,7 @@ export function ComposeView({
         <BrandMark size={52} />
       </View>
       <Text style={styles.composeTitle}>Let's build</Text>
+      <NewChatRunTarget />
       <Pressable
         style={({ pressed }) => [
           styles.workspaceCapsule,

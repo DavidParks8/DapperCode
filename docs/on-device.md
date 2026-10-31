@@ -7,8 +7,11 @@ continue to use desktop agents.
 
 ## First run
 
-1. Choose **On this iPhone** on onboarding, or under **Settings → Profiles**.
-2. Open **Model library**, choose a family, then compare its sizes and quants on the next page.
+1. Choose **On this iPhone** wherever you pick where agents run: the onboarding choices, the
+   **Runs on** row in the drawer, the profile capsule under **Let's build** in a new chat, or
+   **Settings → Profiles**. Each opens a new chat in the local profile.
+2. Until a model and a workspace are ready, the new chat shows a **Set up On this iPhone**
+   checklist whose rows open the model library and workspaces. Open **Model library**, choose a family, then compare its sizes and quants on the next page.
    Download a compatible quant and choose **Load and use**. Search and **Downloaded only** narrow
    the family list. Back returns from the quant page to the family list; selecting for an existing
    conversation returns directly to that conversation.
@@ -310,13 +313,18 @@ model when the composer sends none or a desktop path.
   `localConversationReadiness`, using the same model and workspace fallbacks as the server. It is
   null for desktop profiles. The drawer footer shows the status line (with a dot for ready, busy,
   attention, and error), and the empty new chat shows the readiness reason with **Get a model**
-  (Settings) when no model is usable; suggestions are hidden until a chat can start. When the
+  (`LOCAL_SETUP_DESTINATIONS.models`) when no model is usable; suggestions are hidden until a chat can start. When the
   local new-chat workspace is unset, the host seeds it with the workspace the agent would use.
-- Run phases stream as the `dappercode.dev/activity` custom AG-UI event (`bridge/runActivity.ts`):
+- Run phases stream as the `dappercode.dev/activity` custom AG-UI event (`bridge/runActivity.ts`).
+  The loop loads the model before it records the message, so load progress is sent for the turn
+  the loop is starting before `RUN_STARTED`; a failed or stopped load stays a rejected send (the
+  draft is kept) rather than a run. Phases:
   `Preparing`, `Loading <model> · N%`, `Generating`, the running tool's action (for example
   `Reading README.md`, from `describeLocalTool`), `Stopping`, and `Saving`. The shell shows the
-  title (and detail) in the transcript activity row instead of a rotating working phrase and
-  announces each named phase (progress is not re-announced).
+  title (and detail) in the transcript activity row instead of a rotating working phrase; a later
+  generic "Working" from the shell does not replace a reported phase. VoiceOver hears reported
+  phases (not progress) and the completion of a turn the screen watched running, never the
+  shell's own transitions such as opening a settled chat.
 - Tool titles come from `describeLocalTool`; an interrupted tool keeps the wire's `failed` status
   but its title ends with `· Interrupted`.
 
@@ -343,9 +351,27 @@ draft is corrected by that reload.
   local profile and still links to the legacy `/on-device/models`, `/workspaces`, and `/account`
   screens. Replace those rows with Settings sections; `model/list` and the model config option can
   carry download/memory state once the sheet renders it.
-- **Discovery and onboarding**: `OnDeviceEntry` (onboarding) and the Settings **Profiles** group open
-  `routes.newChat(LOCAL_PROFILE_ID)`. Missing model/workspace prerequisites reject chat creation with
-  `on_device_model_required`/`on_device_workspace_required`, which a call to action can key on.
+- **Discovery and onboarding**: every "where to run" surface lists the same `shellProfilesAtom`
+  through `shell/profiles`: `useProfileChoices` (profiles with live state plus **Add bridge**),
+  `describeProfile` (the only place that varies copy, icon, and status by profile kind), and
+  `openProfileAtom`. Onboarding offers `OnDeviceEntry` beside pairing when
+  `localProfileAvailableAtom` is true and words its hero for the choices actually offered. The
+  drawer's **Runs on** row (`DrawerProfileRow`) and the new-chat capsule (`NewChatRunTarget`) open
+  the same sheet; Settings' Connection/Profiles rows use the same presentation, so the local row
+  reports setup (`Needs a model`, `Ready`) rather than a connection.
+- **First-run setup**: `useLocalSetup` derives model and workspace steps from the open runtime via
+  `localConversationReadiness`, resolving the model the way the server's `resolveModel` does (the
+  selected model when downloaded, otherwise any downloaded runnable model, otherwise a download in
+  progress), so a first download started from the library without selecting a model still counts; `LocalSetupGuide` renders them in the new chat until a chat can
+  start. Its destinations live in `LOCAL_SETUP_DESTINATIONS` (`shell/profiles/localSetup.ts`), which
+  still points at the legacy `/on-device/models` and `/on-device/workspaces` screens; repoint that
+  single constant when the Settings model screens and local workspace picker land. Missing
+  prerequisites still reject chat creation with `on_device_model_required`/
+  `on_device_workspace_required`.
+- **Profile routes**: `app/profiles/_layout.tsx` gives `[profileId]` its own stack. Expo Router only
+  notices a changed dynamic segment on a route named exactly `[param]`, so without it a profile
+  switch left the previous profile id on the parent route and returning from any root-level screen
+  (such as a legacy `/on-device/*` page) switched back.
 
 ## Ownership and testing
 

@@ -4,13 +4,14 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
-import { ChoiceAction } from './ChoiceAction';
+import { ChoiceAction, choiceActionAccessibilityLabel } from './ChoiceAction';
 
 jest.mock('@expo/vector-icons', () => {
   const mockReact = jest.requireActual('react');
   const { Text: MockText } = jest.requireActual('react-native');
   return {
-    Ionicons: ({ name }: { name: string }) => mockReact.createElement(MockText, null, name),
+    Ionicons: ({ name, ...props }: { name: string }) =>
+      mockReact.createElement(MockText, { ...props, testID: `icon-${name}` }, name),
   };
 });
 
@@ -100,5 +101,59 @@ describe('ChoiceAction', () => {
     expect(onPress).toHaveBeenCalledTimes(1);
     expect(textContent(queryRoot(tree))).toContain('Ready');
     act(() => tree.unmount());
+  });
+
+  it('exposes one labelled button with decorative icons and no empty spoken segments', () => {
+    const tree = render(
+      <>
+        <ChoiceAction
+          title="On this iPhone"
+          meta="Offline models with file and Git tools"
+          iconName="phone-portrait-outline"
+          accessibilityHint="Opens a new chat that runs on this iPhone."
+          testID="choice-local"
+          onPress={jest.fn()}
+        />
+        <ChoiceAction title="Your machine" logo="dappercode" onPress={jest.fn()} />
+        <ChoiceAction title="Loading" meta="  " loading onPress={jest.fn()} />
+      </>,
+    );
+    const buttons = queryRoot(tree).findAll(
+      (node) => typeof node.type === 'string' && node.props['accessibilityRole'] === 'button',
+    );
+    expect(buttons.map((button) => button.props['accessibilityLabel'])).toEqual([
+      'On this iPhone, Offline models with file and Git tools',
+      'Your machine',
+      'Loading',
+    ]);
+    for (const button of buttons) {
+      const label = String(button.props['accessibilityLabel']);
+      expect(label.split(',').every((segment) => segment.trim().length > 0)).toBe(true);
+    }
+    const local = requireTestValue(buttons[0], 'local choice');
+    expect(local.props['accessibilityHint']).toBe('Opens a new chat that runs on this iPhone.');
+    expect(local.props['testID']).toBe('choice-local');
+    expect(requireTestValue(buttons[2], 'loading choice').props['accessibilityState']).toEqual(
+      expect.objectContaining({ disabled: true, busy: true }),
+    );
+
+    // Every glyph is hidden from assistive technology, either itself or through its container.
+    const isGlyph = (node: QueryableInstance) =>
+      typeof node.props['testID'] === 'string' && String(node.props['testID']).startsWith('icon-');
+    const glyphs = queryRoot(tree).findAll(isGlyph);
+    const hiddenGlyphs = new Set(
+      queryRoot(tree)
+        .findAll((node) => node.props['accessibilityElementsHidden'] === true)
+        .flatMap((node) => node.findAll(isGlyph)),
+    );
+    expect(glyphs.length).toBeGreaterThanOrEqual(4);
+    expect(glyphs.every((glyph) => hiddenGlyphs.has(glyph))).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('builds labels without empty segments', () => {
+    expect(choiceActionAccessibilityLabel('Title', undefined)).toBe('Title');
+    expect(choiceActionAccessibilityLabel('Title', '')).toBe('Title');
+    expect(choiceActionAccessibilityLabel(' Title ', ' Meta ')).toBe('Title, Meta');
   });
 });
