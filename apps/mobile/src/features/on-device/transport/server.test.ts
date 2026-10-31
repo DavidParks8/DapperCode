@@ -215,6 +215,8 @@ describe('LocalBridgeServer', () => {
       EventType.CUSTOM,
       EventType.TOOL_CALL_END,
       EventType.TOOL_CALL_RESULT,
+      // "Saving": the loop persists the turn before it settles, as the real runtime does.
+      EventType.CUSTOM,
       EventType.RUN_FINISHED,
     ]);
     const deltas = events()
@@ -273,6 +275,7 @@ describe('LocalBridgeServer', () => {
       { title: 'Generating' },
       { title: 'Reading src/app.ts' },
       { title: 'Generating' },
+      { title: 'Saving' },
     ]);
     expect(events().at(-1)?.type).toBe(EventType.RUN_FINISHED);
   });
