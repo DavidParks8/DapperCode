@@ -72,14 +72,28 @@ export interface ManagedWorkspaceSummary extends ManagedWorkspaceResponse {
   origin: string | null;
 }
 
+/** Disk usage of a workspace, Git metadata included. */
+export interface ManagedWorkspaceSize {
+  /** Allocated bytes on disk. */
+  bytes: number;
+  files: number;
+  /** Measurement stopped at its bound, so `bytes` is a lower bound. */
+  truncated: boolean;
+}
+
 /**
- * Working-tree state of one Git workspace. The picker asks for these after the list, so the list
- * opens without waiting for a status read per repository.
+ * Working-tree state and size of one workspace. The picker asks for these after the list, so the
+ * list opens without waiting for a status read or a size walk per workspace.
  */
 export interface ManagedWorkspaceState {
   path: string;
-  /** Changed, staged, and untracked files; 0 is a clean working tree. */
-  changedFiles: number;
+  /**
+   * Changed, staged, and untracked files; 0 is a clean working tree. Null for workspaces without
+   * Git or whose status could not be read.
+   */
+  changedFiles: number | null;
+  /** Null when the size could not be measured. */
+  size: ManagedWorkspaceSize | null;
 }
 
 export interface CloneProgressResponse {

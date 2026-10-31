@@ -344,6 +344,15 @@ export function createFakeOnDeviceNative(llama: FakeLlama, options: FakeNativeOp
       workspaces = workspaces.filter((entry) => entry.id !== id);
     },
     getWorkspaceChangeToken: async (id) => `token-${id}-${String(files.size)}`,
+    getWorkspaceSize: async (id) => {
+      record('getWorkspaceSize', id);
+      const contents = [...files].filter(([key]) => key.startsWith(`${id}:`));
+      return {
+        bytes: contents.reduce((total, [, content]) => total + content.length, 0),
+        files: contents.length,
+        truncated: false,
+      };
+    },
     listWorkspaceFiles: async (id, path, limit) => {
       record('listWorkspaceFiles', id, path);
       const prefix = path ? `${id}:${path}/` : `${id}:`;

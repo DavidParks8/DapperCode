@@ -91,6 +91,7 @@ function harness(documents = new Map<string, string>()) {
       );
     }),
     getWorkspaceChangeToken: jest.fn(async () => 'token-0'),
+    getWorkspaceSize: jest.fn(async () => ({ bytes: 0, files: 0, truncated: false })),
     listWorkspaceFiles: jest.fn(async () => ({ entries: [], truncated: false })),
     readWorkspaceFile: jest.fn<
       ReturnType<OnDeviceNativeServices['readWorkspaceFile']>,

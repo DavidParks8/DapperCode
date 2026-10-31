@@ -21,7 +21,7 @@ import { LocalBridgeServer } from '../../on-device/transport/server';
 import { FakeAgentPort } from '../../on-device/transport/testing';
 import { LOCAL_WORKSPACE_ROOT } from '../../on-device/transport/wire';
 import { loadManagedWorkspacesAtom } from '../state/managedWorkspaces';
-import { managedWorkspaceSubtitle } from './ManagedView';
+import { formatWorkspaceSize, managedWorkspaceSubtitle } from './ManagedView';
 import { WorkspacePickerScreen } from './Screen';
 
 type Node = ReactTestInstance & {
@@ -32,7 +32,8 @@ type Node = ReactTestInstance & {
 };
 
 const DEMO = `${LOCAL_WORKSPACE_ROOT}/Demo`;
-const DEMO_LABEL = 'Demo, main · 1 changed · github.com/acme/demo';
+const DEMO_LABEL = 'Demo, main · 1 changed · 42 MB · github.com/acme/demo';
+const SCRATCH_LABEL = 'Scratch, Not a Git repository · 12 KB';
 
 async function flush(): Promise<void> {
   for (let round = 0; round < 4; round += 1) {
@@ -134,6 +135,8 @@ function twoWorkspaces(): FakeAgentPort {
     { id: 'ws-one', name: 'Demo', isRepository: true },
     { id: 'ws-two', name: 'Scratch', isRepository: false },
   ];
+  port.workspaceSizes.set('ws-one', { bytes: 42_000_000, files: 120, truncated: false });
+  port.workspaceSizes.set('ws-two', { bytes: 12_288, files: 3, truncated: false });
   return port;
 }
 
@@ -145,22 +148,24 @@ describe('managed workspace picker', () => {
   it('lists workspaces with Git metadata and marks the selected one', async () => {
     const { root } = await renderPicker(twoWorkspaces());
     const screen = text(root);
-    expect(screen).toContain('main · 1 changed · github.com/acme/demo');
-    expect(screen).toContain('Not a Git repository');
+    expect(screen).toContain('main · 1 changed · 42 MB · github.com/acme/demo');
+    expect(screen).toContain('Not a Git repository · 12 KB');
     expect(screen).not.toContain('Default workspace');
     expect(screen).not.toContain(' · Selected');
     // Selection is a checkmark on the row, not a " · Selected" suffix.
     expect(control(root, DEMO_LABEL).props['selected']).toBe(true);
-    expect(control(root, 'Scratch, Not a Git repository').props['selected']).toBe(false);
+    expect(control(root, SCRATCH_LABEL).props['selected']).toBe(false);
   });
 
-  it('loads working-tree state after the list and rereads it only when a workspace changes', async () => {
+  it('loads working-tree state and size after the list and rereads them only when a workspace changes', async () => {
     const port = twoWorkspaces();
     port.workspaceList = [
       ...port.workspaceList,
       { id: 'ws-three', name: 'Broken', isRepository: true },
     ];
+    port.workspaceSizes.set('ws-three', { bytes: 3_400_000, files: 50_000, truncated: true });
     const original = port.git.status;
+    const originalSize = port.workspaceAdmin.size;
     let release: () => void = () => undefined;
     const held = new Promise<void>((resolve) => {
       release = resolve;
@@ -172,27 +177,43 @@ describe('managed workspace picker', () => {
       await held;
       return original(id);
     });
+    const size = jest.spyOn(port.workspaceAdmin, 'size').mockImplementation(async (id) => {
+      if (id === 'ws-two') {
+        throw new Error('The workspace could not be measured.');
+      }
+      await held;
+      return originalSize(id);
+    });
     const { root, store } = await renderPicker(port);
-    // The list is usable before any Git status read finishes.
+    // The list is usable before any Git status read or size walk finishes.
     expect(text(root)).toContain('main · github.com/acme/demo');
     expect(text(root)).not.toContain('changed');
+    expect(text(root)).not.toContain(' MB');
 
     release();
     await act(flush);
     expect(control(root, DEMO_LABEL).props['selected']).toBe(true);
-    // A workspace without Git is never asked for status; an unreadable one just shows no state.
+    // A workspace without Git is never asked for status; every workspace is measured.
     expect(status.mock.calls.map(([id]) => id).sort()).toEqual(['ws-one', 'ws-three']);
-    expect(control(root, 'Broken, main · github.com/acme/demo')).toBeTruthy();
+    expect(size.mock.calls.map(([id]) => id).sort()).toEqual(['ws-one', 'ws-three', 'ws-two']);
+    // An unreadable repository still shows its size, bounded walks read as a lower bound, and an
+    // unmeasurable workspace just shows no size.
+    expect(control(root, 'Broken, main · Over 3.4 MB · github.com/acme/demo')).toBeTruthy();
+    expect(control(root, 'Scratch, Not a Git repository')).toBeTruthy();
 
-    // Reopening without a change reuses the cached state instead of reading Git again.
+    // Reopening without a change reuses the cached state and size; only failed reads run again.
     status.mockClear();
+    size.mockClear();
+    port.workspaceSizes.set('ws-one', { bytes: 43_000_000, files: 121, truncated: false });
     await act(async () => {
       await store.set(loadManagedWorkspacesAtom);
       await flush();
     });
     expect(status.mock.calls.map(([id]) => id)).toEqual(['ws-three']);
+    expect(size.mock.calls.map(([id]) => id)).toEqual(['ws-two']);
+    expect(control(root, DEMO_LABEL).props['selected']).toBe(true);
 
-    // A change moves the workspace's change token, so its state is read again.
+    // A change moves the workspace's change token, so its state and size are read again.
     status.mockImplementation(async (id) => ({
       ...(await original(id)),
       clean: true,
@@ -204,7 +225,9 @@ describe('managed workspace picker', () => {
       await store.set(loadManagedWorkspacesAtom);
       await flush();
     });
-    expect(control(root, 'Demo, main · Clean · github.com/acme/demo').props['selected']).toBe(true);
+    expect(
+      control(root, 'Demo, main · Clean · 43 MB · github.com/acme/demo').props['selected'],
+    ).toBe(true);
   });
 
   it('keeps the workspace in use checked and inert', async () => {
@@ -229,7 +252,7 @@ describe('managed workspace picker', () => {
   it('selects a workspace with one tap and records it for first-run setup', async () => {
     const port = twoWorkspaces();
     const { root, store } = await renderPicker(port);
-    await invoke(control(root, 'Scratch, Not a Git repository'));
+    await invoke(control(root, SCRATCH_LABEL));
     expect(store.get(defaultStartCwdAtom)).toBe(`${LOCAL_WORKSPACE_ROOT}/Scratch`);
     // The runtime's remembered workspace drives the setup checklist and new-chat fallback.
     expect(port.calls).toContain('workspace.select:ws-two');
@@ -241,7 +264,7 @@ describe('managed workspace picker', () => {
     const port = twoWorkspaces();
     const { root, store } = await renderPicker(port);
     port.workspaceList = port.workspaceList.filter((entry) => entry.id !== 'ws-two');
-    await invoke(control(root, 'Scratch, Not a Git repository'));
+    await invoke(control(root, SCRATCH_LABEL));
     expect(store.get(defaultStartCwdAtom)).toBe(DEMO);
     expect(router.back).not.toHaveBeenCalled();
     expect(text(root)).toContain('That workspace is no longer on this iPhone.');
@@ -303,14 +326,39 @@ describe('managedWorkspaceSubtitle', () => {
     expect(managedWorkspaceSubtitle({ ...base, isRepository: true, branch: 'dev' })).toBe(
       'dev · No remote',
     );
-    expect(managedWorkspaceSubtitle({ ...base, isRepository: true, branch: 'dev' }, 0)).toBe(
+    const repository = { ...base, isRepository: true, branch: 'dev' };
+    const size = { bytes: 42_000_000, files: 9, truncated: false };
+    expect(managedWorkspaceSubtitle(repository, { changedFiles: 0, size: null })).toBe(
       'dev · Clean · No remote',
     );
-    expect(managedWorkspaceSubtitle({ ...base, isRepository: true, branch: 'dev' }, 3)).toBe(
-      'dev · 3 changed · No remote',
+    expect(managedWorkspaceSubtitle(repository, { changedFiles: 3, size })).toBe(
+      'dev · 3 changed · 42 MB · No remote',
     );
-    expect(managedWorkspaceSubtitle({ ...base, isRepository: false }, 3)).toBe(
-      'Not a Git repository',
+    expect(managedWorkspaceSubtitle(repository, { changedFiles: null, size })).toBe(
+      'dev · 42 MB · No remote',
     );
+    expect(
+      managedWorkspaceSubtitle({ ...base, isRepository: false }, { changedFiles: 3, size }),
+    ).toBe('Not a Git repository · 42 MB');
+    expect(
+      managedWorkspaceSubtitle(
+        { ...base, isRepository: false },
+        { changedFiles: null, size: null },
+      ),
+    ).toBe('Not a Git repository');
+  });
+
+  it('formats workspace sizes in decimal units and marks bounded measurements', () => {
+    const sized = (bytes: number, truncated = false) =>
+      formatWorkspaceSize({ bytes, files: 1, truncated });
+    expect(formatWorkspaceSize({ bytes: 0, files: 0, truncated: false })).toBe('Empty');
+    expect(sized(200)).toBe('1 KB');
+    expect(sized(12_288)).toBe('12 KB');
+    expect(sized(999_499)).toBe('999 KB');
+    expect(sized(999_500)).toBe('1 MB');
+    expect(sized(4_250_000)).toBe('4.3 MB');
+    expect(sized(42_000_000)).toBe('42 MB');
+    expect(sized(1_340_000_000)).toBe('1.3 GB');
+    expect(sized(42_000_000, true)).toBe('Over 42 MB');
   });
 });

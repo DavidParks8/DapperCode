@@ -9,7 +9,7 @@ import {
 } from '../../workspace/api/protocol';
 import { httpsRemoteError } from '../../workspace/api/remoteUrl';
 import { isOnDeviceNativeError } from '../native/services.errors';
-import type { LocalGitStatus, LocalWorkspace } from '../workspaces/types';
+import type { LocalGitStatus, LocalWorkspace, LocalWorkspaceSize } from '../workspaces/types';
 import { LOCAL_RPC_ERROR, LocalRpcError } from './errors';
 import { readParam, type RpcParams } from './params';
 import type { LocalAgentPort } from './port';
@@ -98,21 +98,39 @@ function changedFileCount(status: LocalGitStatus): number {
   return status.clean ? 0 : Math.max(status.totalFiles, status.files.length, 1);
 }
 
+interface CachedWorkspaceState {
+  token: string;
+  changedFiles?: number;
+  size?: LocalWorkspaceSize;
+}
+
 /**
- * Working-tree states keyed by workspace id. Each is reused until the workspace's change token
- * moves, so reopening the picker reads Git status only for workspaces that changed.
+ * Working-tree states and sizes keyed by workspace id. Each is reused until the workspace's change
+ * token moves, so reopening the picker reads Git status and walks the folder only for workspaces
+ * that changed. A part that failed is read again next time.
  */
 function createWorkspaceStateReader(port: LocalAgentPort) {
-  const cache = new Map<string, { token: string; changedFiles: number }>();
-  const read = async (workspace: LocalWorkspace): Promise<number> => {
+  const cache = new Map<string, CachedWorkspaceState>();
+  const read = async (workspace: LocalWorkspace): Promise<CachedWorkspaceState> => {
     const token = await port.workspaceAdmin.changeToken(workspace.id);
     const cached = cache.get(workspace.id);
-    if (cached?.token === token) {
-      return cached.changedFiles;
+    const known = cached?.token === token ? cached : { token };
+    const [changedFiles, size] = await Promise.all([
+      known.changedFiles ??
+        (workspace.isRepository
+          ? port.git.status(workspace.id).then(changedFileCount, () => undefined)
+          : undefined),
+      known.size ?? port.workspaceAdmin.size(workspace.id).catch(() => undefined),
+    ]);
+    const next: CachedWorkspaceState = { token };
+    if (changedFiles !== undefined) {
+      next.changedFiles = changedFiles;
     }
-    const changedFiles = changedFileCount(await port.git.status(workspace.id));
-    cache.set(workspace.id, { token, changedFiles });
-    return changedFiles;
+    if (size !== undefined) {
+      next.size = size;
+    }
+    cache.set(workspace.id, next);
+    return next;
   };
   return async (): Promise<ManagedWorkspaceState[]> => {
     const workspaces = port.workspaces();
@@ -124,19 +142,22 @@ function createWorkspaceStateReader(port: LocalAgentPort) {
     }
     const paths = localWorkspacePaths(workspaces);
     const states = await Promise.all(
-      workspaces
-        .filter((entry) => entry.isRepository)
-        .map(async (entry) => {
-          try {
-            return {
-              path: paths.get(entry.id) ?? `${LOCAL_WORKSPACE_ROOT}/${entry.name}`,
-              changedFiles: await read(entry),
-            };
-          } catch {
-            // One unreadable repository leaves only its own row without a state.
+      workspaces.map(async (entry): Promise<ManagedWorkspaceState | null> => {
+        try {
+          const { changedFiles, size } = await read(entry);
+          if (changedFiles === undefined && size === undefined) {
             return null;
           }
-        }),
+          return {
+            path: paths.get(entry.id) ?? `${LOCAL_WORKSPACE_ROOT}/${entry.name}`,
+            changedFiles: changedFiles ?? null,
+            size: size ?? null,
+          };
+        } catch {
+          // One unreadable workspace leaves only its own row without a state.
+          return null;
+        }
+      }),
     );
     return states.filter((state): state is ManagedWorkspaceState => state !== null);
   };

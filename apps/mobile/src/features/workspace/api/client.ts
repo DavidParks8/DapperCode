@@ -40,7 +40,7 @@ export class WorkspaceHostClient {
   listWorkspaces(): Promise<{ workspaces: ManagedWorkspaceSummary[] }> {
     return this.transport.request(M.workspaceList, {});
   }
-  /** Working-tree state of each Git workspace; workspaces whose state is unknown are omitted. */
+  /** Working-tree state and size of each workspace; workspaces with neither known are omitted. */
   workspaceStates(): Promise<{ states: ManagedWorkspaceState[] }> {
     return this.transport.request(M.workspaceStates, {});
   }

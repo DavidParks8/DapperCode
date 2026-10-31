@@ -10,7 +10,11 @@ import { useAppTheme, type AppTheme } from '@shared/theme';
 import { SwipeToDeleteRow } from '@shared/ui/SwipeToDeleteRow';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
-import type { ManagedWorkspaceSummary } from '../api/protocol';
+import type {
+  ManagedWorkspaceSize,
+  ManagedWorkspaceState,
+  ManagedWorkspaceSummary,
+} from '../api/protocol';
 import { fileNameError } from '../files/controller';
 import { NameSheet } from '../NameSheet';
 import { matchesSearch } from './helpers';
@@ -27,8 +31,8 @@ import { NAV_BAR_TEXT_BUTTON_HEIGHT, NAV_BAR_TEXT_BUTTON_WIDTH } from './stylesL
 export interface ManagedWorkspacePickerProps {
   selectedPath: string | null;
   entries: ManagedWorkspaceSummary[];
-  /** Changed-file counts of Git workspaces by path, loaded after the list. */
-  changedFiles?: Readonly<Record<string, number>>;
+  /** Working-tree states and sizes by path, loaded after the list. */
+  states?: Readonly<Record<string, ManagedWorkspaceState>>;
   loading: boolean;
   error: string | null;
   onSelect: (path: string) => void;
@@ -42,23 +46,50 @@ export interface ManagedWorkspacePickerProps {
 
 type SheetState = { kind: 'create' } | { kind: 'rename'; entry: ManagedWorkspaceSummary };
 
-function workingTreeLabel(changedFiles: number | undefined): string | null {
-  if (changedFiles === undefined) {
+type WorkspaceRowState = Pick<ManagedWorkspaceState, 'changedFiles' | 'size'>;
+
+function workingTreeLabel(changedFiles: number | null | undefined): string | null {
+  if (changedFiles === null || changedFiles === undefined) {
     return null;
   }
   return changedFiles === 0 ? 'Clean' : `${String(changedFiles)} changed`;
 }
 
+function decimal(value: number): string {
+  return value >= 10 ? value.toFixed(0) : value.toFixed(1).replace(/\.0$/u, '');
+}
+
 /**
- * "main · 2 changed · github.com/owner/repo", or why a workspace has no Git details. The
- * working-tree state is left out until it has loaded.
+ * Decimal units, as the iOS storage pages use: "12 KB", "4.2 MB", "1.3 GB". A size measured up to
+ * its bound reads "Over 42 MB"; a workspace without files reads "Empty".
+ */
+export function formatWorkspaceSize(size: ManagedWorkspaceSize): string {
+  if (size.files === 0 && !size.truncated) {
+    return 'Empty';
+  }
+  const bytes = Number.isFinite(size.bytes) ? Math.max(0, size.bytes) : 0;
+  let amount: string;
+  if (bytes >= 999_500_000) {
+    amount = `${decimal(bytes / 1e9)} GB`;
+  } else if (bytes >= 999_500) {
+    amount = `${decimal(bytes / 1e6)} MB`;
+  } else {
+    amount = `${String(Math.max(bytes > 0 ? 1 : 0, Math.round(bytes / 1e3)))} KB`;
+  }
+  return size.truncated ? `Over ${amount}` : amount;
+}
+
+/**
+ * "main · 2 changed · 42 MB · github.com/owner/repo", or why a workspace has no Git details. The
+ * working-tree state and size are left out until they have loaded.
  */
 export function managedWorkspaceSubtitle(
   entry: ManagedWorkspaceSummary,
-  changedFiles?: number,
+  state?: WorkspaceRowState,
 ): string {
+  const size = state?.size ? formatWorkspaceSize(state.size) : null;
   if (!entry.isRepository) {
-    return 'Not a Git repository';
+    return size ? `Not a Git repository · ${size}` : 'Not a Git repository';
   }
   const origin = entry.origin
     ?.replace(/^https?:\/\//u, '')
@@ -66,7 +97,8 @@ export function managedWorkspaceSubtitle(
     .replace(/\/+$/u, '');
   const parts = [
     entry.branch ?? null,
-    workingTreeLabel(changedFiles),
+    workingTreeLabel(state?.changedFiles),
+    size,
     origin ?? 'No remote',
   ].filter(Boolean);
   return parts.length ? parts.join(' · ') : 'Git repository';
@@ -74,7 +106,7 @@ export function managedWorkspaceSubtitle(
 
 function WorkspaceRow({
   entry,
-  changedFiles,
+  state,
   first,
   last,
   selected,
@@ -85,7 +117,7 @@ function WorkspaceRow({
   onOpenMenu,
 }: {
   entry: ManagedWorkspaceSummary;
-  changedFiles: number | undefined;
+  state: WorkspaceRowState | undefined;
   first: boolean;
   last: boolean;
   selected: boolean;
@@ -96,7 +128,7 @@ function WorkspaceRow({
   onOpenMenu: (target: View | null) => void;
 }) {
   const rowRef = useRef<View>(null);
-  const subtitle = managedWorkspaceSubtitle(entry, changedFiles);
+  const subtitle = managedWorkspaceSubtitle(entry, state);
   return (
     <View
       style={[
@@ -390,7 +422,7 @@ export function ManagedWorkspacePicker(props: ManagedWorkspacePickerProps) {
           renderItem={({ item, index }) => (
             <WorkspaceRow
               entry={item}
-              changedFiles={props.changedFiles?.[item.path]}
+              state={props.states?.[item.path]}
               first={index === 0}
               last={index === entries.length - 1}
               selected={item.path === props.selectedPath}

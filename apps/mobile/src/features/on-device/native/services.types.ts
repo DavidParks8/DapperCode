@@ -6,6 +6,7 @@ import type {
   LocalGitStatus,
   LocalSearchResult,
   LocalWorkspace,
+  LocalWorkspaceSize,
 } from '../workspaces/types';
 import type { DeviceMemory, LocalModelFile, LocalModelPaths } from '../models/types';
 import type {
@@ -14,7 +15,7 @@ import type {
   NativeModelVerificationProgress,
 } from '../models/downloadState';
 
-export const ON_DEVICE_NATIVE_API_VERSION = 8;
+export const ON_DEVICE_NATIVE_API_VERSION = 9;
 
 /** Native event carrying throttled clone, fetch, pull, and push progress (API 8). */
 export const GIT_TRANSFER_PROGRESS_EVENT = 'onGitTransferProgress';
@@ -67,6 +68,11 @@ export interface OnDeviceNativeServices {
    * branches, or metadata (including agent tool edits). Compare tokens to decide when to refresh.
    */
   getWorkspaceChangeToken(id: string): Promise<string>;
+  /**
+   * Allocated size of the workspace's files, Git metadata included (API 9). Symbolic links are
+   * never followed. The walk is bounded by entry count and time; `truncated` marks a lower bound.
+   */
+  getWorkspaceSize(id: string): Promise<LocalWorkspaceSize>;
   listWorkspaceFiles(id: string, path: string, limit: number): Promise<LocalDirectoryListing>;
   readWorkspaceFile(
     id: string,

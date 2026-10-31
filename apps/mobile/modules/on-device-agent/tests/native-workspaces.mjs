@@ -71,6 +71,7 @@ export default async function scenario(e2e) {
           path.join(module, 'ios/NativeGitRemote.swift'),
           path.join(module, 'ios/WorkspaceStore.swift'),
           path.join(module, 'ios/WorkspaceFileTools.swift'),
+          path.join(module, 'ios/WorkspaceSize.swift'),
           path.join(module, 'ios/WorkspaceGitTools.swift'),
           path.join(module, 'tests/NativeWorkspaceTests.swift'),
           path.join(module, 'tests/NativeTestHost.swift'),

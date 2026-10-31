@@ -267,8 +267,59 @@ func runNativeGate() async throws {
   try check(
     boundedDirectories.truncated && boundedDirectories.visitedEntries == 2000,
     "empty directory trees cannot bypass search limits")
+  try await runSizeGate(store)
   try await runLifecycleGate(store)
   print("NATIVE_WORKSPACE_PASS")
+}
+
+private func runSizeGate(_ store: WorkspaceStore) async throws {
+  let sized = try await store.createWorkspace(name: "Sized")
+  let id = sized.workspace.id
+  let root = try await store.resolve(id, path: "", allowRoot: true)
+  _ = try await store.writeFile(id, path: "README.md", content: "hello\n", expectedRevision: nil)
+  _ = try await store.writeFile(
+    id, path: "src/app.txt", content: String(repeating: "a", count: 10_000), expectedRevision: nil)
+  let objects = root.appendingPathComponent(".git/objects", isDirectory: true)
+  try FileManager.default.createDirectory(at: objects, withIntermediateDirectories: true)
+  try Data(count: 20_000).write(to: objects.appendingPathComponent("pack"))
+  let outside = FileManager.default.temporaryDirectory.appendingPathComponent(
+    "size-outside-\(id)", isDirectory: true)
+  try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+  try Data(count: 4 * 1024 * 1024).write(to: outside.appendingPathComponent("large.bin"))
+  try FileManager.default.createSymbolicLink(
+    at: root.appendingPathComponent("linked-folder"), withDestinationURL: outside)
+  try FileManager.default.createSymbolicLink(
+    at: root.appendingPathComponent("linked-file"),
+    withDestinationURL: outside.appendingPathComponent("large.bin"))
+
+  let size = try await store.workspaceSize(id)
+  try check(
+    size.files == 3 && !size.truncated,
+    "workspace size counts regular files, Git metadata included, and never follows symlinks")
+  try check(
+    size.bytes >= 30_006 && size.bytes < 1024 * 1024,
+    "workspace size reports allocated bytes without the symlinked files outside the workspace")
+  try check(
+    size.payload["bytes"] as? Int64 == size.bytes && size.payload["truncated"] as? Bool == false,
+    "workspace size payload carries bytes, files, and truncation")
+  let byEntries = try WorkspaceStore.measure(root, entryLimit: 2, timeBudget: 60)
+  try check(
+    byEntries.truncated && byEntries.files <= 2, "workspace size stops at its entry bound")
+  let byTime = try WorkspaceStore.measure(root, entryLimit: 1000, timeBudget: 0)
+  try check(
+    byTime.truncated && byTime.files == 0 && byTime.bytes == 0,
+    "workspace size stops at its time budget")
+  try await rejected("workspace size rejects malformed IDs", code: .workspaceInvalidID) {
+    _ = try await store.workspaceSize("not-a-workspace")
+  }
+  try await rejected("workspace size rejects missing IDs", code: .workspaceRequired) {
+    _ = try await store.workspaceSize("")
+  }
+  try await store.deleteWorkspace(id)
+  try await rejected("workspace size rejects deleted workspaces", code: .workspaceNotFound) {
+    _ = try await store.workspaceSize(id)
+  }
+  try FileManager.default.removeItem(at: outside)
 }
 
 private func runLifecycleGate(_ store: WorkspaceStore) async throws {

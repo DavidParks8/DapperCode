@@ -125,7 +125,7 @@ items below were defects of the legacy kit or legacy screens.
 | 66 | Wrong empty-diff copy | Fixed by removal | #67; wave 3 legacy sweep | The copy exists only in legacy `GitScreen.tsx`; the shared Git screen has correct copy | GitScreen.local |
 | 67 | Commit field single-line | Fixed | #67 | Shared multiline commit field (`features/git/screen/sections/ReviewSection.tsx`) | — (visual) |
 | 68 | Files shows "." and text prefixes | Fixed | #67 | Workspace name title; folder icons | Files Screen "shows the workspace name at the root and folders by icon…" |
-| 69 | Workspaces form muddled | Partially fixed | #67, #76 | Managed picker with branch/origin and New/Clone rows. `workspace/states` adds **Clean**/**N changed** per repository after the list renders, cached per workspace until its change token moves. The workspace in use has a checkmark and `accessibilityState.selected`, does nothing when tapped, and has no **Use** menu action. Remaining: workspace size, which needs a native folder-size API that does not exist yet | ManagedView "lists workspaces with Git metadata…", "loads working-tree state after the list and rereads it only when a workspace changes", "keeps the workspace in use checked and inert", "summarizes Git state" |
+| 69 | Workspaces form muddled | Fixed | #67, #76, #77 | Managed picker with branch/origin and New/Clone rows. `workspace/states` adds **Clean**/**N changed** per repository and every workspace's size ("main · Clean · 42 MB · github.com/…", "Over 42 MB" for a bounded walk) after the list renders, both cached per workspace until its change token moves. Size comes from native `getWorkspaceSize` (ABI 9, `modules/on-device-agent/ios/WorkspaceSize.swift`): allocated bytes, `.git` included, symlinks never followed, at most 50,000 entries or 2 s, off the workspace actor. The workspace in use has a checkmark and `accessibilityState.selected`, does nothing when tapped, and has no **Use** menu action. The native walk was typechecked, not run on a simulator or device (see [Gaps](#gaps)) | ManagedView "lists workspaces with Git metadata…", "loads working-tree state and size after the list and rereads them only when a workspace changes", "keeps the workspace in use checked and inert", "summarizes Git state", "formats workspace sizes…"; runtimePort "reports native workspace sizes with Git state and measures again only after a change"; native `NativeWorkspaceTests.swift` size gate |
 | 70 | Developer paragraph; plain code | Fixed | #69 | Large monospace code; "Unavailable" without configuration text | LocalGitAccountScreen "hides build configuration details…", "shows and copies the device code…" |
 | 71 | Chat header differs from bridge | Fixed | #65, #68 | Shared `ChatHeader`; single-mode chip hidden | HeaderAndWorkflow "hides the agent mode chip when the agent offers only one mode"; MainScreen.local |
 | 72 | Grey shadow band above the composer | Fixed by removal | #65; wave 3 legacy sweep | Local chats use `MainScreen`'s overlay composer | MainScreen.local; layout e2e covers the shared composer |
@@ -242,7 +242,10 @@ legacy test IDs and is updated by the wave 3 legacy sweep.
    returned 69. For the same reason, #121's native event delivery (`Events`/`sendEvent` and the
    `NativeGitTestApp.swift` observer check) was typechecked with `swiftc` against the module sources
    and a stub of the ExpoModulesCore API, and its throttling was exercised in a macOS harness, but it
-   was not run in the simulator.
+   was not run in the simulator. #69's `getWorkspaceSize` and its `NativeWorkspaceTests.swift` size
+   gate (symlinks, `.git`, entry and time bounds, typed errors) were likewise only typechecked with
+   `swiftc` against an ExpoModulesCore stub; the walk's speed on a large repository is unmeasured on
+   device.
 2. **Excluded by user (#117):** confirmations for #34, #93, #105, #110, and #117.
 3. **Depends on the wave 3 legacy sweep:** the "Fixed by removal" rows (#50–#57, #66, #72, #73,
    #79–#81, #83, #87, #88, #90, #94–#96, #107) are complete once the sweep deletes the legacy

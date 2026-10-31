@@ -19,6 +19,8 @@ See [product setup and limitations](../../../../docs/on-device.md).
   publication, rename, deletion (atomically unpublished before removal), containment, revision
   checks, bounded UTF-8 operations, and an in-memory per-workspace change token. The workspace root is
   the empty path; `"."` is accepted as a root alias where the root is allowed.
+  `WorkspaceSize.swift` measures a workspace's allocated bytes (`.git` included, symlinks never
+  followed) off the actor, bounded to 50,000 entries or 2 seconds, and reports `truncated`.
 - `ios/NativeServiceError.swift` defines the stable error codes. Every workspace, Git, and credential
   failure is described as `[ondevice:CODE] message`; `src/features/on-device/native/services.errors.ts`
   maps Expo's wrapped rejections to `OnDeviceNativeError` with that code and a clean message. Model
@@ -41,10 +43,10 @@ See [product setup and limitations](../../../../docs/on-device.md).
   written releases the transfer and records the failure. Checkpoints from the earlier
   JavaScript transfer (`resume.json`) are imported on the next resume.
   `RuntimeDocumentStore.swift` owns separate atomic, size-limited local journals/preferences.
-- The native ABI is versioned (currently 8: workspace rename/delete, change tokens, UI file
+- The native ABI is versioned (currently 9: workspace rename/delete, change tokens, UI file
   rename/delete, fetch/pull, init, branch creation, discard, remote-aware status, typed errors,
-  background model downloads, verification progress/cancellation, storage info, and Git transfer
-  progress events). An old binary is
+  background model downloads, verification progress/cancellation, storage info, Git transfer
+  progress events, and workspace size). An old binary is
   rejected before loading model variants that need the newer inference engine, including
   Bonsai 2's activation transforms.
 - `scripts/build-git.mjs` builds pinned libgit2 1.9.7 for iOS arm64 and simulator arm64/x86_64.
