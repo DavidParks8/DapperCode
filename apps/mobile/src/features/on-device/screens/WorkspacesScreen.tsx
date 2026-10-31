@@ -1,4 +1,3 @@
-import { useRouter } from 'expo-router';
 import { useState } from 'react';
 
 import { useOnDeviceRuntime } from '../runtime/OnDeviceProvider';
@@ -7,7 +6,6 @@ import { GitTransferProgress } from './GitTransferProgress';
 
 export function LocalWorkspacesScreen() {
   const runtime = useOnDeviceRuntime();
-  const router = useRouter();
   const operation = useLocalOperation();
   const [name, setName] = useState('');
   const [remote, setRemote] = useState('');
@@ -68,12 +66,6 @@ export function LocalWorkspacesScreen() {
             title={`Use ${workspace.name}`}
             disabled={operation.busy}
             onPress={() => operation.run(() => runtime.selectWorkspace(workspace.id))}
-          />
-          <LocalAction
-            title={`Browse ${workspace.name}`}
-            onPress={() =>
-              router.push({ pathname: '/on-device/files', params: { workspaceId: workspace.id } })
-            }
           />
         </LocalCard>
       ))}

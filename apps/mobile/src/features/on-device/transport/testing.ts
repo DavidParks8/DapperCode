@@ -3,8 +3,17 @@ import type { LocalModelDefinition } from '../models/types';
 import { localModelDefinition } from '../models/catalog';
 import type { LocalRunSnapshot } from '../runtime/agentLoop';
 import type { LocalMessage, LocalThread } from '../runtime/types';
+import { OnDeviceNativeError } from '../native/services.errors';
 import type { LocalWorkspace } from '../workspaces/types';
-import type { LocalAgentPort, LocalGitPort } from './port';
+import type { LocalAgentPort, LocalFilesPort, LocalGitPort, LocalWorkspaceAdminPort } from './port';
+
+/** A typed native failure, as the native module reports it, for tests outside `on-device`. */
+export function fakeNativeError(
+  code: ConstructorParameters<typeof OnDeviceNativeError>[0],
+  message: string,
+): Error {
+  return new OnDeviceNativeError(code, message);
+}
 
 const IDLE: LocalRunSnapshot = {
   phase: 'idle',
@@ -62,6 +71,14 @@ export class FakeAgentPort implements LocalAgentPort {
       omittedFiles: 0,
       maxFiles: 500,
       maxBytes: 1_000_000,
+      stagedFiles: 0,
+      hasOrigin: false,
+      origin: null,
+      upstream: null,
+      ahead: null,
+      behind: null,
+      detached: false,
+      unborn: false,
     }),
     diff: async () => ({
       diff: 'diff --git a/README.md b/README.md\n+hello\n',
@@ -99,7 +116,124 @@ export class FakeAgentPort implements LocalAgentPort {
     push: async (...args: unknown[]) => {
       this.calls.push(`git.push:${JSON.stringify(args)}`);
     },
+    fetch: async (...args: unknown[]) => {
+      this.calls.push(`git.fetch:${JSON.stringify(args)}`);
+    },
+    pull: async (...args: unknown[]) => {
+      this.calls.push(`git.pull:${JSON.stringify(args)}`);
+      return { outcome: 'fast-forwarded', from: 'aaaaaaa', to: 'bbbbbbbbbb' };
+    },
+    init: async (id: string, ...args: unknown[]) => {
+      this.calls.push(`git.init:${JSON.stringify([id, ...args])}`);
+      const workspace = this.workspaceList.find((entry) => entry.id === id);
+      return { id, name: workspace?.name ?? id, isRepository: true };
+    },
+    discard: async (...args: unknown[]) => {
+      this.calls.push(`git.discard:${JSON.stringify(args)}`);
+    },
+    createBranch: async (...args: unknown[]) => {
+      this.calls.push(`git.createBranch:${JSON.stringify(args)}`);
+    },
   };
+  networkValue: 'online' | 'offline' | 'unknown' = 'online';
+  /** Workspace files keyed by `${workspaceId}:${path}`; directories are implied by their files. */
+  readonly fileMap = new Map<string, string>();
+  readonly workspaceAdmin: LocalWorkspaceAdminPort = {
+    create: async (name) => {
+      this.calls.push(`workspace.create:${name}`);
+      const workspace = { id: `ws-${String(++this.counter)}`, name, isRepository: false };
+      this.workspaceList = [...this.workspaceList, workspace];
+      return workspace;
+    },
+    select: async (id) => {
+      this.calls.push(`workspace.select:${id}`);
+      this.defaultValues = { ...this.defaultValues, workspaceId: id };
+    },
+    rename: async (id, name) => {
+      this.calls.push(`workspace.rename:${id}:${name}`);
+      this.workspaceList = this.workspaceList.map((entry) =>
+        entry.id === id ? { ...entry, name } : entry,
+      );
+      return (
+        this.workspaceList.find((entry) => entry.id === id) ?? { id, name, isRepository: false }
+      );
+    },
+    delete: async (id) => {
+      this.calls.push(`workspace.delete:${id}`);
+      this.workspaceList = this.workspaceList.filter((entry) => entry.id !== id);
+    },
+    clone: async (name, url) => {
+      this.calls.push(`workspace.clone:${name}:${url}`);
+      const workspace = { id: `ws-${String(++this.counter)}`, name, isRepository: true };
+      this.workspaceList = [...this.workspaceList, workspace];
+      return workspace;
+    },
+    cloneProgress: () => ({ active: false, cancelled: false, completed: 0, total: 0 }),
+    cancelTransfer: () => {
+      this.calls.push('workspace.cancelTransfer');
+    },
+    changeToken: async (id) => `token-${id}-${String(this.fileMap.size)}`,
+    metadata: async () => ({ branch: 'main', origin: 'https://github.com/acme/demo.git' }),
+  };
+  readonly files: LocalFilesPort = {
+    list: async (id, path, limit) => {
+      const prefix = path ? `${id}:${path}/` : `${id}:`;
+      const names = new Map<string, { kind: 'file' | 'directory'; bytes: number }>();
+      for (const [key, content] of this.fileMap) {
+        if (!key.startsWith(prefix)) {
+          continue;
+        }
+        const [name, ...rest] = key.slice(prefix.length).split('/');
+        if (name) {
+          names.set(
+            name,
+            rest.length
+              ? { kind: 'directory', bytes: 0 }
+              : {
+                  kind: 'file',
+                  bytes: content.length,
+                },
+          );
+        }
+      }
+      const entries = [...names].map(([name, value]) => ({ name, ...value }));
+      return { entries: entries.slice(0, limit), truncated: entries.length > limit };
+    },
+    read: async (id, path, offset, limit) => {
+      const content = this.fileMap.get(`${id}:${path}`);
+      if (content === undefined) {
+        throw new OnDeviceNativeError('PATH_NOT_FOUND', 'The path does not exist.');
+      }
+      const end = Math.min(content.length, offset + limit);
+      return {
+        path,
+        content: content.slice(offset, end),
+        revision: `rev-${String(content.length)}`,
+        nextOffset: end < content.length ? end : null,
+        totalBytes: content.length,
+      };
+    },
+    write: async (id, path, content, revision) => {
+      this.calls.push(`files.write:${JSON.stringify([id, path, revision])}`);
+      const existing = this.fileMap.get(`${id}:${path}`);
+      if ((existing === undefined) !== (revision === null)) {
+        throw new OnDeviceNativeError('FILE_REVISION_CONFLICT', 'The file changed.');
+      }
+      this.fileMap.set(`${id}:${path}`, content);
+      return `rev-${String(content.length)}`;
+    },
+    rename: async (id, path, destination) => {
+      this.calls.push(`files.rename:${JSON.stringify([id, path, destination])}`);
+      const content = this.fileMap.get(`${id}:${path}`) ?? '';
+      this.fileMap.delete(`${id}:${path}`);
+      this.fileMap.set(`${id}:${destination}`, content);
+    },
+    remove: async (id, path) => {
+      this.calls.push(`files.remove:${JSON.stringify([id, path])}`);
+      this.fileMap.delete(`${id}:${path}`);
+    },
+  };
+  network = () => this.networkValue;
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);

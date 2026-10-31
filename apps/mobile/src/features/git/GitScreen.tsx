@@ -15,6 +15,9 @@ import { useAccessibilityAnnouncement } from '@shared/accessibility';
 import { approvalModeAtom } from '@shell/state/appState/settings';
 import { useBridgeApi } from '@shell/state/bridge/hooks';
 import { closeGitAtom, gitChatUpdatedAtom } from '@shell/navigation/actions';
+import { activeProfileFeaturesAtom } from '@shell/state/bridge/atoms';
+import { workspaceHostClientAtom } from '../workspace/api/atoms';
+import { openWorkspaceFilesAtom } from '../workspace/files/navigation';
 import { useAppTheme } from '@shared/theme';
 import { GitScreenBranchSummarySection } from './screen/sections/BranchSummarySection';
 import { GitScreenCommitHistorySection } from './screen/sections/CommitHistorySection';
@@ -22,6 +25,7 @@ import { GitScreenDiffSection } from './screen/sections/DiffSection';
 import { GitScreenHeaderSection } from './screen/sections/HeaderSection';
 import { GitScreenReviewSection } from './screen/sections/ReviewSection';
 import { GitScreenWorkspaceSection } from './screen/sections/WorkspaceSection';
+import { GitNotice, GitRepositorySetupSection } from './screen/sections/HostSections';
 import { useGitScreenController } from './controller/screenController';
 import { createGitScreenStyles } from './styles/screenStyles';
 
@@ -37,6 +41,9 @@ export function GitScreen({ chat }: GitScreenProps) {
   const approvalMode = useAtomValue(approvalModeAtom);
   const onBack = useSetAtom(closeGitAtom);
   const onChatUpdated = useSetAtom(gitChatUpdatedAtom);
+  const features = useAtomValue(activeProfileFeaturesAtom);
+  const host = useAtomValue(workspaceHostClientAtom);
+  const openFilesRoute = useSetAtom(openWorkspaceFilesAtom);
 
   const controller = useGitScreenController({
     api,
@@ -44,7 +51,13 @@ export function GitScreen({ chat }: GitScreenProps) {
     approvalMode,
     onBack,
     onChatUpdated,
+    features,
+    host,
   });
+  const openFiles =
+    features.workspaceFiles && controller.requestedCwd
+      ? () => openFilesRoute({ cwd: controller.requestedCwd ?? '', chatId: chat.id })
+      : undefined;
 
   useAccessibilityAnnouncement(controller.error);
   useAccessibilityAnnouncement(
@@ -58,7 +71,11 @@ export function GitScreen({ chat }: GitScreenProps) {
             ? 'Pushing changes'
             : controller.switchingBranch
               ? 'Switching branch'
-              : null,
+              : controller.syncing === 'fetch'
+                ? 'Fetching from origin'
+                : controller.syncing === 'pull'
+                  ? 'Pulling from origin'
+                  : null,
   );
 
   const inlineToolbar = useInlineToolbar();
@@ -79,6 +96,17 @@ export function GitScreen({ chat }: GitScreenProps) {
       group: 'action',
       disabled: refreshing,
     },
+    ...(openFiles
+      ? [
+          {
+            key: 'files',
+            icon: 'document-text-outline',
+            label: 'Browse files',
+            onPress: openFiles,
+            group: 'action',
+          } satisfies SceneToolbarItem,
+        ]
+      : []),
   ];
 
   return (
@@ -99,7 +127,12 @@ export function GitScreen({ chat }: GitScreenProps) {
           nestedScrollEnabled
           keyboardShouldPersistTaps="handled"
         >
-          <GitScreenWorkspaceSection controller={controller} styles={styles} theme={theme} />
+          <GitScreenWorkspaceSection
+            controller={controller}
+            styles={styles}
+            theme={theme}
+            onOpenFiles={openFiles}
+          />
 
           {controller.loading ? (
             <ActivityIndicator
@@ -108,6 +141,8 @@ export function GitScreen({ chat }: GitScreenProps) {
               color={theme.colors.textPrimary}
               style={styles.loader}
             />
+          ) : controller.notRepository ? (
+            <GitRepositorySetupSection controller={controller} styles={styles} theme={theme} />
           ) : (
             <Animated.View entering={FadeIn.duration(200)}>
               <GitScreenBranchSummarySection
@@ -123,6 +158,8 @@ export function GitScreen({ chat }: GitScreenProps) {
               <GitScreenDiffSection controller={controller} styles={styles} theme={theme} />
             </Animated.View>
           )}
+
+          <GitNotice controller={controller} styles={styles} />
 
           {controller.error ? (
             <Text
