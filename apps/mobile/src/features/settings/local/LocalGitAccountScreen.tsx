@@ -13,7 +13,13 @@ import { SettingsGroup, SettingsNotice, SettingsRow } from '../SettingsList';
 import { useLocalRuntime } from './hooks';
 import { SettingsButtonRow, SettingsInlineActions, SettingsTextFieldRow } from './localSettingsUi';
 import { SettingsSubpage } from './SettingsSubpage';
-import { cancelLocalSignIn, IDLE_SIGN_IN, localSignInAtom, startLocalSignIn } from './signIn';
+import {
+  cancelLocalSignIn,
+  IDLE_SIGN_IN,
+  localSignInAtom,
+  resetLocalSignIn,
+  startLocalSignIn,
+} from './signIn';
 
 const PREFERENCE_SLICES: readonly OnDeviceRuntimeSlice[] = ['preferences'];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -65,9 +71,7 @@ function GitHubSection() {
       ? `GitHub code ${spokenCode(signIn.authorization.userCode)}${
           signIn.copied ? ', copied to the clipboard' : ''
         }.`
-      : signIn.completedLogin
-        ? `Signed in to GitHub as ${signIn.completedLogin}.`
-        : null,
+      : null,
   );
 
   if (account) {
@@ -86,6 +90,7 @@ function GitHubSection() {
               setSignOutError(null);
               runtime
                 .signOut()
+                .then(() => resetLocalSignIn(store, runtime))
                 .catch((error: unknown) =>
                   setSignOutError(
                     error instanceof Error ? error.message : 'Could not sign out. Try again.',

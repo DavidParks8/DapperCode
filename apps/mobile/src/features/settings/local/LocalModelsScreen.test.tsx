@@ -56,6 +56,7 @@ beforeEach(() => {
   announce = jest
     .spyOn(AccessibilityInfo, 'announceForAccessibility')
     .mockImplementation(() => undefined);
+  announce.mockClear();
 });
 
 afterEach(() => {
@@ -115,6 +116,35 @@ describe('Models settings', () => {
     act(() => runtime.setDownload('qwen35-2b-q4-k-m', { phase: 'ready' }));
     expect(announce).toHaveBeenCalledWith('Qwen3.5 2B Q4_K_M downloaded.');
     expect(screen.queryAllByTestId('local-model-qwen35-2b-q4-k-m')).toHaveLength(0);
+  });
+
+  it('announces each change once while a family page is stacked on the Models page', () => {
+    const runtime = new FakeSettingsRuntime();
+    router.replace({
+      pathname: '/profiles/[profileId]/settings/models/[familyId]',
+      params: { profileId: 'on-device', familyId: 'qwen3.5' },
+    });
+    const { rerender } = render(
+      wrap(
+        runtime,
+        <>
+          <LocalModelsScreen />
+          <LocalModelFamilyScreen />
+        </>,
+      ),
+    );
+    act(() =>
+      runtime.setDownload('qwen35-0.8b-q4-0', { phase: 'downloading', totalBytes: 740 * MB }),
+    );
+    expect(
+      announce.mock.calls.filter(([message]) => message === 'Downloading Qwen3.5 0.8B Q4_0.'),
+    ).toHaveLength(1);
+
+    // Popping the family page leaves the Models page as the only announcer.
+    rerender(wrap(runtime, <LocalModelsScreen />));
+    announce.mockClear();
+    act(() => runtime.setDownload('qwen35-0.8b-q4-0', { phase: 'ready' }));
+    expect(announce.mock.calls).toEqual([['Qwen3.5 0.8B Q4_0 downloaded.']]);
   });
 
   it('shows storage used and free, and finds families by size or quant', () => {

@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Provider, createStore } from 'jotai';
 import type { ReactNode } from 'react';
-import { Alert, Linking } from 'react-native';
+import { AccessibilityInfo, Alert, Linking } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { resetRouterMock } from '@shared/testing/expoRouterMock';
@@ -103,6 +103,42 @@ describe('Git & GitHub settings', () => {
     expect(screen.queryByText('WDJB-MJHT')).toBeNull();
     expect(screen.getByTestId('settings-local-github-sign-in')).toBeTruthy();
     expect(screen.queryByText(/cancelled/)).toBeNull();
+  });
+
+  it('announces a completed sign-in once, never on later visits or after signing out', async () => {
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => undefined);
+    announce.mockClear();
+    const runtime = new FakeSettingsRuntime();
+    const store = createStore();
+    const first = render(wrap(runtime, store, <LocalGitAccountScreen />));
+    await startSignIn(runtime);
+    await act(async () => {
+      await runtime.completeSignIn({
+        providerId: 'github',
+        host: 'github.com',
+        id: '42',
+        login: 'octocat',
+        credentialRef: 'ref',
+      });
+    });
+    const signedIn = (call: unknown[]) => String(call[0]).startsWith('Signed in to GitHub');
+    expect(announce.mock.calls.filter(signedIn)).toEqual([['Signed in to GitHub as octocat.']]);
+    first.unmount();
+
+    announce.mockClear();
+    const revisit = render(wrap(runtime, store, <LocalGitAccountScreen />));
+    expect(announce.mock.calls.filter(signedIn)).toHaveLength(0);
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('settings-local-github-sign-out'));
+    });
+    revisit.unmount();
+
+    render(wrap(runtime, store, <LocalGitAccountScreen />));
+    expect(screen.getByTestId('settings-local-github-sign-in')).toBeTruthy();
+    expect(announce.mock.calls.filter(signedIn)).toHaveLength(0);
+    announce.mockRestore();
   });
 
   it('hides build configuration details when sign-in is unavailable', () => {

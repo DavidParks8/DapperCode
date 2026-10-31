@@ -1,5 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import { atom, type createStore } from 'jotai';
+import { AccessibilityInfo } from 'react-native';
 
 import { GitAuthenticationError, type GitDeviceAuthorization } from '../../on-device/auth/strategy';
 import type { OnDeviceRuntime } from '../../on-device/runtime/runtime';
@@ -14,8 +15,6 @@ export interface LocalSignInState {
   /** True once the code was placed on the clipboard automatically. */
   copied: boolean;
   error: string | null;
-  /** The account that just finished signing in, for confirmation. */
-  completedLogin: string | null;
 }
 
 export const IDLE_SIGN_IN: LocalSignInState = {
@@ -24,7 +23,6 @@ export const IDLE_SIGN_IN: LocalSignInState = {
   authorization: null,
   copied: false,
   error: null,
-  completedLogin: null,
 };
 
 /**
@@ -65,11 +63,12 @@ export function startLocalSignIn(store: Store, runtime: OnDeviceRuntime): void {
     })
     .then(() => {
       if (owns()) {
-        store.set(localSignInAtom, {
-          ...IDLE_SIGN_IN,
-          runtime,
-          completedLogin: runtime.preferences().account?.login ?? null,
-        });
+        store.set(localSignInAtom, { ...IDLE_SIGN_IN, runtime });
+        // Announced once, when it happens; the signed-in row states it from then on.
+        const login = runtime.preferences().account?.login;
+        if (login) {
+          AccessibilityInfo.announceForAccessibility(`Signed in to GitHub as ${login}.`);
+        }
       }
     })
     .catch((error: unknown) => {
@@ -94,4 +93,11 @@ export function cancelLocalSignIn(store: Store, runtime: OnDeviceRuntime): void 
   }
   store.set(localSignInAtom, { ...IDLE_SIGN_IN, runtime });
   runtime.authentication.cancelSignIn();
+}
+
+/** Forgets the last attempt's code and error, for example after signing out. */
+export function resetLocalSignIn(store: Store, runtime: OnDeviceRuntime): void {
+  if (store.get(localSignInAtom).runtime === runtime) {
+    store.set(localSignInAtom, { ...IDLE_SIGN_IN, runtime });
+  }
 }

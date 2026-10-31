@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import { AccessibilityInfo, AppState } from 'react-native';
 
 import type { DeviceMemory } from '../../on-device/models/types';
@@ -134,13 +135,33 @@ function transferAnnouncement(kind: string, name: string, error: string | null):
  * that showed the transfer leaves the screen (a finished download leaves the Downloads group).
  * States that were already present when the page appeared are not announced.
  */
+/** Focused model pages, most recently focused last; only the last one announces. */
+const focusedAnnouncers: object[] = [];
+
 export function useModelAnnouncements(): void {
   const runtime = useLocalRuntime();
   const key = useOnDeviceSelector(transferKinds, ANNOUNCEMENT_SLICES);
   const previous = useRef(key);
+  const token = useRef<object>({});
+  // Pages pushed onto Settings stay mounted underneath; only the focused one may announce.
+  useFocusEffect(
+    useCallback(() => {
+      const owner = token.current;
+      focusedAnnouncers.push(owner);
+      return () => {
+        const index = focusedAnnouncers.lastIndexOf(owner);
+        if (index >= 0) {
+          focusedAnnouncers.splice(index, 1);
+        }
+      };
+    }, []),
+  );
   useEffect(() => {
     const before = parseKinds(previous.current);
     previous.current = key;
+    if (focusedAnnouncers.at(-1) !== token.current) {
+      return;
+    }
     for (const [id, now] of parseKinds(key)) {
       const was = before.get(id);
       const model = LOCAL_MODEL_CATALOG.find((entry) => entry.id === id);
