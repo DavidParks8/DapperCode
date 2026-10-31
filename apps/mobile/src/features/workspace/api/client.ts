@@ -1,5 +1,8 @@
+import type { RpcNotification } from '@bridge/types/types';
+import { readFiniteNumber } from '@shared/runtimeValidation';
 import {
   WORKSPACE_HOST_METHODS as M,
+  WORKSPACE_HOST_NOTIFICATIONS,
   type CloneProgressResponse,
   type GitPullResponse,
   type ManagedWorkspaceResponse,
@@ -12,6 +15,21 @@ import {
 /** The part of `HostBridgeWsClient` the extensions need, so tests can pass a plain fake. */
 export interface WorkspaceHostTransport {
   request<T>(method: string, params?: unknown): Promise<T>;
+  onEvent(listener: (event: RpcNotification) => void): () => void;
+}
+
+function readCloneProgress(params: Record<string, unknown> | null): CloneProgressResponse | null {
+  const completed = readFiniteNumber(params?.['completed']);
+  const total = readFiniteNumber(params?.['total']);
+  if (!params || completed === null || total === null) {
+    return null;
+  }
+  return {
+    active: params['active'] === true,
+    cancelled: params['cancelled'] === true,
+    completed,
+    total,
+  };
 }
 
 /** Typed client for the workspace host extensions in `protocol.ts`. */
@@ -37,8 +55,21 @@ export class WorkspaceHostClient {
   changeToken(cwd: string): Promise<{ token: string }> {
     return this.transport.request(M.workspaceChangeToken, { cwd });
   }
+  /** One read of the host's transfer progress; use `onCloneProgress` to follow it. */
   cloneProgress(): Promise<CloneProgressResponse> {
     return this.transport.request(M.cloneProgress, {});
+  }
+  /** Progress pushed by the host while a Git transfer runs; returns the unsubscribe function. */
+  onCloneProgress(listener: (progress: CloneProgressResponse) => void): () => void {
+    return this.transport.onEvent((event) => {
+      if (event.method !== WORKSPACE_HOST_NOTIFICATIONS.cloneProgress) {
+        return;
+      }
+      const progress = readCloneProgress(event.params);
+      if (progress) {
+        listener(progress);
+      }
+    });
   }
   cancelClone(): Promise<{ ok: true }> {
     return this.transport.request(M.cloneCancel, {});

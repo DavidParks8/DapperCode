@@ -1,4 +1,5 @@
 import { LOCAL_MODEL_CATALOG } from '../models/catalog';
+import { GIT_TRANSFER_PROGRESS_EVENT } from '../native/services.types';
 import type { OnDeviceRuntime } from '../runtime/runtime';
 import type { OnDeviceRuntimeSlice } from '../runtime/types';
 import type { LocalAgentPort, LocalModelChoice } from './port';
@@ -117,6 +118,10 @@ export function createRuntimeAgentPort(runtime: OnDeviceRuntime): LocalAgentPort
       delete: (id) => runtime.workspaceAdmin.delete(id),
       clone: (name, url) => runtime.cloneWorkspace(name, url),
       cloneProgress: () => native.getGitTransferProgress(),
+      onCloneProgress: (listener) => {
+        const subscription = native.addListener(GIT_TRANSFER_PROGRESS_EVENT, listener);
+        return () => subscription.remove();
+      },
       cancelTransfer: () => native.cancelGitTransfer(),
       changeToken: (id) => native.getWorkspaceChangeToken(id),
       metadata: async (id) => {

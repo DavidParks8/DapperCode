@@ -186,6 +186,16 @@ export function localToolStatus(
   }
 }
 
+/** Like the bridge snapshot, an interrupted call keeps ACP's `failed` plus the flag. */
+function localSnapshotToolStatus(status: NonNullable<LocalMessage['tool']>['status']): {
+  status: string;
+  interrupted?: true;
+} {
+  return status === 'interrupted'
+    ? { status: 'failed', interrupted: true }
+    : { status: localToolStatus(status) };
+}
+
 function toolArguments(thread: LocalThread, callId: string): string | null {
   for (const message of thread.messages) {
     const call = message.toolCalls?.find((entry) => entry.id === callId);
@@ -412,9 +422,7 @@ export function localThreadSnapshot(
       id: tool.callId,
       generation: null,
       kind: described.kind,
-      // Like the bridge snapshot, an interrupted call keeps ACP's `failed` plus the flag.
-      status: tool.status === 'interrupted' ? 'failed' : localToolStatus(tool.status),
-      ...(tool.status === 'interrupted' ? { interrupted: true } : {}),
+      ...localSnapshotToolStatus(tool.status),
       title: described.title,
       startedAtMs: Date.parse(tool.startedAt),
       completedAtMs: tool.completedAt ? Date.parse(tool.completedAt) : null,

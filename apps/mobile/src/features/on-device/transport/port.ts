@@ -71,6 +71,15 @@ export interface LocalWorkspaceAdminPort {
   /** Clones an HTTPS remote into a new workspace and selects it. */
   clone(name: string, url: string): Promise<LocalWorkspace>;
   cloneProgress(): { active: boolean; cancelled: boolean; completed: number; total: number };
+  /** Native transfer progress as it changes; returns the unsubscribe function. */
+  onCloneProgress(
+    listener: (progress: {
+      active: boolean;
+      cancelled: boolean;
+      completed: number;
+      total: number;
+    }) => void,
+  ): () => void;
   cancelTransfer(): void;
   changeToken(id: string): Promise<string>;
   /** Current branch and origin URL; both null for workspaces without Git. */

@@ -241,6 +241,25 @@ describe('LocalBridgeServer workspaces', () => {
     expect(port.calls).toContain('workspace.cancelTransfer');
   });
 
+  it('forwards native transfer progress as host notifications until stopped', () => {
+    const { port, server } = setup();
+    const notifications: unknown[] = [];
+    server.onNotification((notification) => notifications.push(notification));
+
+    port.emitCloneProgress({ active: true, cancelled: false, completed: 5, total: 40 });
+    expect(notifications).toEqual([
+      {
+        method: 'workspace/clone/progressChanged',
+        params: { active: true, cancelled: false, completed: 5, total: 40 },
+      },
+    ]);
+
+    server.stop();
+    expect(port.cloneProgressListeners.size).toBe(0);
+    port.emitCloneProgress({ active: false, cancelled: false, completed: 40, total: 40 });
+    expect(notifications).toHaveLength(1);
+  });
+
   it('remembers the selected workspace for new chats', async () => {
     const { port, server } = setup();
     await expect(server.request('workspace/select', { cwd: DEMO })).resolves.toEqual({

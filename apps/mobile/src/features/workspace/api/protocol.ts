@@ -28,6 +28,12 @@ export const WORKSPACE_HOST_METHODS = {
   filesRemove: 'workspace/files/remove',
 } as const;
 
+/** Notifications a host may push for the extensions above; listeners ignore unknown methods. */
+export const WORKSPACE_HOST_NOTIFICATIONS = {
+  /** Params are a `CloneProgressResponse`, sent whenever the host's Git transfer progress moves. */
+  cloneProgress: 'workspace/clone/progressChanged',
+} as const;
+
 export type WorkspaceHostMethod =
   (typeof WORKSPACE_HOST_METHODS)[keyof typeof WORKSPACE_HOST_METHODS];
 

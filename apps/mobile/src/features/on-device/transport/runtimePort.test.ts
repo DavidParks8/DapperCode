@@ -122,6 +122,26 @@ function lifecycle(events: readonly ObservedEvent[]): EventType[] {
 }
 
 describe('the local transport over the real on-device runtime', () => {
+  it('forwards native Git transfer progress events and releases the native listener on stop', async () => {
+    const { fake, server, notifications } = await setup();
+    expect(fake.gitProgressListeners.size).toBe(1);
+
+    fake.emitGitTransferProgress({ active: true, cancelled: false, completed: 12, total: 48 });
+    expect(
+      notifications.filter(
+        (notification) => notification.method === 'workspace/clone/progressChanged',
+      ),
+    ).toEqual([
+      {
+        method: 'workspace/clone/progressChanged',
+        params: { active: true, cancelled: false, completed: 12, total: 48 },
+      },
+    ]);
+
+    server.stop();
+    expect(fake.gitProgressListeners.size).toBe(0);
+  });
+
   it('reports load progress before the run starts and records the message only after the load', async () => {
     const { runtime, events, activities, createChat, send } = await setup();
     const threadId = await createChat();

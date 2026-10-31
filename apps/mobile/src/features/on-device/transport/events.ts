@@ -2,8 +2,10 @@ import { EventType } from '@ag-ui/core';
 
 import { RUN_ACTIVITY_EVENT_NAME, type RunActivity } from '@bridge/runActivity';
 import { TOOL_META_EVENT_NAME } from '@bridge/toolMeta';
+import { WORKSPACE_HOST_NOTIFICATIONS } from '../../workspace/api/protocol';
 import type { LocalRunSnapshot } from '../runtime/agentLoop';
 import type { LocalMessage, LocalThread } from '../runtime/types';
+import type { LocalAgentPort } from './port';
 import {
   describeLocalToolMessage,
   localReasoningId,
@@ -16,6 +18,16 @@ import {
 export interface LocalNotification {
   method: string;
   params: Record<string, unknown>;
+}
+
+/** Forwards native Git transfer progress as host notifications; returns the unsubscribe. */
+export function forwardLocalCloneProgress(
+  port: LocalAgentPort,
+  publish: (notification: LocalNotification) => void,
+): () => void {
+  return port.workspaceAdmin.onCloneProgress((progress) => {
+    publish({ method: WORKSPACE_HOST_NOTIFICATIONS.cloneProgress, params: { ...progress } });
+  });
 }
 
 interface RunTrack {

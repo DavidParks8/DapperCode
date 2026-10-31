@@ -331,7 +331,16 @@ private func runGitGate() throws {
   }
   try check(Date().timeIntervalSince(started) < 25, "unresponsive Git transports have a bounded timeout")
   try check(GitNetworkOperation.shared.snapshot()["active"] as? Bool == false, "cancelled Git transfers release native ownership")
+  let progressEvents = NSMutableArray()
+  GitNetworkOperation.shared.setObserver { progressEvents.add($0) }
   try NativeGit.clone(remote: remote, destination: repository, credential: credential)
+  GitNetworkOperation.shared.setObserver(nil)
+  let deliveredProgress = progressEvents.compactMap { $0 as? [String: Any] }
+  try check(
+    deliveredProgress.first?["active"] as? Bool == true
+      && deliveredProgress.last?["active"] as? Bool == false
+      && deliveredProgress.contains { ($0["total"] as? Int ?? 0) > 0 },
+    "clone progress is pushed to the observer from start to finish")
   try check(try NativeGit.isClean(repository: repository), "authenticated HTTPS clone is clean")
   let initialStatus = try NativeGit.status(repository: repository)
   try check(initialStatus.branch == "main" && initialStatus.files.isEmpty, "structured Git status reports the active branch")
