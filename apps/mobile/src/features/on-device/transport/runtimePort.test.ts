@@ -70,7 +70,6 @@ async function setup(options: FakeNativeOptions = {}) {
     network: new FakeNetwork(),
     emitIntervalMs: 0,
     threadProgressDelayMs: 0,
-    draftDelayMs: 0,
   });
   runtimes.push(runtime);
   await runtime.initialize();

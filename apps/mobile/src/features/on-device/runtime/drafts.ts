@@ -154,14 +154,9 @@ export class LegacyDraftReader {
     }
     try {
       const text = raw === null ? '' : parseDraft(raw);
-      if (raw !== null) {
-        this.documents.add(threadId);
-      }
       if (text) {
         this.values.set(threadId, text);
-      } else if (raw !== null) {
-        await this.storage.removeRuntimeDocument(name).catch(() => undefined);
-        this.documents.delete(threadId);
+        this.documents.add(threadId);
       }
       return 'loaded';
     } catch {

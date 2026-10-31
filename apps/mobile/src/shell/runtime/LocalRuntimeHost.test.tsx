@@ -5,6 +5,8 @@ jest.mock('../../features/on-device/runtime/OnDeviceProvider', () => {
   const state = {
     downloaded: true,
     workspaces: [{ id: 'ws-one', name: 'Demo', isRepository: true }],
+    legacy: new Map<string, string>(),
+    issues: [] as { id: string; message: string }[],
   };
   const runtime = {
     id: 'runtime',
@@ -33,8 +35,9 @@ jest.mock('../../features/on-device/runtime/OnDeviceProvider', () => {
       }),
     },
     workspaceActivity: () => null,
-    legacyDrafts: () => new Map(),
-    issues: () => [],
+    legacyDrafts: () => state.legacy,
+    issues: () => state.issues,
+    report: jest.fn(),
     subscribe: (listener: () => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -53,12 +56,14 @@ jest.mock('../../features/on-device/runtime/OnDeviceProvider', () => {
     useOnDeviceRuntime: () => runtime,
   };
 });
+jest.mock('./localDraftImport', () => ({ importLegacyLocalDrafts: jest.fn() }));
 jest.mock('../../features/on-device/transport/runtimePort', () => {
   const { FakeAgentPort } = jest.requireActual('../../features/on-device/transport/testing');
   return { createRuntimeAgentPort: () => new FakeAgentPort() };
 });
 
 import { router } from 'expo-router';
+import { AccessibilityInfo } from 'react-native';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
 import { createDefaultAppStateData } from '@shell/state/appState';
@@ -72,7 +77,17 @@ import {
 } from '@shell/state/local/atoms';
 import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 import { createTestStore, withAppStore } from '@shell/state/testing';
+import { importLegacyLocalDrafts } from './localDraftImport';
 import { LocalRuntimeHost } from './LocalRuntimeHost';
+
+type MockRuntime = {
+  change: (update: Record<string, unknown>) => void;
+  report: jest.Mock;
+};
+const mockRuntime = () =>
+  jest.requireMock<{ mockRuntime: MockRuntime }>(
+    '../../features/on-device/runtime/OnDeviceProvider',
+  ).mockRuntime;
 
 function storeWith(activeProfileId: string, available = true) {
   const data = createDefaultAppStateData();
@@ -185,5 +200,49 @@ describe('LocalRuntimeHost', () => {
     expect(unsupported.get(localTransportAtom)).toBeNull();
     expect((hidden as unknown as { toJSON: () => unknown }).toJSON()).toBeNull();
     act(() => hidden.unmount());
+  });
+
+  it('imports drafts from older builds before any local chat can open, and opens even if it fails', async () => {
+    let finish!: (error?: Error) => void;
+    jest.mocked(importLegacyLocalDrafts).mockImplementation(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          finish = (error) => (error ? reject(error) : resolve());
+        }),
+    );
+    act(() => mockRuntime().change({ legacy: new Map([['thread-1', 'old text']]) }));
+    const store = storeWith(LOCAL_PROFILE_ID);
+    const tree = render(store);
+    expect(importLegacyLocalDrafts).toHaveBeenCalledTimes(1);
+    // No transport means ProfileRouteBoundary keeps chats (and their composers) unmounted.
+    expect(store.get(localTransportAtom)).toBeNull();
+    await act(async () => finish());
+    expect(store.get(localTransportAtom)?.isConnected).toBe(true);
+    act(() => tree.unmount());
+
+    const failing = storeWith(LOCAL_PROFILE_ID);
+    const second = render(failing);
+    await act(async () => finish(new Error('Disk full')));
+    expect(failing.get(localTransportAtom)?.isConnected).toBe(true);
+    expect(mockRuntime().report).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('kept on this iPhone') }),
+    );
+    act(() => second.unmount());
+    act(() => mockRuntime().change({ legacy: new Map() }));
+  });
+
+  it('announces each runtime issue to VoiceOver once', () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+    const issue = { id: 'persistence:preferences', message: 'Local settings could not be saved.' };
+    act(() => mockRuntime().change({ issues: [issue] }));
+    const tree = render(storeWith(LOCAL_PROFILE_ID));
+    act(() => mockRuntime().change({ issues: [issue] }));
+    expect(announce.mock.calls).toEqual([['On this iPhone: Local settings could not be saved.']]);
+    act(() => mockRuntime().change({ issues: [] }));
+    act(() => mockRuntime().change({ issues: [issue] }));
+    expect(announce).toHaveBeenCalledTimes(2);
+    act(() => tree.unmount());
+    act(() => mockRuntime().change({ issues: [] }));
+    announce.mockRestore();
   });
 });

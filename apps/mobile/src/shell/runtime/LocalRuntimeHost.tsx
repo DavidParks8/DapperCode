@@ -1,7 +1,7 @@
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { usePathname } from 'expo-router';
 import { useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, StyleSheet, View } from 'react-native';
 
 import {
   OnDeviceProvider,
@@ -47,6 +47,7 @@ export function LocalRuntimeHost() {
       <OnDeviceProvider fallback={(startup) => <LocalRuntimeRecovery {...startup} />}>
         <LocalTransportBinder />
         <LocalPresencePublisher />
+        <LocalIssueAnnouncer />
       </OnDeviceProvider>
     </View>
   );
@@ -89,6 +90,35 @@ function LocalTransportBinder() {
       transport?.dispose();
     };
   }, [runtime, setRuntime, setTransport]);
+  return null;
+}
+
+/**
+ * Tells VoiceOver about each runtime issue once when it appears (again only if it clears and
+ * recurs). The drawer status and Settings keep showing it until it is retried or dismissed.
+ */
+function LocalIssueAnnouncer() {
+  const runtime = useOnDeviceRuntime();
+  useEffect(() => {
+    const announced = new Set<string>();
+    const announce = () => {
+      const issues = runtime.issues();
+      const current = new Set(issues.map((issue) => issue.id));
+      for (const id of announced) {
+        if (!current.has(id)) {
+          announced.delete(id);
+        }
+      }
+      for (const issue of issues) {
+        if (!announced.has(issue.id)) {
+          announced.add(issue.id);
+          AccessibilityInfo.announceForAccessibility(`On this iPhone: ${issue.message}`);
+        }
+      }
+    };
+    announce();
+    return runtime.subscribe(announce, ['issues']);
+  }, [runtime]);
   return null;
 }
 

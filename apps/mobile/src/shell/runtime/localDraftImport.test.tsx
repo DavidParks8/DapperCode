@@ -2,7 +2,7 @@ jest.mock('expo-crypto', () => ({ randomUUID: jest.fn() }));
 jest.mock('../../features/on-device/models/engine', () => ({ loadNativeModelContext: jest.fn() }));
 
 import { randomUUID } from 'expo-crypto';
-import renderer, { act } from 'react-test-renderer';
+import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
 import {
   serializeDraftEntries,
@@ -13,8 +13,13 @@ import {
 import { getWebProfilePersistenceKey } from '../../features/chat/helpers/persistence';
 import { submissionScopeKey } from '../../features/chat/turn/controllers/submissionController';
 import { draftDocument } from '../../features/on-device/runtime/drafts';
+import { emptyLocalPreferences } from '../../features/on-device/runtime/preferences';
 import { OnDeviceRuntime } from '../../features/on-device/runtime/runtime';
-import type { OnDeviceNativeServices } from '../../features/on-device/native/services.types';
+import {
+  createFakeOnDeviceNative,
+  FakeLlama,
+  FakeNetwork,
+} from '../../features/on-device/runtime/testing';
 import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 import { importLegacyLocalDrafts } from './localDraftImport';
 
@@ -25,9 +30,16 @@ const SECOND = '22222222-2222-4222-8222-222222222222';
 const PLATFORM = 'web';
 const DRAFTS_KEY = getWebProfilePersistenceKey('drafts.v2', LOCAL_PROFILE_ID)!;
 
-/** The native document and workspace surface the runtime touches while it starts. */
-function nativeWith(documents: Map<string, string>): OnDeviceNativeServices {
-  const handlers: Partial<Record<keyof OnDeviceNativeServices, unknown>> = {
+/** The real runtime over in-memory native services holding `documents` (shared across restarts). */
+async function started(documents: Map<string, string>): Promise<OnDeviceRuntime> {
+  const fake = createFakeOnDeviceNative(new FakeLlama(), {
+    downloaded: [MODEL_ID],
+    workspaces: [{ id: 'workspace-one', name: 'Demo', isRepository: true }],
+  });
+  // Point the fake at the caller's map so a restart sees what the previous runtime wrote.
+  fake.documents.clear();
+  const native = {
+    ...fake.native,
     readRuntimeDocument: async (name: string) => documents.get(name) ?? null,
     writeRuntimeDocument: async (name: string, value: string) => {
       documents.set(name, value);
@@ -37,21 +49,8 @@ function nativeWith(documents: Map<string, string>): OnDeviceNativeServices {
     removeRuntimeDocument: async (name: string) => {
       documents.delete(name);
     },
-    listWorkspaces: async () => [{ id: 'workspace-one', name: 'Demo', isRepository: true }],
-    attachModelDownloads: async () => [],
-    getDownloadedModelFile: async () => null,
-    getMemoryInfo: () => ({ physicalBytes: 8 * 1024 ** 3, availableBytes: 4 * 1024 ** 3 }),
-    getGitTransferProgress: () => ({ active: false, cancelled: false, completed: 0, total: 0 }),
-    cancelGitTransfer: () => undefined,
   };
-  return new Proxy(handlers, {
-    get: (target, name: string) =>
-      (target as Record<string, unknown>)[name] ?? (async () => undefined),
-  }) as unknown as OnDeviceNativeServices;
-}
-
-async function started(documents: Map<string, string>): Promise<OnDeviceRuntime> {
-  const runtime = new OnDeviceRuntime(nativeWith(documents));
+  const runtime = new OnDeviceRuntime(native, { network: new FakeNetwork() });
   await runtime.initialize();
   return runtime;
 }
@@ -84,7 +83,7 @@ async function composerDraft(storage: DraftStorage, chatId: string): Promise<str
     controller = useDraftController(LOCAL_PROFILE_ID, chatId, storage, undefined, PLATFORM);
     return null;
   }
-  let tree: renderer.ReactTestRenderer | undefined;
+  let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(<Probe />);
     for (let index = 0; index < 20; index += 1) {
@@ -99,7 +98,14 @@ async function composerDraft(storage: DraftStorage, chatId: string): Promise<str
 /** Two local chats saved by a build from before the shared composer, each with an unsent draft. */
 async function oldBuildDocuments(): Promise<Map<string, string>> {
   const documents = new Map<string, string>([
-    ['preferences.json', JSON.stringify({ modelId: MODEL_ID, workspaceId: 'workspace-one' })],
+    [
+      'preferences.json',
+      JSON.stringify({
+        ...emptyLocalPreferences(),
+        modelId: MODEL_ID,
+        workspaceId: 'workspace-one',
+      }),
+    ],
   ]);
   jest.mocked(randomUUID).mockReturnValueOnce(FIRST).mockReturnValueOnce(SECOND);
   const source = await started(documents);
@@ -185,7 +191,10 @@ describe('importLegacyLocalDrafts', () => {
       ],
     ]);
     expect(runtime.issues()).toEqual([
-      expect.objectContaining({ kind: 'recovery', message: expect.stringContaining('newer draft') }),
+      expect.objectContaining({
+        kind: 'recovery',
+        message: expect.stringContaining('newer draft'),
+      }),
     ]);
     await runtime.dispose();
   });
