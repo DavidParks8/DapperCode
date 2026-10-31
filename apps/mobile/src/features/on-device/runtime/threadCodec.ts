@@ -147,24 +147,54 @@ export function parseLocalJson(raw: string): unknown {
   }
 }
 
+export interface LocalThreadBase {
+  thread: LocalThread;
+  /** The last journal position the base accounts for (0 for a legacy document). */
+  sequence: number;
+  /** Positions at or before `sequence` that were never applied and could not be set aside. */
+  skipped: number[];
+  /** A whole-conversation document without a journal position, from an older build. */
+  legacy: boolean;
+}
+
+function journalPositions(value: unknown, sequence: number): number[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (
+    !Array.isArray(value) ||
+    !value.every(
+      (position) =>
+        typeof position === 'number' &&
+        Number.isSafeInteger(position) &&
+        position > 0 &&
+        position <= sequence,
+    )
+  ) {
+    throw new Error('The local conversation journal position is invalid.');
+  }
+  return value as number[];
+}
+
 /**
- * Reads a conversation base document: a whole-thread document from older builds, or a compacted
- * base whose `segment` records the last journal segment it already contains (0 when absent).
+ * Reads a conversation base document: a compacted base whose `segment` records the last journal
+ * position it accounts for, or a whole-thread document from an older build (no `segment`), which
+ * never owns any journal segment.
  */
-export function parseLocalThreadBase(
-  raw: string,
-  expectedId: string,
-): { thread: LocalThread; sequence: number } {
+export function parseLocalThreadBase(raw: string, expectedId: string): LocalThreadBase {
   const item = record(parseLocalJson(raw));
   if (item['version'] !== 1 || item['id'] !== expectedId || !Array.isArray(item['messages'])) {
     throw new Error('The local conversation version or identity is invalid.');
   }
+  const legacy = item['segment'] === undefined;
   const sequence = item['segment'] ?? 0;
   if (typeof sequence !== 'number' || !Number.isSafeInteger(sequence) || sequence < 0) {
     throw new Error('The local conversation journal position is invalid.');
   }
   return {
     sequence,
+    skipped: journalPositions(item['skipped'], sequence),
+    legacy,
     thread: {
       version: 1,
       id: expectedId,

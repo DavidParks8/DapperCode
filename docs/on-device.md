@@ -202,10 +202,15 @@ and that prompt is passed straight to completion.
   contains (an interrupted compaction) are discarded. A damaged, unreadable, or out-of-order segment
   ends the replay: it and every later segment are set aside with their bytes preserved, the
   conversation opens at the last good step, and its next write is a new base positioned past every
-  set-aside segment, so no name is ever reused. A damaged base is set aside together with its
-  segments. Whole-conversation documents from older builds are read as a base at position 0 and
-  are never rewritten just to migrate them; older builds never list segments, so they still open
-  the base. Deleting a conversation removes the base first and then its segments; segments left
+  set-aside segment, so no name is ever reused. A segment that cannot be moved is left in place
+  and recorded in the base's `skipped` list, so it is never applied or deleted as already folded;
+  it is set aside at a later start. A damaged base is set aside together with its segments (and
+  stays in place while any of them cannot be moved).
+- Whole-conversation documents from older builds (no `segment`) are read as a base and rewritten
+  once as a positioned base on their first save, before any segment follows them. Because an older
+  build ignores segments and rewrites the base without `segment`, segments found next to such a
+  base are never applied: they are set aside with their bytes preserved and the base's content
+  wins. Deleting a conversation removes the base first and then its segments; segments left
   without a base by an interrupted delete are discarded at the next start.
 - Composer drafts are the shared chat drafts, stored per profile and chat exactly like desktop
   chats; the runtime never writes drafts. Unsent drafts from older builds (inline in

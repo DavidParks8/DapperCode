@@ -96,11 +96,11 @@ async function journalToolIntent(threads: LocalThreadRepository, id: string) {
   await append(threads, id, pendingTool('tool-1', 'call-1'));
 }
 
-test('older whole-conversation documents are read as the base and journaled after unchanged', async () => {
-  const legacy: LocalThread = {
+function legacyThread(title: string, messages: LocalMessage[]): LocalThread {
+  return {
     version: 1,
     id: ID,
-    title: 'Legacy conversation',
+    title,
     workspaceId: 'workspace',
     modelId: 'model',
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -109,28 +109,125 @@ test('older whole-conversation documents are read as the base and journaled afte
     activeTurnId: null,
     lastSubmissionId: 'submission',
     lastError: null,
-    messages: [userMessage('user-legacy', 'Hello from an older build')],
+    messages,
   };
+}
+
+test('older whole-conversation documents are read as the base and positioned before any segment', async () => {
+  const legacy = legacyThread('Legacy conversation', [
+    userMessage('user-legacy', 'Hello from an older build'),
+  ]);
   const raw = JSON.stringify(legacy);
   const { documents, port, threads } = await open(new Map([[threadDocument(ID), raw]]));
   expect(threads.get(ID)).toEqual(legacy);
   expect(threads.recovery().setAside).toBe(0);
   expect(port.writeRuntimeDocument).not.toHaveBeenCalled();
 
+  // The first save rewrites it once as a positioned base, so no segment ever follows a legacy base.
   threads.change(ID, (thread) => ({ ...thread, title: 'Renamed' }));
   await threads.save(ID);
-  expect(documents.get(threadDocument(ID))).toBe(raw);
+  expect(port.writeRuntimeDocument.mock.calls.map(([name]) => name)).toEqual([threadDocument(ID)]);
+  expect(JSON.parse(documents.get(threadDocument(ID)) ?? '{}')).toMatchObject({
+    segment: 0,
+    title: 'Renamed',
+  });
+  threads.change(ID, (thread) => ({ ...thread, title: 'Renamed again' }));
+  await threads.save(ID);
   expect(JSON.parse(documents.get(threadSegmentDocument(ID, 1)) ?? '{}')).toEqual({
     version: 1,
     thread: ID,
     sequence: 1,
-    set: { title: 'Renamed' },
+    set: { title: 'Renamed again' },
     remove: [],
     messages: [],
   });
 
   const restored = await open(documents);
-  expect(restored.threads.get(ID)).toEqual({ ...legacy, title: 'Renamed' });
+  expect(restored.threads.get(ID)).toEqual({ ...legacy, title: 'Renamed again' });
+});
+
+test('after a downgrade rewrote the base, newer base content wins and older segments are set aside', async () => {
+  const live = await open();
+  await live.threads.create('workspace', 'model');
+  await append(live.threads, ID, userMessage('user-1', 'First'));
+  live.threads.change(ID, (thread) => ({ ...thread, title: 'Journaled title' }));
+  await live.threads.save(ID);
+  await append(live.threads, ID, userMessage('user-2', 'Second'));
+  const segments = names(live.documents, 'threadseg-');
+  expect(segments).toHaveLength(3);
+  const segmentBytes = segments.map((name) => live.documents.get(name)).sort();
+
+  // An older build ignores segments: it reads the base, then rewrites it without a position.
+  const documents = new Map(live.documents);
+  const downgraded = legacyThread('Newer title from the older build', [
+    userMessage('older-1', 'Written by the older build'),
+  ]);
+  documents.set(threadDocument(ID), JSON.stringify(downgraded));
+
+  const restored = await open(documents);
+  expect(restored.threads.get(ID)).toEqual(downgraded);
+  expect(restored.threads.recovery()).toEqual({ setAside: 1, leftInPlace: 0, ids: new Set([ID]) });
+  expect(names(documents, 'threadseg-')).toEqual([]);
+  expect(
+    names(documents, 'quarantine-')
+      .map((name) => documents.get(name))
+      .sort(),
+  ).toEqual(segmentBytes);
+  // The base is positioned past the set-aside segments, and later segments apply on top of it.
+  expect(JSON.parse(documents.get(threadDocument(ID)) ?? '{}')).toMatchObject({ segment: 3 });
+  restored.threads.change(ID, (thread) => ({ ...thread, title: 'Upgraded again' }));
+  await restored.threads.save(ID);
+  expect(names(documents, 'threadseg-')).toEqual([threadSegmentDocument(ID, 4)]);
+  expect((await open(new Map(documents))).threads.get(ID)).toEqual({
+    ...downgraded,
+    title: 'Upgraded again',
+  });
+});
+
+test('an out-of-order segment that cannot be set aside is never deleted as folded', async () => {
+  const live = await open();
+  await live.threads.create('workspace', 'model');
+  for (const title of ['One', 'Two', 'Three']) {
+    live.threads.change(ID, (thread) => ({ ...thread, title }));
+    await live.threads.save(ID);
+  }
+  const documents = new Map(live.documents);
+  const third = documents.get(threadSegmentDocument(ID, 3));
+  // A gap: the second segment is missing, so the valid third one must not be applied.
+  documents.delete(threadSegmentDocument(ID, 2));
+  const failingQuarantine = () => {
+    const port = storage(documents);
+    port.writeRuntimeDocument.mockImplementation(async (name, value) => {
+      if (name.startsWith('quarantine-')) {
+        throw new Error('Disk full');
+      }
+      documents.set(name, value);
+    });
+    return port;
+  };
+
+  for (let restart = 0; restart < 3; restart += 1) {
+    const threads = new LocalThreadRepository(failingQuarantine(), jest.fn(), 60_000);
+    await threads.initialize();
+    expect(threads.get(ID).title).toBe('One');
+    expect(threads.recovery()).toMatchObject({ leftInPlace: 1 });
+    expect(documents.get(threadSegmentDocument(ID, 3))).toBe(third);
+    expect(JSON.parse(documents.get(threadDocument(ID)) ?? '{}')).toMatchObject({
+      segment: 3,
+      skipped: [3],
+      title: 'One',
+    });
+    threads.close();
+  }
+
+  // Once it can be moved, its bytes are set aside and the base stops tracking it.
+  const restored = await open(documents);
+  expect(restored.threads.get(ID).title).toBe('One');
+  expect(documents.has(threadSegmentDocument(ID, 3))).toBe(false);
+  expect(names(documents, 'quarantine-').map((name) => documents.get(name))).toEqual([third]);
+  restored.threads.change(ID, (thread) => ({ ...thread, title: 'Four' }));
+  await restored.threads.save(ID);
+  expect(names(documents, 'threadseg-')).toEqual([threadSegmentDocument(ID, 4)]);
 });
 
 test('a crash after journaling tool intent replays the segments, interrupts the tool, and never replays it', async () => {
@@ -274,6 +371,32 @@ test('a damaged base is set aside together with its segments', async () => {
       .sort(),
   ).toEqual([segment, '{not json'].sort());
   expect(names(documents, 'thread')).toEqual([]);
+});
+
+test('a damaged base stays in place while its segments cannot be set aside', async () => {
+  const live = await open();
+  await live.threads.create('workspace', 'model');
+  live.threads.change(ID, (thread) => ({ ...thread, title: 'Edited' }));
+  await live.threads.save(ID);
+  const documents = new Map(live.documents);
+  const segment = documents.get(threadSegmentDocument(ID, 1));
+  documents.set(threadDocument(ID), '{not json');
+  for (let restart = 0; restart < 2; restart += 1) {
+    const port = storage(documents);
+    port.writeRuntimeDocument.mockImplementation(async (name, value) => {
+      if (name.includes('threadseg-')) {
+        throw new Error('Disk full');
+      }
+      documents.set(name, value);
+    });
+    const threads = new LocalThreadRepository(port, jest.fn(), 60_000);
+    await threads.initialize();
+    expect(threads.list()).toEqual([]);
+    expect(threads.recovery()).toMatchObject({ leftInPlace: 1 });
+    // The segment is never treated as an orphan of an interrupted delete.
+    expect(documents.get(threadSegmentDocument(ID, 1))).toBe(segment);
+    expect(documents.get(threadDocument(ID))).toBe('{not json');
+  }
 });
 
 test('deleting a conversation removes every segment, and an interrupted delete stays deleted', async () => {

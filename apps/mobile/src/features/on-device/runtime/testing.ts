@@ -35,6 +35,9 @@ export function storedLocalThread(
   }
   const base = parseLocalThreadBase(raw, id);
   let thread = base.thread;
+  if (base.legacy) {
+    return thread;
+  }
   for (let sequence = base.sequence + 1; ; sequence += 1) {
     const segment = documents.get(threadSegmentDocument(id, sequence));
     if (segment === undefined) {

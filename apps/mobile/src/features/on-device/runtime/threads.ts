@@ -1,7 +1,12 @@
 import { randomUUID } from 'expo-crypto';
 import type { OnDeviceNativeServices } from '../native/services.types';
 import { quarantineDocument } from './quarantine';
-import { parseLocalThreadBase, recoverLocalThread, threadDocument } from './threadCodec';
+import {
+  parseLocalThreadBase,
+  recoverLocalThread,
+  threadDocument,
+  type LocalThreadBase,
+} from './threadCodec';
 import {
   applyLocalThreadDelta,
   durableLocalThread,
@@ -49,6 +54,11 @@ interface PersistedThread {
   /** Segments written since the base, removed once a new base contains them. */
   segments: readonly number[];
   segmentBytes: number;
+  /**
+   * Positions at or before `sequence` that were never applied but could not be set aside. The
+   * base records them so a later startup never mistakes them for folded segments and deletes them.
+   */
+  skipped: readonly number[];
 }
 
 /** Delay for coalescing progress writes that are not needed by the run journal. */
@@ -367,8 +377,20 @@ export class LocalThreadRepository {
         }
       }
     }
+    await this.compact(id, thread, durable, previous);
+  }
+
+  /** Writes the conversation as a new base, then removes the segments it now contains. */
+  private async compact(
+    id: string,
+    thread: LocalThread,
+    durable: DurableLocalThread,
+    previous: PersistedThread | undefined,
+  ): Promise<void> {
+    const running = thread.status === 'running';
     const sequence = previous?.sequence ?? 0;
-    const contents = encodeLocalThreadBase(thread, sequence);
+    const skipped = previous?.skipped ?? [];
+    const contents = encodeLocalThreadBase(thread, sequence, skipped);
     await this.storage.writeRuntimeDocument(threadDocument(id), contents);
     this.rebase.delete(id);
     this.persisted.set(id, {
@@ -379,6 +401,7 @@ export class LocalThreadRepository {
       baseBytes: utf8Bytes(contents),
       segments: [],
       segmentBytes: 0,
+      skipped,
     });
     // The new base contains these segments; any that cannot be removed are discarded at startup.
     await Promise.allSettled(
@@ -399,6 +422,7 @@ export class LocalThreadRepository {
       const moved = await quarantineDocument(this.storage, name, raw);
       // Each conversation is counted once, however many of its documents were affected.
       (moved ? setAside : leftInPlace).add(id ?? name);
+      return moved;
     };
     const { segments, unexpected } = groupSegments(segmentNames);
     for (const name of unexpected) {
@@ -461,20 +485,25 @@ export class LocalThreadRepository {
     id: string,
     raw: string,
     journal: readonly SegmentName[],
-    quarantine: (name: string, raw: string | null) => Promise<void>,
+    quarantine: (name: string, raw: string | null) => Promise<boolean>,
   ): Promise<{ thread: LocalThread; recovered: boolean } | null> {
-    let base: { thread: LocalThread; sequence: number };
+    let base: LocalThreadBase;
     try {
       base = parseLocalThreadBase(raw, id);
     } catch {
-      await quarantine(threadDocument(id), raw);
+      let moved = true;
       for (const segment of journal) {
-        await quarantine(segment.name, null);
+        moved = (await quarantine(segment.name, null)) && moved;
+      }
+      // A base whose segments stay in place stays with them, so they are never seen as orphans.
+      if (moved) {
+        await quarantine(threadDocument(id), raw);
       }
       return null;
     }
     const replayed = await this.replay(id, base, journal, quarantine);
-    if (replayed.damaged) {
+    if (replayed.damaged || base.legacy) {
+      // A legacy document is rewritten as a positioned base before any segment can follow it.
       this.rebase.add(id);
     }
     this.persisted.set(id, {
@@ -485,6 +514,7 @@ export class LocalThreadRepository {
       baseBytes: utf8Bytes(raw),
       segments: replayed.segments,
       segmentBytes: replayed.segmentBytes,
+      skipped: replayed.skipped,
     });
     const thread = recoverLocalThread(replayed.thread);
     return { thread, recovered: thread !== replayed.thread || replayed.damaged };
@@ -493,56 +523,73 @@ export class LocalThreadRepository {
   /**
    * Applies the contiguous segments after the base. A damaged, unreadable, or missing segment ends
    * the replay; it and every later segment are set aside with their bytes preserved, and the
-   * position moves past all of them so new segments never reuse their names.
+   * position moves past all of them so new segments never reuse their names. Segments are never
+   * applied over a legacy base (an older build may have rewritten it after they were written) or
+   * at a position the base recorded as skipped. A segment that cannot be set aside is recorded as
+   * skipped, so it is never deleted as folded.
    */
   private async replay(
     id: string,
-    base: { thread: LocalThread; sequence: number },
+    base: LocalThreadBase,
     journal: readonly SegmentName[],
-    quarantine: (name: string, raw: string | null) => Promise<void>,
+    quarantine: (name: string, raw: string | null) => Promise<boolean>,
   ): Promise<{
     thread: LocalThread;
     sequence: number;
     segments: number[];
     segmentBytes: number;
+    skipped: number[];
     damaged: boolean;
   }> {
+    const fenced = new Set(base.skipped);
     let thread = base.thread;
     let applied = base.sequence;
     let highest = base.sequence;
     let damaged = false;
     let segmentBytes = 0;
     const segments: number[] = [];
+    const skipped: number[] = [];
+    const setAside = async (segment: SegmentName, raw: string | null) => {
+      if (!(await quarantine(segment.name, raw))) {
+        skipped.push(segment.sequence);
+      }
+    };
     for (const segment of journal) {
       highest = Math.max(highest, segment.sequence);
+      const folded = segment.sequence <= base.sequence;
+      if (base.legacy || fenced.has(segment.sequence)) {
+        damaged ||= base.legacy;
+        await setAside(segment, null);
+        continue;
+      }
       let raw: string | null;
       try {
         raw = await this.storage.readRuntimeDocument(segment.name);
       } catch {
-        damaged ||= segment.sequence > base.sequence;
-        await quarantine(segment.name, null);
+        damaged ||= !folded;
+        await setAside(segment, null);
         continue;
       }
       if (raw === null) {
-        damaged ||= segment.sequence > base.sequence;
+        damaged ||= !folded;
         continue;
       }
       let delta: LocalThreadDelta;
       try {
         delta = parseLocalThreadSegment(raw, id, segment.sequence);
       } catch {
-        damaged ||= segment.sequence > base.sequence;
-        await quarantine(segment.name, raw);
+        damaged ||= !folded;
+        await setAside(segment, raw);
         continue;
       }
-      if (segment.sequence <= base.sequence) {
+      if (folded) {
         // Already contained in the base; compaction was interrupted before removing it.
         await this.storage.removeRuntimeDocument(segment.name).catch(() => undefined);
         continue;
       }
       if (damaged || segment.sequence !== applied + 1) {
         damaged = true;
-        await quarantine(segment.name, raw);
+        await setAside(segment, raw);
         continue;
       }
       thread = applyLocalThreadDelta(thread, delta);
@@ -550,6 +597,13 @@ export class LocalThreadRepository {
       segments.push(segment.sequence);
       segmentBytes += utf8Bytes(raw);
     }
-    return { thread, sequence: damaged ? highest : applied, segments, segmentBytes, damaged };
+    return {
+      thread,
+      sequence: damaged ? highest : applied,
+      segments,
+      segmentBytes,
+      skipped,
+      damaged,
+    };
   }
 }

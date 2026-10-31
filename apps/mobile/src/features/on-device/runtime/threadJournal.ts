@@ -137,8 +137,12 @@ export function localThreadDelta(
   return { set, remove, messages };
 }
 
-export function encodeLocalThreadBase(thread: LocalThread, sequence: number): string {
-  return JSON.stringify({ ...thread, segment: sequence });
+export function encodeLocalThreadBase(
+  thread: LocalThread,
+  sequence: number,
+  skipped: readonly number[] = [],
+): string {
+  return JSON.stringify({ ...thread, segment: sequence, ...(skipped.length ? { skipped } : {}) });
 }
 
 export function encodeLocalThreadSegment(
