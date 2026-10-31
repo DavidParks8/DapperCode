@@ -71,6 +71,8 @@ export interface ActiveProfileFeatures {
   gitClone: boolean;
   /** The desktop preview browser, which proxies through the bridge host. */
   browserPreview: boolean;
+  /** Continuing a failed turn in place (`bridge/turn/retry`) instead of resending it. */
+  turnRetry: boolean;
   /**
    * Models are downloaded and loaded on this device and managed in Settings, so the model picker
    * lists downloaded models and links there instead of offering an agent-side default.
@@ -103,6 +105,7 @@ export const activeProfileFeaturesAtom = atom<ActiveProfileFeatures>((get) => {
     gitClone: true,
     browserPreview: !local,
     modelLibrary: local,
+    turnRetry: local,
     managedWorkspaces: local,
     workspaceFiles: local,
     gitSync: local,

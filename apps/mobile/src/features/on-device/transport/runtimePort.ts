@@ -4,10 +4,11 @@ import type { OnDeviceRuntimeSlice } from '../runtime/types';
 import type { LocalAgentPort, LocalModelChoice } from './port';
 
 /**
- * The transport projects threads and the run (including approvals). Download progress and other
- * slices are read on demand, so they never wake the event projector.
+ * The transport projects threads, the run (including approvals), and the resident model (load
+ * progress shown as run activity). Download progress and other slices are read on demand, so they
+ * never wake the event projector.
  */
-const TRANSPORT_SLICES: readonly OnDeviceRuntimeSlice[] = ['threads', 'loop'];
+const TRANSPORT_SLICES: readonly OnDeviceRuntimeSlice[] = ['threads', 'loop', 'models'];
 
 function availableModels(runtime: OnDeviceRuntime) {
   return LOCAL_MODEL_CATALOG.filter(
@@ -61,6 +62,8 @@ export function createRuntimeAgentPort(runtime: OnDeviceRuntime): LocalAgentPort
     send: (id, text, submissionId, accepted) =>
       runtime.sendMessage(id, text, submissionId, accepted),
     stop: () => runtime.stop(),
+    retryTurn: (id) => runtime.retryTurn(id),
+    modelSession: () => runtime.models.snapshot(),
     resolveApproval: (callId, approved) => runtime.loop.resolveApproval(callId, approved),
     git: {
       status: (id) => native.getWorkspaceGitStatus(id),

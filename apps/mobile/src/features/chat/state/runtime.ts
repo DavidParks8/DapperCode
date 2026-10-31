@@ -19,6 +19,8 @@ export interface ActivityState {
   tone: ActivityTone;
   title: string;
   detail?: string;
+  /** A phase the agent reported (for example loading a model), announced to assistive tech. */
+  announce?: boolean;
 }
 
 export interface ActivePlanState {

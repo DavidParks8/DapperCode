@@ -6,8 +6,11 @@ import type {
   ChatToolKind,
   ChatToolStatus,
 } from '@bridge/types/types';
-import { localModelDefinition } from '../models/catalog';
+import type { RunActivity } from '@bridge/runActivity';
+import { findLocalModelDefinition, localModelDefinition } from '../models/catalog';
+import type { LocalModelSessionSnapshot } from '../models/session';
 import type { LocalModelDefinition } from '../models/types';
+import type { LocalRunSnapshot } from '../runtime/agentLoop';
 import type { LocalMessage, LocalThread } from '../runtime/types';
 import type { LocalWorkspace } from '../workspaces/types';
 
@@ -19,6 +22,8 @@ export const LOCAL_WORKSPACE_ROOT = '/On this iPhone';
 /** ACP config id used to expose and change a local chat's model through the model sheet. */
 export const LOCAL_MODEL_CONFIG_ID = 'model';
 export const LOCAL_STREAM_ID = 'on-device';
+/** Shown wherever a chat's workspace was removed from this iPhone. */
+export const LOCAL_UNAVAILABLE_WORKSPACE = 'Workspace unavailable';
 export const LOCAL_PROTOCOL_VERSION = 2;
 
 /**
@@ -112,51 +117,62 @@ export function localReasoningId(messageId: string): string {
   return `${messageId}::reasoning`;
 }
 
-const TOOL_VERBS: Record<string, { kind: ChatToolKind; verb: string; pathKey?: string }> = {
-  list_directory: { kind: 'read', verb: 'List', pathKey: 'path' },
-  read_file: { kind: 'read', verb: 'Read', pathKey: 'path' },
-  write_file: { kind: 'edit', verb: 'Write', pathKey: 'path' },
-  edit_file: { kind: 'edit', verb: 'Edit', pathKey: 'path' },
-  rename_path: { kind: 'move', verb: 'Rename', pathKey: 'path' },
-  delete_path: { kind: 'delete', verb: 'Delete', pathKey: 'path' },
-  search_files: { kind: 'search', verb: 'Search', pathKey: 'query' },
-  git_status: { kind: 'read', verb: 'Git status' },
-  git_diff: { kind: 'read', verb: 'Git diff' },
-  git_history: { kind: 'read', verb: 'Git history' },
-  git_stage: { kind: 'other', verb: 'Git stage', pathKey: 'path' },
-  git_commit: { kind: 'other', verb: 'Git commit' },
-  git_push: { kind: 'fetch', verb: 'Git push' },
+const TOOL_VERBS: Record<
+  string,
+  { kind: ChatToolKind; verb: string; activity: string; pathKey?: string }
+> = {
+  list_directory: { kind: 'read', verb: 'List', activity: 'Listing', pathKey: 'path' },
+  read_file: { kind: 'read', verb: 'Read', activity: 'Reading', pathKey: 'path' },
+  write_file: { kind: 'edit', verb: 'Write', activity: 'Writing', pathKey: 'path' },
+  edit_file: { kind: 'edit', verb: 'Edit', activity: 'Editing', pathKey: 'path' },
+  rename_path: { kind: 'move', verb: 'Rename', activity: 'Renaming', pathKey: 'path' },
+  delete_path: { kind: 'delete', verb: 'Delete', activity: 'Deleting', pathKey: 'path' },
+  search_files: { kind: 'search', verb: 'Search', activity: 'Searching', pathKey: 'query' },
+  git_status: { kind: 'read', verb: 'Git status', activity: 'Checking Git status' },
+  git_diff: { kind: 'read', verb: 'Git diff', activity: 'Reading the Git diff' },
+  git_history: { kind: 'read', verb: 'Git history', activity: 'Reading Git history' },
+  git_stage: { kind: 'other', verb: 'Git stage', activity: 'Staging', pathKey: 'path' },
+  git_commit: { kind: 'other', verb: 'Git commit', activity: 'Committing' },
+  git_push: { kind: 'fetch', verb: 'Git push', activity: 'Pushing' },
 };
 
 /**
- * Human title and kind for a local tool call. Wave-2 chat parity extends this single function
- * instead of special-casing local tools in the transcript.
+ * Human title, in-progress activity, and kind for a local tool call. Wave-2 chat parity extends
+ * this single function instead of special-casing local tools in the transcript.
  */
 export function describeLocalTool(
   name: string,
   argumentsJson: string | null,
-): { kind: ChatToolKind; title: string } {
+): { kind: ChatToolKind; title: string; activity: string } {
   const known = TOOL_VERBS[name];
   if (!known) {
-    return { kind: 'other', title: name };
+    const readable = name.replace(/_/g, ' ').trim() || 'tool';
+    return { kind: 'other', title: name, activity: `Running ${readable}` };
   }
-  let subject: string | null = null;
-  if (known.pathKey && argumentsJson) {
-    try {
-      const parsed: unknown = JSON.parse(argumentsJson);
-      const value =
-        parsed && typeof parsed === 'object'
-          ? (parsed as Record<string, unknown>)[known.pathKey]
-          : null;
-      subject = typeof value === 'string' && value.trim() ? value.trim() : null;
-    } catch {
-      subject = null;
-    }
-  }
-  if (name === 'list_directory' && subject === null) {
+  let subject = known.pathKey ? toolArgument(argumentsJson, known.pathKey) : null;
+  if (name === 'list_directory' && (subject === null || subject === '.')) {
     subject = 'workspace root';
   }
-  return { kind: known.kind, title: subject ? `${known.verb} ${subject}` : known.verb };
+  const quoted = subject && known.pathKey === 'query' ? `“${subject}”` : subject;
+  return {
+    kind: known.kind,
+    title: quoted ? `${known.verb} ${quoted}` : known.verb,
+    activity: quoted ? `${known.activity} ${quoted}` : known.activity,
+  };
+}
+
+function toolArgument(argumentsJson: string | null, key: string): string | null {
+  if (!argumentsJson) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(argumentsJson);
+    const value =
+      parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>)[key] : null;
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 export function localToolStatus(
@@ -185,15 +201,69 @@ function toolArguments(thread: LocalThread, callId: string): string | null {
 export function describeLocalToolMessage(
   thread: LocalThread,
   message: LocalMessage,
-): { kind: ChatToolKind; title: string } {
+): { kind: ChatToolKind; title: string; activity: string } {
   const tool = message.tool;
   if (!tool) {
-    return { kind: 'other', title: 'Tool' };
+    return { kind: 'other', title: 'Tool', activity: 'Running a tool' };
   }
   const described = describeLocalTool(tool.name, toolArguments(thread, tool.callId));
+  // The wire has no interrupted tool status, so the title says what happened instead of "failed".
   return tool.status === 'interrupted'
-    ? { ...described, title: `${described.title} (interrupted, inspect changes)` }
+    ? { ...described, title: `${described.title} · Interrupted` }
     : described;
+}
+
+/**
+ * What a running local turn is doing, named the way the user would describe it: loading the model
+ * (with progress), generating, or the running tool's action. Null when the thread is not the one
+ * running.
+ */
+export function localRunActivity(
+  thread: LocalThread,
+  run: LocalRunSnapshot,
+  model: Pick<LocalModelSessionSnapshot, 'phase' | 'modelId' | 'progress'>,
+): RunActivity | null {
+  // Before the model loads the thread is not running yet; the loop already names it.
+  const loading = run.phase === 'preparing' || run.phase === 'stopping';
+  if (run.threadId !== thread.id || (thread.status !== 'running' && !loading)) {
+    return null;
+  }
+  switch (run.phase) {
+    case 'preparing':
+      return preparingActivity(model);
+    case 'generating':
+      return { title: 'Generating' };
+    case 'tool':
+      return toolActivity(thread);
+    case 'stopping':
+      return { title: model.phase === 'loading' ? 'Cancelling model load' : 'Stopping' };
+    case 'persisting':
+      return { title: 'Saving' };
+    default:
+      // Idle has nothing to report; an approval request drives the shell's own waiting state.
+      return null;
+  }
+}
+
+function preparingActivity(
+  model: Pick<LocalModelSessionSnapshot, 'phase' | 'modelId' | 'progress'>,
+): RunActivity {
+  if (model.phase === 'loading') {
+    const name = findLocalModelDefinition(model.modelId ?? '')?.name ?? 'model';
+    const percent = Math.max(0, Math.min(100, Math.floor(model.progress)));
+    return { title: `Loading ${name}`, detail: `${String(percent)}%` };
+  }
+  return model.phase === 'stopping'
+    ? { title: 'Releasing the previous model' }
+    : { title: 'Preparing' };
+}
+
+/** The running tool's action; between a tool settling and the next phase, nothing changes. */
+function toolActivity(thread: LocalThread): RunActivity | null {
+  const running = [...thread.messages]
+    .reverse()
+    .find((message) => message.tool?.status === 'running' || message.tool?.status === 'pending');
+  return running ? { title: describeLocalToolMessage(thread, running).activity } : null;
 }
 
 function seconds(iso: string): number {
@@ -235,7 +305,7 @@ export function localThreadPath(
 ): string {
   return (
     localWorkspacePaths(workspaces).get(thread.workspaceId) ??
-    `${LOCAL_WORKSPACE_ROOT}/Unavailable workspace`
+    `${LOCAL_WORKSPACE_ROOT}/${LOCAL_UNAVAILABLE_WORKSPACE}`
   );
 }
 
@@ -286,6 +356,26 @@ function contextSize(modelId: string): number | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * A failed conversation lists its last turn as failed with the runtime's message, which is how the
+ * bridge reports a failed turn: reopening the chat shows why it failed and offers a retry.
+ */
+function failedTurn(thread: LocalThread): Pick<RawThread, 'turns'> | Record<string, never> {
+  if (thread.status !== 'failed') {
+    return {};
+  }
+  return {
+    turns: [
+      {
+        id: `submission-${thread.lastSubmissionId ?? thread.id}`,
+        status: 'failed',
+        error: { message: thread.lastError ?? 'The local turn failed.' },
+        items: [],
+      },
+    ],
+  };
 }
 
 /** Full ACP-style snapshot used by `thread/read` with history. */
@@ -364,7 +454,7 @@ export function localThreadSnapshot(
             },
           ],
         }
-      : {}),
+      : failedTurn(thread)),
     acpSnapshot: {
       version: 2,
       timeline,

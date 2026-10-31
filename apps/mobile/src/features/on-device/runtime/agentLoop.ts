@@ -100,6 +100,23 @@ function emptyAnswer(message: LocalMessage): boolean {
   return message.role === 'assistant' && !message.content.trim() && !message.toolCalls?.length;
 }
 
+const TITLE_LIMIT = 60;
+
+/**
+ * A conversation title from its first message: the first line, cut at a word boundary with an
+ * ellipsis when it is longer than the drawer can show.
+ */
+export function localConversationTitle(input: string): string {
+  const line = input.trim().split(/\r?\n/u)[0]?.replace(/\s+/gu, ' ').trim() ?? '';
+  if (line.length <= TITLE_LIMIT) {
+    return line || 'New local conversation';
+  }
+  const cut = line.slice(0, TITLE_LIMIT - 1);
+  const boundary = cut.lastIndexOf(' ');
+  const words = boundary >= TITLE_LIMIT / 2 ? cut.slice(0, boundary) : cut;
+  return `${words.replace(/[\s.,;:!?-]+$/u, '')}…`;
+}
+
 export class LocalAgentLoop {
   private active: Run | null = null;
   private value: LocalRunSnapshot = IDLE;
@@ -157,7 +174,7 @@ export class LocalAgentLoop {
         lastSubmissionId: submissionId,
         lastError: null,
         updatedAt: now,
-        title: current.messages.length === 0 ? input.trim().slice(0, 60) : current.title,
+        title: current.messages.length === 0 ? localConversationTitle(input) : current.title,
         messages: [
           ...current.messages,
           { id: `user-${submissionId}`, role: 'user', content: input, createdAt: now },
