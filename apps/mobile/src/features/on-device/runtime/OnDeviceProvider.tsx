@@ -92,6 +92,17 @@ function message(failure: unknown, fallback: string): string {
   return failure instanceof Error ? failure.message : fallback;
 }
 
+/**
+ * Exposes a runtime owned elsewhere (the shell's local runtime host) to screens that read it
+ * through `useOnDeviceRuntime`, so every on-device surface shares one runtime.
+ */
+export function OnDeviceRuntimeScope({
+  runtime,
+  children,
+}: PropsWithChildren<{ runtime: OnDeviceRuntime }>) {
+  return <RuntimeContext.Provider value={runtime}>{children}</RuntimeContext.Provider>;
+}
+
 export function OnDeviceProvider({
   children,
   recoveryAction,

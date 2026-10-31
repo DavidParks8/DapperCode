@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import type { Chat } from '@bridge/types/types';
 import { routes } from '@shell/navigation/routes';
 import { pendingBrowserTargetUrlAtom } from '../../features/browser/state/browser';
-import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
+import { activeProfileIdAtom } from '@shell/state/bridge/atoms';
 import {
   activeChatAtom,
   gitChatAtom,
@@ -27,7 +27,7 @@ import type { DrawerScreen } from '@shell/navigation/drawerContentTypes';
 import { navigateRoot, replaceRoot } from '@shell/navigation/routeNavigation';
 
 function activeProfileId(get: Getter): string | null {
-  return get(activeBridgeProfileAtom)?.id ?? null;
+  return get(activeProfileIdAtom);
 }
 
 function activeChatId(get: Getter): string {

@@ -4,11 +4,13 @@ import {
   upsertBridgeProfile,
 } from '@shell/state/bridgeProfiles';
 import { normalizeBridgeUrlInput } from '@shell/state/bridgeUrl';
+import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 import {
   APP_STATE_VERSION,
   type AppStateAction,
   type AppStateData,
   AppStatePersistenceError,
+  migrateLegacyExecutionTarget,
   normalizeAppSettings,
   normalizeAppStateData,
   normalizeCollaborationMode,
@@ -84,7 +86,11 @@ function reduceProfileAction(state: AppStateData, action: ProfileAction): AppSta
       };
     }
     case 'profiles/switch': {
-      if (!state.bridgeProfiles.profiles.some((profile) => profile.id === action.profileId)) {
+      if (
+        action.profileId !== null &&
+        action.profileId !== LOCAL_PROFILE_ID &&
+        !state.bridgeProfiles.profiles.some((profile) => profile.id === action.profileId)
+      ) {
         throw new Error('The selected bridge profile no longer exists.');
       }
       return {
@@ -162,7 +168,10 @@ export function parsePersistedAppState(raw: string): AppStateData {
     }
     return normalizeAppStateData({
       settings: normalizeAppSettings(parsed['settings']),
-      bridgeProfiles: parseBridgeProfileStore(JSON.stringify(parsed['bridgeProfiles'] ?? {})),
+      bridgeProfiles: migrateLegacyExecutionTarget(
+        parsed['settings'],
+        parseBridgeProfileStore(JSON.stringify(parsed['bridgeProfiles'] ?? {})),
+      ),
       push: parsed['push'],
     });
   } catch (error) {

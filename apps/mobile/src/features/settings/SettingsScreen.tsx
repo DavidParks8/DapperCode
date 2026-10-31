@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -25,11 +25,7 @@ import { AgentIcon } from '@shared/ui/AgentIcon';
 import { SelectionSheet } from '@shared/ui/SelectionSheet';
 import { disablePush, enablePush, updatePushEvents } from '@shell/push/controller';
 import { retryPersistenceAtom } from '@shell/state/appState/actions';
-import {
-  appStatePersistenceErrorAtom,
-  pushSettingsAtom,
-  bridgeProfilesAtom,
-} from '@shell/state/appState/atoms';
+import { appStatePersistenceErrorAtom, pushSettingsAtom } from '@shell/state/appState/atoms';
 import {
   confirmSessionDeletionAtom,
   showToolCallsAtom,
@@ -37,9 +33,14 @@ import {
 } from '@shell/state/appState/settings';
 import {
   activeBridgeProfileAtom,
+  activeProfileAtom,
+  activeProfileFeaturesAtom,
+  activeProfileIsLocalAtom,
   apiClientAtom,
   bridgeConnectedAtom,
+  shellProfilesAtom,
 } from '@shell/state/bridge/atoms';
+import { isLocalProfile, type ShellProfile } from '@shell/state/localProfile';
 import { useBridgeCapabilitiesResource } from '@shell/state/bridge/capabilities';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { routes } from '@shell/navigation/routes';
@@ -56,6 +57,7 @@ import {
 } from './SettingsList';
 import { ICON_ROW_SEPARATOR_INSET } from './settingsListStyles';
 import { approvalModeTitle, useApprovalModeSettings } from './useApprovalModeSettings';
+import { LocalProfileSection } from './LocalProfileSection';
 
 function cycleWorkspaceChatLimit(current: WorkspaceChatLimit): WorkspaceChatLimit {
   if (current === 5) {
@@ -71,48 +73,51 @@ function cycleWorkspaceChatLimit(current: WorkspaceChatLimit): WorkspaceChatLimi
 }
 
 interface ConnectionSectionProps {
-  activeBridgeProfile: { id: string; name: string } | null;
-  activeBridgeProfileId: string | null;
+  activeProfile: ShellProfile | null;
   bridgeConnected: boolean;
-  bridgeProfiles: { id: string; name: string }[];
+  profiles: ShellProfile[];
   profileId: string;
   router: ReturnType<typeof useRouter>;
 }
 
 function ConnectionSection({
-  activeBridgeProfile,
-  activeBridgeProfileId,
+  activeProfile,
   bridgeConnected,
-  bridgeProfiles,
+  profiles,
   profileId,
   router,
 }: ConnectionSectionProps) {
+  const local = isLocalProfile(activeProfile);
   return (
     <>
       <SettingsGroup title="Connection">
-        <SettingsRow
-          label={activeBridgeProfile?.name ?? 'Current bridge'}
-          value={bridgeConnected ? 'Connected' : 'Disconnected'}
-          accessory="chevron"
-          onPress={() => router.push(routes.settingsConnection(profileId, 'edit'))}
-        />
+        {local ? (
+          <SettingsRow label={activeProfile.name} value="Offline" />
+        ) : (
+          <SettingsRow
+            label={activeProfile?.name ?? 'Current bridge'}
+            value={bridgeConnected ? 'Connected' : 'Disconnected'}
+            accessory="chevron"
+            onPress={() => router.push(routes.settingsConnection(profileId, 'edit'))}
+          />
+        )}
         <SettingsRow
           label="Add bridge"
           tone="accent"
           onPress={() => router.push(routes.settingsConnection(profileId, 'add'))}
         />
       </SettingsGroup>
-      {bridgeProfiles.length > 0 ? (
+      {profiles.length > 0 ? (
         <SettingsGroup
-          title="Bridges"
-          footer="Switching bridges opens a new chat on that workspace."
+          title="Profiles"
+          footer="Switching profiles opens a new chat there. On this iPhone runs offline."
         >
-          {bridgeProfiles.map((profile) => (
+          {profiles.map((profile) => (
             <SettingsRow
               key={profile.id}
               label={profile.name}
               accessory="check"
-              selected={profile.id === activeBridgeProfileId}
+              selected={profile.id === activeProfile?.id}
               onPress={() => replaceRoot(routes.newChat(profile.id))}
             />
           ))}
@@ -156,9 +161,16 @@ interface ChatSettingsSectionProps {
   api: HostBridgeApiClient | null;
   bridgeConnected: boolean;
   onError: (message: string | null) => void;
+  /** The local agent has no approval flow, so its profile hides the approvals row. */
+  showApprovals: boolean;
 }
 
-function ChatSettingsSection({ api, bridgeConnected, onError }: ChatSettingsSectionProps) {
+function ChatSettingsSection({
+  api,
+  bridgeConnected,
+  onError,
+  showApprovals,
+}: ChatSettingsSectionProps) {
   const [confirmSessionDeletion, setConfirmSessionDeletion] = useAtom(confirmSessionDeletionAtom);
   const [showToolCalls, setShowToolCalls] = useAtom(showToolCallsAtom);
   const [workspaceChatLimit, setWorkspaceChatLimit] = useAtom(workspaceChatLimitAtom);
@@ -172,13 +184,20 @@ function ChatSettingsSection({ api, bridgeConnected, onError }: ChatSettingsSect
 
   return (
     <>
-      <SettingsGroup title="Chat" footer="Approvals decide when an agent must ask before it acts.">
-        <SettingsRow
-          label="Approvals"
-          value={approvalModeTitle(approvalMode)}
-          accessory="expand"
-          onPress={() => setApprovalSheetVisible(true)}
-        />
+      <SettingsGroup
+        title="Chat"
+        footer={
+          showApprovals ? 'Approvals decide when an agent must ask before it acts.' : undefined
+        }
+      >
+        {showApprovals ? (
+          <SettingsRow
+            label="Approvals"
+            value={approvalModeTitle(approvalMode)}
+            accessory="expand"
+            onPress={() => setApprovalSheetVisible(true)}
+          />
+        ) : null}
         <SettingsToggleRow
           label="Show tool calls"
           value={showToolCalls}
@@ -276,7 +295,7 @@ function LegalSection({
   );
 }
 
-export function SettingsScreen({ executionTargets }: { executionTargets?: ReactNode } = {}) {
+export function SettingsScreen() {
   const theme = useAppTheme();
   const router = useRouter();
   const { profileId: routeProfileId } = useLocalSearchParams<{ profileId?: string }>();
@@ -286,10 +305,12 @@ export function SettingsScreen({ executionTargets }: { executionTargets?: ReactN
   const styles = useMemo(() => createStyles(theme), [theme]);
   const api = useAtomValue(apiClientAtom);
   const bridgeConnected = useAtomValue(bridgeConnectedAtom);
-  const activeBridgeProfile = useAtomValue(activeBridgeProfileAtom);
-  const activeBridgeProfileId = activeBridgeProfile?.id ?? null;
-  const profileId = routeProfileId ?? activeBridgeProfileId ?? '';
-  const bridgeProfiles = useAtomValue(bridgeProfilesAtom);
+  const activeProfile = useAtomValue(activeProfileAtom);
+  const activeBridgeProfileId = useAtomValue(activeBridgeProfileAtom)?.id ?? null;
+  const localProfile = useAtomValue(activeProfileIsLocalAtom);
+  const profileId = routeProfileId ?? activeProfile?.id ?? '';
+  const profiles = useAtomValue(shellProfilesAtom);
+  const features = useAtomValue(activeProfileFeaturesAtom);
   const pushSettings = useAtomValue(pushSettingsAtom);
   const persistenceError = useAtomValue(appStatePersistenceErrorAtom);
   const drawerCommands = useAtomValue(drawerCommandsAtom);
@@ -370,25 +391,31 @@ export function SettingsScreen({ executionTargets }: { executionTargets?: ReactN
           {error ? <SettingsNotice text={error} /> : null}
 
           <ConnectionSection
-            activeBridgeProfile={activeBridgeProfile}
-            activeBridgeProfileId={activeBridgeProfileId}
+            activeProfile={activeProfile}
             bridgeConnected={bridgeConnected}
-            bridgeProfiles={bridgeProfiles}
+            profiles={profiles}
             profileId={profileId}
             router={router}
           />
-          {executionTargets}
+          {localProfile ? <LocalProfileSection /> : null}
 
           <InstalledAgentsSection loading={loading} capabilities={capabilities} theme={theme} />
 
-          <ChatSettingsSection api={api} bridgeConnected={bridgeConnected} onError={setError} />
-
-          <NotificationsSection
-            pushSettings={pushSettings}
-            pushBusy={pushBusy}
-            updatePush={updatePush}
-            updatePushEvent={updatePushEvent}
+          <ChatSettingsSection
+            api={api}
+            bridgeConnected={bridgeConnected}
+            onError={setError}
+            showApprovals={!localProfile}
           />
+
+          {features.pushNotifications ? (
+            <NotificationsSection
+              pushSettings={pushSettings}
+              pushBusy={pushBusy}
+              updatePush={updatePush}
+              updatePushEvent={updatePushEvent}
+            />
+          ) : null}
 
           <LegalSection profileId={profileId} router={router} />
         </ScrollView>

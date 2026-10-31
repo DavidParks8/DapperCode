@@ -1,11 +1,11 @@
 import { router } from 'expo-router';
 import type { Getter } from 'jotai';
 
-import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
+import { activeProfileIdAtom } from '@shell/state/bridge/atoms';
 import { activeChatAtom, selectedChatIdAtom } from '@shell/state/chat/atoms';
 
 export function getWorkspaceRouteIds(get: Getter) {
-  const profileId = get(activeBridgeProfileAtom)?.id ?? null;
+  const profileId = get(activeProfileIdAtom);
   const chatId = get(activeChatAtom)?.id ?? get(selectedChatIdAtom) ?? 'new';
   return { profileId, chatId };
 }

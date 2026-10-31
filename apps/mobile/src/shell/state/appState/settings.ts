@@ -3,7 +3,8 @@ import { atom } from 'jotai';
 import type { AgentId, CollaborationMode } from '@bridge/types/types';
 import type { AppSettingsState } from '@shell/state/appState';
 import { pushRecentModelId } from '@shell/state/appSettings';
-import { appSettingsAtom } from '@shell/state/appState/atoms';
+import { appSettingsAtom, bridgeProfileStoreAtom } from '@shell/state/appState/atoms';
+import { isLocalProfileId } from '@shell/state/localProfile';
 import { dispatchAppStateAtom } from '@shell/state/appState/actions';
 
 export const updateSettingsAtom = atom(null, (get, set, patch: Partial<AppSettingsState>): void => {
@@ -26,8 +27,26 @@ function settingAtom<Key extends keyof AppSettingsState>(key: Key) {
   );
 }
 
-export const defaultStartCwdAtom = settingAtom('defaultStartCwd');
-export const preferredExecutionTargetAtom = settingAtom('preferredExecutionTarget');
+/**
+ * The new-chat workspace for the active profile. The local profile keeps its own value so picking
+ * an on-device workspace never becomes a desktop bridge's default path, and vice versa.
+ */
+export const defaultStartCwdAtom = atom(
+  (get) => {
+    const settings = get(appSettingsAtom);
+    return isLocalProfileId(get(bridgeProfileStoreAtom).activeProfileId)
+      ? settings.localDefaultStartCwd
+      : settings.defaultStartCwd;
+  },
+  (get, set, value: string | null) => {
+    set(
+      updateSettingsAtom,
+      isLocalProfileId(get(bridgeProfileStoreAtom).activeProfileId)
+        ? { localDefaultStartCwd: value }
+        : { defaultStartCwd: value },
+    );
+  },
+);
 export const preferredAgentIdAtom = settingAtom('preferredAgentId');
 export const agentSettingsAtom = settingAtom('agentSettings');
 export const approvalModeAtom = settingAtom('approvalMode');

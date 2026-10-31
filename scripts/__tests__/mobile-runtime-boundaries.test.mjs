@@ -54,6 +54,40 @@ test('local implementations cannot depend on concrete desktop transport clients'
   );
 });
 
+// The unified shell runs "On this iPhone" through the unchanged bridge client. The local RPC server
+// may speak the bridge wire protocol (types, mapping, AG-UI), but only the shell adapter
+// (src/shell/runtime/LocalBridgeWsClient.ts) may plug it into the concrete transport.
+test('the local RPC server speaks bridge wire types without depending on bridge transports', async () => {
+  const server = 'src/features/on-device/transport/server.ts';
+  assert.equal(
+    (
+      await restrictedImports(
+        server,
+        'import { HostBridgeWsClient } from "@bridge/ws/ws"; void HostBridgeWsClient;',
+      )
+    ).length,
+    1,
+  );
+  assert.equal(
+    (
+      await restrictedImports(
+        server,
+        'import type { RawThread } from "@bridge/mapping/chatMapping"; export type T = RawThread;',
+      )
+    ).length,
+    0,
+  );
+  assert.equal(
+    (
+      await restrictedImports(
+        'src/shell/runtime/LocalBridgeWsClient.ts',
+        'import { HostBridgeWsClient } from "@bridge/ws/ws"; import { LocalBridgeServer } from "../../features/on-device/transport/server"; void HostBridgeWsClient; void LocalBridgeServer;',
+      )
+    ).length,
+    0,
+  );
+});
+
 test('local implementations can reuse genuinely shared helpers directly', async () => {
   assert.equal(
     (

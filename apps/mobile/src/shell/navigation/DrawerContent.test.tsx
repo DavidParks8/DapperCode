@@ -32,6 +32,9 @@ import { selectedChatIdAtom } from '@shell/state/chat/atoms';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { windowTraitsAtom } from '@shell/state/layout/atoms';
 import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
+import { appStateSnapshotAtom } from '@shell/state/appState/atoms';
+import { localProfileAvailableAtom } from '@shell/state/bridge/atoms';
+import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 import type { AppStore } from '@shell/state/types';
 import type { WorkspaceChatLimit } from '@shell/state/appSettings';
 import {
@@ -2904,6 +2907,27 @@ describe('DrawerContent bulk selection', () => {
     expect(findOptionalByLabel(root, 'Close session list')).toBeDefined();
     expect(findOptionalByLabel(root, 'Bridge connected. Edit connection')).toBeDefined();
     expect(findOptionalByLabel(root, 'Select all sessions')).toBeUndefined();
+    act(() => tree.unmount());
+  });
+
+  it('shows the local profile footer without bridge connection or browser actions', async () => {
+    const harness = createHarness({ chats: [createChat()] });
+    const store = createDrawerStore(harness.api, harness.ws);
+    store.set(localProfileAvailableAtom, true);
+    const snapshot = store.get(appStateSnapshotAtom);
+    store.set(appStateSnapshotAtom, {
+      ...snapshot,
+      data: {
+        ...snapshot.data,
+        bridgeProfiles: { ...snapshot.data.bridgeProfiles, activeProfileId: LOCAL_PROFILE_ID },
+      },
+    });
+    const tree = await renderDrawer(harness, { store });
+    const root = tree.root as Queryable;
+
+    expect(findOptionalByLabel(root, 'On this iPhone. Open settings')).toBeDefined();
+    expect(findOptionalByLabel(root, 'Bridge connected. Edit connection')).toBeUndefined();
+    expect(findOptionalByLabel(root, 'Open preview browser')).toBeUndefined();
     act(() => tree.unmount());
   });
 

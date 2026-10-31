@@ -13,7 +13,9 @@ lives under `apps/mobile/src/shell/state`, with feature-owned state under each f
 | `shell/state/appState/actions.ts`          | `initialize` / `dispatch` / `dispatchDurable` / `retryPersistence` / `flushPersistence` write atoms |
 | `shell/state/appState/settings.ts`         | Read/write atoms for individual settings (`approvalModeAtom`, …)                                    |
 | `shell/state/appState/persistenceCoordinator.ts` | Mutable write machinery behind the app-state atoms                                            |
-| `shell/state/bridge/*`                     | Active bridge profile, WS/API clients, profile lifecycle actions                                    |
+| `shell/state/bridge/*`                     | Active profile (bridge or local), WS/API clients, profile features, profile lifecycle actions       |
+| `shell/state/localProfile.ts`              | Built-in "On this iPhone" profile id, `ShellProfile` union, and guards                              |
+| `shell/state/local/atoms.ts`               | Runtime and transport published by the local runtime host                                           |
 | `src/app/*`                                | Expo Router layouts and thin route adapters; URL paths are navigation state                         |
 | `shell/navigation/routes.ts`               | Typed builders for canonical profile, chat, settings, and pushed-screen URLs                        |
 | `shell/navigation/actions.ts`              | Router-backed application commands that also coordinate related domain atoms                        |
@@ -24,7 +26,7 @@ lives under `apps/mobile/src/shell/state`, with feature-owned state under each f
 | `shell/state/commands.ts`                  | Screen-registered imperative entry points (replaces `useImperativeHandle` refs)                     |
 | `shell/state/theme.ts`                     | Theme derived from settings and the system colour scheme                                            |
 | `features/chat/state/*`                    | MainScreen screen state, grouped by domain, plus the reset registry                                 |
-| `shell/runtime/*`                         | Execution-target composition and target-switch controls, not transport implementations               |
+| `shell/runtime/*`                         | Local runtime host, `LocalBridgeWsClient` adapter, local support detection, and exit actions         |
 | `features/on-device/runtime/*`            | Scoped native owner, local turn/tool journal, preferences, drafts, and thread repository               |
 | `shell/state/testing.ts`                   | `createAppStore` helpers for tests (`createTestStore`, `createBridgeTestStore`, `withAppStore`)     |
 
@@ -45,12 +47,17 @@ lives under `apps/mobile/src/shell/state`, with feature-owned state under each f
   `then`.
 - **`wsClientAtom` / `apiClientAtom` are derived but writable.** Writing installs an override; that is
   the injection seam used by tests.
+- **Scope profile state by `activeProfileIdAtom`, not `activeBridgeProfileAtom`.** The latter is
+  `null` while the local profile is open and is only for bridge URL/token, push, and connection
+  settings. While the local profile is open, `wsClientAtom` returns the transport in
+  `localTransportAtom`; `localProfileAvailableAtom` is writable as a test seam.
 
 ## Navigation
 
 Expo Router is the only source of truth for navigation. Every screen has a profile-aware URL under
-`/profiles/[profileId]` for desktop mode; the isolated iOS subtree uses `/on-device`, with
-`/on-device/chat/[threadId]` for local conversations. Chats and sub-agent transcripts use dynamic path parameters. Use the typed
+`/profiles/[profileId]`, including the built-in local profile (`/profiles/on-device/…`). The legacy
+`/on-device` hub and `/on-device/chat/[threadId]` redirect there; the remaining `/on-device/*` screens
+are model, workspace, account, and file screens that Settings links to. Chats and sub-agent transcripts use dynamic path parameters. Use the typed
 builders in `shell/navigation/routes.ts`, clear nested detail history before selecting a profile or chat,
 use `router.push` for hierarchical drill-in screens, and use `router.back` for one-level dismissal.
 The one-shot new-chat handoff guard only prevents a superseded chat URL from rehydrating while `/new`

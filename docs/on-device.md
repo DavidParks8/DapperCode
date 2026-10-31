@@ -1,11 +1,13 @@
 # On this iPhone
 
-The iOS app can run a coding model and its file/Git tools locally. This is a separate execution
-target, not a bridge profile or a localhost server. Android and web continue to use desktop agents.
+The iOS app can run a coding model and its file/Git tools locally. **On this iPhone** is a built-in
+profile next to your desktop bridge profiles: its chats use the same drawer, chat screen, model sheet,
+workspace picker, Git screen, and Settings. It is not a localhost server, and Android and web
+continue to use desktop agents.
 
 ## First run
 
-1. Choose **On this iPhone** on onboarding, or in a desktop connection's Settings.
+1. Choose **On this iPhone** on onboarding, or under **Settings → Profiles**.
 2. Open **Model library**, choose a family, then compare its sizes and quants on the next page.
    Download a compatible quant and choose **Load and use**. Search and **Downloaded only** narrow
    the family list. Back returns from the quant page to the family list; selecting for an existing
@@ -17,14 +19,16 @@ target, not a bridge profile or a localhost server. Android and web continue to 
    An empty file workspace is also available; **Initialize Git** on its Git page (optionally with
    an HTTPS origin) to stage, commit, and later push or pull. Workspaces can be renamed or deleted;
    deleting one removes its files but keeps conversations that used it readable.
-4. Set your Git author name/email, then start a **New local conversation**.
+4. Set your Git author name/email, then start a **New chat**. Pick the model with the chat's
+   **Choose a model** sheet (downloaded models) and the workspace with the workspace picker.
 5. After preparation, inference, file edits, search, diffs, staging, discarding, branch creation and
    switching, history, and commits work without internet. Push, fetch, pull, cloning, sign-in, and
    new downloads require connectivity.
 
-Existing desktop profiles and conversations are not migrated or deleted. The last explicitly
-selected target is restored at startup. Switching back settles local work and unloads its model
-before desktop lifecycle effects are mounted.
+Existing desktop profiles and conversations are not migrated or deleted. The last selected profile,
+local or desktop, is restored at startup. Builds that stored the old global "On this iPhone" mode
+open the local profile instead. Switching to another profile settles local work and unloads its
+model.
 
 ## Model downloads
 
@@ -201,17 +205,135 @@ Signing out removes the local credential, not GitHub's authorization. Revoke the
 in GitHub account settings when necessary. Other authentication providers can implement the
 feature's `GitProviderAuthStrategy`; the agent loop and file tools are provider-independent.
 
+## Unified shell architecture
+
+The chat shell has no local-mode branches. The local agent speaks the bridge's JSON-RPC protocol
+in-process, so `HostBridgeApiClient`, `MainScreen`, the drawer, and the Git and workspace screens drive
+it unchanged.
+
+```text
+MainScreen / drawer / Git / picker ── HostBridgeApiClient ── HostBridgeWsClient seam
+                                                                  │
+                                    shell/runtime/LocalBridgeWsClient (extends it, no socket)
+                                                                  │
+                         features/on-device/transport/LocalBridgeServer (wire shapes + events)
+                                                                  │
+                         LocalAgentPort ── runtimePort.ts ── OnDeviceRuntime (models, loop, Git)
+```
+
+### Profile model
+
+- `shell/state/localProfile.ts` defines the built-in profile (`LOCAL_PROFILE_ID = 'on-device'`) and
+  the `ShellProfile` union. Bridge profile ids are `bridge-…`, so the id cannot collide.
+- `bridgeProfiles.activeProfileId` may be `'on-device'`; the local profile itself is never stored.
+  `activeProfileAtom` resolves it only when `localProfileAvailableAtom` is true: iOS with the
+  on-device native module at the expected ABI (`shell/runtime/localProfileSupport.ts`). Android, web,
+  and old builds fall back to a bridge profile or onboarding.
+- `activeBridgeProfileAtom` is bridge-only (`null` while the local profile is open). Use
+  `activeProfileAtom`/`activeProfileIdAtom` for anything profile-scoped (routes, caches, drawer).
+- Migration: a persisted `settings.preferredExecutionTarget === 'on-device'` becomes
+  `activeProfileId = 'on-device'` when app state loads, and the setting no longer exists.
+- Startup restores the chat snapshot cache of the resolved active profile, including the local
+  profile, so a relaunch reopens the last local chat.
+- `defaultStartCwdAtom` keeps a separate `localDefaultStartCwd`, so local workspace paths never
+  become a desktop bridge's new-chat path.
+- Routes are the regular `/profiles/on-device/(drawer)/chats/…` routes. `/on-device` and
+  `/on-device/chat/[threadId]` redirect there.
+
+### Runtime ownership and lifecycle
+
+`shell/runtime/LocalRuntimeHost.tsx`, mounted once by `RootLayout`, owns the single
+`OnDeviceRuntime` through `OnDeviceProvider` while the local profile is open or a legacy
+`/on-device/*` screen is shown. While the runtime starts or fails, the provider's page covers the
+shell (its recovery actions are ordinary profile switches; with no desktop profile, the local
+profile is closed before onboarding opens, and the host never renders over `/onboarding`). When ready, the host publishes
+`localRuntimeAtom` and a `LocalBridgeWsClient` in `localTransportAtom`; `wsClientAtom` returns that
+transport for the local profile, and `ProfileRouteBoundary` keeps local routes in their loading
+state until it exists. Leaving the profile unmounts the host, which disposes the transport and the
+runtime (stop, unload, pause downloads, cancel sign-in) — every exit path is the same.
+
+Profile lifecycles in `useAppBridgeLifecycle` keep running (capabilities, prefetch, snapshot cache),
+but WebSocket foreground/background handling, push presence, and push registration are skipped for
+the local profile. `LocalBridgeWsClient` is connected from creation until disposal and ignores
+`disconnect()`.
+
+### Implemented RPCs
+
+`LOCAL_IMPLEMENTED_METHODS` in `transport/server.ts` is authoritative:
+
+| Area         | Methods                                                                                                                                                           |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session      | `bridge/capabilities/read`, `bridge/health/read`, `thread/approvalPolicy/set` (accepted, no approvals locally)                                                     |
+| Chats        | `thread/list`, `thread/loaded/list`, `bridge/thread/list/stream/start`/`cancel`, `thread/read`, `thread/start`, `bridge/thread/create`, `thread/name/update`, `thread/delete`, `thread/config/set` (model), `thread/resume` |
+| Turns        | `bridge/thread/queue/send`, `turn/start`, `turn/interrupt`, `bridge/thread/queue/read`, `bridge/thread/schedules/read` (always empty)                              |
+| Models       | `model/list` (downloaded, runnable catalog models)                                                                                                                |
+| Workspaces   | `bridge/workspaces/list`, `bridge/fs/list` (workspace roots only)                                                                                                 |
+| Attention    | `bridge/approvals/list`, `bridge/approvals/resolve` (the loop's pending tool approval, such as a push), `bridge/userInput/list` (always empty)                     |
+| Git          | `bridge/git/status`, `diff`, `history`, `branches`, `stage`, `stageAll`, `unstage`, `unstageAll`, `commit`, `switch`, `push`                                     |
+
+Every other method rejects with JSON-RPC `-32601` and `data.error = 'unsupported_on_device'`
+(surfaced as `RpcRequestError`). Other stable `data.error` reasons are `thread_not_found`,
+`on_device_model_required`, `on_device_workspace_required`, `on_device_busy`, `on_device_offline`,
+`on_device_not_repository`, and `on_device_failed`; typed native failures also carry
+`data.nativeCode`. A tool approval requested by the agent loop is sent as
+`bridge/approval.requested`/`bridge/approval.resolved`, so the shared approval banner answers it. Only one local chat runs at a time; there is no queue or steering.
+
+Local workspaces are presented as `/On this iPhone/<name>` paths (duplicate names gain an id
+suffix). A chat's model is an ACP config option (`id: 'model'`), so the existing model sheet changes
+it through `thread/config/set`. `thread/create` falls back to the runtime's remembered workspace and
+model when the composer sends none or a desktop path.
+
+### Capability flags
+
+- Wire capabilities (`localCapabilities()`): one agent, `threadDelete` only; steer, fork, plan mode,
+  review, browser preview, bridge UI surfaces, and fast mode are false, so the shell hides them.
+- Client profile features (`activeProfileFeaturesAtom`): `attachments`, `pushNotifications`,
+  `connectionSettings`, and `gitClone` are false for the local profile. The composer disables
+  attach/paste, the workspace picker hides **Clone Repo**, and Settings hides notifications and
+  approvals.
+
+### Streaming
+
+The runtime publishes state, not events. `LocalEventProjector` (`transport/events.ts`) diffs each
+thread against the last state it delivered and emits the bridge notifications the shell already
+consumes: `thread/started`, `thread/name/updated`, `thread/deleted`, and `bridge/agui.event` with
+`RUN_STARTED`, reasoning and text message start/content/end, `TOOL_CALL_START/ARGS/END/RESULT`, the
+`dappercode.dev/tool-meta` custom event, and `RUN_FINISHED` or `RUN_ERROR` (`code: 'interrupted'` for
+stops). Snapshot message, reasoning, and tool ids match the event ids, so the reload the shell
+performs after a run converges with what was streamed. Text that is not an append of the streamed
+draft is corrected by that reload.
+
+### Extension points for the next tracks
+
+- **Chat parity** (activity, tool titles, errors, retry): tool kinds and titles come from
+  `describeLocalTool` in `transport/wire.ts`. Run failures arrive as `RUN_ERROR` with the runtime's
+  message; add richer error data in `events.ts` `finish()` and in `server.ts` error reasons rather than
+  branching in `MainScreen`. Runtime phases (`preparing`, model loading progress) can be streamed as
+  `ACTIVITY_SNAPSHOT`/custom events from the projector.
+- **Git, workspaces, files**: add methods to `createLocalGitHandlers` or the server handler table and
+  to `LocalAgentPort`. Implementing `bridge/git/clone` (native clone exists) means flipping
+  `gitClone` in `activeProfileFeaturesAtom`. `bridge/fs/list` currently lists workspace roots only.
+- **Models and account in Settings**: `features/settings/LocalProfileSection.tsx` is mounted for the
+  local profile and still links to the legacy `/on-device/models`, `/workspaces`, and `/account`
+  screens. Replace those rows with Settings sections; `model/list` and the model config option can
+  carry download/memory state once the sheet renders it.
+- **Discovery and onboarding**: `OnDeviceEntry` (onboarding) and the Settings **Profiles** group open
+  `routes.newChat(LOCAL_PROFILE_ID)`. Missing model/workspace prerequisites reject chat creation with
+  `on_device_model_required`/`on_device_workspace_required`, which a call to action can key on.
+
 ## Ownership and testing
 
-`src/app/on-device` owns a separate route/provider subtree. `src/features/on-device` owns local
-models, authentication, workspaces, tool dispatch, journals, and screens. The Expo module under
-`modules/on-device-agent` owns native memory, Keychain, workspace containment, atomic document/model
-storage, and Git. Native ABI version mismatches fail locally with a rebuild message.
+`src/features/on-device` owns local models, authentication, workspaces, tool dispatch, journals, the
+legacy screens, and the in-process transport (`transport/`, which may use bridge wire types but not
+bridge transports). The Expo module under `modules/on-device-agent` owns native memory, Keychain,
+workspace containment, atomic document/model storage, and Git. Native ABI version mismatches fail
+locally with a rebuild message. `src/shell/runtime` composes the runtime host and the
+`LocalBridgeWsClient` adapter; `src/app/on-device` keeps the legacy model, workspace, account, and
+files screens on the shell-owned runtime until Settings replaces them.
 
-`shell/runtime` selects target lifecycle at composition. Generic app-state hydration is independent
-of the bridge lifecycle. Existing bridge clients, WebSocket/replay, ACP recovery, and `MainScreen`
-do not acquire local-mode branches. Local chat directly reuses the existing transcript, composer,
-theme, and layout primitives with projected chat DTOs.
+Transport behaviour is covered by `transport/server.test.ts` (wire shapes, events, stop, unsupported
+methods), `shell/runtime/LocalBridgeWsClient.test.ts` (the real API client over the transport), and
+`features/chat/screen/MainScreen.local.test.tsx` (send, stream, and stop in the real chat screen).
 
 See the [native module guide](../apps/mobile/modules/on-device-agent/README.md) for build and native
 scenario commands. Run mobile lint/typecheck/tests, `typecheck:native`, architectural boundary tests,

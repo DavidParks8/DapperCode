@@ -1,0 +1,186 @@
+jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
+jest.mock('expo-router/react-navigation', () => ({ usePreventRemove: jest.fn() }));
+jest.mock('@expo/vector-icons', () => ({
+  Ionicons: Object.assign(() => null, { glyphMap: {} }),
+}));
+jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
+jest.mock('react-native-markdown-display', () => 'Markdown');
+jest.mock('../message/ChatMessage', () => ({
+  ChatMessage: ({ message }: { message: { content: string } }) => message.content,
+  ToolInvocationRow: ({ invocation }: { invocation: { title: string } }) =>
+    `tool:${invocation.title}`,
+}));
+jest.mock('./AtomGlyph', () => ({ AtomGlyph: () => null }));
+
+import { AppState, FlatList, TextInput } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
+
+import { HostBridgeApiClient } from '@bridge/client/client';
+import { getMessageText } from '@bridge/messages';
+import type { ChatMessage } from '@bridge/types/types';
+import { LocalBridgeServer } from '../../on-device/transport/server';
+import { FakeAgentPort } from '../../on-device/transport/testing';
+import { LOCAL_WORKSPACE_ROOT } from '../../on-device/transport/wire';
+import { LocalBridgeWsClient } from '@shell/runtime/LocalBridgeWsClient';
+import { appStateSnapshotAtom } from '@shell/state/appState/atoms';
+import { defaultStartCwdAtom } from '@shell/state/appState/settings';
+import { localProfileAvailableAtom } from '@shell/state/bridge/atoms';
+import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
+import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
+import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import { MainScreen } from './MainScreen';
+import { selectedChatIdAtom } from '../state/session';
+
+type Node = ReactTestInstance & {
+  props: Record<string, unknown>;
+  findAll(predicate: (node: Node) => boolean): Node[];
+  findAllByType(type: unknown): Node[];
+};
+
+async function flush(rounds = 25): Promise<void> {
+  for (let index = 0; index < rounds; index += 1) {
+    await Promise.resolve();
+  }
+}
+
+async function settle(): Promise<void> {
+  await act(async () => {
+    await flush();
+    jest.advanceTimersByTime(50);
+    await flush();
+  });
+}
+
+function transcript(root: Node): string[] {
+  const items = (root.findAllByType(FlatList)[0]?.props['data'] ?? []) as {
+    message?: ChatMessage;
+  }[];
+  return items
+    .map((item) => (item.message ? getMessageText(item.message) : ''))
+    .filter((text) => text.length > 0);
+}
+
+function labeled(root: Node, label: string): Node | undefined {
+  return root.findAll((node) => node.props['accessibilityLabel'] === label)[0];
+}
+
+async function renderLocalMain() {
+  const port = new FakeAgentPort();
+  const ws = new LocalBridgeWsClient(new LocalBridgeServer(port));
+  ws.connect();
+  const api = new HostBridgeApiClient({ ws, profileId: LOCAL_PROFILE_ID });
+  const store = createBridgeTestStore({ api, ws, bridgeProfileId: 'bridge-1' });
+  store.set(localProfileAvailableAtom, true);
+  const snapshot = store.get(appStateSnapshotAtom);
+  store.set(appStateSnapshotAtom, {
+    ...snapshot,
+    data: {
+      ...snapshot.data,
+      bridgeProfiles: { ...snapshot.data.bridgeProfiles, activeProfileId: LOCAL_PROFILE_ID },
+    },
+  });
+  store.set(defaultStartCwdAtom, `${LOCAL_WORKSPACE_ROOT}/Demo`);
+  let tree: ReactTestRenderer | undefined;
+  await act(async () => {
+    tree = renderer.create(
+      withAppStore(
+        store,
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 47, left: 0, right: 0, bottom: 34 },
+          }}
+        >
+          <AppThemeProvider theme={createAppTheme('dark')}>
+            <MainScreen />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      ),
+    );
+    await flush();
+  });
+  await settle();
+  return { tree: tree!, root: tree!.root as Node, port, store, ws };
+}
+
+async function submit(root: Node, text: string): Promise<void> {
+  const input = root
+    .findAllByType(TextInput)
+    .find((node) => node.props['accessibilityLabel'] === 'Message');
+  if (!input) {
+    throw new Error('Missing composer');
+  }
+  await act(async () => {
+    (input.props['onChangeText'] as (value: string) => void)(text);
+    await flush();
+  });
+  const composer = root.findAll(
+    (node) =>
+      typeof node.props['onSubmit'] === 'function' &&
+      typeof node.props['onChangeText'] === 'function',
+  )[0];
+  await act(async () => {
+    (composer?.props['onSubmit'] as () => void)();
+    await flush();
+  });
+  await settle();
+}
+
+describe('MainScreen on the local profile', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('starts a local chat, streams the reply into the transcript, and stops it', async () => {
+    const { tree, root, port, store } = await renderLocalMain();
+    expect(
+      root
+        .findAllByType(TextInput)
+        .some((node) => node.props['placeholder'] === 'Message On this iPhone...'),
+    ).toBe(true);
+    const attach = labeled(root, 'Add attachment');
+    expect(attach?.props['accessibilityState']).toMatchObject({ disabled: true });
+
+    await submit(root, 'Explain the workspace');
+
+    const [thread] = port.threads();
+    expect(thread).toMatchObject({
+      workspaceId: 'ws-one',
+      modelId: 'qwen3-1.7b-q4-k-m',
+      status: 'running',
+    });
+    expect(store.get(selectedChatIdAtom)).toBe(thread!.id);
+    expect(transcript(root)).toContain('Explain the workspace');
+
+    await act(async () => {
+      port.streamAssistant(thread!.id, 'assistant-1', 'The workspace');
+      await flush();
+    });
+    await act(async () => {
+      port.streamAssistant(thread!.id, 'assistant-1', 'The workspace holds a demo app.');
+      await flush();
+    });
+    await settle();
+    expect(transcript(root)).toContain('The workspace holds a demo app.');
+    expect(labeled(root, 'Stop agent')).toBeTruthy();
+
+    await act(async () => {
+      (labeled(root, 'Stop agent')!.props['onPress'] as () => void)();
+      await flush();
+    });
+    await settle();
+
+    expect(port.thread(thread!.id)?.status).toBe('interrupted');
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    expect(transcript(root)).toEqual(
+      expect.arrayContaining(['Explain the workspace', 'The workspace holds a demo app.']),
+    );
+    act(() => tree.unmount());
+  });
+});
