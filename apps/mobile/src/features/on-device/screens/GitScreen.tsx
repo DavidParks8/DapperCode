@@ -317,18 +317,17 @@ function GitSyncActions({
         title="Push current branch"
         disabled={noBranch}
         onPress={() =>
-          action('Pushing current branch', async (workspace) =>
-            runtime.native.pushWorkspaceGit(workspace, await runtime.credential(workspace)),
-          )
+          action('Pushing current branch', (workspace) => runtime.pushWorkspace(workspace))
         }
       />
       <LocalAction
         title="Fetch from origin"
         disabled={noRemote}
         onPress={() =>
-          action('Fetching from origin', async (workspace) =>
-            runtime.native.fetchWorkspaceGit(workspace, await runtime.credential(workspace)),
-          )
+          action('Fetching from origin', async (workspace) => {
+            runtime.requireNetwork('fetch');
+            await runtime.native.fetchWorkspaceGit(workspace, await runtime.credential(workspace));
+          })
         }
       />
       <LocalAction
@@ -336,6 +335,7 @@ function GitSyncActions({
         disabled={noBranch}
         onPress={() =>
           action('Pulling from origin', async (workspace) => {
+            runtime.requireNetwork('pull');
             const result = await runtime.native.pullWorkspaceGit(
               workspace,
               await runtime.credential(workspace),

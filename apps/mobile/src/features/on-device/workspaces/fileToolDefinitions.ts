@@ -1,5 +1,11 @@
 import { toolDefinition as definition } from '../runtime/toolDefinition';
 
+// Small model contexts hold only a few kilobytes of tool output per turn, so reads stay chunked.
+export const READ_FILE_DEFAULT_BYTES = 3072;
+export const READ_FILE_MAX_BYTES = 16_384;
+export const LIST_DIRECTORY_DEFAULT_LIMIT = 64;
+export const LIST_DIRECTORY_MAX_LIMIT = 200;
+
 // Keep generation grammars structural; the dispatcher and native boundary enforce all bounds.
 const path = { type: 'string' } as const;
 const revision = { type: ['string', 'null'] } as const;
@@ -7,7 +13,7 @@ const revision = { type: ['string', 'null'] } as const;
 export const FILE_TOOL_DEFINITIONS = [
   definition(
     'list_directory',
-    'List a workspace directory. Use an empty path for the root. Truncation is reported.',
+    `List a workspace directory. Use an empty path for the root. limit defaults to ${LIST_DIRECTORY_DEFAULT_LIMIT} (max ${LIST_DIRECTORY_MAX_LIMIT}).`,
     {
       path: { type: 'string' },
       limit: { type: 'integer' },
@@ -16,7 +22,7 @@ export const FILE_TOOL_DEFINITIONS = [
   ),
   definition(
     'read_file',
-    'Read a UTF-8 file chunk. Returns JSON with path, content, revision, and nextOffset. Offsets and limits are UTF-8 bytes.',
+    `Read a UTF-8 file chunk. Returns path, content, revision, and nextOffset. offset/limit are bytes; limit defaults to ${READ_FILE_DEFAULT_BYTES} (max ${READ_FILE_MAX_BYTES}).`,
     {
       path,
       offset: { type: 'integer' },

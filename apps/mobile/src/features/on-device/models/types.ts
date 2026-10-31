@@ -9,9 +9,14 @@ export interface LocalModelDefinition {
   sha256: string;
   bytes: number;
   license: string;
+  /** Smallest context the agent loop is usable with; memory admission is measured at this size. */
   contextTokens: number;
+  /** Largest context loaded when fresh memory headroom allows it. */
+  maxContextTokens: number;
   kvBytesPerToken: number;
   workingBytes: number;
+  /** Prompt-state checkpoint budget for hybrid/SWA models; 0 for pure-attention models. */
+  stateCacheBytes: number;
   minimumDeviceBytes: number;
   recommended: boolean;
   runtimeIssue?: string;

@@ -54,6 +54,8 @@ const mockRuntime = {
   workspaceTask: <T,>(_label: string, action: () => Promise<T>) => action(),
   refreshWorkspaces: jest.fn(async () => undefined),
   credential: jest.fn(async () => null),
+  requireNetwork: jest.fn(),
+  pushWorkspace: jest.fn(async () => undefined),
   native: {
     getWorkspaceGitStatus: jest.fn<Promise<LocalGitStatus>, [string]>(),
     getWorkspaceGitDiff: jest.fn(async () => ({

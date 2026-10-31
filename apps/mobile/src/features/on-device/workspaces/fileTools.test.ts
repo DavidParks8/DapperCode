@@ -39,7 +39,7 @@ test('file tools bind the trusted workspace and return the native JSON result', 
     'trusted-workspace',
     'src/main.txt',
     0,
-    4096,
+    3072,
   );
   expect(result).toEqual({
     path: 'src/main.txt',
@@ -48,6 +48,15 @@ test('file tools bind the trusted workspace and return the native JSON result', 
     nextOffset: null,
     totalBytes: 8,
   });
+});
+
+test('model reads are bounded to chunks that fit small local contexts', async () => {
+  const native = port();
+  await expect(
+    executeFileTool('trusted', 'read_file', { path: 'big.txt', limit: 65_536 }, native),
+  ).rejects.toThrow('from 1 to 16384');
+  await executeFileTool('trusted', 'read_file', { path: 'big.txt', limit: 16_384 }, native);
+  expect(native.readWorkspaceFile).toHaveBeenCalledWith('trusted', 'big.txt', 0, 16_384);
 });
 
 test('the model cannot select another workspace through extra arguments', async () => {
