@@ -1,3 +1,4 @@
+import Darwin
 import DapperGit
 import Foundation
 
@@ -57,7 +58,8 @@ extension WorkspaceStore {
   }
 
   /// Discards working-tree changes for one file (removing it when untracked), or for every tracked
-  /// file. Staged content is preserved.
+  /// file. Staged content is preserved. With `removeUntracked`, untracked files that are not ignored
+  /// are removed too; ignored files (including inside untracked folders) are never touched.
   func gitDiscard(_ id: String, path: String?, removeUntracked: Bool) throws {
     let root = try resolve(id, path: "", allowRoot: true)
     if let path {
@@ -67,13 +69,44 @@ extension WorkspaceStore {
       }
       if try NativeGit.isUntracked(repository: root, path: path) {
         try fileManager.removeItem(at: url)
+        pruneEmptyDirectories(from: url.deletingLastPathComponent(), root: root)
       } else {
-        try NativeGit.discard(repository: root, path: path, removeUntracked: false)
+        try NativeGit.discard(repository: root, path: path)
       }
     } else {
-      try NativeGit.discard(repository: root, path: nil, removeUntracked: removeUntracked)
+      try NativeGit.discard(repository: root, path: nil)
+      if removeUntracked { try removeUntrackedFiles(id, root: root) }
     }
     markChanged(id)
+  }
+
+  /// Every path is validated (containment, no symlinks, no hard links, regular files only) before
+  /// anything is removed, so an unsupported entry cannot leave a partial cleanup.
+  private func removeUntrackedFiles(_ id: String, root: URL) throws {
+    let files = try NativeGit.untrackedFiles(repository: root).map { path in
+      let url = try resolve(id, path: path)
+      guard try kind(url) == .file else {
+        throw WorkspaceError(
+          .pathUnsupported, "Only regular untracked files can be removed: \(path)")
+      }
+      return url
+    }
+    for url in files {
+      try fileManager.removeItem(at: url)
+    }
+    for url in files {
+      pruneEmptyDirectories(from: url.deletingLastPathComponent(), root: root)
+    }
+  }
+
+  /// Removes now-empty parent folders up to (not including) the workspace root. `rmdir` refuses
+  /// non-empty folders, so folders still holding ignored or other files are kept.
+  private func pruneEmptyDirectories(from directory: URL, root: URL) {
+    var current = directory.standardizedFileURL
+    let boundary = root.standardizedFileURL.path
+    while current.path.hasPrefix(boundary + "/"), Darwin.rmdir(current.path) == 0 {
+      current = current.deletingLastPathComponent().standardizedFileURL
+    }
   }
 
   func gitInit(_ id: String, initialBranch: String, origin: String?) throws -> NativeWorkspaceSummary {

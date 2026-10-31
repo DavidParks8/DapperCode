@@ -399,20 +399,54 @@ private func runLifecycleGate(_ store: WorkspaceStore) async throws {
   try await rejected("per-file discard deletes an untracked file", code: .pathNotFound) {
     _ = try await store.readFile(id, path: "scratch.txt", offset: 0, limit: 64)
   }
+  let repository = try await store.resolve(id, path: "", allowRoot: true)
+  let info = repository.appendingPathComponent(".git/info", isDirectory: true)
+  try FileManager.default.createDirectory(at: info, withIntermediateDirectories: true)
+  try "*.env\n".write(to: info.appendingPathComponent("exclude"), atomically: true, encoding: .utf8)
   let app = try await store.readFile(id, path: "src/app.txt", offset: 0, limit: 64)
   _ = try await store.writeFile(id, path: "src/app.txt", content: "edit\n", expectedRevision: app.revision)
-  _ = try await store.writeFile(id, path: "keep.txt", content: "keep\n", expectedRevision: nil)
+  for path in ["keep.txt", "untracked/deep/remove.txt", "untracked/deep/secret.env", "gone/only.txt"] {
+    _ = try await store.writeFile(id, path: path, content: "\(path)\n", expectedRevision: nil)
+  }
+  try await store.removeEntry(id, path: "notes.txt")
+  try await store.gitStage(id, path: "notes.txt")
+  _ = try await store.writeFile(id, path: "notes.txt", content: "RECREATED\n", expectedRevision: nil)
   try await store.gitDiscard(id, path: nil, removeUntracked: false)
   let restoredApp = try await store.readFile(id, path: "src/app.txt", offset: 0, limit: 64)
   let kept = try await store.readFile(id, path: "keep.txt", offset: 0, limit: 64)
   try check(
-    restoredApp.content == "app\n" && kept.content == "keep\n",
+    restoredApp.content == "app\n" && kept.content == "keep.txt\n",
     "discard-all restores tracked files and keeps untracked files by default")
-  try await store.gitDiscard(id, path: nil, removeUntracked: true)
-  try await rejected("discard-all can remove untracked files", code: .pathNotFound) {
-    _ = try await store.readFile(id, path: "keep.txt", offset: 0, limit: 64)
+  try check(
+    try await store.readFile(id, path: "notes.txt", offset: 0, limit: 64).content == "RECREATED\n",
+    "discard-all keeps a staged-for-deletion file that is still on disk")
+  try await rejected("per-file discard refuses staged deletions", code: .invalidArgument) {
+    try await store.gitDiscard(id, path: "notes.txt", removeUntracked: false)
   }
-  try check(try await store.gitStatus(id).payload["clean"] as? Bool == true, "discard leaves a clean tree")
+  try await store.gitDiscard(id, path: nil, removeUntracked: true)
+  for path in ["keep.txt", "untracked/deep/remove.txt", "gone/only.txt"] {
+    try await rejected("removeUntracked removes \(path)", code: .pathNotFound) {
+      _ = try await store.readFile(id, path: path, offset: 0, limit: 64)
+    }
+  }
+  try check(
+    !FileManager.default.fileExists(atPath: repository.appendingPathComponent("gone").path),
+    "removeUntracked prunes folders it emptied")
+  try check(
+    try await store.readFile(id, path: "untracked/deep/secret.env", offset: 0, limit: 64).content
+      == "untracked/deep/secret.env\n",
+    "removeUntracked keeps ignored files inside untracked folders")
+  try check(
+    try await store.readFile(id, path: "notes.txt", offset: 0, limit: 64).content == "RECREATED\n",
+    "removeUntracked keeps a staged-for-deletion file that is still on disk")
+  try await store.gitUnstage(id, path: "notes.txt")
+  try await store.gitDiscard(id, path: "notes.txt", removeUntracked: false)
+  try await store.removeEntry(id, path: "untracked")
+  let restoredNotes = try await store.readFile(id, path: "notes.txt", offset: 0, limit: 64)
+  let settled = try await store.gitStatus(id)
+  try check(
+    restoredNotes.content == "" && settled.payload["clean"] as? Bool == true,
+    "unstaging then discarding restores a staged deletion and leaves a clean tree")
   try await rejected("directories are not discarded wholesale", code: .invalidArgument) {
     try await store.gitDiscard(id, path: "src", removeUntracked: false)
   }

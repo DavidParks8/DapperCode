@@ -120,7 +120,7 @@ private func runSyncGate(
     "a rejected pull leaves the working tree and branch unchanged")
   let behind = try NativeGit.status(repository: first).remote
   try check(behind.behind == 1 && behind.ahead == 0, "fetched upstream commits are counted as behind")
-  try NativeGit.discard(repository: first, path: "sync.txt", removeUntracked: false)
+  try NativeGit.discard(repository: first, path: "sync.txt")
   try check(try read(first, "sync.txt") == "ONE\nLOCAL_AHEAD\n", "discard restores the indexed file")
   let pulled = try NativeGit.pull(repository: first, credential: credential)
   try check(
@@ -154,12 +154,38 @@ private func runSyncGate(
 
   try write(first, "a-side.txt", "EDITED\n")
   try write(first, "untracked.txt", "U\n")
-  try NativeGit.discard(repository: first, path: nil, removeUntracked: false)
+  try FileManager.default.removeItem(at: first.appendingPathComponent("hello.txt"))
+  try NativeGit.stage(repository: first, path: "hello.txt")
+  try write(first, "hello.txt", "RECREATED\n")
+  try write(first, ".git/info/exclude", "*.env\n")
+  try FileManager.default.createDirectory(
+    at: first.appendingPathComponent("cache/nested"), withIntermediateDirectories: true)
+  try write(first, "cache/nested/secret.env", "SECRET\n")
+  try write(first, "cache/remove.txt", "REMOVE\n")
+  try NativeGit.discard(repository: first, path: nil)
+  let staged = try NativeGit.status(repository: first)
   try check(
-    try read(first, "a-side.txt") == "A\n" && (try read(first, "untracked.txt")) == "U\n",
+    try read(first, "a-side.txt") == "A\n" && (try read(first, "untracked.txt")) == "U\n"
+      && (try read(first, "cache/remove.txt")) == "REMOVE\n",
     "discard-all restores tracked files and keeps untracked files")
-  try NativeGit.discard(repository: first, path: nil, removeUntracked: true)
-  try check(try NativeGit.isClean(repository: first), "discard-all can also remove untracked files")
+  try check(
+    try read(first, "hello.txt") == "RECREATED\n" && staged.files.contains { $0.path == "hello.txt" },
+    "discard-all keeps a staged-for-deletion file that is still on disk")
+  try rejected("per-file discard refuses staged deletions", code: .invalidArgument) {
+    _ = try NativeGit.isUntracked(repository: first, path: "hello.txt")
+  }
+  let untracked = try NativeGit.untrackedFiles(repository: first).sorted()
+  try check(
+    untracked == ["cache/remove.txt", "untracked.txt"],
+    "untracked enumeration excludes ignored files in untracked folders and staged deletions")
+  try NativeGit.unstage(repository: first, path: "hello.txt")
+  try NativeGit.discard(repository: first, path: "hello.txt")
+  for path in ["untracked.txt", "cache"] {
+    try FileManager.default.removeItem(at: first.appendingPathComponent(path))
+  }
+  try check(
+    try NativeGit.isClean(repository: first) && (try read(first, "hello.txt")) == "NATIVE_GIT_CHANGED\n",
+    "unstaging then discarding restores a staged deletion")
 
   let plain = root.appendingPathComponent("plain")
   try FileManager.default.createDirectory(at: plain, withIntermediateDirectories: true)

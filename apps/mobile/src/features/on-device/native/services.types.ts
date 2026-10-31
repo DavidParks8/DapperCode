@@ -103,6 +103,8 @@ export interface OnDeviceNativeServices {
   /**
    * Restores working-tree files from the index (staged changes are kept). A single untracked path
    * is deleted. For all files, untracked files are removed only when `removeUntracked` is true.
+   * Ignored files and files staged for deletion but still on disk are never removed; a per-path
+   * discard of a staged deletion rejects with `INVALID_ARGUMENT`.
    */
   discardWorkspaceGit(id: string, path: string | null, removeUntracked: boolean): Promise<void>;
   /** Initializes Git in a workspace that has none, optionally adding an HTTPS `origin`. */

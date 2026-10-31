@@ -237,7 +237,9 @@ extension NativeGit {
     }
   }
 
-  /// Whether the path exists only in the working tree (neither indexed nor committed).
+  /// Whether the path exists only in the working tree (neither indexed nor committed). A file that
+  /// is staged for deletion but still on disk is committed content, so it is rejected rather than
+  /// treated as removable.
   static func isUntracked(repository: URL, path: String) throws -> Bool {
     try validateGitPath(path)
     return try withRepository(repository) { repository in
@@ -247,30 +249,70 @@ extension NativeGit {
         throw GitOperationError(.pathNotFound, "The requested Git path does not exist.")
       }
       try requireSuccess(result, "Read file status")
+      if flags & GIT_STATUS_INDEX_DELETED.rawValue != 0 {
+        throw GitOperationError(
+          .invalidArgument, "This file is staged for deletion. Unstage it before discarding it.")
+      }
       return flags & GIT_STATUS_WT_NEW.rawValue != 0
     }
   }
 
-  /// Restores tracked working-tree files from the index. Staged changes are kept; unstage first to
-  /// discard them too. Untracked files are removed only when `removeUntracked` is set.
-  static func discard(repository: URL, path: String?, removeUntracked: Bool) throws {
+  /// Restores tracked working-tree files from the index; staged changes are kept. The index is the
+  /// checkout baseline, so only index-to-working-tree differences are touched: files absent from the
+  /// index (untracked, or staged for deletion but still on disk) are never removed here.
+  static func discard(repository: URL, path: String?) throws {
     if let path { try validateGitPath(path) }
     try withRepository(repository) { repository in
+      var index: OpaquePointer?
+      try requireSuccess(git_repository_index(&index, repository), "Open index")
+      defer { git_index_free(index) }
       var options = git_checkout_options()
       try requireSuccess(
         git_checkout_options_init(&options, UInt32(GIT_CHECKOUT_OPTIONS_VERSION)),
         "Initialize checkout")
       options.checkout_strategy =
         GIT_CHECKOUT_FORCE.rawValue | GIT_CHECKOUT_DISABLE_PATHSPEC_MATCH.rawValue
-        | (removeUntracked ? GIT_CHECKOUT_REMOVE_UNTRACKED.rawValue : 0)
+      options.baseline_index = index
       if let path {
         try withStringArray(path) { paths in
           options.paths = paths
-          try requireSuccess(git_checkout_index(repository, nil, &options), "Discard changes")
+          try requireSuccess(git_checkout_index(repository, index, &options), "Discard changes")
         }
       } else {
-        try requireSuccess(git_checkout_index(repository, nil, &options), "Discard changes")
+        try requireSuccess(git_checkout_index(repository, index, &options), "Discard changes")
       }
+    }
+  }
+
+  /// Untracked, non-ignored files (recursing into untracked directories). Files staged for deletion
+  /// but still on disk are excluded because they are committed content.
+  static func untrackedFiles(repository: URL) throws -> [String] {
+    try withRepository(repository) { repository in
+      var options = git_status_options()
+      try requireSuccess(
+        git_status_options_init(&options, UInt32(GIT_STATUS_OPTIONS_VERSION)), "Initialize status")
+      options.flags =
+        GIT_STATUS_OPT_INCLUDE_UNTRACKED.rawValue | GIT_STATUS_OPT_RECURSE_UNTRACKED_DIRS.rawValue
+      var list: OpaquePointer?
+      try requireSuccess(git_status_list_new(&list, repository, &options), "Read status")
+      defer { git_status_list_free(list) }
+      var paths: [String] = []
+      for position in 0..<git_status_list_entrycount(list) {
+        guard let entry = git_status_byindex(list, position) else {
+          throw GitOperationError(.gitFailure, "Git returned an invalid status entry.")
+        }
+        let flags = entry.pointee.status.rawValue
+        guard flags & GIT_STATUS_WT_NEW.rawValue != 0,
+          flags & GIT_STATUS_INDEX_DELETED.rawValue == 0
+        else { continue }
+        guard let raw = entry.pointee.index_to_workdir?.pointee.new_file.path,
+          let path = String(validatingCString: raw)
+        else {
+          throw GitOperationError(.gitFailure, "Git file names must be valid UTF-8.")
+        }
+        paths.append(path)
+      }
+      return paths
     }
   }
 

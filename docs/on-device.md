@@ -109,7 +109,9 @@ and that prompt is passed straight to completion.
   pull share push's HTTPS-only, origin-bound credential, redirect, cancellation, and timeout rules.
   The first push of a new branch records `origin/<branch>` as its upstream.
 - Discard restores working-tree files from the index (staged content is kept); discarding a single
-  untracked file deletes it, and discard-all removes untracked files only when asked.
+  untracked file deletes it, and discard-all removes untracked files only when asked. Ignored files
+  (including inside untracked folders) and files staged for deletion but still on disk are never
+  removed; unstage a staged deletion before discarding it.
 - Native failures reach the UI as `OnDeviceNativeError` values with stable codes (for example
   `GIT_NOT_REPOSITORY`, `PATH_OUTSIDE_WORKSPACE`, `GIT_NO_ORIGIN`) and never include native exception
   names or Swift source locations. These capabilities require on-device ABI 7.
