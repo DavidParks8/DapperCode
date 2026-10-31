@@ -7,13 +7,17 @@ continue to use desktop agents.
 
 ## First run
 
-1. Choose **On this iPhone** on onboarding, or under **Settings → Profiles**.
-2. Open **Settings → On this iPhone → Models**. Search across families, sizes, and quants (for
-   example "q8" or "2b"); **Downloaded only** and **Include models too large for this iPhone**
-   sit together under the search field. Choose a family to compare its sizes and quants, then
-   **Download** one and **Load** it. Loading also makes it the model new chats use. The page shows
-   storage used and free, every queued or running download, and, under **In use**, which model is
-   loaded and which one new chats use (they can differ, for example after **Unload**).
+1. Choose **On this iPhone** wherever you pick where agents run: the onboarding choices, the
+   **Runs on** row in the drawer, the profile capsule under **Let's build** in a new chat, or
+   **Settings → Profiles**. Each opens a new chat in the local profile.
+2. Until a model and a workspace are ready, the new chat shows a **Set up On this iPhone**
+   checklist whose rows open Settings → Models and the workspaces screen. On **Settings → On this
+   iPhone → Models**, search across families, sizes, and quants (for example "q8" or "2b");
+   **Downloaded only** and **Include models too large for this iPhone** sit together under the
+   search field. Choose a family to compare its sizes and quants, then **Download** one and
+   **Load** it. Loading also makes it the model new chats use. The page shows storage used and
+   free, every queued or running download, and, under **In use**, which model is loaded and which
+   one new chats use (they can differ, for example after **Unload**).
    Downloads are pinned by revision, byte count, and SHA-256; unverified weights cannot be loaded.
    See [Model downloads](#model-downloads).
 3. Open **Workspaces** and clone an HTTPS repository. Public repositories need no account.
@@ -332,9 +336,27 @@ draft is corrected by that reload.
   `features/settings/local`. Those pages read the runtime from `localRuntimeAtom`. GitHub device-flow
   progress lives in `localSignInAtom`, so leaving the page never cancels a sign-in. The
   **Workspaces** row still opens the legacy `/on-device/workspaces` screen.
-- **Discovery and onboarding**: `OnDeviceEntry` (onboarding) and the Settings **Profiles** group open
-  `routes.newChat(LOCAL_PROFILE_ID)`. Missing model/workspace prerequisites reject chat creation with
-  `on_device_model_required`/`on_device_workspace_required`, which a call to action can key on.
+- **Discovery and onboarding**: every "where to run" surface lists the same `shellProfilesAtom`
+  through `shell/profiles`: `useProfileChoices` (profiles with live state plus **Add bridge**),
+  `describeProfile` (the only place that varies copy, icon, and status by profile kind), and
+  `openProfileAtom`. Onboarding offers `OnDeviceEntry` beside pairing when
+  `localProfileAvailableAtom` is true and words its hero for the choices actually offered. The
+  drawer's **Runs on** row (`DrawerProfileRow`) and the new-chat capsule (`NewChatRunTarget`) open
+  the same sheet; Settings' Connection/Profiles rows use the same presentation, so the local row
+  reports setup (`Needs a model`, `Ready`) rather than a connection.
+- **First-run setup**: `useLocalSetup` derives model and workspace steps from the open runtime via
+  `localConversationReadiness`, resolving the model the way the server's `resolveModel` does (the
+  selected model when downloaded, otherwise any downloaded runnable model, otherwise a download in
+  progress), so a first download started from the library without selecting a model still counts; `LocalSetupGuide` renders them in the new chat until a chat can
+  start. Its destinations live in `LOCAL_SETUP_DESTINATIONS` (`shell/profiles/localSetup.ts`): the
+  model step opens Settings → Models (`/profiles/on-device/settings/models`); the workspace step
+  still opens the legacy `/on-device/workspaces` screen until the local workspace picker lands. Missing
+  prerequisites still reject chat creation with `on_device_model_required`/
+  `on_device_workspace_required`.
+- **Profile routes**: `app/profiles/_layout.tsx` gives `[profileId]` its own stack. Expo Router only
+  notices a changed dynamic segment on a route named exactly `[param]`, so without it a profile
+  switch left the previous profile id on the parent route and returning from any root-level screen
+  (such as a legacy `/on-device/*` page) switched back.
 
 ## Ownership and testing
 

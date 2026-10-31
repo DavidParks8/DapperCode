@@ -22,6 +22,7 @@ import type { DrawerScreen } from '@shell/navigation/drawerContentTypes';
 import { useDrawerContentAtoms } from '@shell/navigation/drawerContentViewContext';
 import { DrawerChatList } from '@shell/navigation/DrawerChatList';
 import { DrawerToolbar } from '@shell/navigation/DrawerToolbar';
+import { DrawerProfileRow } from '@shell/profiles/ProfileSwitcher';
 import { activeProfileFeaturesAtom, activeProfileIsLocalAtom } from '@shell/state/bridge/atoms';
 import {
   formatBulkDeleteLabel,
@@ -383,6 +384,15 @@ const DrawerHeader = memo(function DrawerHeader({
             : `${String(searchResultCount)} ${searchResultCount === 1 ? 'session matches' : 'sessions match'} "${searchQuery.trim()}"`}
         </Text>
       ) : null}
+
+      <DrawerProfileRow
+        styles={{
+          row: styles.folderFilter,
+          rowPressed: styles.folderFilterPressed,
+          label: styles.folderFilterLabel,
+          value: styles.folderFilterValue,
+        }}
+      />
 
       <Pressable
         accessibilityLabel={`Filter sessions by folder, ${selectedFolderLabel}`}

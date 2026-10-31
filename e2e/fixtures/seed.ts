@@ -12,6 +12,8 @@ export interface SeedOptions {
   readonly bridgeUrl: string;
   readonly bridgeToken: string;
   readonly nowMs: number;
+  /** Names of extra, inactive bridge profiles saved beside the harness profile. */
+  readonly additionalProfileNames?: readonly string[];
 }
 
 /**
@@ -44,6 +46,15 @@ export function seedBridgeProfileScript(options: SeedOptions): void {
           createdAt: timestamp,
           updatedAt: timestamp,
         },
+        // Inactive profiles never connect, so they can share the harness bridge URL.
+        ...(options.additionalProfileNames ?? []).map((name, index) => ({
+          id: `harness-extra-${String(index)}`,
+          name,
+          bridgeUrl: options.bridgeUrl,
+          bridgeToken: options.bridgeToken,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })),
       ],
     },
     push: {

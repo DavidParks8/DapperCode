@@ -16,6 +16,7 @@ lives under `apps/mobile/src/shell/state`, with feature-owned state under each f
 | `shell/state/bridge/*`                     | Active profile (bridge or local), WS/API clients, profile features, profile lifecycle actions       |
 | `shell/state/localProfile.ts`              | Built-in "On this iPhone" profile id, `ShellProfile` union, and guards                              |
 | `shell/state/local/atoms.ts`               | Runtime and transport published by the local runtime host                                           |
+| `shell/profiles/*`                         | Shared profile switcher: presentation, live choices, `openProfileAtom`, and local setup progress    |
 | `src/app/*`                                | Expo Router layouts and thin route adapters; URL paths are navigation state                         |
 | `shell/navigation/routes.ts`               | Typed builders for canonical profile, chat, settings, and pushed-screen URLs                        |
 | `shell/navigation/actions.ts`              | Router-backed application commands that also coordinate related domain atoms                        |
