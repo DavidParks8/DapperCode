@@ -186,6 +186,7 @@ function ModelRowNotes({
         <SettingsProgressBar
           label={`${name} ${transfer.kind === 'verifying' ? 'verification' : 'download'} progress`}
           value={transfer.progress ?? 0}
+          valueText={transfer.progressText}
           testID={`local-model-progress-${model.id}`}
         />
       ) : null}

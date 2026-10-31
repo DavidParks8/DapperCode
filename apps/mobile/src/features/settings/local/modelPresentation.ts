@@ -49,6 +49,29 @@ export function formatTimeLeft(seconds: number | null): string | null {
   return rest > 0 ? `${hours} hr ${rest} min left` : `${hours} hr left`;
 }
 
+/** Transfer speed in decimal units, or null when there is no meaningful rate to show yet. */
+export function formatSpeed(bytesPerSecond: number | null): string | null {
+  if (bytesPerSecond === null || !Number.isFinite(bytesPerSecond) || bytesPerSecond < 1e3) {
+    return null;
+  }
+  if (bytesPerSecond >= 1e9) {
+    return `${(bytesPerSecond / 1e9).toFixed(1)} GB/s`;
+  }
+  if (bytesPerSecond >= 1e6) {
+    const megabytes = bytesPerSecond / 1e6;
+    return `${megabytes >= 100 ? megabytes.toFixed(0) : megabytes.toFixed(1)} MB/s`;
+  }
+  return `${Math.round(bytesPerSecond / 1e3)} KB/s`;
+}
+
+/** VoiceOver reads "MB/s" letter by letter, so spoken values spell the unit out. */
+function spokenSpeed(speed: string): string {
+  return speed
+    .replace(/ GB\/s$/u, ' gigabytes per second')
+    .replace(/ MB\/s$/u, ' megabytes per second')
+    .replace(/ KB\/s$/u, ' kilobytes per second');
+}
+
 function percentOf(done: number, total: number): number {
   if (total <= 0) {
     return 0;
@@ -61,10 +84,15 @@ export type ModelTransferKind =
 
 export interface ModelTransferPresentation {
   kind: ModelTransferKind;
-  /** Short state shown on the row, such as "Downloading 42% · 310 MB of 740 MB · 2 min left". */
+  /**
+   * Short state shown on the row, such as
+   * "Downloading 42% · 310 MB of 740 MB · 4.2 MB/s · 2 min left".
+   */
   label: string;
   /** 0–100 while bytes are moving or being verified (or paused part-way); null otherwise. */
   progress: number | null;
+  /** What VoiceOver reads as the progress bar's value; null when there is no progress bar. */
+  progressText: string | null;
   /** True while queued, running, or verifying work exists that pause and cancel apply to. */
   active: boolean;
 }
@@ -77,29 +105,54 @@ export function describeTransfer(
   const total = download.totalBytes > 0 ? download.totalBytes : model.bytes;
   switch (download.phase) {
     case 'ready':
-      return { kind: 'ready', label: 'Downloaded', progress: null, active: false };
+      return {
+        kind: 'ready',
+        label: 'Downloaded',
+        progress: null,
+        progressText: null,
+        active: false,
+      };
     case 'queued':
       return {
         kind: 'queued',
         label: 'Queued · starts when a download finishes',
         progress: null,
+        progressText: null,
         active: true,
       };
     case 'preparing':
-      return { kind: 'downloading', label: 'Starting download…', progress: 0, active: true };
+      return {
+        kind: 'downloading',
+        label: 'Starting download…',
+        progress: 0,
+        progressText: 'Starting download',
+        active: true,
+      };
     case 'downloading': {
       const progress = percentOf(download.bytesWritten, total);
-      const parts = [
-        `Downloading ${progress}%`,
-        `${formatBytes(download.bytesWritten)} of ${formatBytes(total)}`,
-        formatTimeLeft(download.etaSeconds),
-      ].filter(Boolean);
-      return { kind: 'downloading', label: parts.join(' · '), progress, active: true };
+      const amount = `${formatBytes(download.bytesWritten)} of ${formatBytes(total)}`;
+      const speed = formatSpeed(download.bytesPerSecond);
+      const timeLeft = formatTimeLeft(download.etaSeconds);
+      return {
+        kind: 'downloading',
+        label: [`Downloading ${progress}%`, amount, speed, timeLeft].filter(Boolean).join(' · '),
+        progress,
+        progressText: [`${progress}%`, amount, speed && spokenSpeed(speed), timeLeft]
+          .filter(Boolean)
+          .join(', '),
+        active: true,
+      };
     }
     case 'verifying': {
       const progress = percentOf(download.verifiedBytes, total);
-      const parts = [`Verifying ${progress}%`, formatTimeLeft(download.etaSeconds)].filter(Boolean);
-      return { kind: 'verifying', label: parts.join(' · '), progress, active: true };
+      const timeLeft = formatTimeLeft(download.etaSeconds);
+      return {
+        kind: 'verifying',
+        label: [`Verifying ${progress}%`, timeLeft].filter(Boolean).join(' · '),
+        progress,
+        progressText: [`${progress}%`, timeLeft].filter(Boolean).join(', '),
+        active: true,
+      };
     }
     case 'paused': {
       if (download.verificationPending) {
@@ -107,6 +160,7 @@ export function describeTransfer(
           kind: 'paused',
           label: 'Downloaded · verification paused',
           progress: null,
+          progressText: null,
           active: false,
         };
       }
@@ -115,6 +169,7 @@ export function describeTransfer(
         kind: 'paused',
         label: `Paused at ${progress}% · ${formatBytes(download.bytesWritten)} of ${formatBytes(total)}`,
         progress,
+        progressText: `${progress}%, paused`,
         active: false,
       };
     }
@@ -123,12 +178,25 @@ export function describeTransfer(
         kind: 'error',
         label: download.canResume ? 'Download stopped' : 'Download failed',
         progress: null,
+        progressText: null,
         active: false,
       };
     case 'loading':
-      return { kind: 'checking', label: 'Checking…', progress: null, active: false };
+      return {
+        kind: 'checking',
+        label: 'Checking…',
+        progress: null,
+        progressText: null,
+        active: false,
+      };
     default:
-      return { kind: 'none', label: 'Not downloaded', progress: null, active: false };
+      return {
+        kind: 'none',
+        label: 'Not downloaded',
+        progress: null,
+        progressText: null,
+        active: false,
+      };
   }
 }
 

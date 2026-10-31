@@ -72,6 +72,7 @@ describe('Models settings', () => {
       phase: 'downloading',
       bytesWritten: 310 * MB,
       totalBytes: 740 * MB,
+      bytesPerSecond: 4_200_000,
       etaSeconds: 95,
     });
     runtime.setDownload('qwen3-0.6b-q4-0', { phase: 'queued', totalBytes: 428_970_080 });
@@ -83,10 +84,18 @@ describe('Models settings', () => {
     render(wrap(runtime, <LocalModelsScreen />));
 
     const first = row('qwen35-0.8b-q4-0');
-    expect(first.getByText('Downloading 41% · 310 MB of 740 MB · 2 min left')).toBeTruthy();
+    expect(
+      first.getByText('Downloading 41% · 310 MB of 740 MB · 4.2 MB/s · 2 min left'),
+    ).toBeTruthy();
     const progress = screen.getAllByTestId('local-model-progress-qwen35-0.8b-q4-0')[0]!;
     expect(progress.props['accessibilityRole']).toBe('progressbar');
-    expect(progress.props['accessibilityValue']).toMatchObject({ min: 0, max: 100, now: 41 });
+    expect(progress.props['accessibilityValue']).toEqual({
+      min: 0,
+      max: 100,
+      now: 41,
+      text: '41%, 310 MB of 740 MB, 4.2 megabytes per second, 2 min left',
+    });
+    // Without a measured rate yet, the row shows no speed rather than "0 MB/s".
     expect(row('gemma-4-e2b-q4-0').getByText('Downloading 50% · 1.0 GB of 2.0 GB')).toBeTruthy();
     expect(
       row('qwen3-0.6b-q4-0').getByText('Queued · starts when a download finishes'),
@@ -99,6 +108,57 @@ describe('Models settings', () => {
     expect(runtime.downloads.cancel).not.toHaveBeenCalledWith('qwen35-0.8b-q4-0');
     expect(alert).not.toHaveBeenCalled();
     alert.mockRestore();
+  });
+
+  it('keeps the measured download speed current on the row and its progress value', () => {
+    const runtime = new FakeSettingsRuntime();
+    const id = 'qwen35-0.8b-q4-0';
+    runtime.setDownload(id, { phase: 'preparing', totalBytes: 740 * MB });
+    render(wrap(runtime, <LocalModelsScreen />));
+    const progressText = () =>
+      (
+        screen.getAllByTestId(`local-model-progress-${id}`)[0]!.props['accessibilityValue'] as {
+          text: string;
+        }
+      ).text;
+    expect(row(id).getByText('Starting download…')).toBeTruthy();
+
+    // A rate below 1 KB/s, or one that is not a finite number, is not worth showing.
+    act(() =>
+      runtime.setDownload(id, {
+        phase: 'downloading',
+        bytesWritten: 10 * MB,
+        bytesPerSecond: 500,
+        etaSeconds: null,
+      }),
+    );
+    expect(row(id).getByText('Downloading 1% · 10 MB of 740 MB')).toBeTruthy();
+    expect(progressText()).toBe('1%, 10 MB of 740 MB');
+    act(() => runtime.setDownload(id, { bytesPerSecond: Number.NaN }));
+    expect(row(id).getByText('Downloading 1% · 10 MB of 740 MB')).toBeTruthy();
+
+    act(() => runtime.setDownload(id, { bytesPerSecond: 850_000, etaSeconds: 860 }));
+    expect(
+      row(id).getByText('Downloading 1% · 10 MB of 740 MB · 850 KB/s · 15 min left'),
+    ).toBeTruthy();
+    expect(progressText()).toBe('1%, 10 MB of 740 MB, 850 kilobytes per second, 15 min left');
+
+    act(() =>
+      runtime.setDownload(id, {
+        bytesWritten: 370 * MB,
+        bytesPerSecond: 123_400_000,
+        etaSeconds: 3,
+      }),
+    );
+    expect(
+      row(id).getByText('Downloading 50% · 370 MB of 740 MB · 123 MB/s · less than a minute left'),
+    ).toBeTruthy();
+
+    // Speed describes moving bytes only; a paused transfer drops it.
+    act(() => runtime.setDownload(id, { phase: 'paused' }));
+    expect(row(id).getByText('Paused at 50% · 370 MB of 740 MB')).toBeTruthy();
+    expect(row(id).queryByText(/MB\/s/u)).toBeNull();
+    expect(progressText()).toBe('50%, paused');
   });
 
   it('announces a completed download but not the state rows already had when shown', () => {
