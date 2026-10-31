@@ -28,9 +28,11 @@ import type {
   ListChatsOptions,
 } from '@bridge/client/clientContractsAndSnapshotInternals';
 
-export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeApiClientCore {
-  private static readonly MODEL_LIST_CACHE_TTL_MS = 5 * 60 * 1000;
+function optionalText(value: unknown): string | undefined {
+  return readString(value)?.trim() || undefined;
+}
 
+export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeApiClientCore {
   readBridgeCapabilities(): Promise<BridgeCapabilities> {
     return this.ws.request<BridgeCapabilities>('bridge/capabilities/read');
   }
@@ -42,10 +44,7 @@ export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeA
   async listModelOptions(agentId?: AgentId | null): Promise<ModelOption[]> {
     const cacheKey = this.modelListCacheKey(agentId);
     const cached = this.modelListCache.get(cacheKey);
-    if (
-      cached &&
-      Date.now() - cached.loadedAt < HostBridgeApiClientHealthAndCacheLayer.MODEL_LIST_CACHE_TTL_MS
-    ) {
+    if (cached && Date.now() - cached.loadedAt < this.modelListCacheTtlMs) {
       return cloneModelOptions(cached.value);
     }
 
@@ -87,8 +86,6 @@ export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeA
       .map((entry) => {
         const id = readString(entry['id'])?.trim() ?? '';
         const displayName = readString(entry['displayName'])?.trim() ?? id;
-        const providerId = readString(entry['providerId'])?.trim() || undefined;
-        const providerName = readString(entry['providerName'])?.trim() || undefined;
         const contextWindow = readPositiveInteger(entry['contextWindow']);
         const reasoningEffort = (
           Array.isArray(entry['reasoningEffort']) ? entry['reasoningEffort'] : []
@@ -99,8 +96,10 @@ export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeA
         return {
           id,
           displayName,
-          providerId,
-          providerName,
+          providerId: optionalText(entry['providerId']),
+          providerName: optionalText(entry['providerName']),
+          description: optionalText(entry['description']),
+          ...(entry['isDefault'] === true ? { isDefault: true } : {}),
           contextWindow: contextWindow && contextWindow > 0 ? contextWindow : undefined,
           reasoningEffort: reasoningEffort.length > 0 ? reasoningEffort : undefined,
         } satisfies ModelOption;

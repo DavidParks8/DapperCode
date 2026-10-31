@@ -41,6 +41,11 @@ function formatContextWindow(value: number): string {
     return `${millions >= 10 ? millions.toFixed(0) : millions.toFixed(1)}M`;
   }
 
+  // Context windows are usually powers of two: 4,096 tokens reads as "4K", not "4.1K".
+  if (value >= 1_024 && value % 1_024 === 0 && value % 1_000 !== 0 && value < 1_048_576) {
+    return `${value / 1_024}K`;
+  }
+
   if (value >= 1_000) {
     const thousands = value / 1_000;
     return `${thousands >= 10 ? thousands.toFixed(0) : thousands.toFixed(1)}K`;

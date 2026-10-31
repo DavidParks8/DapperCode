@@ -8,14 +8,13 @@ import { failure, LOCAL_RPC_ERROR, LocalRpcError } from './errors';
 import { LocalEventProjector, type LocalNotification } from './events';
 import { LocalApprovalRelay } from './approvals';
 import { createLocalGitHandlers } from './gitHandlers';
+import { localModelListEntries } from './modelOptions';
 import { readParam, readRecord, type RpcParams } from './params';
 import type { LocalAgentPort } from './port';
 import {
-  LOCAL_AGENT_NAME,
   LOCAL_MODEL_CONFIG_ID,
   LOCAL_WORKSPACE_ROOT,
   localCapabilities,
-  localModelDisplayName,
   localWorkspaceIdForPath,
   localWorkspacePaths,
   localThreadSnapshot,
@@ -218,14 +217,19 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
       : null;
   }
 
-  private resolveModel(requested: string | null): string {
+  /** The model a new chat uses when none is requested, or null when none is downloaded. */
+  private defaultModel(): string | null {
     const recent = this.port.threads()[0]?.modelId ?? null;
-    const model =
-      this.availableModel(requested) ??
+    return (
       this.availableModel(this.port.defaults().modelId) ??
       this.availableModel(recent) ??
       this.port.availableModels()[0]?.id ??
-      null;
+      null
+    );
+  }
+
+  private resolveModel(requested: string | null): string {
+    const model = this.availableModel(requested) ?? this.defaultModel();
     if (!model) {
       throw new LocalRpcError(
         LOCAL_RPC_ERROR.serverError,
@@ -488,7 +492,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
             { error: 'on_device_model_required' },
           );
         }
-        return { thread: this.snapshot(await port.updateThread(thread.id, { modelId: model })) };
+        return { thread: this.snapshot(await port.chooseModel(thread.id, model)) };
       },
       'thread/resume': async (params) => {
         let thread = this.requireThread(params);
@@ -551,13 +555,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
         schedules: [],
       }),
       'model/list': () => ({
-        data: port.availableModels().map((model) => ({
-          id: model.id,
-          displayName: localModelDisplayName(model),
-          providerId: 'on-device',
-          providerName: LOCAL_AGENT_NAME,
-          contextWindow: model.contextTokens,
-        })),
+        data: localModelListEntries(port.modelChoices(), this.defaultModel()),
       }),
       'bridge/workspaces/list': async () => {
         await port.refreshWorkspaces();

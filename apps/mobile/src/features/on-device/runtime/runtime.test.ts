@@ -629,6 +629,23 @@ describe('unrelated actions never interrupt a running conversation', () => {
     await h.runtime.dispose();
   });
 
+  test('choosing another model for an idle conversation keeps the run going and loads nothing', async () => {
+    const h = await running();
+    const loads = jest.mocked(loadNativeModelContext).mock.calls.length;
+    await h.runtime.chooseModel(otherModelId, h.other.id);
+    expect(h.runtime.threads.get(h.other.id).modelId).toBe(otherModelId);
+    expect(h.runtime.preferences().modelId).toBe(otherModelId);
+    expect(jest.mocked(loadNativeModelContext).mock.calls).toHaveLength(loads);
+    expect(h.runtime.models.snapshot().modelId).toBe(modelId);
+    await expect(h.runtime.chooseModel(otherModelId, h.thread.id)).rejects.toThrow(
+      'Stop this conversation',
+    );
+    expect(h.runtime.threads.get(h.thread.id).modelId).toBe(modelId);
+    expect(h.context.stopCompletion).not.toHaveBeenCalled();
+    expect((await h.finish()).status).toBe('complete');
+    await h.runtime.dispose();
+  });
+
   test('removing an unrelated download does not stop the run', async () => {
     const h = await running();
     await h.runtime.removeModel(otherModelId);

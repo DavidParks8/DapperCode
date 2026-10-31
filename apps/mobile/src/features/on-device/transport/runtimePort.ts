@@ -1,13 +1,19 @@
 import { LOCAL_MODEL_CATALOG } from '../models/catalog';
 import type { OnDeviceRuntime } from '../runtime/runtime';
 import type { OnDeviceRuntimeSlice } from '../runtime/types';
-import type { LocalAgentPort } from './port';
+import type { LocalAgentPort, LocalModelChoice } from './port';
 
 /**
  * The transport projects threads and the run (including approvals). Download progress and other
  * slices are read on demand, so they never wake the event projector.
  */
 const TRANSPORT_SLICES: readonly OnDeviceRuntimeSlice[] = ['threads', 'loop'];
+
+function availableModels(runtime: OnDeviceRuntime) {
+  return LOCAL_MODEL_CATALOG.filter(
+    (model) => !model.runtimeIssue && runtime.downloads.snapshot(model.id).phase === 'ready',
+  );
+}
 
 /**
  * Adapts the on-device runtime's public API to the transport port. Workspace mutations go through
@@ -26,10 +32,25 @@ export function createRuntimeAgentPort(runtime: OnDeviceRuntime): LocalAgentPort
       const { workspaceId, modelId } = runtime.preferences();
       return { workspaceId, modelId };
     },
-    availableModels: () =>
-      LOCAL_MODEL_CATALOG.filter(
-        (model) => !model.runtimeIssue && runtime.downloads.snapshot(model.id).phase === 'ready',
-      ),
+    availableModels: () => availableModels(runtime),
+    modelChoices: () => {
+      const session = runtime.models.snapshot();
+      return availableModels(runtime).map((model): LocalModelChoice => {
+        const resident = session.modelId === model.id;
+        const loaded = resident && (session.phase === 'ready' || session.phase === 'running');
+        const loading = resident && session.phase === 'loading';
+        return {
+          model,
+          residency: loaded ? 'loaded' : loading ? 'loading' : 'idle',
+          loadProgress: loading ? session.progress : 0,
+          contextTokens: loaded ? session.contextTokens : null,
+        };
+      });
+    },
+    chooseModel: async (threadId, modelId) => {
+      await runtime.chooseModel(modelId, threadId);
+      return runtime.threads.get(threadId);
+    },
     createThread: (workspaceId, modelId) => runtime.threads.create(workspaceId, modelId),
     updateThread: async (id, patch) => {
       const next = runtime.threads.change(id, (thread) => ({ ...thread, ...patch }));

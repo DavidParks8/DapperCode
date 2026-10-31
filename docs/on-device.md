@@ -8,19 +8,25 @@ continue to use desktop agents.
 ## First run
 
 1. Choose **On this iPhone** on onboarding, or under **Settings → Profiles**.
-2. Open **Model library**, choose a family, then compare its sizes and quants on the next page.
-   Download a compatible quant and choose **Load and use**. Search and **Downloaded only** narrow
-   the family list. Back returns from the quant page to the family list; selecting for an existing
-   conversation returns directly to that conversation.
+2. Open **Settings → On this iPhone → Models**. Search across families, sizes, and quants (for
+   example "q8" or "2b"); **Downloaded only** and **Include models too large for this iPhone**
+   sit together under the search field. Choose a family to compare its sizes and quants, then
+   **Download** one and **Load** it. Loading also makes it the model new chats use. The page shows
+   storage used and free, every queued or running download, and, under **In use**, which model is
+   loaded and which one new chats use (they can differ, for example after **Unload**).
    Downloads are pinned by revision, byte count, and SHA-256; unverified weights cannot be loaded.
    See [Model downloads](#model-downloads).
 3. Open **Workspaces** and clone an HTTPS repository. Public repositories need no account.
-   Sign in under **GitHub and author** before cloning a private GitHub repository.
+   Sign in under **Settings → On this iPhone → Git & GitHub** before cloning a private GitHub
+   repository.
    An empty file workspace is also available; **Initialize Git** on its Git page (optionally with
    an HTTPS origin) to stage, commit, and later push or pull. Workspaces can be renamed or deleted;
    deleting one removes its files but keeps conversations that used it readable.
-4. Set your Git author name/email, then start a **New chat**. Pick the model with the chat's
-   **Choose a model** sheet (downloaded models) and the workspace with the workspace picker.
+4. Set your commit author name/email on the same **Git & GitHub** page, then start a **New chat**.
+   Pick the model with the chat's **Choose a model** sheet and the workspace with the workspace
+   picker. The sheet lists downloaded models with whether each is loaded, marks the one new chats
+   use as **Default**, and links to **Download more models** in Settings. Choosing a model there
+   changes it for that chat and for new chats without loading it; it loads when you send.
 5. After preparation, inference, file edits, search, diffs, staging, discarding, branch creation and
    switching, history, and commits work without internet. Push, fetch, pull, cloning, sign-in, and
    new downloads require connectivity.
@@ -35,16 +41,18 @@ model.
 - Up to two models download at once; further downloads wait in a visible **Queued** state and
   start automatically when a slot frees. Pause, resume, and cancel apply to one model at a time.
 - Download actions return as soon as the transfer is accepted, so other models stay usable while
-  it runs. Each card shows bytes transferred, speed, and remaining time (updated at most four
-  times a second), then SHA-256 verification progress. Verification can be paused (the downloaded
-  file is kept) or cancelled.
+  it runs. Each model row shows its state in words ("Downloading 42% · 310 MB of 740 MB · 2 min
+  left", "Queued", "Paused at 42%", "Verifying 30%", "Downloaded") with a progress bar that VoiceOver
+  reads as a percentage; starts, completions, pauses, and failures are announced. Verification can
+  be paused (the downloaded file is kept) or cancelled. Pause, resume, cancel, and delete act
+  immediately on that one model; their errors stay on its row.
 - Transfers use an iOS background URL session: locking the phone or switching apps does not stop
   them. If iOS terminates the app, a running transfer continues and is re-attached on the next
   launch; a transfer that finished meanwhile is verified when the app becomes active. Force-quitting
   from the app switcher makes iOS cancel the transfer; it resumes from its checkpoint next time.
 - Free-space checks reserve the bytes still needed by every queued or running transfer, plus a
-  64 MiB margin. Pause, cancel, and removal errors are shown on that model's card.
-- Cancel discards partial data but never deletes an installed model; **Delete download** does.
+  64 MiB margin.
+- Cancel discards partial data but never deletes an installed model; **Delete** does.
 
 ## Models and memory
 
@@ -69,9 +77,11 @@ Compatibility uses physical RAM plus a fresh native app-memory-headroom measurem
 includes weights, an FP16 KV cache at the model's minimum context (4,096 tokens), working space, the
 prompt-state budget of hybrid/sliding-window models, and a 384 MiB reserve. When fresh headroom
 allows, a load doubles the context up to the catalog maximum (8,192 tokens for Qwen3; 16,384 for
-Qwen3.5, Bonsai 2, and Gemma 4). The library credits the memory of a currently loaded model when
-judging another one, because loading always releases the previous context first and then checks
-memory again. A loaded model is not double-counted when starting generation.
+Qwen3.5, Bonsai 2, and Gemma 4). The Models page credits the memory of a currently loaded model when
+judging another one ("Loading replaces the current model in memory"), because loading always
+releases the previous context first and then checks memory again. Free memory is re-measured every
+few seconds while the page is open and whenever the loaded model changes, so there is no manual
+refresh. A loaded model is not double-counted when starting generation.
 
 iOS builds request Apple's `com.apple.developer.kernel.increased-memory-limit` entitlement (added by
 `plugins/withOnDeviceAgentNative.js`) so local models can use the larger per-app limit iOS grants
@@ -266,7 +276,7 @@ the local profile. `LocalBridgeWsClient` is connected from creation until dispos
 | Session      | `bridge/capabilities/read`, `bridge/health/read`, `thread/approvalPolicy/set` (accepted, no approvals locally)                                                     |
 | Chats        | `thread/list`, `thread/loaded/list`, `bridge/thread/list/stream/start`/`cancel`, `thread/read`, `thread/start`, `bridge/thread/create`, `thread/name/update`, `thread/delete`, `thread/config/set` (model), `thread/resume` |
 | Turns        | `bridge/thread/queue/send`, `turn/start`, `turn/interrupt`, `bridge/thread/queue/read`, `bridge/thread/schedules/read` (always empty)                              |
-| Models       | `model/list` (downloaded, runnable catalog models)                                                                                                                |
+| Models       | `model/list` (downloaded, runnable catalog models with load state in `description` and the new-chat model as `isDefault`)                                         |
 | Workspaces   | `bridge/workspaces/list`, `bridge/fs/list` (workspace roots only)                                                                                                 |
 | Attention    | `bridge/approvals/list`, `bridge/approvals/resolve` (the loop's pending tool approval, such as a push), `bridge/userInput/list` (always empty)                     |
 | Git          | `bridge/git/status`, `diff`, `history`, `branches`, `stage`, `stageAll`, `unstage`, `unstageAll`, `commit`, `switch`, `push`                                     |
@@ -280,7 +290,7 @@ Every other method rejects with JSON-RPC `-32601` and `data.error = 'unsupported
 
 Local workspaces are presented as `/On this iPhone/<name>` paths (duplicate names gain an id
 suffix). A chat's model is an ACP config option (`id: 'model'`), so the existing model sheet changes
-it through `thread/config/set`. `thread/create` falls back to the runtime's remembered workspace and
+it through `thread/config/set`, which also makes it the default for new chats without loading it. `thread/create` falls back to the runtime's remembered workspace and
 model when the composer sends none or a desktop path.
 
 ### Capability flags
@@ -288,7 +298,10 @@ model when the composer sends none or a desktop path.
 - Wire capabilities (`localCapabilities()`): one agent, `threadDelete` only; steer, fork, plan mode,
   review, browser preview, bridge UI surfaces, and fast mode are false, so the shell hides them.
 - Client profile features (`activeProfileFeaturesAtom`): `attachments`, `pushNotifications`,
-  `connectionSettings`, and `gitClone` are false for the local profile. The composer disables
+  `connectionSettings`, and `gitClone` are false for the local profile, and `modelLibrary` is true:
+  the model sheet then uses device wording, hides the agent-side "Use server default" row, labels an
+  empty choice "Choose a model", and links to Settings → Models. The local API client reads
+  `model/list` fresh each time (`modelListCacheTtlMs: 0`) because downloads and loads change it. The composer disables
   attach/paste, the workspace picker hides **Clone Repo**, and Settings hides notifications and
   approvals.
 
@@ -313,10 +326,12 @@ draft is corrected by that reload.
 - **Git, workspaces, files**: add methods to `createLocalGitHandlers` or the server handler table and
   to `LocalAgentPort`. Implementing `bridge/git/clone` (native clone exists) means flipping
   `gitClone` in `activeProfileFeaturesAtom`. `bridge/fs/list` currently lists workspace roots only.
-- **Models and account in Settings**: `features/settings/LocalProfileSection.tsx` is mounted for the
-  local profile and still links to the legacy `/on-device/models`, `/workspaces`, and `/account`
-  screens. Replace those rows with Settings sections; `model/list` and the model config option can
-  carry download/memory state once the sheet renders it.
+- **Models and account in Settings**: `features/settings/LocalProfileSection.tsx` links to
+  `routes.settingsModels` (`settings/models`, `settings/models/[familyId]`) and
+  `routes.settingsGitHub` (`settings/github`), built from `SettingsGroup`/`SettingsRow` in
+  `features/settings/local`. Those pages read the runtime from `localRuntimeAtom`. GitHub device-flow
+  progress lives in `localSignInAtom`, so leaving the page never cancels a sign-in. The
+  **Workspaces** row still opens the legacy `/on-device/workspaces` screen.
 - **Discovery and onboarding**: `OnDeviceEntry` (onboarding) and the Settings **Profiles** group open
   `routes.newChat(LOCAL_PROFILE_ID)`. Missing model/workspace prerequisites reject chat creation with
   `on_device_model_required`/`on_device_workspace_required`, which a call to action can key on.

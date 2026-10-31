@@ -112,6 +112,19 @@ export class FakeAgentPort implements LocalAgentPort {
   };
   defaults = () => this.defaultValues;
   availableModels = () => this.models;
+  loadedModelId: string | null = null;
+  modelChoices = () =>
+    this.models.map((model) => ({
+      model,
+      residency: model.id === this.loadedModelId ? ('loaded' as const) : ('idle' as const),
+      loadProgress: 0,
+      contextTokens: model.id === this.loadedModelId ? model.maxContextTokens : null,
+    }));
+  chooseModel = async (threadId: string, modelId: string) => {
+    this.calls.push(`chooseModel:${threadId}:${modelId}`);
+    this.defaultValues = { ...this.defaultValues, modelId };
+    return this.change(threadId, (thread) => ({ ...thread, modelId }));
+  };
 
   createThread = async (workspaceId: string, modelId: string) => {
     this.calls.push(`create:${workspaceId}:${modelId}`);

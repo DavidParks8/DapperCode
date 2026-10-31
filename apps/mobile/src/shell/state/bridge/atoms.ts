@@ -71,6 +71,11 @@ export interface ActiveProfileFeatures {
   gitClone: boolean;
   /** The desktop preview browser, which proxies through the bridge host. */
   browserPreview: boolean;
+  /**
+   * Models are downloaded and loaded on this device and managed in Settings, so the model picker
+   * lists downloaded models and links there instead of offering an agent-side default.
+   */
+  modelLibrary: boolean;
 }
 
 export const activeProfileFeaturesAtom = atom<ActiveProfileFeatures>((get) => {
@@ -81,6 +86,7 @@ export const activeProfileFeaturesAtom = atom<ActiveProfileFeatures>((get) => {
     connectionSettings: !local,
     gitClone: !local,
     browserPreview: !local,
+    modelLibrary: local,
   };
 });
 
@@ -145,6 +151,8 @@ export const apiClientAtom = atom(
       bridgeUrl: bridgeUrl ?? undefined,
       authToken: local ? null : (get(bridgeTokenAtom) ?? env.hostBridgeToken),
       profileId: get(activeProfileIdAtom),
+      // Local models download and load while the app runs, so the list is always read fresh.
+      ...(local ? { modelListCacheTtlMs: 0 } : {}),
     });
   },
   (get, set, client: HostBridgeApiClient | null) => {

@@ -85,7 +85,9 @@ export abstract class HostBridgeApiClientCore {
   protected readonly chatInFlight = new Map<string, Promise<Chat>>();
   protected readonly modelListCache = new Map<string, CacheEntry<ModelOption[]>>();
   protected readonly modelListInFlight = new Map<string, Promise<ModelOption[]>>();
+  protected readonly modelListCacheTtlMs: number;
   constructor(options: ApiClientOptions) {
+    this.modelListCacheTtlMs = options.modelListCacheTtlMs ?? 5 * 60 * 1000;
     this.profileId = options.profileId?.trim() || null;
     this.ws = options.ws;
     this.bridgeUrl = options.bridgeUrl?.replace(/\/$/, '') ?? null;

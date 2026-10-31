@@ -27,6 +27,10 @@ export interface LocalAgentPort {
   defaults(): { workspaceId: string | null; modelId: string | null };
   /** Catalog models whose weights are downloaded, verified, and supported by this build. */
   availableModels(): readonly LocalModelDefinition[];
+  /** The available models with whether each is resident in memory, for the model picker. */
+  modelChoices(): readonly LocalModelChoice[];
+  /** Uses a downloaded model for this chat and for new chats; it loads when the chat sends. */
+  chooseModel(threadId: string, modelId: string): Promise<LocalThread>;
   createThread(workspaceId: string, modelId: string): Promise<LocalThread>;
   updateThread(
     id: string,
@@ -42,6 +46,15 @@ export interface LocalAgentPort {
   /** Answers the pending tool approval in `run().approval`. */
   resolveApproval(callId: string, approved: boolean): void;
   git: LocalGitPort;
+}
+
+export interface LocalModelChoice {
+  model: LocalModelDefinition;
+  residency: 'loaded' | 'loading' | 'idle';
+  /** 0–100 while loading. */
+  loadProgress: number;
+  /** The context size of the resident model; null when it is not loaded. */
+  contextTokens: number | null;
 }
 
 export interface LocalGitPort {
