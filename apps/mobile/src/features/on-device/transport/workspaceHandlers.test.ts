@@ -241,6 +241,15 @@ describe('LocalBridgeServer workspaces', () => {
     expect(port.calls).toContain('workspace.cancelTransfer');
   });
 
+  it('remembers the selected workspace for new chats', async () => {
+    const { port, server } = setup();
+    await expect(server.request('workspace/select', { cwd: DEMO })).resolves.toEqual({
+      ok: true,
+      cwd: DEMO,
+    });
+    expect(port.defaults().workspaceId).toBe('ws-one');
+  });
+
   it('creates, renames, and deletes workspaces by presented path', async () => {
     const { port, server } = setup();
     await expect(server.request('workspace/create', { name: 'Scratch' })).resolves.toEqual({

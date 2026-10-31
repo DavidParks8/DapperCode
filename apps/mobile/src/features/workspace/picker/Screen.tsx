@@ -10,6 +10,7 @@ import {
   managedWorkspacesErrorAtom,
   managedWorkspacesLoadingAtom,
   renameManagedWorkspaceAtom,
+  selectManagedWorkspaceAtom,
 } from '../state/managedWorkspaces';
 import { ManagedWorkspacePicker } from './ManagedView';
 import { WorkspacePicker } from './Picker';
@@ -76,6 +77,7 @@ export function WorkspacePickerScreen() {
   const managedLoading = useAtomValue(managedWorkspacesLoadingAtom);
   const managedError = useAtomValue(managedWorkspacesErrorAtom);
   const loadManagedWorkspaces = useSetAtom(loadManagedWorkspacesAtom);
+  const selectManagedWorkspace = useSetAtom(selectManagedWorkspaceAtom);
   useEffect(() => {
     if (features.managedWorkspaces) {
       void loadManagedWorkspaces();
@@ -95,7 +97,7 @@ export function WorkspacePickerScreen() {
         entries={managedWorkspaces ?? []}
         loading={managedLoading && managedWorkspaces === null}
         error={managedError}
-        onSelect={(path) => selectWorkspace(path)}
+        onSelect={(path) => void selectManagedWorkspace(path)}
         onClose={() => closePicker()}
         onCreate={(name) => createWorkspace(name)}
         onClone={() => openGitCheckout(bridgeRoot)}

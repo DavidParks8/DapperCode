@@ -276,7 +276,7 @@ the local profile. `LocalBridgeWsClient` is connected from creation until dispos
 | Workspaces   | `bridge/workspaces/list`, `bridge/fs/list` (workspace roots only), `bridge/git/clone` (HTTPS, into a new workspace)                                               |
 | Attention    | `bridge/approvals/list`, `bridge/approvals/resolve` (the loop's pending tool approval, such as a push), `bridge/userInput/list` (always empty)                     |
 | Git          | `bridge/git/status`, `diff`, `history`, `branches`, `stage`, `stageAll`, `unstage`, `unstageAll`, `commit`, `switch`, `push`                                     |
-| Extensions   | `workspace/list`, `create`, `rename`, `delete`, `changeToken`, `clone/progress`, `clone/cancel`, `workspace/git/fetch`, `pull`, `init`, `discard`, `branch/create`, `workspace/files/list`, `read`, `write`, `create`, `rename`, `remove` |
+| Extensions   | `workspace/list`, `select`, `create`, `rename`, `delete`, `changeToken`, `clone/progress`, `clone/cancel`, `workspace/git/fetch`, `pull`, `init`, `discard`, `branch/create`, `workspace/files/list`, `read`, `write`, `create`, `rename`, `remove` |
 
 Every other method rejects with JSON-RPC `-32601` and `data.error = 'unsupported_on_device'`
 (surfaced as `RpcRequestError`). Other stable `data.error` reasons are `thread_not_found`,
@@ -336,7 +336,9 @@ The shared screens serve the local profile through the transport; nothing branch
   `managedWorkspaces` the workspace row is read-only and links to Files.
 - **Workspace picker** (`picker/ManagedView.tsx`, `managedWorkspaces`): a flat list from
   `workspace/list` with branch and origin, tap to use, touch-and-hold to rename or browse files,
-  swipe to delete, plus **New workspace** and **Clone repository**. The clone screen validates
+  swipe to delete, plus **New workspace** and **Clone repository**. Choosing a workspace also calls
+  `workspace/select`, so the runtime's remembered workspace (first-run setup, new-chat fallback)
+  matches the picker. The clone screen validates
   HTTPS (`api/remoteUrl.ts`), derives the name from the URL, polls `workspace/clone/progress`, and
   offers **Stop**.
 - **Files** (`features/workspace/files`, route `chats/[chatId]/files?cwd=…`, `workspaceFiles`):
@@ -372,9 +374,10 @@ The legacy `/on-device/workspaces`, `/on-device/git`, and `/on-device/files` rou
   `localConversationReadiness`, resolving the model the way the server's `resolveModel` does (the
   selected model when downloaded, otherwise any downloaded runnable model, otherwise a download in
   progress), so a first download started from the library without selecting a model still counts; `LocalSetupGuide` renders them in the new chat until a chat can
-  start. Its destinations live in `LOCAL_SETUP_DESTINATIONS` (`shell/profiles/localSetup.ts`), which
-  still points at the legacy `/on-device/models` and `/on-device/workspaces` screens; repoint that
-  single constant when the Settings model screens and local workspace picker land. Missing
+  start. The workspace step opens the chat's workspace picker (`openWorkspaceModalAtom`); the model
+  destination lives in `LOCAL_SETUP_DESTINATIONS` (`shell/profiles/localSetup.ts`), which still
+  points at the legacy `/on-device/models` screen; repoint that constant when the Settings model
+  screens land. Missing
   prerequisites still reject chat creation with `on_device_model_required`/
   `on_device_workspace_required`.
 - **Profile routes**: `app/profiles/_layout.tsx` gives `[profileId]` its own stack. Expo Router only

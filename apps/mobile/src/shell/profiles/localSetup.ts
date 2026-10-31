@@ -15,13 +15,13 @@ import type { OnDeviceRuntimeSlice } from '../../features/on-device/runtime/type
 import { localRuntimeAtom } from '@shell/state/local/atoms';
 
 /**
- * Where first-run setup sends the user. These are the legacy model library and workspace screens
- * until the Settings model screens and the local workspace picker replace them; update only this
- * constant when they do (see docs/on-device.md, "Discovery and onboarding").
+ * Where first-run setup sends the user for a model. This is the legacy model library until the
+ * Settings model screens replace it; update only this constant when they do (see
+ * docs/on-device.md, "Discovery and onboarding"). The workspace step opens the chat's workspace
+ * picker (`openWorkspaceModalAtom`), which manages local workspaces.
  */
 export const LOCAL_SETUP_DESTINATIONS = {
   models: '/on-device/models',
-  workspaces: '/on-device/workspaces',
 } as const satisfies Record<string, Href>;
 
 export type LocalSetupStepStatus = 'done' | 'in-progress' | 'todo';

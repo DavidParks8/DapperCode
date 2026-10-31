@@ -52,6 +52,8 @@ export interface LocalAgentPort {
 /** Workspace lifecycle. Mutations are serialized with agent runs and other manual operations. */
 export interface LocalWorkspaceAdminPort {
   create(name: string): Promise<LocalWorkspace>;
+  /** Remembers the workspace for new chats (and first-run setup). */
+  select(id: string): Promise<void>;
   rename(id: string, name: string): Promise<LocalWorkspace>;
   delete(id: string): Promise<void>;
   /** Clones an HTTPS remote into a new workspace and selects it. */

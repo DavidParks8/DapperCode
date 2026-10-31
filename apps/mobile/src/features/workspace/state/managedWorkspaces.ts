@@ -6,7 +6,7 @@ import { screenAtom } from '../../chat/state/registry';
 import { workspaceHostClientAtom } from '../api/atoms';
 import { describeHostError } from '../api/errors';
 import type { ManagedWorkspaceSummary } from '../api/protocol';
-import { refreshWorkspaceRootsAtom } from './workspaceActions';
+import { refreshWorkspaceRootsAtom, selectWorkspaceAtom } from './workspaceActions';
 import { returnToChat } from './workspaceRouteNavigation';
 
 /**
@@ -40,6 +40,26 @@ const reloadAfterChangeAtom = atom(null, async (_get, set): Promise<void> => {
   // Recent workspaces elsewhere in the shell (drawer grouping, composer) read the roots list.
   void set(refreshWorkspaceRootsAtom, { force: true });
 });
+
+/** Uses a workspace for new chats, recording it with the host so first-run setup sees it. */
+export const selectManagedWorkspaceAtom = atom(
+  null,
+  async (get, set, path: string): Promise<boolean> => {
+    const host = get(workspaceHostClientAtom);
+    if (!host) {
+      return false;
+    }
+    try {
+      await host.selectWorkspace(path);
+    } catch (error) {
+      set(managedWorkspacesErrorAtom, describeHostError(error, 'Could not use that workspace.'));
+      return false;
+    }
+    set(managedWorkspacesErrorAtom, null);
+    set(selectWorkspaceAtom, path);
+    return true;
+  },
+);
 
 export const createManagedWorkspaceAtom = atom(
   null,

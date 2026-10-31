@@ -21,6 +21,7 @@ import { LOCAL_WORKSPACE_ROOT, localWorkspacePaths } from './wire';
 export const LOCAL_WORKSPACE_METHODS = [
   'bridge/git/clone',
   M.workspaceList,
+  M.workspaceSelect,
   M.gitFetch,
   M.gitPull,
   M.gitInit,
@@ -141,6 +142,11 @@ export function createLocalWorkspaceHandlers(port: LocalAgentPort, workspace: Re
           a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
         ),
       };
+    },
+    [M.workspaceSelect]: async (params: RpcParams) => {
+      const { id, cwd } = await workspace(params);
+      await port.workspaceAdmin.select(id);
+      return { ok: true, cwd };
     },
     [M.cloneProgress]: () => port.workspaceAdmin.cloneProgress(),
     [M.cloneCancel]: () => {

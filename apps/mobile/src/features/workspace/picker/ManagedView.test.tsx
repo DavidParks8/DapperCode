@@ -152,11 +152,25 @@ describe('managed workspace picker', () => {
     expect(control(root, 'Scratch, Not a Git repository').props['selected']).toBe(false);
   });
 
-  it('selects a workspace with one tap', async () => {
-    const { root, store } = await renderPicker(twoWorkspaces());
+  it('selects a workspace with one tap and records it for first-run setup', async () => {
+    const port = twoWorkspaces();
+    const { root, store } = await renderPicker(port);
     await invoke(control(root, 'Scratch, Not a Git repository'));
     expect(store.get(defaultStartCwdAtom)).toBe(`${LOCAL_WORKSPACE_ROOT}/Scratch`);
+    // The runtime's remembered workspace drives the setup checklist and new-chat fallback.
+    expect(port.calls).toContain('workspace.select:ws-two');
+    expect(port.defaults().workspaceId).toBe('ws-two');
     expect(router.back).toHaveBeenCalled();
+  });
+
+  it('stays open and explains a workspace that can no longer be used', async () => {
+    const port = twoWorkspaces();
+    const { root, store } = await renderPicker(port);
+    port.workspaceList = port.workspaceList.filter((entry) => entry.id !== 'ws-two');
+    await invoke(control(root, 'Scratch, Not a Git repository'));
+    expect(store.get(defaultStartCwdAtom)).toBe(DEMO);
+    expect(router.back).not.toHaveBeenCalled();
+    expect(text(root)).toContain('That workspace is no longer on this iPhone.');
   });
 
   it('creates an empty workspace and uses it', async () => {

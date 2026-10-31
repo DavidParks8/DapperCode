@@ -8,6 +8,7 @@ import type { GitStatusResponse } from '@bridge/types/types';
  */
 export const WORKSPACE_HOST_METHODS = {
   workspaceList: 'workspace/list',
+  workspaceSelect: 'workspace/select',
   workspaceCreate: 'workspace/create',
   workspaceRename: 'workspace/rename',
   workspaceDelete: 'workspace/delete',

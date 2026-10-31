@@ -88,6 +88,7 @@ export function createRuntimeAgentPort(runtime: OnDeviceRuntime): LocalAgentPort
     },
     workspaceAdmin: {
       create: (name) => runtime.createWorkspace(name),
+      select: (id) => runtime.selectWorkspace(id),
       rename: (id, name) => runtime.workspaceAdmin.rename(id, name),
       delete: (id) => runtime.workspaceAdmin.delete(id),
       clone: (name, url) => runtime.cloneWorkspace(name, url),

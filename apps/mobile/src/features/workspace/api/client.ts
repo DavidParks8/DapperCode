@@ -21,6 +21,10 @@ export class WorkspaceHostClient {
   listWorkspaces(): Promise<{ workspaces: ManagedWorkspaceSummary[] }> {
     return this.transport.request(M.workspaceList, {});
   }
+  /** Makes the workspace the host's default for new chats. */
+  selectWorkspace(cwd: string): Promise<{ ok: true; cwd: string }> {
+    return this.transport.request(M.workspaceSelect, { cwd });
+  }
   createWorkspace(name: string): Promise<ManagedWorkspaceResponse> {
     return this.transport.request(M.workspaceCreate, { name });
   }

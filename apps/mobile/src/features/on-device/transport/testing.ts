@@ -139,6 +139,10 @@ export class FakeAgentPort implements LocalAgentPort {
       this.workspaceList = [...this.workspaceList, workspace];
       return workspace;
     },
+    select: async (id) => {
+      this.calls.push(`workspace.select:${id}`);
+      this.defaultValues = { ...this.defaultValues, workspaceId: id };
+    },
     rename: async (id, name) => {
       this.calls.push(`workspace.rename:${id}:${name}`);
       this.workspaceList = this.workspaceList.map((entry) =>
