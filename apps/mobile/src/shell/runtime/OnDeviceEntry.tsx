@@ -4,20 +4,25 @@ import { ChoiceAction } from '../../features/onboarding/ChoiceAction';
 import { routes } from '@shell/navigation/routes';
 import { replaceRoot } from '@shell/navigation/routeNavigation';
 import { localProfileAvailableAtom } from '@shell/state/bridge/atoms';
-import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
+import { LOCAL_PROFILE_ID, LOCAL_PROFILE_NAME } from '@shell/state/localProfile';
 
-/** Onboarding entry that opens the built-in local profile in the regular chat shell. */
+export const ON_DEVICE_ENTRY_META = 'Private, offline models with file and Git tools';
+
+/** Onboarding choice that opens the built-in local profile in the regular chat shell. */
 export function OnDeviceEntry() {
-  const available = useAtomValue(localProfileAvailableAtom);
-  if (!available) {
-    return null;
-  }
   return (
     <ChoiceAction
-      title="On this iPhone"
-      meta="Offline models with file and Git tools"
+      title={LOCAL_PROFILE_NAME}
+      meta={ON_DEVICE_ENTRY_META}
       iconName="phone-portrait-outline"
+      accessibilityHint="Opens a new chat that runs on this iPhone. Setup downloads a model first."
+      testID="onboarding-choice-local"
       onPress={() => replaceRoot(routes.newChat(LOCAL_PROFILE_ID))}
     />
   );
+}
+
+/** The local onboarding choice, or nothing where this build cannot run the local agent. */
+export function useOnDeviceEntry() {
+  return useAtomValue(localProfileAvailableAtom) ? <OnDeviceEntry /> : undefined;
 }
