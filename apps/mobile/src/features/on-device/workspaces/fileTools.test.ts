@@ -11,6 +11,7 @@ function port() {
       content: 'contents',
       revision,
       nextOffset: null,
+      totalBytes: 8,
     })),
     writeWorkspaceFile: jest.fn(async () => revision),
     editWorkspaceFile: jest.fn(async () => revision),
@@ -40,7 +41,13 @@ test('file tools bind the trusted workspace and return the native JSON result', 
     0,
     3072,
   );
-  expect(result).toEqual({ path: 'src/main.txt', content: 'contents', revision, nextOffset: null });
+  expect(result).toEqual({
+    path: 'src/main.txt',
+    content: 'contents',
+    revision,
+    nextOffset: null,
+    totalBytes: 8,
+  });
 });
 
 test('model reads are bounded to chunks that fit small local contexts', async () => {

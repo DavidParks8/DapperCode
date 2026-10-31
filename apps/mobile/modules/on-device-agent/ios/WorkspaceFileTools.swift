@@ -6,11 +6,12 @@ struct NativeFileRead: Sendable {
   let content: String
   let revision: String
   let nextOffset: Int?
+  let totalBytes: Int
 
   var payload: [String: Any] {
     [
       "path": path, "content": content, "revision": revision,
-      "nextOffset": nextOffset.map { $0 as Any } ?? NSNull(),
+      "nextOffset": nextOffset.map { $0 as Any } ?? NSNull(), "totalBytes": totalBytes,
     ]
   }
 }
@@ -62,11 +63,11 @@ struct NativeSearchResult: Sendable {
 extension WorkspaceStore {
   func listFiles(_ id: String, path: String, limit: Int) throws -> NativeDirectoryListing {
     guard (1...1000).contains(limit) else {
-      throw WorkspaceError("Directory limits must be between 1 and 1000.")
+      throw WorkspaceError(.invalidArgument, "Directory limits must be between 1 and 1000.")
     }
     let directory = try resolve(id, path: path, allowRoot: true)
     guard try kind(directory) == .directory else {
-      throw WorkspaceError("Choose a directory to list.")
+      throw WorkspaceError(.pathNotDirectory, "Choose a directory to list.")
     }
     var enumerationError: Error?
     guard
@@ -78,13 +79,13 @@ extension WorkspaceStore {
         }
       )
     else {
-      throw WorkspaceError("The workspace directory could not be enumerated.")
+      throw WorkspaceError(.storageFailure, "The workspace directory could not be enumerated.")
     }
     var selected: [NativeFileEntry] = []
     var truncated = false
     while let value = enumerator.nextObject() {
       guard let item = value as? URL, item.path.hasPrefix(directory.path + "/") else {
-        throw WorkspaceError("Directory enumeration returned an invalid workspace path.")
+        throw WorkspaceError(.storageFailure, "Directory enumeration returned an invalid workspace path.")
       }
       if item.lastPathComponent.lowercased() == ".git" { continue }
       if selected.count == limit {
@@ -92,7 +93,7 @@ extension WorkspaceStore {
         break
       }
       guard let type = try kind(item), let info = try fileStatus(item) else {
-        throw WorkspaceError("The directory changed while it was being listed. Retry the tool.")
+        throw WorkspaceError(.storageFailure, "The directory changed while it was being listed. Retry the tool.")
       }
       selected.append(
         NativeFileEntry(name: item.lastPathComponent, kind: type, bytes: info.st_size))
@@ -106,18 +107,19 @@ extension WorkspaceStore {
   func readFile(_ id: String, path: String, offset: Int, limit: Int) throws -> NativeFileRead {
     guard offset >= 0, (1...65_536).contains(limit) else {
       throw WorkspaceError(
+        .invalidArgument,
         "Read offsets must be non-negative and limits must be between 1 and 65536 bytes.")
     }
     let url = try resolve(id, path: path)
     let data = try readData(url)
     guard String(data: data, encoding: .utf8) != nil else {
-      throw WorkspaceError("Workspace tools only read UTF-8 text files.")
+      throw WorkspaceError(.fileNotText, "Workspace tools only read UTF-8 text files.")
     }
     guard offset <= data.count else {
-      throw WorkspaceError("The read offset is beyond the end of the file.")
+      throw WorkspaceError(.invalidArgument, "The read offset is beyond the end of the file.")
     }
     guard offset == data.count || data[offset] & 0xC0 != 0x80 else {
-      throw WorkspaceError("The read offset must fall on a UTF-8 character boundary.")
+      throw WorkspaceError(.invalidArgument, "The read offset must fall on a UTF-8 character boundary.")
     }
     var end = min(data.count, offset + limit)
     while end > offset && end < data.count && data[end] & 0xC0 == 0x80 {
@@ -126,11 +128,11 @@ extension WorkspaceStore {
     guard end > offset || offset == data.count,
       let content = String(data: data.subdata(in: offset..<end), encoding: .utf8)
     else {
-      throw WorkspaceError("The read limit is too small for the next UTF-8 character.")
+      throw WorkspaceError(.invalidArgument, "The read limit is too small for the next UTF-8 character.")
     }
     return NativeFileRead(
       path: path, content: content, revision: digest(data),
-      nextOffset: end < data.count ? end : nil
+      nextOffset: end < data.count ? end : nil, totalBytes: data.count
     )
   }
 
@@ -138,7 +140,7 @@ extension WorkspaceStore {
     -> String
   {
     guard content.utf8.count <= Self.maximumFileBytes else {
-      throw WorkspaceError("Files larger than 4 MiB cannot be written by local tools.")
+      throw WorkspaceError(.fileTooLarge, "Files larger than 4 MiB cannot be written by local tools.")
     }
     let data = Data(content.utf8)
     let url = try resolve(id, path: path, allowMissing: true)
@@ -147,10 +149,10 @@ extension WorkspaceStore {
       guard try kind(url) == .file, let expectedRevision,
         digest(try readData(url)) == expectedRevision
       else {
-        throw WorkspaceError("The file changed or was not read. Read it again before replacing it.")
+        throw WorkspaceError(.fileRevisionConflict, "The file changed or was not read. Read it again before replacing it.")
       }
     } else if expectedRevision != nil {
-      throw WorkspaceError("The file was removed. Read the workspace again before replacing it.")
+      throw WorkspaceError(.fileRevisionConflict, "The file was removed. Read the workspace again before replacing it.")
     }
     try fileManager.createDirectory(
       at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -159,6 +161,7 @@ extension WorkspaceStore {
       try fileManager.setAttributes(
         [.posixPermissions: NSNumber(value: Int(previous.st_mode & 0o777))], ofItemAtPath: url.path)
     }
+    markChanged(id)
     return digest(data)
   }
 
@@ -169,26 +172,27 @@ extension WorkspaceStore {
       newText.utf8.count <= Self.maximumFileBytes
     else {
       throw WorkspaceError(
+        .invalidArgument,
         "An edit requires non-empty old text and text sizes no larger than 4 MiB.")
     }
     let url = try resolve(id, path: path)
     let data = try readData(url)
     guard digest(data) == expectedRevision, String(data: data, encoding: .utf8) != nil else {
-      throw WorkspaceError("The file changed or is not UTF-8 text. Read it again before editing.")
+      throw WorkspaceError(.fileRevisionConflict, "The file changed or is not UTF-8 text. Read it again before editing.")
     }
     let oldData = Data(oldText.utf8)
     guard let range = data.range(of: oldData),
       data.range(of: oldData, in: (range.lowerBound + 1)..<data.endIndex) == nil
     else {
-      throw WorkspaceError("The edit must match exactly one location in the file.")
+      throw WorkspaceError(.editNoUniqueMatch, "The edit must match exactly one location in the file.")
     }
     guard data.count - oldData.count + newText.utf8.count <= Self.maximumFileBytes else {
-      throw WorkspaceError("The edited file would exceed 4 MiB.")
+      throw WorkspaceError(.fileTooLarge, "The edited file would exceed 4 MiB.")
     }
     var updated = data
     updated.replaceSubrange(range, with: newText.utf8)
     guard let content = String(data: updated, encoding: .utf8) else {
-      throw WorkspaceError("The edit did not produce valid UTF-8 text.")
+      throw WorkspaceError(.fileNotText, "The edit did not produce valid UTF-8 text.")
     }
     return try writeFile(id, path: path, content: content, expectedRevision: expectedRevision)
   }
@@ -197,26 +201,44 @@ extension WorkspaceStore {
   {
     let source = try resolve(id, path: path)
     try verifyRevision(source, expectedRevision)
+    try move(id, source: source, destination: destination)
+  }
+
+  private func move(_ id: String, source: URL, destination: String) throws {
     let target = try resolve(id, path: destination, allowMissing: true)
     guard try kind(target) == nil else {
-      throw WorkspaceError("The rename destination already exists.")
+      throw WorkspaceError(.pathExists, "The rename destination already exists.")
     }
     try fileManager.createDirectory(
       at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
     try fileManager.moveItem(at: source, to: target)
+    markChanged(id)
   }
 
   func removePath(_ id: String, path: String, expectedRevision: String?) throws {
     let url = try resolve(id, path: path)
     try verifyRevision(url, expectedRevision)
     try fileManager.removeItem(at: url)
+    markChanged(id)
+  }
+
+  /// User-initiated rename from the Files UI. Containment rules match the agent tools, but the
+  /// user acts on the current listing, so no file revision is required (large/binary files too).
+  func renameEntry(_ id: String, path: String, destination: String) throws {
+    try move(id, source: try resolve(id, path: path), destination: destination)
+  }
+
+  /// User-initiated removal from the Files UI; see `renameEntry`.
+  func removeEntry(_ id: String, path: String) throws {
+    try fileManager.removeItem(at: try resolve(id, path: path))
+    markChanged(id)
   }
 
   func searchFiles(_ id: String, query: String) throws -> NativeSearchResult {
     guard !query.isEmpty, query.utf8.count <= 1024,
       !query.unicodeScalars.contains(where: { CharacterSet.newlines.contains($0) })
     else {
-      throw WorkspaceError("Search text must be a single line of 1-1024 UTF-8 bytes.")
+      throw WorkspaceError(.invalidArgument, "Search text must be a single line of 1-1024 UTF-8 bytes.")
     }
     let root = try resolve(id, path: "", allowRoot: true)
     var matches: [NativeSearchMatch] = []
@@ -233,11 +255,11 @@ extension WorkspaceStore {
         }
       )
     else {
-      throw WorkspaceError("The workspace could not be enumerated for search.")
+      throw WorkspaceError(.storageFailure, "The workspace could not be enumerated for search.")
     }
     while let value = enumerator.nextObject() {
       guard let child = value as? URL, child.path.hasPrefix(root.path + "/") else {
-        throw WorkspaceError("Search enumeration returned an invalid workspace path.")
+        throw WorkspaceError(.storageFailure, "Search enumeration returned an invalid workspace path.")
       }
       if child.lastPathComponent.lowercased() == ".git" {
         enumerator.skipDescendants()
@@ -251,7 +273,7 @@ extension WorkspaceStore {
       scanned += 1
       let relative = String(child.path.dropFirst(root.path.count + 1))
       guard let type = try kind(child), let info = try fileStatus(child) else {
-        throw WorkspaceError("The workspace changed during search. Retry the tool.")
+        throw WorkspaceError(.storageFailure, "The workspace changed during search. Retry the tool.")
       }
       if type == .directory {
         continue
@@ -300,10 +322,10 @@ extension WorkspaceStore {
   private func verifyRevision(_ url: URL, _ expected: String?) throws {
     if try kind(url) == .file {
       guard let expected, digest(try readData(url)) == expected else {
-        throw WorkspaceError("The file changed or was not read. Read it again before changing it.")
+        throw WorkspaceError(.fileRevisionConflict, "The file changed or was not read. Read it again before changing it.")
       }
     } else if expected != nil {
-      throw WorkspaceError("File revisions cannot be used for directories.")
+      throw WorkspaceError(.invalidArgument, "File revisions cannot be used for directories.")
     }
   }
 
@@ -311,7 +333,7 @@ extension WorkspaceStore {
     guard try kind(url) == .file, let info = try fileStatus(url), info.st_nlink == 1,
       info.st_size <= Self.maximumFileBytes
     else {
-      throw WorkspaceError("Workspace tools require a regular file no larger than 4 MiB.")
+      throw WorkspaceError(.pathUnsupported, "Workspace tools require a regular file no larger than 4 MiB.")
     }
     return try Data(contentsOf: url)
   }

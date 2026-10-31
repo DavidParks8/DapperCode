@@ -12,7 +12,7 @@ final class GitNetworkOperation {
   func begin() throws {
     lock.lock()
     defer { lock.unlock() }
-    guard !active else { throw GitOperationError("Another native Git transfer is running.") }
+    guard !active else { throw GitOperationError(.gitTransferBusy, "Another native Git transfer is running.") }
     active = true
     cancelled = false
     completed = 0

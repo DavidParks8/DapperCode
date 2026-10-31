@@ -42,9 +42,9 @@ function deferred<T>() {
 }
 
 function harness(documents = new Map<string, string>()) {
-  const workspaces = [{ id: 'workspace-one', name: 'Workspace one' }];
+  const workspaces = [{ id: 'workspace-one', name: 'Workspace one', isRepository: true }];
   const native = {
-    getAPIVersion: jest.fn(() => 6),
+    getAPIVersion: jest.fn(() => 7),
     cancelGitTransfer: jest.fn(),
     getGitTransferProgress: jest.fn<
       ReturnType<OnDeviceNativeServices['getGitTransferProgress']>,
@@ -73,8 +73,25 @@ function harness(documents = new Map<string, string>()) {
     storeGitCredential: jest.fn(async () => 'opaque-ref'),
     removeGitCredential: jest.fn(async () => undefined),
     listWorkspaces: jest.fn(async () => workspaces),
-    createWorkspace: jest.fn(async (name: string) => ({ id: 'created', name })),
-    cloneWorkspace: jest.fn(async (name: string) => ({ id: 'cloned', name })),
+    createWorkspace: jest.fn(async (name: string) => ({
+      id: 'created',
+      name,
+      isRepository: false,
+    })),
+    cloneWorkspace: jest.fn(async (name: string) => ({ id: 'cloned', name, isRepository: true })),
+    renameWorkspace: jest.fn(async (id: string, name: string) => {
+      const index = workspaces.findIndex((entry) => entry.id === id);
+      const renamed = { id, name, isRepository: true };
+      workspaces.splice(index, 1, renamed);
+      return renamed;
+    }),
+    deleteWorkspace: jest.fn(async (id: string) => {
+      workspaces.splice(
+        workspaces.findIndex((entry) => entry.id === id),
+        1,
+      );
+    }),
+    getWorkspaceChangeToken: jest.fn(async () => 'token-0'),
     listWorkspaceFiles: jest.fn(async () => ({ entries: [], truncated: false })),
     readWorkspaceFile: jest.fn<
       ReturnType<OnDeviceNativeServices['readWorkspaceFile']>,
@@ -84,11 +101,14 @@ function harness(documents = new Map<string, string>()) {
       content: 'Native contents',
       revision: 'revision',
       nextOffset: null,
+      totalBytes: 15,
     })),
     writeWorkspaceFile: jest.fn(async () => 'next-revision'),
     editWorkspaceFile: jest.fn(async () => 'next-revision'),
     renameWorkspacePath: jest.fn(async () => undefined),
     removeWorkspacePath: jest.fn(async () => undefined),
+    renameWorkspaceEntry: jest.fn(async () => undefined),
+    removeWorkspaceEntry: jest.fn(async () => undefined),
     searchWorkspaceFiles: jest.fn(async () => ({
       matches: [],
       truncated: false,
@@ -128,6 +148,15 @@ function harness(documents = new Map<string, string>()) {
     unstageWorkspaceGit: jest.fn(async () => undefined),
     commitWorkspaceGit: jest.fn(async () => 'commit-hash'),
     switchWorkspaceGitBranch: jest.fn(async () => undefined),
+    createWorkspaceGitBranch: jest.fn(async () => undefined),
+    discardWorkspaceGit: jest.fn(async () => undefined),
+    initWorkspaceGit: jest.fn(async (id: string) => ({ id, name: id, isRepository: true })),
+    fetchWorkspaceGit: jest.fn(async () => undefined),
+    pullWorkspaceGit: jest.fn(async () => ({
+      outcome: 'up-to-date' as const,
+      from: 'a',
+      to: 'a',
+    })),
     getWorkspaceGitOrigin: jest.fn(async () => 'https://github.com/owner/repository.git'),
     pushWorkspaceGit: jest.fn(async () => undefined),
   } satisfies OnDeviceNativeServices;
@@ -319,6 +348,7 @@ test('background during a native tool waits for its result, preserves durable hi
     content: 'Native contents',
     revision: 'revision',
     nextOffset: null,
+    totalBytes: 15,
   });
   await background;
   await running;
@@ -411,6 +441,49 @@ test('Git account credentials are origin-bound and author settings survive a new
     account: null,
     author: { name: 'Offline Author', email: 'author@example.invalid' },
   });
+  await h.runtime.dispose();
+});
+
+test('deleting the selected workspace clears the new-conversation default but keeps its conversations readable', async () => {
+  const h = await ready();
+  await h.runtime.workspaceAdmin.delete('workspace-one');
+  expect(h.native.deleteWorkspace).toHaveBeenCalledWith('workspace-one');
+  expect(h.runtime.workspaces()).toEqual([]);
+  expect(h.runtime.preferences().workspaceId).toBeNull();
+  expect(JSON.parse(h.documents.get('preferences.json') ?? '{}')).toMatchObject({
+    workspaceId: null,
+  });
+  expect(h.runtime.threads.get(h.thread.id)).toMatchObject({ workspaceId: 'workspace-one' });
+  expect(h.runtime.workspaceActivity()).toBeNull();
+  await expect(h.runtime.createThread()).rejects.toThrow('local workspace');
+  await h.runtime.dispose();
+});
+
+test('deleting another workspace keeps the selection, and workspaces cannot be deleted mid-operation', async () => {
+  const h = await ready();
+  h.workspaces.push({ id: 'workspace-two', name: 'Workspace two', isRepository: false });
+  const blocker = deferred<void>();
+  const operation = h.runtime.workspaceTask('Pushing', () => blocker.promise);
+  await expect(h.runtime.workspaceAdmin.delete('workspace-two')).rejects.toThrow('settle');
+  expect(h.native.deleteWorkspace).not.toHaveBeenCalled();
+  blocker.resolve();
+  await operation;
+  await h.runtime.workspaceAdmin.delete('workspace-two');
+  expect(h.runtime.preferences().workspaceId).toBe('workspace-one');
+  expect(h.runtime.workspaces().map((entry) => entry.id)).toEqual(['workspace-one']);
+  await h.runtime.dispose();
+});
+
+test('renaming a workspace refreshes the listed name without changing the selection', async () => {
+  const h = await ready();
+  await expect(h.runtime.workspaceAdmin.rename('workspace-one', 'Renamed')).resolves.toMatchObject({
+    id: 'workspace-one',
+    name: 'Renamed',
+  });
+  expect(h.runtime.workspaces()).toEqual([
+    { id: 'workspace-one', name: 'Renamed', isRepository: true },
+  ]);
+  expect(h.runtime.preferences().workspaceId).toBe('workspace-one');
   await h.runtime.dispose();
 });
 

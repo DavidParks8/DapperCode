@@ -30,6 +30,7 @@ import type {
   OnDeviceReachability,
   OnDeviceRuntimeSlice,
 } from './types';
+import { LocalWorkspaceAdmin } from './workspaceAdmin';
 
 export interface OnDeviceRuntimeOptions {
   /** Platform reachability observer; defaults to `unknown`, which never pre-empts actions. */
@@ -56,6 +57,7 @@ export class OnDeviceRuntime {
   private readonly drafts: LocalDraftStore;
   private readonly networkMonitor: NetworkMonitor;
   private readonly settings: LocalPreferencesStore;
+  readonly workspaceAdmin: LocalWorkspaceAdmin;
   private readonly issueLog: RuntimeIssueLog;
   private workspaceValues: LocalWorkspace[] = [];
   private initialization: Promise<void> | null = null;
@@ -91,6 +93,7 @@ export class OnDeviceRuntime {
     this.settings = new LocalPreferencesStore(native, (kind) =>
       kind === 'value' ? this.emitter.emit('preferences') : this.issueLog.invalidate(),
     );
+    this.workspaceAdmin = new LocalWorkspaceAdmin(this, this.settings);
     this.threads = new LocalThreadRepository(
       native,
       (change) => {
