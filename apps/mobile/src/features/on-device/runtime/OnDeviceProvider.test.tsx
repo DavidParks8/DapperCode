@@ -1,33 +1,26 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { AppState, Text, type AppStateStatus } from 'react-native';
-import type * as ReactNative from 'react-native';
-import { OnDeviceProvider } from './OnDeviceProvider';
+import type { PropsWithChildren } from 'react';
+import { AppState, Pressable, Text, type AppStateStatus } from 'react-native';
+import { OnDeviceProvider as Provider, type OnDeviceStartup } from './OnDeviceProvider';
 import { OnDeviceRuntime } from './runtime';
 
 jest.mock('./runtime', () => ({ OnDeviceRuntime: jest.fn() }));
 jest.mock('./expoNetwork', () => ({ createExpoNetwork: () => ({}) }));
 jest.mock('../native/services', () => ({ getOnDeviceNativeServices: () => ({}) }));
-jest.mock('../screens/ui', () => {
-  const {
-    Pressable,
-    Text: MockText,
-    View,
-  } = jest.requireActual<typeof ReactNative>('react-native');
-  return {
-    LocalPage: ({ children, error }: { children?: React.ReactNode; error?: string | null }) => (
-      <View>
-        {error ? <MockText>{error}</MockText> : null}
-        {children}
-      </View>
-    ),
-    LocalText: ({ children }: { children?: React.ReactNode }) => <MockText>{children}</MockText>,
-    LocalAction: ({ title, onPress }: { title: string; onPress: () => void }) => (
-      <Pressable onPress={onPress}>
-        <MockText>{title}</MockText>
-      </Pressable>
-    ),
-  };
-});
+
+function Startup({ error, retry }: OnDeviceStartup) {
+  return error ? (
+    <Pressable onPress={retry}>
+      <Text>{error}</Text>
+    </Pressable>
+  ) : (
+    <Text>starting</Text>
+  );
+}
+
+function OnDeviceProvider({ children }: PropsWithChildren) {
+  return <Provider fallback={(startup) => <Startup {...startup} />}>{children}</Provider>;
+}
 
 function deferred() {
   let resolve!: () => void;
@@ -107,7 +100,8 @@ test('retry waits for the failed runtime to finish disposing before constructing
       <Text>ready</Text>
     </OnDeviceProvider>,
   );
-  fireEvent.press(await screen.findByText('Retry without resetting storage'));
+  expect(screen.getByText('starting')).toBeTruthy();
+  fireEvent.press(await screen.findByText('Broken storage'));
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });

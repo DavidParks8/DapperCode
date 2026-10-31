@@ -184,10 +184,9 @@ and that prompt is passed straight to completion.
   tools are marked interrupted and are **never automatically replayed**. Inspect the workspace and,
   for push, the remote before retrying. Streamed text, tool results, and run settlement are
   coalesced into one write shortly afterwards (and on backgrounding).
-- Drafts are stored per conversation and written after a short typing pause; deleting a
-  conversation deletes its draft. Drafts saved inline by older builds stay in `preferences.json`
-  until their own draft document has been written, so a failed or skipped migration never loses
-  them.
+- Composer drafts are the shared chat drafts, stored per profile and chat exactly like desktop
+  chats. The runtime still restores (or quarantines) per-conversation draft documents written by
+  older builds and deletes them with their conversation, but no screen writes them any more.
 - Startup is not fail-closed. Damaged or unexpected conversation, draft, or settings files are
   moved to a `quarantine-…` name with their bytes unchanged (or skipped and left in place when they
   cannot be moved), a dismissible notice explains what happened, and the rest of the mode starts.
@@ -253,16 +252,22 @@ MainScreen / drawer / Git / picker ── HostBridgeApiClient ── HostBridgeW
   profile, so a relaunch reopens the last local chat.
 - `defaultStartCwdAtom` keeps a separate `localDefaultStartCwd`, so local workspace paths never
   become a desktop bridge's new-chat path.
-- Routes are the regular `/profiles/on-device/(drawer)/chats/…` routes. `/on-device` and
-  `/on-device/chat/[threadId]` redirect there.
+- Routes are the regular `/profiles/on-device/(drawer)/…` routes. There are no separate local
+  screens: links from older builds (`/on-device/*`) are redirects in `src/app/on-device`
+  (`shell/navigation/legacyOnDeviceLinks.ts`) to the matching profile route — the old home and
+  `chat/[threadId]` to chats, `models` and `models/[familyId]` to Settings → Models, `account` to
+  Settings → Git & GitHub, and anything else to a new chat.
 
 ### Runtime ownership and lifecycle
 
 `shell/runtime/LocalRuntimeHost.tsx`, mounted once by `RootLayout`, owns the single
-`OnDeviceRuntime` through `OnDeviceProvider` while the local profile is open or a legacy
-`/on-device/*` screen is shown. While the runtime starts or fails, the provider's page covers the
-shell (its recovery actions are ordinary profile switches; with no desktop profile, the local
-profile is closed before onboarding opens, and the host never renders over `/onboarding`). When ready, the host publishes
+`OnDeviceRuntime` through `OnDeviceProvider` while the local profile is open. While the runtime
+starts, the host draws nothing and `ProfileRouteBoundary` shows its **Opening On this iPhone**
+indicator, exactly as for a bridge profile. If it fails to start, `LocalRuntimeRecovery` covers the
+shell with a standard Settings page: the error notice (announced as an alert), **Retry without
+resetting storage**, and ordinary profile switches (`LocalProfileExit`; with no desktop profile the
+local profile is closed before onboarding opens). The host never renders over `/onboarding`. When
+ready, the host publishes
 `localRuntimeAtom` and a `LocalBridgeWsClient` in `localTransportAtom`; `wsClientAtom` returns that
 transport for the local profile, and `ProfileRouteBoundary` keeps local routes in their loading
 state until it exists. Leaving the profile unmounts the host, which disposes the transport and the
@@ -393,7 +398,6 @@ The shared screens serve the local profile through the transport; nothing branch
   disk is flagged and a stale save offers **Overwrite** or **Discard edits**. Files over 64 KiB open
   read-only with their total size.
 
-The legacy `/on-device/workspaces`, `/on-device/git`, and `/on-device/files` routes are gone.
 
 ### Extension points for the next tracks
 
@@ -426,21 +430,27 @@ The legacy `/on-device/workspaces`, `/on-device/git`, and `/on-device/files` rou
 - **Profile routes**: `app/profiles/_layout.tsx` gives `[profileId]` its own stack. Expo Router only
   notices a changed dynamic segment on a route named exactly `[param]`, so without it a profile
   switch left the previous profile id on the parent route and returning from any root-level screen
-  (such as a legacy `/on-device/*` page) switched back.
+  switched back.
 
 ## Ownership and testing
 
-`src/features/on-device` owns local models, authentication, workspaces, tool dispatch, journals, the
-legacy screens, and the in-process transport (`transport/`, which may use bridge wire types but not
-bridge transports). The Expo module under `modules/on-device-agent` owns native memory, Keychain,
-workspace containment, atomic document/model storage, and Git. Native ABI version mismatches fail
-locally with a rebuild message. `src/shell/runtime` composes the runtime host and the
-`LocalBridgeWsClient` adapter; `src/app/on-device` keeps the legacy model and account screens on
-the shell-owned runtime until Settings replaces them.
+`src/features/on-device` owns local models, authentication, workspaces, tool dispatch, journals,
+the runtime owner (`OnDeviceProvider`), and the in-process transport (`transport/`, which may use
+bridge wire types but not bridge transports). It has no screens, routes, or UI kit: ESLint rejects
+React Native view components, `expo-router`, the theme, shared UI, the shell, chat, and Settings in
+its non-test files (`scripts/__tests__/mobile-runtime-boundaries.test.mjs`). Every local surface is
+a shared one — the chat shell, Git, workspace, and Files screens over the transport, and
+`features/settings/local` for models and Git & GitHub. The Expo module under
+`modules/on-device-agent` owns native memory, Keychain, workspace containment, atomic
+document/model storage, and Git. Native ABI version mismatches fail locally with a rebuild message.
+`src/shell/runtime` composes the runtime host, its recovery page, and the `LocalBridgeWsClient`
+adapter; `src/app/on-device` only redirects links from older builds.
 
 Transport behaviour is covered by `transport/server.test.ts` (wire shapes, events, stop, unsupported
 methods), `shell/runtime/LocalBridgeWsClient.test.ts` (the real API client over the transport), and
 `features/chat/screen/MainScreen.local.test.tsx` (send, stream, and stop in the real chat screen).
+Startup recovery is covered by `shell/runtime/LocalRuntimeRecovery.test.tsx` and retired links by
+`shell/navigation/localProfileRouting.test.tsx`.
 Workspaces, Git, and Files are covered over the real transport by
 `transport/workspaceHandlers.test.ts`, `features/git/GitScreen.local.test.tsx`,
 `features/workspace/picker/ManagedView.test.tsx`, `features/workspace/checkout/Screen.local.test.tsx`,

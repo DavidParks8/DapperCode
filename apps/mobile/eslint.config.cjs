@@ -6,6 +6,11 @@ const reactHooks = require('eslint-plugin-react-hooks');
 
 const jestFiles = ['**/*.{test,spec}.{ts,tsx}', 'src/shared/testing/**/*.{ts,tsx}'];
 
+const onDeviceTransportRestriction = {
+  group: ['@bridge/client/**', '@bridge/ws/**', '**/bridge/client/**', '**/bridge/ws/**'],
+  message: 'On-device implementations must not depend on concrete bridge transports.',
+};
+
 module.exports = [
   {
     ignores: ['node_modules/**', 'dist/**', '.expo/**'],
@@ -119,18 +124,56 @@ module.exports = [
   {
     files: ['src/features/on-device/**/*.{ts,tsx}'],
     rules: {
+      'no-restricted-imports': ['error', { patterns: [onDeviceTransportRestriction] }],
+    },
+  },
+  {
+    // On this iPhone renders only through the shared chat shell and Settings. The feature owns the
+    // runtime and its in-process transport; it must not grow its own screens or UI kit again.
+    files: ['src/features/on-device/**/*.{ts,tsx}'],
+    ignores: [...jestFiles, 'src/features/on-device/**/testing.ts'],
+    rules: {
       'no-restricted-imports': [
         'error',
         {
+          paths: [
+            {
+              name: 'react-native',
+              importNames: [
+                'ActivityIndicator',
+                'FlatList',
+                'Image',
+                'Pressable',
+                'ScrollView',
+                'Switch',
+                'Text',
+                'TextInput',
+                'TouchableOpacity',
+                'View',
+              ],
+              message:
+                'On-device code has no screens; render local state through shared shell or Settings components.',
+            },
+            {
+              name: 'expo-router',
+              message:
+                'On-device code has no routes; navigation belongs to the shell and shared screens.',
+            },
+          ],
           patterns: [
+            onDeviceTransportRestriction,
             {
               group: [
-                '@bridge/client/**',
-                '@bridge/ws/**',
-                '**/bridge/client/**',
-                '**/bridge/ws/**',
+                '@shell/**',
+                '@shared/theme',
+                '@shared/ui/**',
+                '**/features/chat/**',
+                '**/features/settings/**',
+                '../../chat/**',
+                '../../settings/**',
               ],
-              message: 'On-device implementations must not depend on concrete bridge transports.',
+              message:
+                'On-device code has no screens; the shell and Settings depend on it, not the reverse.',
             },
           ],
         },

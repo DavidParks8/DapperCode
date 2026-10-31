@@ -11,7 +11,6 @@ import {
 import { AppState } from 'react-native';
 
 import { getOnDeviceNativeServices } from '../native/services';
-import { LocalAction, LocalPage, LocalText } from '../screens/ui';
 import { createExpoNetwork } from './expoNetwork';
 import { OnDeviceRuntime } from './runtime';
 import type {
@@ -29,7 +28,7 @@ let settling: Promise<unknown> = Promise.resolve();
 function useRuntimeOwner(): OnDeviceRuntime {
   const runtime = useContext(RuntimeContext);
   if (!runtime) {
-    throw new Error('On-device screens require their own runtime provider.');
+    throw new Error('On-device consumers need an OnDeviceProvider or OnDeviceRuntimeScope.');
   }
   return runtime;
 }
@@ -103,10 +102,18 @@ export function OnDeviceRuntimeScope({
   return <RuntimeContext.Provider value={runtime}>{children}</RuntimeContext.Provider>;
 }
 
+/** What the owner of an `OnDeviceProvider` shows until its runtime is ready. */
+export interface OnDeviceStartup {
+  /** Why the runtime could not start, or `null` while it is still starting. */
+  error: string | null;
+  /** Starts a new runtime after the failed one settles; storage is never reset. */
+  retry: () => void;
+}
+
 export function OnDeviceProvider({
   children,
-  recoveryAction,
-}: PropsWithChildren<{ recoveryAction?: ReactNode }>) {
+  fallback,
+}: PropsWithChildren<{ fallback: (startup: OnDeviceStartup) => ReactNode }>) {
   const [owner, setOwner] = useState<OnDeviceRuntime | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -186,19 +193,9 @@ export function OnDeviceProvider({
       });
     };
   }, [attempt]);
+  const retry = useCallback(() => setAttempt((value) => value + 1), []);
   if (!owner) {
-    return (
-      <LocalPage title="On this iPhone" busy={!error} error={error}>
-        <LocalText>Your local models, files, and conversations stay on this device.</LocalText>
-        {error ? (
-          <LocalAction
-            title="Retry without resetting storage"
-            onPress={() => setAttempt((value) => value + 1)}
-          />
-        ) : null}
-        {error ? recoveryAction : null}
-      </LocalPage>
-    );
+    return fallback({ error, retry });
   }
   return <RuntimeContext.Provider value={owner}>{children}</RuntimeContext.Provider>;
 }

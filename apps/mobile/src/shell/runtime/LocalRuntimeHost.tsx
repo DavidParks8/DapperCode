@@ -22,35 +22,28 @@ import {
   sameLocalAgentPresence,
 } from './localAgentPresence';
 import { LocalBridgeWsClient } from './LocalBridgeWsClient';
-import { LocalProfileExit } from './LocalProfileExit';
-
-export function isLegacyOnDevicePath(pathname: string): boolean {
-  return pathname === '/on-device' || pathname.startsWith('/on-device/');
-}
+import { LocalRuntimeRecovery } from './LocalRuntimeRecovery';
 
 /**
  * Owns the single on-device runtime for the whole app. It exists only while the local profile is
- * open (or a legacy `/on-device/*` screen is shown) and disposes the runtime — stopping runs,
- * unloading the model, pausing downloads, cancelling sign-in — as soon as neither is true.
+ * open and disposes the runtime — stopping runs, unloading the model, pausing downloads, cancelling
+ * sign-in — as soon as it closes.
  *
- * While the runtime starts or fails to start, the provider's own page covers the shell; once it is
- * ready the host renders nothing and only publishes the runtime and its transport.
+ * While the runtime starts, the profile route shows its loading state; if it fails to start, the
+ * recovery page covers the shell. Once ready the host renders nothing and only publishes the
+ * runtime and its transport.
  */
 export function LocalRuntimeHost() {
   const available = useAtomValue(localProfileAvailableAtom);
   const localProfile = useAtomValue(activeProfileIsLocalAtom);
   const pathname = usePathname();
   // Onboarding never shows local runtime pages, even while a local selection is being closed.
-  if (
-    !available ||
-    pathname === '/onboarding' ||
-    !(localProfile || isLegacyOnDevicePath(pathname))
-  ) {
+  if (!available || !localProfile || pathname === '/onboarding') {
     return null;
   }
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none" testID="local-runtime-host">
-      <OnDeviceProvider recoveryAction={<LocalProfileExit />}>
+      <OnDeviceProvider fallback={(startup) => <LocalRuntimeRecovery {...startup} />}>
         <LocalTransportBinder />
         <LocalPresencePublisher />
       </OnDeviceProvider>

@@ -76,7 +76,6 @@ function RootNavigator({ theme, styles }: { theme: AppTheme; styles: AppStyles }
       <BridgeRuntimeEffects />
       <Stack screenOptions={createStackScreenOptions(theme)}>
         <Stack.Screen name="index" />
-        <Stack.Screen name="on-device" />
         <Stack.Protected guard={hasBridgeProfiles || localProfileAvailable}>
           <Stack.Screen name="profiles" />
         </Stack.Protected>

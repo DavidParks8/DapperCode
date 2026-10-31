@@ -175,10 +175,14 @@ node .agents/skills/local-e2e-validation/scripts/run.mjs \
   apps/mobile/modules/on-device-agent/tests/native-downloads.mjs
 ```
 
-`native-product.mjs` bundles the production router/screens behind an isolated fixture bootstrap.
-It requires an installed Appium/XCUITest driver, owns its Appium server and disposable simulator,
-and serializes the WDA ports. Its native model/workspace preparation does not change the user app,
-Metro, or a desktop bridge. All fixture bundles disable `.env` loading and public environment
+`native-product.mjs` bundles the production router behind an isolated fixture bootstrap and drives
+the unified experience as a new user would: onboarding → **On this iPhone** → a new chat in the
+shared chat shell, Settings → Models and Git & GitHub, the shared model sheet and workspace chip, a
+real offline file/stage/commit turn, draft and history recovery across cold launches, stop on
+background, and the profile switcher. Its handles live in `nativeOnDeviceSelectors`
+(`e2e/fixtures/selectors.ts`). It requires an installed Appium/XCUITest driver, owns its Appium
+server and disposable simulator, and serializes the WDA ports. Its native model/workspace
+preparation does not change the user app, Metro, or a desktop bridge. All fixture bundles disable `.env` loading and public environment
 overrides so they cannot inherit a user's configured bridge credentials.
 
 GitHub sign-in uses the bundled public DapperCode client ID. Forks can override

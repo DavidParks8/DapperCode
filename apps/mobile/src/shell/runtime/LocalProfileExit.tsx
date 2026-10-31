@@ -1,7 +1,7 @@
 import { useAtomValue, useSetAtom } from 'jotai';
-import { StyleSheet, View } from 'react-native';
 
-import { LocalAction } from '../../features/on-device/screens/ui';
+import { SettingsButtonRow } from '../../features/settings/local/localSettingsUi';
+import { SettingsGroup } from '../../features/settings/SettingsList';
 import { routes } from '@shell/navigation/routes';
 import { replaceRoot } from '@shell/navigation/routeNavigation';
 import { bridgeProfilesAtom } from '@shell/state/appState/atoms';
@@ -19,22 +19,20 @@ export function LocalProfileExit() {
   const profiles = useAtomValue(bridgeProfilesAtom);
   const closeActiveProfile = useSetAtom(closeActiveProfileAtom);
   return (
-    <View style={styles.actions}>
+    <SettingsGroup title="Use another profile">
       {profiles.map((profile) => (
-        <LocalAction
+        <SettingsButtonRow
           key={profile.id}
-          title={`Open ${profile.name}`}
+          label={`Open ${profile.name}`}
           onPress={() => replaceRoot(routes.newChat(profile.id))}
         />
       ))}
       {profiles.length === 0 ? (
-        <LocalAction
-          title="Connect a desktop instead"
+        <SettingsButtonRow
+          label="Connect a desktop instead"
           onPress={() => void closeActiveProfile().then(() => replaceRoot(routes.onboarding))}
         />
       ) : null}
-    </View>
+    </SettingsGroup>
   );
 }
-
-const styles = StyleSheet.create({ actions: { gap: 8 } });

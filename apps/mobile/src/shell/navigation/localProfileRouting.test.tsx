@@ -1,4 +1,4 @@
-import { router, Stack, useGlobalSearchParams } from 'expo-router';
+import { router, Stack, useGlobalSearchParams, type Href } from 'expo-router';
 jest.mock('react-native-drawer-layout', () => {
   const React = jest.requireActual('react');
   const progress = { value: 0 };
@@ -93,7 +93,10 @@ function render(store: ReturnType<typeof storeWith>, initialUrl: string) {
       overrides: {
         _layout: RootLayout,
         'profiles/[profileId]/(drawer)/chats/[chatId]/index': ReadyMainRoute,
-        'on-device/models': () => <Text>Model library</Text>,
+        'profiles/[profileId]/(drawer)/settings/models/index': () => <Text>Models</Text>,
+        'profiles/[profileId]/(drawer)/settings/models/[familyId]': () => <Text>Family</Text>,
+        'profiles/[profileId]/(drawer)/settings/github': () => <Text>Git and GitHub</Text>,
+        outside: () => <Text>Outside the profile</Text>,
       },
     },
     { initialUrl, wrapper: Wrapper },
@@ -148,18 +151,24 @@ describe('local profile routing', () => {
     expect(screen.getByText('On this iPhone is unavailable')).toBeTruthy();
   });
 
-  it('redirects the legacy on-device hub and chat links into the unified shell', async () => {
+  it('redirects retired on-device links to the matching On this iPhone profile routes', async () => {
     const store = storeWith(LOCAL_PROFILE_ID, true);
     store.set(localRuntimeAtom, {} as OnDeviceRuntime);
-    const hub = render(store, '/on-device');
-    await waitFor(() => {
-      expect(hub.getPathname()).toBe('/profiles/on-device/chats/new');
-    });
-    hub.unmount();
-    const chat = render(store, '/on-device/chat/thread-7');
-    await waitFor(() => {
-      expect(chat.getPathname()).toBe('/profiles/on-device/chats/thread-7');
-    });
+    for (const [legacy, unified] of [
+      ['/on-device', '/profiles/on-device/chats/new'],
+      ['/on-device/chat/thread-7', '/profiles/on-device/chats/thread-7'],
+      ['/on-device/models', '/profiles/on-device/settings/models'],
+      ['/on-device/models/qwen3.5', '/profiles/on-device/settings/models/qwen3.5'],
+      ['/on-device/account', '/profiles/on-device/settings/github'],
+      ['/on-device/workspaces', '/profiles/on-device/chats/new'],
+    ] as const) {
+      const result = render(store, legacy);
+      await waitFor(() => {
+        expect(result.getPathname()).toBe(unified);
+      });
+      expect(store.get(activeProfileIdAtom)).toBe(LOCAL_PROFILE_ID);
+      result.unmount();
+    }
   });
 
   it('keeps a switched profile after returning from a screen outside the profile', async () => {
@@ -174,8 +183,8 @@ describe('local profile routing', () => {
     await waitFor(() => {
       expect(screen.getByText('Main on-device new')).toBeTruthy();
     });
-    act(() => router.push('/on-device/models'));
-    expect(screen.getByText('Model library')).toBeTruthy();
+    act(() => router.push('/outside' as Href));
+    expect(screen.getByText('Outside the profile')).toBeTruthy();
     act(() => router.back());
 
     await waitFor(() => {

@@ -1,19 +1,41 @@
 import type { Locator, Page } from '@playwright/test';
 
+/**
+ * XCUITest handles for the native On this iPhone product scenario
+ * (`apps/mobile/modules/on-device-agent/tests/native-product.mjs`). A string is an accessibility
+ * id (a `testID` or an accessibility label); `{ predicate }` is an iOS predicate string for labels
+ * that carry live values.
+ */
 export const nativeOnDeviceSelectors = {
   entry: 'onboarding-choice-local',
-  modelLibrary: 'on-device-model-library',
-  qwen35Family: 'Qwen3.5 model family',
-  bonsaiFamily: 'Bonsai 2 model family',
-  gemmaFamily: 'Gemma 4 model family',
-  newChat: 'on-device-new-chat',
-  chatBody: 'on-device-chat-body',
-  message: 'Message',
-  messagePredicate: 'type == "XCUIElementTypeTextView" AND label BEGINSWITH "Message"',
+  runTarget: 'new-chat-profile-switcher',
+  setupGuide: 'local-setup-guide',
+  openDrawer: 'Open navigation drawer',
+  newChat: 'New chat',
+  settings: 'Open settings',
+  settingsBack: 'Back to Settings',
+  settingsModels: { predicate: 'label BEGINSWITH "Models, "' },
+  modelLibrary: 'settings-local-models-screen',
+  qwen35Family: 'settings-local-family-qwen3.5',
+  bonsaiFamily: 'settings-local-family-bonsai-2',
+  gemmaFamily: 'settings-local-family-gemma-4',
+  familyPage: 'settings-local-family-screen',
+  gitAccount: { predicate: 'label BEGINSWITH "Git & GitHub, "' },
+  gitAccountPage: 'settings-local-account-screen',
+  githubUnavailable: { predicate: 'label == "GitHub sign-in, Unavailable"' },
+  workspace: { predicate: 'label BEGINSWITH "Workspace, "' },
+  modelChip: { predicate: 'label BEGINSWITH "Model, "' },
+  sheetClose: 'selection-sheet-close',
+  downloadMoreModels: 'Download more models',
+  message: { predicate: 'type == "XCUIElementTypeTextView" AND label BEGINSWITH "Message"' },
   send: 'Send message',
-  back: 'Back',
-  workspaces: 'Workspaces',
-  account: 'GitHub and author',
+  stop: 'Stop agent',
+  stopping: 'Stopping agent',
+  addBridge: 'Add bridge',
+  localProfile: 'On this iPhone',
+  bridgeUrl: 'Bridge URL',
+  cancelConnection: 'Cancel connection setup',
+  chatRowPrefix: 'drawer-chat-row-',
 } as const;
 
 /**
@@ -24,8 +46,6 @@ export const nativeOnDeviceSelectors = {
  * is used instead — those are stable because they are user-facing accessibility contracts.
  */
 export const selectors = {
-  onDeviceModelLibrary: (page: Page): Locator => page.getByTestId('on-device-model-library'),
-  onDeviceNewChat: (page: Page): Locator => page.getByTestId('on-device-new-chat'),
   drawer: (page: Page): Locator => page.getByTestId('drawer-glass-surface'),
   drawerHeader: (page: Page): Locator => page.getByTestId('drawer-header'),
   drawerChatRow: (page: Page, chatId: string): Locator =>
