@@ -4,7 +4,6 @@ import { usePreventRemove } from 'expo-router/react-navigation';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useEffect, useMemo, useRef } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,13 +12,15 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import Animated, { Easing, FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
+import { Easing, FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
 import { SceneToolbarHost, useInlineToolbar } from '@shell/layout/SceneToolbar';
 
 import { decorativeAccessibilityProps, useAccessibilityAnnouncement } from '@shared/accessibility';
 import { feedback } from '@shared/feedback';
+import { activeProfileFeaturesAtom } from '@shell/state/bridge/atoms';
+import { workspaceHostClientAtom } from '../api/atoms';
 import {
   gitCheckoutCloningAtom,
   gitCheckoutDirectoryNameAtom,
@@ -37,6 +38,16 @@ import {
 } from '../state/workspaceActions';
 import { motion, useAppTheme } from '@shared/theme';
 import { joinWorkspacePath, normalizeCloneDirectoryName } from '../../chat/helpers/helpers';
+import {
+  checkoutCopy,
+  checkoutSubmitDisabled,
+  checkoutSummary,
+  CheckoutSecondaryButton,
+  checkoutUrlError,
+  CheckoutUrlError,
+  CloningRow,
+  useCloneProgress,
+} from './parts';
 import { createGitCheckoutScreenStyles } from './styles';
 
 export function GitCheckoutScreen() {
@@ -55,6 +66,11 @@ export function GitCheckoutScreen() {
   const submit = useSetAtom(submitGitCheckoutAtom);
   const close = useSetAtom(closeGitCheckoutAtom);
   const inlineToolbar = useInlineToolbar();
+  // App-managed hosts clone over HTTPS into a new workspace, with progress and cancellation.
+  const managed = useAtomValue(activeProfileFeaturesAtom).managedWorkspaces;
+  const host = useAtomValue(workspaceHostClientAtom);
+  const progress = useCloneProgress(host, managed, cloning);
+  const copy = checkoutCopy(managed);
 
   const normalizedDirectoryName = normalizeCloneDirectoryName(directoryName);
   const destinationLabel = parentPath ?? bridgeRoot ?? 'Bridge default workspace';
@@ -62,7 +78,14 @@ export function GitCheckoutScreen() {
     parentPath && normalizedDirectoryName
       ? joinWorkspacePath(parentPath, normalizedDirectoryName)
       : null;
-  const submitDisabled = !repoUrl.trim() || !normalizedDirectoryName || cloning;
+  const urlError = checkoutUrlError(managed, repoUrl);
+  const submitDisabled = checkoutSubmitDisabled(
+    repoUrl,
+    normalizedDirectoryName,
+    cloning,
+    urlError,
+  );
+  const summary = checkoutSummary(managed, normalizedDirectoryName, targetPath);
   usePreventRemove(cloning, () => undefined);
 
   // Announce loading state to screen readers, mirroring the GitScreen pattern.
@@ -132,21 +155,18 @@ export function GitCheckoutScreen() {
               </Pressable>
             ) : null}
             <Text accessibilityRole="header" style={styles.title}>
-              Git checkout
+              {copy.title}
             </Text>
             <View style={styles.headerSpacer} />
           </View>
 
           <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-            <Text style={styles.hint}>
-              Paste an SSH or HTTPS repository URL, choose where to clone it, then start the new
-              chat in that workspace.
-            </Text>
+            <Text style={styles.hint}>{copy.hint}</Text>
             <TextInput
               value={repoUrl}
               onChangeText={changeRepoUrl}
               keyboardAppearance={theme.keyboardAppearance}
-              placeholder="git@github.com:org/repo.git"
+              placeholder={copy.urlPlaceholder}
               placeholderTextColor={theme.colors.textMuted}
               style={styles.input}
               accessibilityLabel="Repository URL"
@@ -154,67 +174,66 @@ export function GitCheckoutScreen() {
               editable={!cloning}
               autoCapitalize="none"
               autoCorrect={false}
+              keyboardType={copy.urlKeyboard}
               returnKeyType="next"
             />
-            <Pressable
-              onPress={() => openDestinationPicker()}
-              style={({ pressed }) => [styles.pathButton, pressed && styles.pressed]}
-              disabled={cloning}
-              accessibilityRole="button"
-              accessibilityLabel={`Clone into ${destinationLabel}`}
-            >
-              <Ionicons
-                {...decorativeAccessibilityProps}
-                name="folder-open-outline"
-                size={16}
-                color={theme.colors.textMuted}
-              />
-              <View style={styles.pathCopy}>
-                <Text style={styles.pathLabel}>Clone into</Text>
-                <Text style={styles.pathValue} numberOfLines={1}>
-                  {destinationLabel}
-                </Text>
-              </View>
-              <Ionicons
-                {...decorativeAccessibilityProps}
-                name="chevron-forward"
-                size={14}
-                color={theme.colors.textMuted}
-              />
-            </Pressable>
+            <CheckoutUrlError error={urlError} styles={styles} />
+            {copy.chooseDestination ? (
+              <Pressable
+                onPress={() => openDestinationPicker()}
+                style={({ pressed }) => [styles.pathButton, pressed && styles.pressed]}
+                disabled={cloning}
+                accessibilityRole="button"
+                accessibilityLabel={`Clone into ${destinationLabel}`}
+              >
+                <Ionicons
+                  {...decorativeAccessibilityProps}
+                  name="folder-open-outline"
+                  size={16}
+                  color={theme.colors.textMuted}
+                />
+                <View style={styles.pathCopy}>
+                  <Text style={styles.pathLabel}>Clone into</Text>
+                  <Text style={styles.pathValue} numberOfLines={1}>
+                    {destinationLabel}
+                  </Text>
+                </View>
+                <Ionicons
+                  {...decorativeAccessibilityProps}
+                  name="chevron-forward"
+                  size={14}
+                  color={theme.colors.textMuted}
+                />
+              </Pressable>
+            ) : null}
             <TextInput
               value={directoryName}
               onChangeText={changeDirectoryName}
               keyboardAppearance={theme.keyboardAppearance}
-              placeholder="repo-folder"
+              placeholder={copy.namePlaceholder}
               placeholderTextColor={theme.colors.textMuted}
               style={styles.input}
-              accessibilityLabel="Clone directory name"
+              accessibilityLabel={copy.nameLabel}
               editable={!cloning}
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="done"
               onSubmitEditing={() => void submit()}
             />
-            {targetPath ? (
+            {summary ? (
               <Text style={styles.summary} numberOfLines={2}>
-                {`Will clone into ${targetPath}`}
+                {summary}
               </Text>
             ) : null}
             {cloning ? (
-              <Animated.View
+              <CloningRow
+                managed={managed}
+                progress={progress}
+                styles={styles}
+                theme={theme}
                 entering={routineEnter}
                 exiting={routineExit}
-                style={styles.cloningRow}
-              >
-                <ActivityIndicator
-                  accessibilityRole="progressbar"
-                  accessibilityLabel="Cloning repository"
-                  color={theme.colors.accent}
-                  size="small"
-                />
-                <Text style={styles.cloningText}>Cloning repository…</Text>
-              </Animated.View>
+              />
             ) : null}
             {error ? (
               <Text
@@ -228,19 +247,14 @@ export function GitCheckoutScreen() {
           </ScrollView>
 
           <View style={styles.actions}>
-            <Pressable
-              onPress={() => close()}
-              style={({ pressed }) => [
-                styles.button,
-                styles.buttonSecondary,
-                pressed && styles.pressed,
-              ]}
-              disabled={cloning}
-              accessibilityRole="button"
-              accessibilityLabel="Cancel git checkout"
-            >
-              <Text style={styles.buttonSecondaryText}>Cancel</Text>
-            </Pressable>
+            <CheckoutSecondaryButton
+              managed={managed}
+              cloning={cloning}
+              host={host}
+              progress={progress}
+              styles={styles}
+              onCancel={() => close()}
+            />
             <Pressable
               onPress={() => void submit()}
               style={({ pressed }) => [

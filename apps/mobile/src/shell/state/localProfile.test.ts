@@ -94,9 +94,25 @@ describe('local profile state', () => {
       attachments: false,
       pushNotifications: false,
       connectionSettings: false,
-      gitClone: false,
+      gitClone: true,
       browserPreview: false,
       modelLibrary: true,
+      managedWorkspaces: true,
+      workspaceFiles: true,
+      gitSync: true,
+      gitDiscard: true,
+      gitBranchCreate: true,
+      gitInit: true,
+    });
+    expect(storeWith('bridge-1', true).get(activeProfileFeaturesAtom)).toMatchObject({
+      gitClone: true,
+      modelLibrary: false,
+      managedWorkspaces: false,
+      workspaceFiles: false,
+      gitSync: false,
+      gitDiscard: false,
+      gitBranchCreate: false,
+      gitInit: false,
     });
 
     const unsupported = storeWith(LOCAL_PROFILE_ID, false);

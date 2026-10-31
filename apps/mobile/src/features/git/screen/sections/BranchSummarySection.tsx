@@ -4,6 +4,7 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import { formatRelativeTime } from '../utils';
 import type { GitSectionCommonProps } from '../sectionTypes';
+import { GitBranchCreateRow, GitRemoteSyncBlock } from './HostSections';
 
 function GitBranchHeaderRow({ controller, styles, theme }: GitSectionCommonProps) {
   const { status, branchPanelOpen } = controller;
@@ -141,6 +142,7 @@ function GitBranchSwitchPanel({ controller, styles, theme }: GitSectionCommonPro
       ) : (
         <Text style={styles.emptyFilesText}>No branches found.</Text>
       )}
+      <GitBranchCreateRow controller={controller} styles={styles} theme={theme} />
       <Pressable
         onPress={() => void controller.switchBranch()}
         disabled={derived.branchSwitchDisabled}
@@ -244,6 +246,7 @@ export function GitScreenBranchSummarySection({
       {derived.upstreamDisplay || derived.syncDisplay || derived.latestCommit ? (
         <GitUpstreamSummaryBlock controller={controller} styles={styles} />
       ) : null}
+      <GitRemoteSyncBlock controller={controller} styles={styles} theme={theme} />
     </View>
   );
 }

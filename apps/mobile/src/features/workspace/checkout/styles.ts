@@ -96,6 +96,21 @@ export const createGitCheckoutScreenStyles = (theme: AppTheme) =>
       ...theme.typography.body,
       color: theme.colors.textSecondary,
     },
+    cloningCopy: {
+      flex: 1,
+      gap: theme.spacing.xs,
+    },
+    progressTrack: {
+      height: 4,
+      borderRadius: 2,
+      overflow: 'hidden',
+      backgroundColor: theme.colors.bgInput,
+    },
+    progressFill: {
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: theme.colors.accent,
+    },
     actions: {
       flexDirection: 'row',
       justifyContent: 'flex-end',

@@ -13,7 +13,10 @@ import { SettingsGroup, SettingsRow } from './SettingsList';
 
 const SUMMARY_SLICES: readonly OnDeviceRuntimeSlice[] = ['models', 'preferences'];
 
-/** Settings for the built-in "On this iPhone" profile: models, workspaces, and Git identity. */
+/**
+ * Settings for the built-in "On this iPhone" profile: models and Git identity. Workspaces are
+ * managed in the chat's workspace picker and Files screen.
+ */
 export function LocalProfileSection() {
   const runtime = useAtomValue(localRuntimeAtom);
   return runtime ? (
@@ -64,11 +67,6 @@ function LocalProfileGroup({
         value={models}
         accessory="chevron"
         onPress={() => router.push(routes.settingsModels(LOCAL_PROFILE_ID))}
-      />
-      <SettingsRow
-        label="Workspaces"
-        accessory="chevron"
-        onPress={() => router.push('/on-device/workspaces')}
       />
       <SettingsRow
         label={LOCAL_GIT_ACCOUNT_TITLE}

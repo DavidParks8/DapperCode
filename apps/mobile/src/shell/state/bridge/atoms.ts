@@ -76,6 +76,22 @@ export interface ActiveProfileFeatures {
    * lists downloaded models and links there instead of offering an agent-side default.
    */
   modelLibrary: boolean;
+  /**
+   * Workspaces are a flat, app-managed list rather than host folders: the picker creates, renames,
+   * and deletes them, clones go into a new workspace over HTTPS, and clone progress can be read
+   * and cancelled. Uses the workspace host extensions in `features/workspace/api/protocol.ts`.
+   */
+  managedWorkspaces: boolean;
+  /** The Files browser and editor (`workspace/files/*`). */
+  workspaceFiles: boolean;
+  /** Fetch and fast-forward pull on the Git screen. */
+  gitSync: boolean;
+  /** Discarding unstaged changes per file or for the whole working tree. */
+  gitDiscard: boolean;
+  /** Creating (and switching to) a branch on the Git screen. */
+  gitBranchCreate: boolean;
+  /** Initializing Git in a workspace that has none. */
+  gitInit: boolean;
 }
 
 export const activeProfileFeaturesAtom = atom<ActiveProfileFeatures>((get) => {
@@ -84,9 +100,15 @@ export const activeProfileFeaturesAtom = atom<ActiveProfileFeatures>((get) => {
     attachments: !local,
     pushNotifications: !local,
     connectionSettings: !local,
-    gitClone: !local,
+    gitClone: true,
     browserPreview: !local,
     modelLibrary: local,
+    managedWorkspaces: local,
+    workspaceFiles: local,
+    gitSync: local,
+    gitDiscard: local,
+    gitBranchCreate: local,
+    gitInit: local,
   };
 });
 
