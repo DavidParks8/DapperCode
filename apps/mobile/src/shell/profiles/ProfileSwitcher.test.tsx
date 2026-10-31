@@ -194,6 +194,42 @@ describe('profile switching', () => {
     transport.dispose();
   });
 
+  it('follows the first model download, which starts without selecting a model', async () => {
+    const store = storeWith(true);
+    render(store);
+    const fake = createFakeSetupRuntime({
+      modelId: null,
+      workspaceId: 'w1',
+      workspaces: [{ id: 'w1', name: 'demo' }],
+      downloadPhase: 'not_downloaded',
+      downloadPhases: {},
+    });
+    const transport = new LocalBridgeWsClient(new LocalBridgeServer(new FakeAgentPort()));
+    transport.connect();
+    act(() => {
+      store.set(localRuntimeAtom, fake.runtime);
+      store.set(localTransportAtom, transport);
+    });
+    fireEvent.press(screen.getByTestId('new-chat-profile-switcher'));
+    fireEvent.press(screen.getByLabelText('On this iPhone'));
+    await waitFor(() => {
+      expect(screen.getByText('New chat in on-device')).toBeTruthy();
+    });
+    const switcher = () =>
+      String(screen.getByTestId('new-chat-profile-switcher').props['accessibilityLabel']);
+    expect(screen.getByLabelText('1. Download a model, Required')).toBeTruthy();
+    expect(switcher()).toContain('Needs a model');
+
+    act(() => fake.update({ downloadPhases: { [MODEL]: 'downloading' } }));
+    expect(screen.getByLabelText('1. Download a model, Downloading')).toBeTruthy();
+    expect(switcher()).toContain('Downloading model');
+
+    act(() => fake.update({ downloadPhases: { [MODEL]: 'ready' } }));
+    expect(screen.queryByTestId('local-setup-guide')).toBeNull();
+    expect(switcher()).toBe('Where agents run, On this iPhone, Ready · Private offline models');
+    transport.dispose();
+  });
+
   it('offers no choice with a single bridge where the local agent is unavailable', () => {
     const store = storeWith(false);
     render(store);

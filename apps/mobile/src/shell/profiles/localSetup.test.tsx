@@ -43,6 +43,52 @@ describe('local setup progress', () => {
     expect(state.readiness.action).toBe(action);
   });
 
+  // The first download starts from the model library without selecting a model; the server still
+  // starts chats with any downloaded model, so setup must follow that download.
+  it.each([
+    ['queued', 'in-progress', 'Downloading model', 'wait-for-download'],
+    ['downloading', 'in-progress', 'Downloading model', 'wait-for-download'],
+    ['verifying', 'in-progress', 'Downloading model', 'wait-for-download'],
+    ['ready', 'done', 'Needs a workspace', 'choose-workspace'],
+  ] as const)(
+    'reports an unselected first download that is %s as %s',
+    (phase, model, summary, action) => {
+      const { runtime } = createFakeSetupRuntime({
+        modelId: null,
+        workspaceId: null,
+        workspaces: [],
+        downloadPhase: 'not_downloaded',
+        downloadPhases: { [MODEL]: phase },
+      });
+      const state = localSetupState(runtime);
+      expect(state).toMatchObject({ model, workspace: 'todo', summary });
+      expect(state.readiness.action).toBe(action);
+    },
+  );
+
+  it('is ready with an unselected downloaded model, as the server would start the chat', () => {
+    const { runtime } = createFakeSetupRuntime({
+      modelId: null,
+      workspaceId: 'w1',
+      workspaces: [workspace],
+      downloadPhase: 'not_downloaded',
+      downloadPhases: { [MODEL]: 'ready' },
+    });
+    expect(localSetupState(runtime)).toMatchObject({ model: 'done', summary: 'Ready' });
+    expect(localSetupState(runtime).readiness.canStart).toBe(true);
+  });
+
+  it('falls back from a selected model that is not downloaded to a downloaded one', () => {
+    const { runtime } = createFakeSetupRuntime({
+      modelId: 'gemma-4-e2b-q4-0',
+      workspaceId: 'w1',
+      workspaces: [workspace],
+      downloadPhase: 'not_downloaded',
+      downloadPhases: { [MODEL]: 'ready' },
+    });
+    expect(localSetupState(runtime).summary).toBe('Ready');
+  });
+
   it('follows the open runtime and is null while the local profile is closed', () => {
     const store = createTestStore();
     const seen: (string | null)[] = [];

@@ -2,7 +2,10 @@ import type { Href } from 'expo-router';
 import { useAtomValue } from 'jotai';
 import { useCallback, useSyncExternalStore } from 'react';
 
-import { findLocalModelDefinition } from '../../features/on-device/models/catalog';
+import {
+  findLocalModelDefinition,
+  LOCAL_MODEL_CATALOG,
+} from '../../features/on-device/models/catalog';
 import type { OnDeviceRuntime } from '../../features/on-device/runtime/runtime';
 import {
   localConversationReadiness,
@@ -34,16 +37,50 @@ export interface LocalSetupState {
 
 type LocalSetupRuntime = Pick<OnDeviceRuntime, 'preferences' | 'workspaces' | 'downloads'>;
 
+const IN_PROGRESS_PHASES = new Set(['queued', 'preparing', 'downloading', 'verifying', 'loading']);
+
+/**
+ * The model a new chat would run, resolved like the local server's `resolveModel`: the selected
+ * model when it is usable, otherwise any downloaded runnable model. With none usable yet, a
+ * download in progress (selected first) stands in so setup reports it instead of "Needs a model".
+ */
+function effectiveModelId(runtime: LocalSetupRuntime, selected: string | null): string | null {
+  const phase = (id: string) => runtime.downloads.snapshot(id).phase;
+  const usable = (id: string | null) => {
+    const definition = id ? findLocalModelDefinition(id) : null;
+    return Boolean(definition && !definition.runtimeIssue && phase(definition.id) === 'ready');
+  };
+  if (usable(selected)) {
+    return selected;
+  }
+  const runnable = LOCAL_MODEL_CATALOG.filter((model) => !model.runtimeIssue);
+  const available = runnable.find((model) => usable(model.id));
+  if (available) {
+    return available.id;
+  }
+  if (selected && findLocalModelDefinition(selected) && IN_PROGRESS_PHASES.has(phase(selected))) {
+    return selected;
+  }
+  return runnable.find((model) => IN_PROGRESS_PHASES.has(phase(model.id)))?.id ?? selected;
+}
+
 export function localSetupState(runtime: LocalSetupRuntime): LocalSetupState {
-  const { modelId, workspaceId } = runtime.preferences();
+  const { modelId: selected, workspaceId } = runtime.preferences();
   const workspaces = runtime.workspaces();
+  const modelId = effectiveModelId(runtime, selected);
   const download =
     modelId && findLocalModelDefinition(modelId) ? runtime.downloads.snapshot(modelId) : null;
-  const readiness = localConversationReadiness({ modelId, download, workspaceId, workspaces });
+  // A queued download is already on its way; readiness otherwise asks to start it.
+  const readiness = localConversationReadiness({
+    modelId,
+    download: download?.phase === 'queued' ? { ...download, phase: 'downloading' } : download,
+    workspaceId,
+    workspaces,
+  });
   const model: LocalSetupStepStatus =
     readiness.canStart || readiness.action === 'choose-workspace'
       ? 'done'
-      : readiness.action === 'wait-for-download'
+      : download && IN_PROGRESS_PHASES.has(download.phase)
         ? 'in-progress'
         : 'todo';
   const workspace: LocalSetupStepStatus = workspaces.some((entry) => entry.id === workspaceId)

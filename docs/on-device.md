@@ -329,7 +329,9 @@ draft is corrected by that reload.
   the same sheet; Settings' Connection/Profiles rows use the same presentation, so the local row
   reports setup (`Needs a model`, `Ready`) rather than a connection.
 - **First-run setup**: `useLocalSetup` derives model and workspace steps from the open runtime via
-  `localConversationReadiness`; `LocalSetupGuide` renders them in the new chat until a chat can
+  `localConversationReadiness`, resolving the model the way the server's `resolveModel` does (the
+  selected model when downloaded, otherwise any downloaded runnable model, otherwise a download in
+  progress), so a first download started from the library without selecting a model still counts; `LocalSetupGuide` renders them in the new chat until a chat can
   start. Its destinations live in `LOCAL_SETUP_DESTINATIONS` (`shell/profiles/localSetup.ts`), which
   still points at the legacy `/on-device/models` and `/on-device/workspaces` screens; repoint that
   single constant when the Settings model screens and local workspace picker land. Missing

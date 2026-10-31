@@ -4,7 +4,10 @@ export interface FakeSetupRuntimeState {
   modelId: string | null;
   workspaceId: string | null;
   workspaces: readonly { id: string; name: string }[];
+  /** Phase of the selected model, and of any model without an entry in `downloadPhases`. */
   downloadPhase: string;
+  /** Per-model phases, for models other than the selected one. */
+  downloadPhases?: Record<string, string>;
 }
 
 /** The slice of the on-device runtime that setup progress reads, with a change trigger. */
@@ -21,7 +24,12 @@ export function createFakeSetupRuntime(initial: FakeSetupRuntimeState) {
     preferences: () => ({ modelId: state.modelId, workspaceId: state.workspaceId }),
     workspaces: () => state.workspaces,
     downloads: {
-      snapshot: () => ({ phase: state.downloadPhase, bytesWritten: 0 }),
+      snapshot: (id: string) => ({
+        phase:
+          state.downloadPhases?.[id] ??
+          (state.downloadPhases && id !== state.modelId ? 'not_downloaded' : state.downloadPhase),
+        bytesWritten: 0,
+      }),
     },
   };
   return {
