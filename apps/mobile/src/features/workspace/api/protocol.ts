@@ -8,6 +8,7 @@ import type { GitStatusResponse } from '@bridge/types/types';
  */
 export const WORKSPACE_HOST_METHODS = {
   workspaceList: 'workspace/list',
+  workspaceStates: 'workspace/states',
   workspaceSelect: 'workspace/select',
   workspaceCreate: 'workspace/create',
   workspaceRename: 'workspace/rename',
@@ -69,6 +70,16 @@ export interface ManagedWorkspaceSummary extends ManagedWorkspaceResponse {
   /** Current branch; null without Git or before the first commit on a detached HEAD. */
   branch: string | null;
   origin: string | null;
+}
+
+/**
+ * Working-tree state of one Git workspace. The picker asks for these after the list, so the list
+ * opens without waiting for a status read per repository.
+ */
+export interface ManagedWorkspaceState {
+  path: string;
+  /** Changed, staged, and untracked files; 0 is a clean working tree. */
+  changedFiles: number;
 }
 
 export interface CloneProgressResponse {

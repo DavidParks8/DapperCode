@@ -17,6 +17,28 @@ import { returnToChat } from './workspaceRouteNavigation';
 export const managedWorkspacesAtom = screenAtom<ManagedWorkspaceSummary[] | null>(null);
 export const managedWorkspacesLoadingAtom = screenAtom(false);
 export const managedWorkspacesErrorAtom = screenAtom<string | null>(null);
+/** Changed-file counts of Git workspaces by path; a missing path has no known state yet. */
+export const managedWorkspaceChangesAtom = screenAtom<Readonly<Record<string, number>>>(() => ({}));
+
+/**
+ * Loads working-tree states after the list, so the picker never waits on a Git status read. The
+ * previous states stay on screen until the new ones arrive.
+ */
+export const loadManagedWorkspaceChangesAtom = atom(null, async (get, set): Promise<void> => {
+  const host = get(workspaceHostClientAtom);
+  if (!host) {
+    return;
+  }
+  try {
+    const { states } = await host.workspaceStates();
+    set(
+      managedWorkspaceChangesAtom,
+      Object.fromEntries(states.map((state) => [state.path, state.changedFiles])),
+    );
+  } catch {
+    // Working-tree state is supplementary; rows keep showing branch and remote without it.
+  }
+});
 
 export const loadManagedWorkspacesAtom = atom(null, async (get, set): Promise<void> => {
   const host = get(workspaceHostClientAtom);
@@ -27,6 +49,7 @@ export const loadManagedWorkspacesAtom = atom(null, async (get, set): Promise<vo
   try {
     const { workspaces } = await host.listWorkspaces();
     set(managedWorkspacesAtom, workspaces);
+    void set(loadManagedWorkspaceChangesAtom);
   } catch (error) {
     set(managedWorkspacesErrorAtom, describeHostError(error, 'Could not load workspaces.'));
   } finally {

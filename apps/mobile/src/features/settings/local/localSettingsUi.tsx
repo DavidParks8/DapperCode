@@ -59,14 +59,17 @@ export function SettingsSearchField({
   );
 }
 
-/** A determinate progress bar that VoiceOver reads as a percentage. */
+/** A determinate progress bar that VoiceOver reads as a percentage plus any transfer details. */
 export function SettingsProgressBar({
   label,
   value,
+  valueText,
   testID,
 }: {
   label: string;
   value: number;
+  /** Spoken value, such as "41%, 310 MB of 740 MB, 2 min left"; defaults to the percentage. */
+  valueText?: string | null;
   testID?: string;
 }) {
   const theme = useAppTheme();
@@ -77,7 +80,7 @@ export function SettingsProgressBar({
       accessible
       accessibilityLabel={label}
       accessibilityRole="progressbar"
-      accessibilityValue={{ min: 0, max: 100, now, text: `${now}%` }}
+      accessibilityValue={{ min: 0, max: 100, now, text: valueText ?? `${now}%` }}
       style={styles.progressTrack}
       testID={testID}
     >

@@ -10,8 +10,11 @@ continue to use desktop agents.
 1. Choose **On this iPhone** wherever you pick where agents run: the onboarding choices, the
    **Runs on** row in the drawer, the profile capsule under **Let's build** in a new chat, or
    **Settings → Profiles**. Each opens a new chat in the local profile.
-2. Until a model and a workspace are ready, the new chat shows a **Set up On this iPhone**
-   checklist whose rows open Settings → Models and the workspaces screen. On **Settings → On this
+2. Until a local chat first has a message, the new chat shows a **Set up On this iPhone**
+   checklist: download a model (Settings → Models), clone or create a workspace (the workspace
+   picker), add a Git author (Settings → Git & GitHub; recommended, since commits need it), and
+   start your first chat. Only the model and workspace are required; **Hide setup guide** removes
+   it for good. On **Settings → On this
    iPhone → Models**, search across families, sizes, and quants (for example "q8" or "2b");
    **Downloaded only** and **Include models too large for this iPhone** sit together under the
    search field. Choose a family to compare its sizes and quants, then **Download** one and
@@ -325,7 +328,7 @@ the local profile. `LocalBridgeWsClient` is connected from creation until dispos
 | Workspaces   | `bridge/workspaces/list`, `bridge/fs/list` (workspace roots only), `bridge/git/clone` (HTTPS, into a new workspace)                                               |
 | Attention    | `bridge/approvals/list`, `bridge/approvals/resolve` (the loop's pending tool approval, such as a push), `bridge/userInput/list` (always empty)                     |
 | Git          | `bridge/git/status`, `diff`, `history`, `branches`, `stage`, `stageAll`, `unstage`, `unstageAll`, `commit`, `switch`, `push`                                     |
-| Extensions   | `workspace/list`, `select`, `create`, `rename`, `delete`, `changeToken`, `clone/progress`, `clone/cancel`, `workspace/git/fetch`, `pull`, `init`, `discard`, `branch/create`, `workspace/files/list`, `read`, `write`, `create`, `rename`, `remove` |
+| Extensions   | `workspace/list`, `states`, `select`, `create`, `rename`, `delete`, `changeToken`, `clone/progress`, `clone/cancel`, `workspace/git/fetch`, `pull`, `init`, `discard`, `branch/create`, `workspace/files/list`, `read`, `write`, `create`, `rename`, `remove` |
 
 The transport forwards each native progress event as the host notification
 `workspace/clone/progressChanged` (params match `workspace/clone/progress`) while the server is
@@ -425,7 +428,13 @@ The shared screens serve the local profile through the transport; nothing branch
   `managedWorkspaces` the workspace row is read-only and links to Files.
 - **Workspace picker** (`picker/ManagedView.tsx`, `managedWorkspaces`): a flat list from
   `workspace/list` with branch and origin, tap to use, touch-and-hold to rename or browse files,
-  swipe to delete, plus **New workspace** and **Clone repository**. Choosing a workspace also calls
+  swipe to delete, plus **New workspace** and **Clone repository**. After the list renders,
+  `workspace/states` adds each repository's working tree (**Clean** or **N changed**) in one
+  request; the transport caches each count until the workspace's change token moves, so reopening
+  the picker reads Git status only for workspaces that changed. Workspace size is not shown: no
+  native API reports a folder's size yet. The workspace in use carries a checkmark and
+  `accessibilityState.selected`; tapping it does nothing and its menu has no **Use** action.
+  Choosing a workspace also calls
   `workspace/select`, so the runtime's remembered workspace (first-run setup, new-chat fallback)
   matches the picker. The clone screen validates
   HTTPS (`api/remoteUrl.ts`), derives the name from the URL, follows `workspace/clone/progressChanged`
@@ -461,10 +470,16 @@ The shared screens serve the local profile through the transport; nothing branch
 - **First-run setup**: `useLocalSetup` derives model and workspace steps from the open runtime via
   `localConversationReadiness`, resolving the model the way the server's `resolveModel` does (the
   selected model when downloaded, otherwise any downloaded runnable model, otherwise a download in
-  progress), so a first download started from the library without selecting a model still counts; `LocalSetupGuide` renders them in the new chat until a chat can
-  start. The workspace step opens the chat's workspace picker (`openWorkspaceModalAtom`); the model
-  step opens Settings → Models through `LOCAL_SETUP_DESTINATIONS` (`shell/profiles/localSetup.ts`,
-  `/profiles/on-device/settings/models`). Missing
+  progress), so a first download started from the library without selecting a model still counts.
+  It also reports a Git author step (`recommended` until `preferences().author` is set) and whether
+  any local conversation has a message. `LocalSetupGuide` renders model → workspace → author →
+  first chat in the new chat until that first message exists or the user hides it. The runtime
+  host records the first message once as `localSetupCompleted` (`useRecordLocalSetupCompletion`),
+  so deleting every chat later does not bring the guide back; hiding it sets
+  `localSetupDismissed`. Both are device-wide app settings. Only model and workspace feed readiness, so a missing
+  author never blocks a chat. The workspace step opens the chat's workspace picker
+  (`openWorkspaceModalAtom`); the model and author steps open Settings → Models and Settings →
+  Git & GitHub through `LOCAL_SETUP_DESTINATIONS` (`shell/profiles/localSetup.ts`). Missing
   prerequisites still reject chat creation with `on_device_model_required`/
   `on_device_workspace_required`.
 - **Profile routes**: `app/profiles/_layout.tsx` gives `[profileId]` its own stack. Expo Router only
