@@ -7,7 +7,11 @@ import type { LocalContextLoader, LocalModelContext, LocalModelReply } from '../
 import { residentModelBytes } from '../models/memory';
 import type { LocalModelFile } from '../models/types';
 import { OnDeviceNativeError } from '../native/services.errors';
-import type { OnDeviceNativeServices } from '../native/services.types';
+import {
+  ON_DEVICE_NATIVE_API_VERSION,
+  type NativeGitTransferProgress,
+  type OnDeviceNativeServices,
+} from '../native/services.types';
 import type { LocalGitStatus, LocalWorkspace } from '../workspaces/types';
 import type { OnDeviceNetworkPort } from './network';
 import type { OnDeviceReachability } from './types';
@@ -283,8 +287,9 @@ export function createFakeOnDeviceNative(llama: FakeLlama, options: FakeNativeOp
     const model = localModelDefinition(id);
     return { id, uri: `file:///models/${id}.gguf`, bytes: model.bytes, sha256: model.sha256 };
   };
+  const gitProgressListeners = new Set<(progress: NativeGitTransferProgress) => void>();
   const native: OnDeviceNativeServices = {
-    getAPIVersion: () => 7,
+    getAPIVersion: () => ON_DEVICE_NATIVE_API_VERSION,
     getMemoryInfo: () => ({
       physicalBytes: memory.physicalBytes,
       availableBytes: memory.availableBytes - llama.residentBytes(),
@@ -292,6 +297,10 @@ export function createFakeOnDeviceNative(llama: FakeLlama, options: FakeNativeOp
     }),
     cancelGitTransfer: () => record('cancelGitTransfer'),
     getGitTransferProgress: () => ({ active: false, cancelled: false, completed: 0, total: 0 }),
+    addListener: (_eventName, listener) => {
+      gitProgressListeners.add(listener);
+      return { remove: () => gitProgressListeners.delete(listener) };
+    },
     storeGitCredential: async () => 'credential-ref',
     removeGitCredential: async () => undefined,
     listWorkspaces: async () => workspaces,
@@ -459,6 +468,13 @@ export function createFakeOnDeviceNative(llama: FakeLlama, options: FakeNativeOp
     transfers,
     installed,
     memory,
+    gitProgressListeners,
+    /** Sends a Git transfer progress event, as the native module does while objects arrive. */
+    emitGitTransferProgress(progress: NativeGitTransferProgress): void {
+      for (const listener of [...gitProgressListeners]) {
+        listener(progress);
+      }
+    },
     /** Moves a running background transfer forward, as URLSession progress does. */
     progressDownload(id: string, bytesWritten: number): void {
       const current = transfers.get(id);

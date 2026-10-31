@@ -425,6 +425,54 @@ describe('chatMapping', () => {
     });
   });
 
+  it('maps a persisted tool the user interrupted to the interrupted status, not failed', () => {
+    const snapshotTool = (id: string, extra: Record<string, unknown>) => ({
+      id,
+      kind: 'execute',
+      status: 'failed',
+      title: 'npm test',
+      startedAtMs: 1_000,
+      completedAtMs: 2_000,
+      content: '',
+      structuredContent: [],
+      locations: [],
+      ...extra,
+    });
+    const chat = mapChat(
+      toRawThread({
+        id: 'thread-interrupted',
+        createdAt: 1784419200,
+        acpSnapshot: {
+          version: 2,
+          timeline: [
+            { sequence: 0, kind: 'tool', canonicalId: 'tool-stopped' },
+            { sequence: 1, kind: 'tool', canonicalId: 'tool-broken' },
+          ],
+          messages: [],
+          tools: [
+            snapshotTool('tool-stopped', { interrupted: true }),
+            snapshotTool('tool-broken', {}),
+          ],
+          plan: [],
+          usage: {},
+          config: [],
+          commands: [],
+          session: {
+            agentId: 'agent',
+            threadId: 'thread-interrupted',
+            historyReconstruction: false,
+          },
+          active: { toolIds: [] },
+        },
+      }),
+    );
+
+    expect(chat.messages.map((message) => message.toolMeta?.status)).toEqual([
+      'interrupted',
+      'failed',
+    ]);
+  });
+
   it('maps persisted OpenCode task tools with child identities to one subagent card', () => {
     const mapped = mapChat(
       toRawThread({

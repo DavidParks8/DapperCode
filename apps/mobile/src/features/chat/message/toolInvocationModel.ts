@@ -161,7 +161,7 @@ function finalizeInvocation(draft: ToolInvocationDraft | undefined): ToolInvocat
   const startedAtMs = meta?.startedAtMs ?? draft.firstObservedAtMs;
   const completedAtMs =
     meta?.completedAtMs ??
-    (metaFields.status === 'completed' || metaFields.status === 'failed'
+    (['completed', 'failed', 'interrupted'].includes(metaFields.status)
       ? draft.terminalObservedAtMs
       : null);
   const parsed = parseStructuredContent(meta?.content);

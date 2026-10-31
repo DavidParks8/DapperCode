@@ -154,6 +154,15 @@ pair, holding the same payload plus the bounded `content`, `locations`, and `tru
 Mobile folds it into the tool row and never renders it on its own. Sub-agent tools are excluded from
 both paths because they already have their own `dappercode.subagent` card.
 
+A call that was still active when the user cancelled its run (`StopReason::Cancelled`) keeps
+ACP's `failed` status and gains `"interrupted": true`, on the run's terminal `tool-meta` event, in
+the snapshot's `dappercode.tool` activity, and on the raw `acpSnapshot` tool; the snapshot's
+tool-result message carries no `error`. ACP has no cancelled tool status, and installed clients map
+unknown statuses to `pending`, so the flag is additive: older clients show the call as failed, while
+newer ones render it neutrally ("Stopped running …" with a muted stop icon). Failed and superseded
+runs never set the flag. `toolMetaStatuses` and `interruptedToolMeta` in
+`contracts/bridge-rpc/v2/manifest.json` pin the status set and the flag.
+
 `startedAtMs` and `completedAtMs` are Unix epoch milliseconds measured by the bridge. The start is
 the first time the bridge observes the call and remains stable across updates. Completion is frozen
 on the first completed or failed update; run termination also completes any dangling active call,

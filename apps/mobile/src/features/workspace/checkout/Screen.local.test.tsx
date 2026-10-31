@@ -195,6 +195,101 @@ describe('GitCheckoutScreen on this iPhone', () => {
     });
   });
 
+  it('follows native clone progress events with one snapshot read and no polling', async () => {
+    jest.useFakeTimers({ doNotFake: ['setTimeout', 'nextTick', 'setImmediate', 'queueMicrotask'] });
+    try {
+      const port = new FakeAgentPort();
+      let finish: (workspace: LocalWorkspace) => void = () => undefined;
+      port.workspaceAdmin.clone = () =>
+        new Promise<LocalWorkspace>((resolve) => {
+          finish = resolve;
+        });
+      let snapshotReads = 0;
+      port.workspaceAdmin.cloneProgress = () => {
+        snapshotReads += 1;
+        return { active: true, cancelled: false, completed: 0, total: 0 };
+      };
+      const { root } = await renderLocalCheckout(port);
+      await invoke(
+        labeled(root, 'Repository URL'),
+        'onChangeText',
+        'https://github.com/acme/tool.git',
+      );
+      await invoke(labeled(root, 'Clone repository'));
+
+      expect(text(root)).toContain('Connecting to the remote…');
+      expect(snapshotReads).toBe(1);
+      expect(port.cloneProgressListeners.size).toBe(1);
+
+      await act(async () => {
+        port.emitCloneProgress({ active: true, cancelled: false, completed: 90, total: 120 });
+        await flush();
+      });
+      expect(text(root)).toContain('Receiving files: 90 of 120');
+      const bar = root.findAll(
+        (node) =>
+          node.props['accessibilityRole'] === 'progressbar' &&
+          (node.props['accessibilityValue'] as { now?: number } | undefined)?.now === 75,
+      );
+      expect(bar.length).toBeGreaterThan(0);
+
+      await act(async () => {
+        jest.advanceTimersByTime(5_000);
+        await flush();
+      });
+      expect(snapshotReads).toBe(1);
+
+      await act(async () => {
+        port.emitCloneProgress({ active: true, cancelled: true, completed: 90, total: 120 });
+        await flush();
+      });
+      expect(text(root)).toContain('Stopping…');
+
+      await act(async () => {
+        finish({ id: 'ws-tool', name: 'tool', isRepository: true });
+        await flush();
+      });
+      expect(text(root)).not.toContain('Receiving files');
+      expect(text(root)).not.toContain('Stopping…');
+      expect(snapshotReads).toBe(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps a newer progress event over a slower snapshot read', async () => {
+    const port = new FakeAgentPort();
+    let finish: (workspace: LocalWorkspace) => void = () => undefined;
+    port.workspaceAdmin.clone = () =>
+      new Promise<LocalWorkspace>((resolve) => {
+        finish = resolve;
+      });
+    port.workspaceAdmin.cloneProgress = () => {
+      port.emitCloneProgress({ active: true, cancelled: false, completed: 60, total: 120 });
+      return { active: true, cancelled: false, completed: 10, total: 120 };
+    };
+    const { root } = await renderLocalCheckout(port);
+    await invoke(
+      labeled(root, 'Repository URL'),
+      'onChangeText',
+      'https://github.com/acme/tool.git',
+    );
+    await invoke(labeled(root, 'Clone repository'));
+
+    expect(text(root)).toContain('Receiving files: 60 of 120');
+    expect(text(root)).not.toContain('Receiving files: 10 of 120');
+
+    await act(async () => {
+      finish({ id: 'ws-tool', name: 'tool', isRepository: true });
+      await flush();
+    });
+    await act(async () => {
+      port.emitCloneProgress({ active: true, cancelled: false, completed: 90, total: 120 });
+      await flush();
+    });
+    expect(text(root)).not.toContain('Receiving files');
+  });
+
   it('explains an unauthorized clone in plain language', async () => {
     const port = new FakeAgentPort();
     port.workspaceAdmin.clone = () =>

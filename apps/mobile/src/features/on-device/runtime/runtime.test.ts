@@ -52,6 +52,7 @@ function harness(documents = new Map<string, string>()) {
       completed: 0,
       total: 0,
     })),
+    addListener: jest.fn(() => ({ remove: jest.fn() })),
     getMemoryInfo: jest.fn(() => ({
       physicalBytes: 32 * 1024 ** 3,
       availableBytes: 16 * 1024 ** 3,

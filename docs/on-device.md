@@ -151,6 +151,10 @@ and that prompt is passed straight to completion.
 - Native failures reach the UI as `OnDeviceNativeError` values with stable codes (for example
   `GIT_NOT_REPOSITORY`, `PATH_OUTSIDE_WORKSPACE`, `GIT_NO_ORIGIN`) and never include native exception
   names or Swift source locations. These capabilities require on-device ABI 7.
+- Clone, fetch, pull, and push progress is pushed by the native module as the
+  `onGitTransferProgress` event (ABI 8): once when a transfer begins, is cancelled, or ends, and at
+  most every 100 ms (plus the final object) while objects arrive. `getGitTransferProgress` remains for
+  a single read.
 - Git diffs label staged (HEAD to index) and unstaged (index to working tree) patches separately.
   Opposing changes are not collapsed away; only the staged content is committed. Both sections,
   including their labels, share the reported output byte limit.
@@ -299,6 +303,10 @@ the local profile. `LocalBridgeWsClient` is connected from creation until dispos
 | Git          | `bridge/git/status`, `diff`, `history`, `branches`, `stage`, `stageAll`, `unstage`, `unstageAll`, `commit`, `switch`, `push`                                     |
 | Extensions   | `workspace/list`, `select`, `create`, `rename`, `delete`, `changeToken`, `clone/progress`, `clone/cancel`, `workspace/git/fetch`, `pull`, `init`, `discard`, `branch/create`, `workspace/files/list`, `read`, `write`, `create`, `rename`, `remove` |
 
+The transport forwards each native progress event as the host notification
+`workspace/clone/progressChanged` (params match `workspace/clone/progress`) while the server is
+started.
+
 Every other method rejects with JSON-RPC `-32601` and `data.error = 'unsupported_on_device'`
 (surfaced as `RpcRequestError`). Other stable `data.error` reasons are `thread_not_found`,
 `on_device_model_required`, `on_device_workspace_required`, `on_device_busy`, `on_device_offline`,
@@ -354,8 +362,9 @@ model when the composer sends none or a desktop path.
   generic "Working" from the shell does not replace a reported phase. VoiceOver hears reported
   phases (not progress) and the completion of a turn the screen watched running, never the
   shell's own transitions such as opening a settled chat.
-- Tool titles come from `describeLocalTool`; an interrupted tool keeps the wire's `failed` status
-  but its title ends with `· Interrupted`.
+- Tool titles come from `describeLocalTool`. Like the Rust bridge, an interrupted tool keeps the
+  wire's `failed` status and adds `interrupted: true` (in `tool-meta` and the snapshot), so the
+  transcript shows it neutrally, for example "Stopped editing src/app.ts".
 
 ### Streaming
 
@@ -395,7 +404,8 @@ The shared screens serve the local profile through the transport; nothing branch
   swipe to delete, plus **New workspace** and **Clone repository**. Choosing a workspace also calls
   `workspace/select`, so the runtime's remembered workspace (first-run setup, new-chat fallback)
   matches the picker. The clone screen validates
-  HTTPS (`api/remoteUrl.ts`), derives the name from the URL, polls `workspace/clone/progress`, and
+  HTTPS (`api/remoteUrl.ts`), derives the name from the URL, follows `workspace/clone/progressChanged`
+  notifications (with one `workspace/clone/progress` read when it subscribes; no polling), and
   offers **Stop**.
 - **Files** (`features/workspace/files`, route `chats/[chatId]/files?cwd=…`, `workspaceFiles`):
   grouped-list browser and monospace editor. Edits are explicit: a dirty dot, **Save**, and leaving

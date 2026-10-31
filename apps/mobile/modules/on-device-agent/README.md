@@ -10,7 +10,8 @@ See [product setup and limitations](../../../../docs/on-device.md).
 - `ios/NativeGit.swift` owns the linked-library Git operations. Credential callbacks enforce the
   authorized HTTPS origin. Remote rejections are explicit errors, not successful push results.
 - `ios/NativeGitRead.swift` and `ios/NativeGitMutations.swift` own bounded Git queries and index/branch
-  operations. `GitNetworkOperation.swift` provides cooperative cancellation/progress; a small C
+  operations. `GitNetworkOperation.swift` provides cooperative cancellation and progress, pushed to
+  JavaScript as the throttled `onGitTransferProgress` module event; a small C
   boundary configures libgit2's 15-second connection and read/write timeouts.
 - `ios/NativeGitRemote.swift` owns fetch, fast-forward-only pull, `git init` (with an optional
   HTTPS origin), branch creation, discard/restore, and origin/upstream/ahead/behind status.
@@ -40,9 +41,10 @@ See [product setup and limitations](../../../../docs/on-device.md).
   written releases the transfer and records the failure. Checkpoints from the earlier
   JavaScript transfer (`resume.json`) are imported on the next resume.
   `RuntimeDocumentStore.swift` owns separate atomic, size-limited local journals/preferences.
-- The native ABI is versioned (currently 7: workspace rename/delete, change tokens, UI file
+- The native ABI is versioned (currently 8: workspace rename/delete, change tokens, UI file
   rename/delete, fetch/pull, init, branch creation, discard, remote-aware status, typed errors,
-  background model downloads, verification progress/cancellation, storage info). An old binary is
+  background model downloads, verification progress/cancellation, storage info, and Git transfer
+  progress events). An old binary is
   rejected before loading model variants that need the newer inference engine, including
   Bonsai 2's activation transforms.
 - `scripts/build-git.mjs` builds pinned libgit2 1.9.7 for iOS arm64 and simulator arm64/x86_64.

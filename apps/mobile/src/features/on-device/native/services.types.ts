@@ -14,7 +14,17 @@ import type {
   NativeModelVerificationProgress,
 } from '../models/downloadState';
 
-export const ON_DEVICE_NATIVE_API_VERSION = 7;
+export const ON_DEVICE_NATIVE_API_VERSION = 8;
+
+/** Native event carrying throttled clone, fetch, pull, and push progress (API 8). */
+export const GIT_TRANSFER_PROGRESS_EVENT = 'onGitTransferProgress';
+
+export interface NativeGitTransferProgress {
+  active: boolean;
+  cancelled: boolean;
+  completed: number;
+  total: number;
+}
 
 /**
  * Native on-device services. Every rejection is an `OnDeviceNativeError` with a stable `code`
@@ -25,12 +35,16 @@ export interface OnDeviceNativeServices {
   getAPIVersion(): number;
   getMemoryInfo(): DeviceMemory;
   cancelGitTransfer(): void;
-  getGitTransferProgress(): {
-    active: boolean;
-    cancelled: boolean;
-    completed: number;
-    total: number;
-  };
+  /** One read of the shared transfer state; live updates arrive as `GIT_TRANSFER_PROGRESS_EVENT`. */
+  getGitTransferProgress(): NativeGitTransferProgress;
+  /**
+   * Expo module event subscription. Native sends an update when a transfer begins, is cancelled,
+   * or ends, and at most every 100 ms (plus the final object) while objects arrive.
+   */
+  addListener(
+    eventName: typeof GIT_TRANSFER_PROGRESS_EVENT,
+    listener: (progress: NativeGitTransferProgress) => void,
+  ): { remove(): void };
   storeGitCredential(
     host: string,
     accountId: string,

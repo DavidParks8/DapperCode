@@ -134,7 +134,7 @@ items below were defects of the legacy kit or legacy screens.
 | 75 | Placeholder wording differs | Fixed | #65 | Shared placeholder "Message On this iPhone..." | MainScreen.local "starts a local chat…" |
 | 76 | Turn errors as red header text | Fixed | #68 | Composer failure alert with Retry | MainScreen.local "surfaces a failed local turn in the composer…"; LocalRuntimeShell |
 | 77 | No activity during a run | Fixed | #68 | `dappercode.dev/activity` events in the transcript activity row | MainScreen.local "shows what the local run is doing…"; LocalRuntimeShell |
-| 78 | Tool cards "Read read_file"; interrupted shows failed | Partially fixed | #68 | `describeLocalTool` titles and verbs; tool rows follow `showToolCalls`. Interrupted tools are titled `… · Interrupted`, but the bridge wire has no interrupted status, so the shared row still renders the failed status | server "titles local tools with their subject and marks interrupted ones as interrupted" |
+| 78 | Tool cards "Read read_file"; interrupted shows failed | Fixed | #68, #73 | `describeLocalTool` titles and verbs; tool rows follow `showToolCalls`. Tool metadata gained an additive `interrupted: true` flag (`interruptedToolMeta` in `contracts/bridge-rpc/v2/manifest.json`); the status stays ACP's `failed`, so installed clients still show a failure rather than `pending`. The Rust bridge sets it on calls left active by a cancelled run (`agui.rs`, `acp/snapshot.rs`), the local transport does the same, and `parseToolMeta` maps it to a neutral row ("Stopped editing …", muted stop icon) | server "titles local tools with their subject and marks interrupted ones as interrupted"; ToolInvocation "renders an interrupted tool neutrally instead of as a failure"; toolInvocationPresentation "keeps an interrupted call interrupted…"; agUi "reads interrupted tools from a flag that keeps installed clients on failed"; chatMapping "maps a persisted tool the user interrupted…"; Rust `agui::tests::cancelled_run_flags_a_dangling_tool_interrupted_and_keeps_it_failed`, `rpc::tests::contract_fixture_manifest` |
 | 79 | Dark-mode accent pills low contrast | Fixed by removal | #66–#69; wave 3 legacy sweep | Legacy `LocalAction` pills removed | `shared/theme.test.ts` contrast tests |
 | 80 | Content scrolls under a hard-cut header | Fixed by removal | #65–#69; wave 3 legacy sweep | Shared headers | — (visual) |
 | 81 | Busy spinner scrolls away; no bottom inset | Fixed by removal | #65–#69; wave 3 legacy sweep | `LocalPage` removed; the sweep replaces the provider's startup and recovery page | — |
@@ -192,7 +192,7 @@ items below were defects of the legacy kit or legacy screens.
 | 118 | Typing rewrites `preferences.json` | Fixed | #61, #72 | Local chats use the shell's debounced per-profile composer draft store, the same as bridge chats; the runtime no longer writes drafts (`runtime/drafts.ts` is a read-only `LegacyDraftReader`). Drafts from older builds (inline in `preferences.json` and per-thread draft documents) are imported once into the composer store before local chats open (`shell/runtime/localDraftImport.ts`) and removed only after that write succeeds | runtime "backgrounding flushes history…", "inline drafts from older builds are offered for import…", "draft documents from older builds are removed only once imported…", "a failed settle keeps the legacy draft so the import is retried"; localDraftImport "moves inline and per-conversation drafts into the shared composer once…", "keeps every legacy byte when the composer write fails…"; LocalRuntimeHost "imports drafts from older builds before any local chat can open…"; preferences "legacy inline drafts are read for migration but never written back…" |
 | 119 | Every token re-renders everything | Fixed | #61, #65 | Coalesced `threads` slice; memoized projection; the transport ignores download slices | runtime "token streaming notifies thread subscribers at most once per interval…"; emitter tests |
 | 120 | Whole thread rewritten per save | Fixed | #61 | Coalesced progress writes; unchanged content skipped | runtime "a turn journals the user message immediately and coalesces progress into one later write" |
-| 121 | `GitTransferProgress` polls every 500 ms | Partially fixed | #67; wave 3 legacy sweep | The legacy component is removed; push, fetch, and pull show no polled progress. The shared clone screen still polls `workspace/clone/progress` every 500 ms (`workspace/checkout/parts.tsx`), but only during an active clone. The native module exposes only a pollable counter, not progress events | checkout Screen.local "shows clone progress…" |
+| 121 | `GitTransferProgress` polls every 500 ms | Fixed | #67, #73; wave 3 legacy sweep | The legacy component is removed. `GitNetworkOperation.swift` pushes throttled `onGitTransferProgress` module events (ABI 8) for clone, fetch, pull, and push; the transport forwards them as `workspace/clone/progressChanged`, and the shared clone screen subscribes (`workspace/checkout/parts.tsx`) with one snapshot read and no polling. Native delivery was typechecked, not run (see [Gaps](#gaps)) | checkout Screen.local "shows clone progress…", "follows native clone progress events with one snapshot read and no polling", "keeps a newer progress event over a slower snapshot read"; runtimePort "forwards native Git transfer progress events…"; workspaceHandlers "forwards native transfer progress as host notifications until stopped"; native `NativeGitTestApp.swift` "clone progress is pushed to the observer from start to finish" |
 | 122 | Persisted `'on-device'` target dead-ends off iOS | Fixed | #65 | Local profile resolves only where supported | localProfile "never detects local support on android/web/macos"; localProfileRouting "never resolves a saved local selection where the local agent is unsupported" |
 | 123 | `ReturnToDesktop` exits inconsistently | Fixed | #65 | `ReturnToDesktop`/`OnDeviceTargets` deleted; exit is profile switching plus disposal | LocalProfileExit "closes the local profile before onboarding…"; LocalRuntimeHost "owns a runtime and transport only while the local profile is open" |
 | 124 | `targets.ts` import at the bottom | Fixed | #65 | `shell/runtime/targets.ts` deleted | — |
@@ -235,19 +235,16 @@ legacy test IDs and is updated by the wave 3 legacy sweep.
 
 ## Gaps
 
-1. **#78 (partial):** interrupted local tools are titled "… · Interrupted", but the bridge wire has
-   no interrupted tool status, so the shared tool row still shows the failed status. A full fix
-   needs a bridge contract change, mirrored in Rust, the mobile types, the fixtures, and the
-   contract tests.
-2. **#121 (partial):** the shared clone screen polls clone progress every 500 ms while a clone runs.
-   Removing the polling needs native progress events from the Expo module.
-3. **Needs a physical device:** #18 (memory headroom with the entitlement), #30 (background
+1. **Needs a physical device:** #18 (memory headroom with the entitlement), #30 (background
    `URLSession` across lock, kill, and relaunch), #82 (foldable and landscape toolbar layout), and
    #125 (inference throughput and prompt-cache reuse on device). Live simulator runs were blocked
    during this work: Xcode needed its first-launch setup, so `xcodebuild -checkFirstLaunchStatus`
-   returned 69.
-4. **Excluded by user (#117):** confirmations for #34, #93, #105, #110, and #117.
-5. **Depends on the wave 3 legacy sweep:** the "Fixed by removal" rows (#50–#57, #66, #72, #73,
+   returned 69. For the same reason, #121's native event delivery (`Events`/`sendEvent` and the
+   `NativeGitTestApp.swift` observer check) was typechecked with `swiftc` against the module sources
+   and a stub of the ExpoModulesCore API, and its throttling was exercised in a macOS harness, but it
+   was not run in the simulator.
+2. **Excluded by user (#117):** confirmations for #34, #93, #105, #110, and #117.
+3. **Depends on the wave 3 legacy sweep:** the "Fixed by removal" rows (#50–#57, #66, #72, #73,
    #79–#81, #83, #87, #88, #90, #94–#96, #107) are complete once the sweep deletes the legacy
    routes and screens. The sweep must also:
    - replace `OnDeviceProvider`'s `LocalPage` startup and recovery page, keeping a retry that
@@ -276,6 +273,9 @@ Short names in the tables refer to these files (under `apps/mobile/src` unless n
 | Files Screen, Files Screen.runtime | `features/workspace/files/Screen{,.runtime}.test.tsx` |
 | ManagedView | `features/workspace/picker/ManagedView.test.tsx` |
 | checkout Screen.local | `features/workspace/checkout/Screen.local.test.tsx` |
+| workspaceHandlers | `features/on-device/transport/workspaceHandlers.test.ts` |
+| ToolInvocation, toolInvocationPresentation | `features/chat/message/{ToolInvocation.test.tsx,toolInvocationPresentation.test.ts}` |
+| agUi, chatMapping | `bridge/agui/agUi.test.ts`, `bridge/mapping/chatMapping.test.ts` |
 | LocalModelsScreen, LocalModelsScreen.runtime | `features/settings/local/LocalModelsScreen{,.runtime}.test.tsx` |
 | LocalGitAccountScreen | `features/settings/local/LocalGitAccountScreen.test.tsx` |
 | LocalProfileSection, SettingsScreen | `features/settings/{LocalProfileSection,SettingsScreen}.test.tsx` |

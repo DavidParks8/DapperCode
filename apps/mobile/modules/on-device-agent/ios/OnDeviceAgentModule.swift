@@ -1,6 +1,8 @@
 import ExpoModulesCore
 import Foundation
 
+private let gitTransferProgressEvent = "onGitTransferProgress"
+
 public class OnDeviceAgentModule: Module {
   private let workspaces = WorkspaceStore()
   private let models = ModelFileStore()
@@ -9,7 +11,21 @@ public class OnDeviceAgentModule: Module {
   public func definition() -> ModuleDefinition {
     Name("OnDeviceAgent")
 
-    Function("getAPIVersion") { 7 }
+    Function("getAPIVersion") { 8 }
+
+    // Clone, fetch, pull, and push progress is pushed as throttled events (API 8); the snapshot
+    // function stays for a single read when a listener attaches mid-transfer.
+    Events(gitTransferProgressEvent)
+
+    OnStartObserving(gitTransferProgressEvent) { [weak self] in
+      GitNetworkOperation.shared.setObserver { snapshot in
+        self?.sendEvent(gitTransferProgressEvent, snapshot)
+      }
+    }
+
+    OnStopObserving(gitTransferProgressEvent) {
+      GitNetworkOperation.shared.setObserver(nil)
+    }
 
     Function("cancelGitTransfer") { GitNetworkOperation.shared.cancel() }
     Function("getGitTransferProgress") { GitNetworkOperation.shared.snapshot() }

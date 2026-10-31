@@ -1,4 +1,5 @@
 import { EventType } from '@ag-ui/core';
+import { TOOL_META_EVENT_NAME } from '@bridge/toolMeta';
 
 import { parseAgUiEventNotification } from '@bridge/agui/agUi';
 import { toPendingApproval } from '../../chat/helpers/status';
@@ -363,12 +364,11 @@ describe('LocalBridgeServer', () => {
       activity: 'Running custom tool',
     });
 
-    const { server, port } = setup();
+    const { server, port, events } = setup();
     const threadId = await createChat(server);
     await server.request('bridge/thread/queue/send', { threadId, content: 'Edit it' });
     port.streamAssistant(threadId, 'assistant-1', '');
     port.startTool(threadId, 'assistant-1', 'call-1', 'edit_file', '{"path":"src/app.ts"}');
-    await port.stop();
     const tool = port.thread(threadId)?.messages.find((message) => message.tool);
     port.put({
       ...port.thread(threadId)!,
@@ -380,10 +380,22 @@ describe('LocalBridgeServer', () => {
             : message,
         ),
     });
+    await port.stop();
     const { thread } = (await server.request('thread/read', { threadId })) as { thread: unknown };
+    // Like the Rust bridge, the wire keeps `failed` so installed clients never show `pending`.
+    expect((thread as { acpSnapshot: { tools: unknown[] } }).acpSnapshot.tools[0]).toMatchObject({
+      status: 'failed',
+      interrupted: true,
+    });
+    const liveMeta = events()
+      .filter((event) => event.type === EventType.CUSTOM && event.name === TOOL_META_EVENT_NAME)
+      .map((event) => (event as { value: Record<string, unknown> }).value)
+      .at(-1);
+    expect(liveMeta).toMatchObject({ toolCallId: 'call-1', status: 'failed', interrupted: true });
     const chat = mapChat(toRawThread(thread));
     expect(chat.messages.find((message) => message.role === 'tool')?.toolMeta).toMatchObject({
-      title: 'Edit src/app.ts · Interrupted',
+      title: 'Edit src/app.ts',
+      status: 'interrupted',
     });
   });
 

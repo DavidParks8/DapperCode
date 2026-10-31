@@ -30,6 +30,9 @@ const IDLE: LocalRunSnapshot = {
  */
 export class FakeAgentPort implements LocalAgentPort {
   readonly listeners = new Set<() => void>();
+  readonly cloneProgressListeners = new Set<
+    Parameters<LocalAgentPort['workspaceAdmin']['onCloneProgress']>[0]
+  >();
   readonly threadMap = new Map<string, LocalThread>();
   workspaceList: LocalWorkspace[] = [{ id: 'ws-one', name: 'Demo', isRepository: true }];
   models: LocalModelDefinition[] = [localModelDefinition('qwen3-1.7b-q4-k-m')];
@@ -169,6 +172,12 @@ export class FakeAgentPort implements LocalAgentPort {
       return workspace;
     },
     cloneProgress: () => ({ active: false, cancelled: false, completed: 0, total: 0 }),
+    onCloneProgress: (listener) => {
+      this.cloneProgressListeners.add(listener);
+      return () => {
+        this.cloneProgressListeners.delete(listener);
+      };
+    },
     cancelTransfer: () => {
       this.calls.push('workspace.cancelTransfer');
     },
@@ -553,6 +562,13 @@ export class FakeAgentPort implements LocalAgentPort {
   emit(): void {
     for (const listener of [...this.listeners]) {
       listener();
+    }
+  }
+
+  /** Delivers a native transfer progress event, as the Expo module would. */
+  emitCloneProgress(progress: ReturnType<LocalAgentPort['workspaceAdmin']['cloneProgress']>): void {
+    for (const listener of [...this.cloneProgressListeners]) {
+      listener(progress);
     }
   }
 }

@@ -10,8 +10,6 @@ import type { createGitCheckoutScreenStyles } from './styles';
 
 type CheckoutStyles = ReturnType<typeof createGitCheckoutScreenStyles>;
 
-const CLONE_PROGRESS_POLL_MS = 500;
-
 /** Copy for bridge checkouts (any URL, chosen folder) and app-managed clones (HTTPS workspace). */
 export function checkoutCopy(managed: boolean) {
   return managed
@@ -65,7 +63,11 @@ export function checkoutSummary(
   return targetPath ? `Will clone into ${targetPath}` : null;
 }
 
-/** Polls the host's transfer progress while a managed clone runs. */
+/**
+ * Follows the host's transfer progress while a managed clone runs. Progress arrives as host
+ * notifications; one snapshot read covers progress made before the subscription, and is ignored
+ * once a newer notification has arrived.
+ */
 export function useCloneProgress(
   host: WorkspaceHostClient | null,
   managed: boolean,
@@ -78,22 +80,23 @@ export function useCloneProgress(
       setProgress(null);
       return;
     }
-    let cancelled = false;
-    const poll = () => {
-      void host
-        .cloneProgress()
-        .then((next) => {
-          if (!cancelled) {
-            setProgress(next);
-          }
-        })
-        .catch(() => undefined);
-    };
-    poll();
-    const timer = setInterval(poll, CLONE_PROGRESS_POLL_MS);
+    let subscribed = true;
+    let notified = false;
+    const unsubscribe = host.onCloneProgress((next) => {
+      notified = true;
+      setProgress(next);
+    });
+    void host
+      .cloneProgress()
+      .then((snapshot) => {
+        if (subscribed && !notified) {
+          setProgress(snapshot);
+        }
+      })
+      .catch(() => undefined);
     return () => {
-      cancelled = true;
-      clearInterval(timer);
+      subscribed = false;
+      unsubscribe();
     };
   }, [active, host]);
   return progress;

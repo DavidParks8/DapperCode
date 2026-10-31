@@ -5,7 +5,7 @@ import type {
 } from '@bridge/types/types';
 import type { LocalThread } from '../runtime/types';
 import { failure, LOCAL_RPC_ERROR, LocalRpcError } from './errors';
-import { LocalEventProjector, type LocalNotification } from './events';
+import { forwardLocalCloneProgress, LocalEventProjector, type LocalNotification } from './events';
 import { LocalApprovalRelay } from './approvals';
 import { createLocalGitHandlers } from './gitHandlers';
 import { localModelListEntries } from './modelOptions';
@@ -140,7 +140,12 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
     }
     this.projector.prime(this.port.threads());
     this.approvals.prime();
-    this.unsubscribe = this.port.subscribe(() => this.flush());
+    const stopThreads = this.port.subscribe(() => this.flush());
+    const stopProgress = forwardLocalCloneProgress(this.port, (event) => this.publish(event));
+    this.unsubscribe = () => {
+      stopThreads();
+      stopProgress();
+    };
   }
 
   stop(): void {
