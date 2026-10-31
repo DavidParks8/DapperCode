@@ -19,6 +19,7 @@ export const LOCAL_PRESENCE_SLICES: readonly OnDeviceRuntimeSlice[] = [
   'preferences',
   'workspaces',
   'threads',
+  'issues',
 ];
 
 /**
@@ -54,6 +55,27 @@ function newChatDefaults(runtime: OnDeviceRuntime, cwd: string | null) {
  * What the shell shows about the local agent outside a conversation: the drawer status line and
  * whether (and why not) a new chat can start, with the next step.
  */
+/**
+ * Failed writes and startup or background problems are listed in Settings; while the agent is not
+ * busy, the status points there instead of hiding them.
+ */
+function issueStatus(
+  runtime: OnDeviceRuntime,
+  kind: LocalAgentPresence['status']['kind'],
+): LocalAgentPresence['status'] | null {
+  const issues = runtime.issues();
+  if (issues.length === 0 || kind === 'busy') {
+    return null;
+  }
+  return {
+    label:
+      issues.length === 1
+        ? '1 issue needs attention'
+        : `${String(issues.length)} issues need attention`,
+    kind: issues.some((issue) => issue.kind === 'persistence') ? 'error' : 'attention',
+  };
+}
+
 export function describeLocalAgentPresence(
   runtime: OnDeviceRuntime,
   cwd: string | null,
@@ -70,7 +92,7 @@ export function describeLocalAgentPresence(
   });
   const readiness = localConversationReadiness({ modelId, download, workspaceId, workspaces });
   return {
-    status: { label: status.label, kind: status.kind },
+    status: issueStatus(runtime, status.kind) ?? { label: status.label, kind: status.kind },
     readiness:
       readiness.canStart || !readiness.reason
         ? null

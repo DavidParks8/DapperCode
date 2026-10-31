@@ -8,6 +8,7 @@ import type { OnDeviceRuntimeSlice } from '../on-device/runtime/types';
 import { routes } from '@shell/navigation/routes';
 import { localRuntimeAtom } from '@shell/state/local/atoms';
 import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
+import { LocalIssueNotices } from './local/LocalIssueNotices';
 import { LOCAL_GIT_ACCOUNT_TITLE } from './local/LocalGitAccountScreen';
 import { SettingsGroup, SettingsRow } from './SettingsList';
 
@@ -46,7 +47,12 @@ function LocalProfileRows() {
     (runtime) => runtime.preferences().account?.login ?? 'Not signed in',
     SUMMARY_SLICES,
   );
-  return <LocalProfileGroup models={models} account={account} />;
+  return (
+    <>
+      <LocalIssueNotices />
+      <LocalProfileGroup models={models} account={account} />
+    </>
+  );
 }
 
 function LocalProfileGroup({
