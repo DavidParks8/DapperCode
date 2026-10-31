@@ -2,6 +2,8 @@ import { EventType } from '@ag-ui/core';
 
 import { parseAgUiEventNotification } from '@bridge/agui/agUi';
 import { mapChat, toRawThread } from '@bridge/mapping/chatMapping';
+import { OnDeviceNativeError } from '../native/services.errors';
+import { OnDeviceOfflineError } from '../runtime/network';
 import type { LocalNotification } from './events';
 import { LocalBridgeServer, LocalRpcError, LOCAL_IMPLEMENTED_METHODS } from './server';
 import { FakeAgentPort } from './testing';
@@ -67,7 +69,7 @@ describe('LocalBridgeServer', () => {
     'thread/snapshot/page',
     'bridge/browser/session/create',
     'bridge/git/clone',
-    'bridge/approvals/resolve',
+    'bridge/userInput/resolve',
   ])('rejects %s as unsupported on this iPhone instead of crashing', async (method) => {
     const { server } = setup();
     const error = await rpcError(server.request(method, {}));
@@ -90,8 +92,8 @@ describe('LocalBridgeServer', () => {
   it('falls back to the remembered workspace when the composer sends a desktop path', async () => {
     const { server, port } = setup();
     port.workspaceList = [
-      { id: 'ws-one', name: 'Demo' },
-      { id: 'ws-two', name: 'Other' },
+      { id: 'ws-one', name: 'Demo', isRepository: true },
+      { id: 'ws-two', name: 'Other', isRepository: true },
     ];
     port.defaultValues = { workspaceId: 'ws-two', modelId: null };
     await server.request('thread/start', { cwd: '/Users/ada/desktop-repo' });
@@ -239,6 +241,54 @@ describe('LocalBridgeServer', () => {
     });
   });
 
+  it('surfaces a tool approval as a bridge approval and resolves it', async () => {
+    const { server, port, notifications } = setup();
+    const threadId = await createChat(server);
+    await server.request('bridge/thread/queue/send', { threadId, content: 'Push it' });
+    port.requestApproval(threadId, 'call-push', 'git_push', 'Push the current branch to origin');
+
+    const requested = notifications.find((entry) => entry.method === 'bridge/approval.requested');
+    expect(requested?.params).toMatchObject({
+      requestId: 'call-push',
+      threadId,
+      title: 'Push the current branch to origin',
+      options: [{ id: 'allow-once' }, { id: 'reject-once' }],
+    });
+    expect(await server.request('bridge/approvals/list')).toEqual([requested?.params]);
+    await expect(
+      server.request('bridge/approvals/resolve', { id: 'call-push', decision: 'maybe' }),
+    ).rejects.toMatchObject({ code: -32602 });
+
+    await server.request('bridge/approvals/resolve', {
+      id: 'call-push',
+      decision: 'reject-once',
+      resolutionId: 'r1',
+    });
+    expect(port.approvals).toEqual([{ callId: 'call-push', approved: false }]);
+    expect(notifications.at(-1)).toEqual({
+      method: 'bridge/approval.resolved',
+      params: { id: 'call-push', threadId },
+    });
+    expect(await server.request('bridge/approvals/list')).toEqual([]);
+    await expect(
+      server.request('bridge/approvals/resolve', { id: 'call-push', decision: 'allow-once' }),
+    ).rejects.toMatchObject({ code: -32004 });
+  });
+
+  it('maps typed native and offline failures to stable reasons', async () => {
+    const { server, port } = setup();
+    port.git.status = () =>
+      Promise.reject(new OnDeviceNativeError('GIT_NOT_REPOSITORY', 'This workspace has no Git.'));
+    expect((await rpcError(server.request('bridge/git/status', { cwd: DEMO }))).data).toEqual({
+      error: 'on_device_not_repository',
+      nativeCode: 'GIT_NOT_REPOSITORY',
+    });
+    port.git.push = () => Promise.reject(new OnDeviceOfflineError('push'));
+    expect((await rpcError(server.request('bridge/git/push', { cwd: DEMO }))).data.error).toBe(
+      'on_device_offline',
+    );
+  });
+
   it('rejects a send that the runtime refuses before accepting it', async () => {
     const { server, port } = setup();
     const threadId = await createChat(server);
@@ -303,8 +353,8 @@ describe('LocalBridgeServer', () => {
   it('only lets an empty chat move to another workspace', async () => {
     const { server, port } = setup();
     port.workspaceList = [
-      { id: 'ws-one', name: 'Demo' },
-      { id: 'ws-two', name: 'Demo' },
+      { id: 'ws-one', name: 'Demo', isRepository: true },
+      { id: 'ws-two', name: 'Demo', isRepository: true },
     ];
     const threadId = await createChat(server);
     const workspaces = (await server.request('bridge/workspaces/list')) as {
@@ -327,7 +377,7 @@ describe('LocalBridgeServer', () => {
       bridgeRoot: LOCAL_WORKSPACE_ROOT,
       path: LOCAL_WORKSPACE_ROOT,
       parentPath: null,
-      entries: [{ name: 'Demo', path: DEMO, kind: 'directory', selectable: true }],
+      entries: [{ name: 'Demo', path: DEMO, kind: 'directory', selectable: true, isGitRepo: true }],
     });
     expect(await server.request('bridge/fs/list', { path: DEMO })).toMatchObject({
       path: DEMO,

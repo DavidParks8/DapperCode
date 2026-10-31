@@ -1,3 +1,6 @@
+import { isOnDeviceNativeError, type OnDeviceNativeErrorCode } from '../native/services.errors';
+import { OnDeviceOfflineError } from '../runtime/network';
+
 /** JSON-RPC error codes from `contracts/bridge-rpc/v2/manifest.json`. */
 export const LOCAL_RPC_ERROR = {
   methodNotFound: -32601,
@@ -16,6 +19,8 @@ export type LocalRpcErrorReason =
   | 'on_device_model_required'
   | 'on_device_workspace_required'
   | 'on_device_busy'
+  | 'on_device_offline'
+  | 'on_device_not_repository'
   | 'on_device_failed';
 
 export class LocalRpcError extends Error {
@@ -31,9 +36,34 @@ export class LocalRpcError extends Error {
   }
 }
 
+const WORKSPACE_CODES = new Set<OnDeviceNativeErrorCode>([
+  'WORKSPACE_REQUIRED',
+  'WORKSPACE_INVALID_ID',
+  'WORKSPACE_NOT_FOUND',
+]);
+
+/** Maps a runtime or typed native failure to a JSON-RPC error with a stable reason. */
 export function failure(error: unknown): LocalRpcError {
   if (error instanceof LocalRpcError) {
     return error;
+  }
+  if (error instanceof OnDeviceOfflineError) {
+    return new LocalRpcError(LOCAL_RPC_ERROR.serverError, error.message, {
+      error: 'on_device_offline',
+    });
+  }
+  if (isOnDeviceNativeError(error)) {
+    const reason: LocalRpcErrorReason = WORKSPACE_CODES.has(error.code)
+      ? 'on_device_workspace_required'
+      : error.code === 'GIT_NOT_REPOSITORY'
+        ? 'on_device_not_repository'
+        : error.code === 'GIT_NETWORK'
+          ? 'on_device_offline'
+          : 'on_device_failed';
+    return new LocalRpcError(LOCAL_RPC_ERROR.serverError, error.message, {
+      error: reason,
+      nativeCode: error.code,
+    });
   }
   return new LocalRpcError(
     LOCAL_RPC_ERROR.serverError,

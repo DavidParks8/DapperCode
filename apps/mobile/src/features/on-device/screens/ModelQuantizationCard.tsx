@@ -19,7 +19,8 @@ export function ModelQuantizationCard({
 }) {
   const runtime = useOnDeviceRuntime();
   const download = runtime.downloads.snapshot(model.id);
-  const admission = modelMemoryAdmission(model, memory);
+  // Loading releases the resident model first, so its memory counts toward a switch.
+  const admission = modelMemoryAdmission(model, memory, runtime.models.resident());
   const loaded =
     runtime.models.snapshot().modelId === model.id && runtime.models.snapshot().phase === 'ready';
   return (
@@ -29,16 +30,15 @@ export function ModelQuantizationCard({
         {model.recommended ? ' · Recommended' : ''}
       </LocalText>
       <LocalText>
-        {modelSize(model.bytes)} download · {model.contextTokens} context
+        {modelSize(model.bytes)} download · {model.contextTokens}–{model.maxContextTokens} context
       </LocalText>
       <LocalText>Estimated load budget {modelSize(modelMemoryBytes(model))}.</LocalText>
       {model.runtimeIssue ? <LocalText>{model.runtimeIssue}</LocalText> : null}
-      {admission.status !== 'ready' && !loaded ? <LocalText>{admission.message}</LocalText> : null}
+      {(admission.status !== 'ready' || admission.unloadsResident) && !loaded ? (
+        <LocalText>{admission.message}</LocalText>
+      ) : null}
       <LocalText>
-        {download.phase.replaceAll('_', ' ')}
-        {download.phase === 'downloading'
-          ? ` · ${Math.floor((download.bytesWritten / model.bytes) * 100)}%`
-          : ''}
+        {downloadStatus(download)}
         {loaded ? ' · Loaded' : ''}
       </LocalText>
       {download.error ? <LocalText>{download.error}</LocalText> : null}
@@ -96,27 +96,24 @@ function DownloadActions({
       </>
     );
   }
-  if (['downloading', 'preparing'].includes(download.phase)) {
+  if (['downloading', 'preparing', 'queued', 'verifying'].includes(download.phase)) {
     return (
       <>
         <LocalAction
-          title="Pause download"
+          title={download.phase === 'verifying' ? 'Pause verification' : 'Pause download'}
           onPress={() => {
-            void runtime.downloads.pause().catch((error: unknown) => runtime.report(error));
+            void runtime.downloads.pause(model.id);
           }}
         />
         <LocalAction
           title="Cancel download"
           destructive
           onPress={() => {
-            void runtime.downloads.cancel().catch((error: unknown) => runtime.report(error));
+            void runtime.downloads.cancel(model.id);
           }}
         />
       </>
     );
-  }
-  if (download.phase === 'verifying') {
-    return <LocalText>Verifying pinned SHA-256 before use…</LocalText>;
   }
   return (
     <>
@@ -134,8 +131,8 @@ function DownloadActions({
             download.verificationPending
               ? runtime.downloads.verify(model.id)
               : download.canResume
-                ? runtime.downloads.resume(model.id)
-                : runtime.downloads.download(model.id),
+                ? runtime.resumeModelDownload(model.id)
+                : runtime.downloadModel(model.id),
           )
         }
       />
@@ -149,4 +146,31 @@ function DownloadActions({
       ) : null}
     </>
   );
+}
+
+function downloadStatus(download: ModelDownloadSnapshot): string {
+  const percent = (bytes: number) =>
+    `${Math.floor((bytes / Math.max(download.totalBytes, 1)) * 100)}%`;
+  const rate =
+    download.bytesPerSecond === null
+      ? ''
+      : ` · ${(download.bytesPerSecond / 1024 ** 2).toFixed(1)} MiB/s`;
+  const eta =
+    download.etaSeconds === null
+      ? ''
+      : ` · ${Math.max(1, Math.ceil(download.etaSeconds / 60))} min left`;
+  switch (download.phase) {
+    case 'downloading':
+      return `Downloading ${percent(download.bytesWritten)} · ${modelSize(download.bytesWritten)} of ${modelSize(download.totalBytes)}${rate}${eta}`;
+    case 'verifying':
+      return `Verifying pinned SHA-256 ${percent(download.verifiedBytes)}${eta}`;
+    case 'queued':
+      return 'Queued · starts when another download finishes';
+    case 'paused':
+      return download.verificationPending
+        ? 'Downloaded · verification paused'
+        : `Paused at ${percent(download.bytesWritten)}`;
+    default:
+      return download.phase.replaceAll('_', ' ');
+  }
 }

@@ -9,7 +9,7 @@ public class OnDeviceAgentModule: Module {
   public func definition() -> ModuleDefinition {
     Name("OnDeviceAgent")
 
-    Function("getAPIVersion") { 6 }
+    Function("getAPIVersion") { 7 }
 
     Function("cancelGitTransfer") { GitNetworkOperation.shared.cancel() }
     Function("getGitTransferProgress") { GitNetworkOperation.shared.snapshot() }
@@ -40,6 +40,19 @@ public class OnDeviceAgentModule: Module {
       let result = try await self.workspaces.cloneWorkspace(
         name: name, remote: remote, credentialRef: credentialRef)
       return result.payload
+    }
+
+    AsyncFunction("renameWorkspace") { (id: String, name: String) in
+      let result = try await self.workspaces.renameWorkspace(id, name: name)
+      return result.payload
+    }
+
+    AsyncFunction("deleteWorkspace") { (id: String) in
+      try await self.workspaces.deleteWorkspace(id)
+    }
+
+    AsyncFunction("getWorkspaceChangeToken") { (id: String) in
+      try await self.workspaces.changeToken(id)
     }
 
     AsyncFunction("listWorkspaceFiles") { (id: String, path: String, limit: Int) in
@@ -74,6 +87,14 @@ public class OnDeviceAgentModule: Module {
       try await self.workspaces.removePath(id, path: path, expectedRevision: revision)
     }
 
+    AsyncFunction("renameWorkspaceEntry") { (id: String, path: String, destination: String) in
+      try await self.workspaces.renameEntry(id, path: path, destination: destination)
+    }
+
+    AsyncFunction("removeWorkspaceEntry") { (id: String, path: String) in
+      try await self.workspaces.removeEntry(id, path: path)
+    }
+
     AsyncFunction("searchWorkspaceFiles") { (id: String, query: String) in
       let result = try await self.workspaces.searchFiles(id, query: query)
       return result.payload
@@ -95,7 +116,41 @@ public class OnDeviceAgentModule: Module {
     }
 
     AsyncFunction("removeModelFile") { (id: String) in
+      try await ModelDownloadSession.shared.cancel(id)
       try await self.models.remove(id)
+    }
+
+    // Background model transfers, verification progress, and storage overview (API 7).
+    AsyncFunction("attachModelDownloads") {
+      await ModelDownloadSession.shared.attach().map(\.payload)
+    }
+
+    AsyncFunction("startModelDownload") { (id: String, url: String, expectedBytes: Int64) in
+      try ModelDownloadSession.shared.start(id, url: url, expectedBytes: expectedBytes).payload
+    }
+
+    AsyncFunction("pauseModelDownload") { (id: String) in
+      try await ModelDownloadSession.shared.pause(id).payload
+    }
+
+    AsyncFunction("cancelModelDownload") { (id: String) in
+      try await ModelDownloadSession.shared.cancel(id)
+    }
+
+    Function("getModelDownload") { (id: String) in
+      try ModelDownloadSession.shared.snapshot(id).payload
+    }
+
+    Function("getModelVerificationProgress") { (id: String) in
+      ModelVerificationProgress.shared.snapshot(id)
+    }
+
+    Function("cancelModelVerification") { (id: String) in
+      ModelVerificationProgress.shared.cancel(id)
+    }
+
+    AsyncFunction("getModelStorageInfo") {
+      try await self.models.storage().payload
     }
 
     AsyncFunction("readRuntimeDocument") { (name: String) in
@@ -149,6 +204,29 @@ public class OnDeviceAgentModule: Module {
 
     AsyncFunction("switchWorkspaceGitBranch") { (id: String, branch: String) in
       try await self.workspaces.gitSwitch(id, branch: branch)
+    }
+
+    AsyncFunction("createWorkspaceGitBranch") { (id: String, name: String, checkout: Bool) in
+      try await self.workspaces.gitCreateBranch(id, name: name, checkout: checkout)
+    }
+
+    AsyncFunction("discardWorkspaceGit") { (id: String, path: String?, removeUntracked: Bool) in
+      try await self.workspaces.gitDiscard(id, path: path, removeUntracked: removeUntracked)
+    }
+
+    AsyncFunction("initWorkspaceGit") { (id: String, initialBranch: String, origin: String?) in
+      let result = try await self.workspaces.gitInit(
+        id, initialBranch: initialBranch, origin: origin)
+      return result.payload
+    }
+
+    AsyncFunction("fetchWorkspaceGit") { (id: String, credentialRef: String?) in
+      try await self.workspaces.gitFetch(id, credentialRef: credentialRef)
+    }
+
+    AsyncFunction("pullWorkspaceGit") { (id: String, credentialRef: String?) in
+      let result = try await self.workspaces.gitPull(id, credentialRef: credentialRef)
+      return result.payload
     }
 
     AsyncFunction("getWorkspaceGitOrigin") { (id: String) in

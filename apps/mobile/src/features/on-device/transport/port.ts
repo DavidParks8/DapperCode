@@ -39,6 +39,8 @@ export interface LocalAgentPort {
    */
   send(id: string, text: string, submissionId: string, accepted: () => void): Promise<LocalThread>;
   stop(): Promise<void>;
+  /** Answers the pending tool approval in `run().approval`. */
+  resolveApproval(callId: string, approved: boolean): void;
   git: LocalGitPort;
 }
 

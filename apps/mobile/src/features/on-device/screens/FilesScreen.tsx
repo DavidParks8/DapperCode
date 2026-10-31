@@ -1,26 +1,50 @@
 import { useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useOnDeviceRuntime } from '../runtime/OnDeviceProvider';
-import type { LocalDirectoryListing, LocalFileRead } from '../workspaces/types';
+import {
+  joinWorkspacePath,
+  LOCAL_WORKSPACE_ROOT,
+  parentWorkspacePath,
+  type LocalDirectoryListing,
+  type LocalFileRead,
+} from '../workspaces/types';
 import { LocalAction, LocalCard, LocalField, LocalPage, LocalText, useLocalOperation } from './ui';
+
+const LISTING_LIMIT = 200;
+const MISSING_WORKSPACE = 'Choose a local workspace first.';
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} bytes`;
+  }
+  const kib = bytes / 1024;
+  return kib < 1024 ? `${kib.toFixed(1)} KiB` : `${(kib / 1024).toFixed(1)} MiB`;
+}
 
 export function LocalFilesScreen() {
   const runtime = useOnDeviceRuntime();
   const { workspaceId = '' } = useLocalSearchParams<{ workspaceId: string }>();
-  const [directory, setDirectory] = useState('.');
+  const [directory, setDirectory] = useState(LOCAL_WORKSPACE_ROOT);
   const [listing, setListing] = useState<LocalDirectoryListing | null>(null);
   const [file, setFile] = useState<(LocalFileRead & { name: string }) | null>(null);
   const [content, setContent] = useState('');
   const [newPath, setNewPath] = useState('');
   const [readError, setReadError] = useState<string | null>(null);
+  const [refreshes, setRefreshes] = useState(0);
+  const changeToken = useRef<string | null>(null);
   const operation = useLocalOperation();
+  const refresh = useCallback(() => setRefreshes((value) => value + 1), []);
   useEffect(() => {
     let active = true;
     setListing(null);
     setReadError(null);
+    if (!workspaceId) {
+      setReadError(MISSING_WORKSPACE);
+      return;
+    }
     void runtime.native
-      .listWorkspaceFiles(workspaceId, directory, 200)
+      .listWorkspaceFiles(workspaceId, directory, LISTING_LIMIT)
       .then((result) => {
         if (active) {
           setListing(result);
@@ -34,24 +58,59 @@ export function LocalFilesScreen() {
     return () => {
       active = false;
     };
-  }, [directory, runtime, workspaceId]);
+  }, [directory, runtime, workspaceId, refreshes]);
+  const version = runtime.version();
+  useEffect(() => {
+    if (!workspaceId) {
+      return;
+    }
+    let active = true;
+    // Agent tool edits change the native token; refresh the listing when it moves.
+    void runtime.native.getWorkspaceChangeToken(workspaceId).then(
+      (token) => {
+        if (active && changeToken.current !== token) {
+          if (changeToken.current !== null) {
+            refresh();
+          }
+          changeToken.current = token;
+        }
+      },
+      () => undefined,
+    );
+    return () => {
+      active = false;
+    };
+  }, [refresh, runtime, version, workspaceId]);
   const open = (path: string) =>
     operation.run(async () => {
       const read = await runtime.native.readWorkspaceFile(workspaceId, path, 0, 65536);
       setFile({ ...read, name: path });
       setContent(read.content);
     });
+  const mutate = (label: string, action: () => Promise<void>) =>
+    operation.run(() =>
+      runtime.workspaceTask(label, async () => {
+        await action();
+        changeToken.current = await runtime.native.getWorkspaceChangeToken(workspaceId);
+        refresh();
+      }),
+    );
   return (
     <LocalPage title="Local files" busy={operation.busy} error={operation.error ?? readError}>
-      <LocalText title>{directory}</LocalText>
-      {directory !== '.' ? (
+      <LocalText title>{directory || 'Workspace root'}</LocalText>
+      {directory !== LOCAL_WORKSPACE_ROOT ? (
         <LocalAction
           title="Parent folder"
-          onPress={() => setDirectory(directory.split('/').slice(0, -1).join('/') || '.')}
+          onPress={() => setDirectory(parentWorkspacePath(directory))}
         />
       ) : null}
+      <LocalAction
+        title="Refresh files"
+        disabled={operation.busy || !workspaceId}
+        onPress={refresh}
+      />
       {listing?.entries.map((entry) => {
-        const path = directory === '.' ? entry.name : `${directory}/${entry.name}`;
+        const path = joinWorkspacePath(directory, entry.name);
         return (
           <LocalAction
             key={entry.name}
@@ -62,9 +121,7 @@ export function LocalFilesScreen() {
         );
       })}
       {listing?.truncated ? (
-        <LocalText>
-          Listing truncated to 200 entries. The agent can search within this workspace.
-        </LocalText>
+        <LocalText>Showing the first {LISTING_LIMIT} entries in this folder.</LocalText>
       ) : null}
       {file ? (
         <LocalCard>
@@ -79,8 +136,8 @@ export function LocalFilesScreen() {
           />
           {file.nextOffset !== null ? (
             <LocalText>
-              Read-only preview: this file exceeds the 64 KiB editor limit. Agent tools support
-              bounded reads.
+              Read-only preview of the first {formatBytes(file.nextOffset)} of{' '}
+              {formatBytes(file.totalBytes)}. Files over 64 KiB cannot be edited here.
             </LocalText>
           ) : (
             <LocalAction
@@ -101,30 +158,82 @@ export function LocalFilesScreen() {
               }
             />
           )}
+          <FileManageActions
+            key={file.name}
+            path={file.name}
+            busy={operation.busy}
+            onRename={(destination) =>
+              mutate('Renaming file', async () => {
+                await runtime.native.renameWorkspaceEntry(workspaceId, file.name, destination);
+                setFile(null);
+              })
+            }
+            onDelete={() =>
+              mutate('Deleting file', async () => {
+                await runtime.native.removeWorkspaceEntry(workspaceId, file.name);
+                setFile(null);
+              })
+            }
+          />
         </LocalCard>
       ) : null}
       <LocalCard>
         <LocalField
-          label="New file path"
+          label="New file name"
           value={newPath}
           onChangeText={setNewPath}
           placeholder="notes.txt"
+          autoCapitalize="none"
+          autoCorrect={false}
         />
         <LocalAction
           title="Create empty file"
-          disabled={operation.busy || !newPath.trim()}
+          disabled={operation.busy || !newPath.trim() || !workspaceId}
           onPress={() =>
-            operation.run(() =>
-              runtime.workspaceTask('Creating file', async () => {
-                await runtime.native.writeWorkspaceFile(workspaceId, newPath.trim(), '', null);
-                const result = await runtime.native.listWorkspaceFiles(workspaceId, directory, 200);
-                setListing(result);
-                setNewPath('');
-              }),
-            )
+            mutate('Creating file', async () => {
+              await runtime.native.writeWorkspaceFile(
+                workspaceId,
+                joinWorkspacePath(directory, newPath.trim()),
+                '',
+                null,
+              );
+              setNewPath('');
+            })
           }
         />
       </LocalCard>
     </LocalPage>
+  );
+}
+
+function FileManageActions({
+  path,
+  busy,
+  onRename,
+  onDelete,
+}: {
+  path: string;
+  busy: boolean;
+  onRename: (destination: string) => void;
+  onDelete: () => void;
+}) {
+  const [destination, setDestination] = useState(path);
+  const target = destination.trim();
+  return (
+    <>
+      <LocalField
+        label="File path"
+        value={destination}
+        onChangeText={setDestination}
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+      <LocalAction
+        title="Rename file"
+        disabled={busy || !target || target === path}
+        onPress={() => onRename(target)}
+      />
+      <LocalAction title="Delete file" destructive disabled={busy} onPress={onDelete} />
+    </>
   );
 }

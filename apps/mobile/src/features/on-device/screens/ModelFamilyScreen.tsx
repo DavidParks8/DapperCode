@@ -116,8 +116,7 @@ export function ModelFamilyScreen() {
         disabled={operation.busy || runtime.models.snapshot().phase === 'empty'}
         onPress={() =>
           operation.run(async () => {
-            await runtime.stop();
-            await runtime.models.unload();
+            await runtime.unloadModel();
             setMemory(runtime.native.getMemoryInfo());
           })
         }

@@ -1,5 +1,6 @@
 import type {
   BridgeThreadQueueState,
+  PendingApproval,
   FileSystemListResponse,
   WorkspaceListResponse,
 } from '@bridge/types/types';
@@ -10,6 +11,7 @@ import { createLocalGitHandlers } from './gitHandlers';
 import { readParam, readRecord, type RpcParams } from './params';
 import type { LocalAgentPort } from './port';
 import {
+  LOCAL_AGENT_ID,
   LOCAL_AGENT_NAME,
   LOCAL_MODEL_CONFIG_ID,
   LOCAL_WORKSPACE_ROOT,
@@ -34,6 +36,9 @@ export interface LocalRpcEndpoint {
 }
 
 type Params = RpcParams;
+
+export const LOCAL_APPROVAL_ALLOW = 'allow-once';
+export const LOCAL_APPROVAL_DENY = 'reject-once';
 type Handler = (params: Params) => unknown;
 
 /**
@@ -65,6 +70,7 @@ export const LOCAL_IMPLEMENTED_METHODS = [
   'bridge/workspaces/list',
   'bridge/fs/list',
   'bridge/approvals/list',
+  'bridge/approvals/resolve',
   'bridge/userInput/list',
   'bridge/git/status',
   'bridge/git/diff',
@@ -111,6 +117,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
   private readonly createdBySubmission = new Map<string, string>();
   private readonly handlers: Record<string, Handler>;
   private unsubscribe: (() => void) | null = null;
+  private approval: PendingApproval | null = null;
   private flushing = false;
   private dirty = false;
 
@@ -124,6 +131,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
       return;
     }
     this.projector.prime(this.port.threads());
+    this.approval = this.pendingApproval();
     this.unsubscribe = this.port.subscribe(() => this.flush());
   }
 
@@ -171,9 +179,55 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
         for (const notification of this.projector.diff(this.port.threads())) {
           this.publish(notification);
         }
+        this.publishApprovalChange();
       } while (this.dirty);
     } finally {
       this.flushing = false;
+    }
+  }
+
+  /** The run's pending tool approval in the bridge's approval shape, keyed by tool call. */
+  private pendingApproval(): PendingApproval | null {
+    const approval = this.port.run().approval;
+    if (!approval) {
+      return null;
+    }
+    if (this.approval?.requestId === approval.callId) {
+      return this.approval;
+    }
+    return {
+      requestId: approval.callId,
+      agentId: LOCAL_AGENT_ID,
+      kind: 'toolCall',
+      threadId: approval.threadId,
+      turnId: approval.turnId,
+      itemId: approval.callId,
+      title: approval.summary,
+      message: approval.summary,
+      reason: approval.summary,
+      requestedAt: new Date().toISOString(),
+      options: [
+        { id: LOCAL_APPROVAL_ALLOW, label: 'Allow', kind: 'AllowOnce' },
+        { id: LOCAL_APPROVAL_DENY, label: 'Deny', kind: 'RejectOnce' },
+      ],
+    };
+  }
+
+  private publishApprovalChange(): void {
+    const next = this.pendingApproval();
+    const previous = this.approval;
+    if (next?.requestId === previous?.requestId) {
+      return;
+    }
+    this.approval = next;
+    if (previous) {
+      this.publish({
+        method: 'bridge/approval.resolved',
+        params: { id: previous.requestId, threadId: previous.threadId },
+      });
+    }
+    if (next) {
+      this.publish({ method: 'bridge/approval.requested', params: { ...next } });
     }
   }
 
@@ -369,14 +423,15 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
 
   private filesystemList(path: string | null): FileSystemListResponse {
     const atRoot = !path || path === LOCAL_WORKSPACE_ROOT;
+    const workspaces = this.port.workspaces();
     const entries = atRoot
-      ? [...localWorkspacePaths(this.port.workspaces())].map(([, entryPath]) => ({
+      ? [...localWorkspacePaths(workspaces)].map(([id, entryPath]) => ({
           name: entryPath.slice(LOCAL_WORKSPACE_ROOT.length + 1),
           path: entryPath,
           kind: 'directory',
           hidden: false,
           selectable: true,
-          isGitRepo: false,
+          isGitRepo: workspaces.find((workspace) => workspace.id === id)?.isRepository === true,
         }))
       : [];
     return {
@@ -557,7 +612,32 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
         await port.refreshWorkspaces();
         return this.filesystemList(readParam(params, 'path'));
       },
-      'bridge/approvals/list': () => [],
+      'bridge/approvals/list': () => {
+        const approval = this.pendingApproval();
+        return approval ? [approval] : [];
+      },
+      'bridge/approvals/resolve': (params) => {
+        const approval = this.pendingApproval();
+        const id = readParam(params, 'id');
+        const decision = readParam(params, 'decision');
+        if (!approval || approval.requestId !== id) {
+          throw new LocalRpcError(LOCAL_RPC_ERROR.notFound, 'This approval is no longer pending.', {
+            error: 'on_device_failed',
+          });
+        }
+        if (decision !== LOCAL_APPROVAL_ALLOW && decision !== LOCAL_APPROVAL_DENY) {
+          throw new LocalRpcError(LOCAL_RPC_ERROR.invalidParams, 'Choose Allow or Deny.', {
+            error: 'on_device_failed',
+          });
+        }
+        port.resolveApproval(approval.requestId, decision === LOCAL_APPROVAL_ALLOW);
+        return {
+          ok: true,
+          approval,
+          decision,
+          resolutionId: readParam(params, 'resolutionId') ?? '',
+        };
+      },
       'bridge/userInput/list': () => [],
       ...createLocalGitHandlers(port, (params) => this.gitWorkspace(params)),
     };

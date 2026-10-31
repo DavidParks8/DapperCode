@@ -1,6 +1,13 @@
 import { LOCAL_MODEL_CATALOG } from '../models/catalog';
 import type { OnDeviceRuntime } from '../runtime/runtime';
+import type { OnDeviceRuntimeSlice } from '../runtime/types';
 import type { LocalAgentPort } from './port';
+
+/**
+ * The transport projects threads and the run (including approvals). Download progress and other
+ * slices are read on demand, so they never wake the event projector.
+ */
+const TRANSPORT_SLICES: readonly OnDeviceRuntimeSlice[] = ['threads', 'loop'];
 
 /**
  * Adapts the on-device runtime's public API to the transport port. Workspace mutations go through
@@ -9,9 +16,9 @@ import type { LocalAgentPort } from './port';
 export function createRuntimeAgentPort(runtime: OnDeviceRuntime): LocalAgentPort {
   const native = runtime.native;
   return {
-    subscribe: (listener) => runtime.subscribe(listener),
+    subscribe: (listener) => runtime.subscribe(listener, TRANSPORT_SLICES),
     threads: () => runtime.threads.list(),
-    thread: (id) => runtime.threads.list().find((thread) => thread.id === id) ?? null,
+    thread: (id) => runtime.threads.find(id),
     run: () => runtime.loop.snapshot(),
     workspaces: () => runtime.workspaces(),
     refreshWorkspaces: () => runtime.refreshWorkspaces(),
@@ -29,10 +36,11 @@ export function createRuntimeAgentPort(runtime: OnDeviceRuntime): LocalAgentPort
       await runtime.threads.save(id);
       return next;
     },
-    deleteThread: (id) => runtime.threads.remove(id),
+    deleteThread: (id) => runtime.deleteThread(id),
     send: (id, text, submissionId, accepted) =>
       runtime.sendMessage(id, text, submissionId, accepted),
     stop: () => runtime.stop(),
+    resolveApproval: (callId, approved) => runtime.loop.resolveApproval(callId, approved),
     git: {
       status: (id) => native.getWorkspaceGitStatus(id),
       diff: (id) => native.getWorkspaceGitDiff(id, null),
@@ -54,10 +62,7 @@ export function createRuntimeAgentPort(runtime: OnDeviceRuntime): LocalAgentPort
         runtime.workspaceTask('Switching branch', () =>
           native.switchWorkspaceGitBranch(id, branch),
         ),
-      push: (id) =>
-        runtime.workspaceTask('Pushing', async () =>
-          native.pushWorkspaceGit(id, await runtime.credential(id)),
-        ),
+      push: (id) => runtime.workspaceTask('Pushing', () => runtime.pushWorkspace(id)),
     },
   };
 }

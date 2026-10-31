@@ -18,6 +18,26 @@ export default async function scenario(e2e) {
         nativeTestPlist(bundleId, 'NativeWorkspaces'),
       );
       const sdk = await e2e.run('xcrun', ['--sdk', 'iphonesimulator', '--show-sdk-path']);
+      const configuration = path.join(e2e.runtimeDir, 'GitNetworkConfiguration.o');
+      await e2e.run(
+        'xcrun',
+        [
+          '--sdk',
+          'iphonesimulator',
+          'clang',
+          '-target',
+          'arm64-apple-ios16.4-simulator',
+          '-isysroot',
+          sdk.stdout.trim(),
+          '-I',
+          path.join(library, 'Headers'),
+          '-c',
+          path.join(module, 'ios/GitNetworkConfiguration.m'),
+          '-o',
+          configuration,
+        ],
+        { timeoutMs: 30_000 },
+      );
       await e2e.run(
         'xcrun',
         [
@@ -39,10 +59,19 @@ export default async function scenario(e2e) {
           'CoreFoundation',
           '-liconv',
           '-lz',
+          '-import-objc-header',
+          path.join(module, 'ios/GitNetworkConfiguration.h'),
+          configuration,
+          path.join(module, 'ios/NativeServiceError.swift'),
           path.join(module, 'ios/GitCredentialStore.swift'),
           path.join(module, 'ios/NativeGit.swift'),
+          path.join(module, 'ios/GitNetworkOperation.swift'),
+          path.join(module, 'ios/NativeGitRead.swift'),
+          path.join(module, 'ios/NativeGitMutations.swift'),
+          path.join(module, 'ios/NativeGitRemote.swift'),
           path.join(module, 'ios/WorkspaceStore.swift'),
           path.join(module, 'ios/WorkspaceFileTools.swift'),
+          path.join(module, 'ios/WorkspaceGitTools.swift'),
           path.join(module, 'tests/NativeWorkspaceTests.swift'),
           path.join(module, 'tests/NativeTestHost.swift'),
           '-o',
@@ -52,7 +81,7 @@ export default async function scenario(e2e) {
       );
       await e2e.run('codesign', ['--force', '--sign', '-', app]);
       await e2e.check(
-        'test app compiles the production workspace actor and file tools',
+        'test app compiles the production workspace actor, file tools, and Git tools',
         () => true,
       );
     });

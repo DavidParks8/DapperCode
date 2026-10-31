@@ -24,7 +24,7 @@ enum GitCredentialStore {
       !username.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
       !token.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
     else {
-      throw CredentialError("Invalid Git credential parameters.")
+      throw CredentialError(.credentialInvalid, "Invalid Git credential parameters.")
     }
     let reference = UUID().uuidString
     let credential = StoredGitCredential(
@@ -35,7 +35,7 @@ enum GitCredentialStore {
     query[kSecAttrAccessible] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
     let status = SecItemAdd(query as CFDictionary, nil)
     guard status == errSecSuccess else {
-      throw CredentialError("Could not store Git credentials (Keychain status \(status)).")
+      throw CredentialError(.storageFailure, "Could not store Git credentials (Keychain status \(status)).")
     }
     return reference
   }
@@ -48,11 +48,11 @@ enum GitCredentialStore {
     let status = SecItemCopyMatching(query as CFDictionary, &result)
     guard status == errSecSuccess, let data = result as? Data else {
       throw CredentialError(
-        "Git credentials are unavailable. Sign in again (Keychain status \(status)).")
+        .credentialUnavailable, "Git credentials are unavailable. Sign in again (Keychain status \(status)).")
     }
     let credential = try JSONDecoder().decode(StoredGitCredential.self, from: data)
     guard credential.host == host else {
-      throw CredentialError("Git credentials cannot be used with a different host.")
+      throw CredentialError(.gitCredentialOrigin, "Git credentials cannot be used with a different host.")
     }
     return credential
   }
@@ -60,13 +60,13 @@ enum GitCredentialStore {
   static func remove(_ reference: String) throws {
     let status = SecItemDelete(try validatedKey(reference) as CFDictionary)
     guard status == errSecSuccess || status == errSecItemNotFound else {
-      throw CredentialError("Could not remove Git credentials (Keychain status \(status)).")
+      throw CredentialError(.storageFailure, "Could not remove Git credentials (Keychain status \(status)).")
     }
   }
 
   private static func validatedKey(_ reference: String) throws -> [CFString: Any] {
     guard UUID(uuidString: reference) != nil else {
-      throw CredentialError("Invalid Git credential reference.")
+      throw CredentialError(.credentialInvalid, "Invalid Git credential reference.")
     }
     return key(reference)
   }
@@ -80,7 +80,11 @@ enum GitCredentialStore {
   }
 }
 
-private struct CredentialError: LocalizedError {
-  let errorDescription: String?
-  init(_ message: String) { errorDescription = message }
+private struct CredentialError: NativeCodedError {
+  let code: NativeErrorCode
+  let message: String
+  init(_ code: NativeErrorCode, _ message: String) {
+    self.code = code
+    self.message = message
+  }
 }

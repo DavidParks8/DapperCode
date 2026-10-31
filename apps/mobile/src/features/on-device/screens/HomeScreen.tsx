@@ -1,46 +1,74 @@
 import { useRouter } from 'expo-router';
 import type { ReactNode } from 'react';
 
+import { findLocalModelDefinition } from '../models/catalog';
 import { useOnDeviceRuntime } from '../runtime/OnDeviceProvider';
-import { LocalAction, LocalCard, LocalPage, LocalText, useLocalOperation } from './ui';
+import { localAgentStatus, localConversationReadiness } from '../runtime/status';
+import type { OnDeviceRuntimeSlice } from '../runtime/types';
+import { LocalAction, LocalCard, LocalError, LocalPage, LocalText, useLocalOperation } from './ui';
+
+const HOME_SLICES: readonly OnDeviceRuntimeSlice[] = [
+  'threads',
+  'loop',
+  'models',
+  'downloads',
+  'preferences',
+  'workspaces',
+  'issues',
+  'network',
+];
 
 export function OnDeviceHomeScreen({ executionTargets }: { executionTargets: ReactNode }) {
-  const runtime = useOnDeviceRuntime();
+  const runtime = useOnDeviceRuntime(HOME_SLICES);
   const router = useRouter();
   const operation = useLocalOperation();
   const preferences = runtime.preferences();
   const workspace = runtime.workspaces().find((entry) => entry.id === preferences.workspaceId);
-  const model = runtime.models.snapshot();
-  const failure = runtime.error();
+  const download =
+    preferences.modelId && findLocalModelDefinition(preferences.modelId)
+      ? runtime.downloads.snapshot(preferences.modelId)
+      : null;
+  const status = localAgentStatus({
+    run: runtime.loop.snapshot(),
+    model: runtime.models.snapshot(),
+    thread: null,
+    modelId: preferences.modelId,
+    download,
+    workspaceActivity: runtime.workspaceActivity(),
+  });
+  const readiness = localConversationReadiness({
+    modelId: preferences.modelId,
+    download,
+    workspaceId: preferences.workspaceId,
+    workspaces: runtime.workspaces(),
+  });
   return (
     <LocalPage
       title="On this iPhone"
       busy={operation.busy}
-      error={operation.error ?? failure?.message}
-      navigation={<LocalText>Offline</LocalText>}
+      error={operation.error}
+      navigation={<LocalText>{runtime.network() === 'offline' ? 'Offline' : ''}</LocalText>}
     >
       <LocalText>
         Private coding with native file and Git tools. Download a model and clone a workspace while
         online; then chat, edit, and commit offline. No desktop or cloud fallback.
       </LocalText>
-      {failure ? (
-        <LocalAction
-          title="Retry saving local state"
-          onPress={() =>
-            operation.run(async () => {
-              await runtime.threads.retryPersistence();
-              await runtime.flush();
-              runtime.dismissError();
-            })
-          }
-        />
-      ) : null}
+      {runtime.issues().map((issue) => (
+        <LocalCard key={issue.id}>
+          <LocalError message={issue.message} />
+          {issue.retryable ? (
+            <LocalAction
+              title="Retry saving"
+              onPress={() => operation.run(() => runtime.retryPersistence())}
+            />
+          ) : null}
+          <LocalAction title="Dismiss" onPress={() => runtime.dismissIssue(issue.id)} />
+        </LocalCard>
+      ))}
       <LocalCard>
         <LocalText title>{workspace?.name ?? 'Choose a workspace'}</LocalText>
-        <LocalText>
-          {model.phase === 'ready' ? 'Model loaded' : 'Model not loaded'} ·{' '}
-          {preferences.modelId ?? 'No model selected'}
-        </LocalText>
+        <LocalText>{status.label}</LocalText>
+        {status.detail ? <LocalText>{status.detail}</LocalText> : null}
         <LocalAction
           title="Model library"
           testID="on-device-model-library"
@@ -52,7 +80,7 @@ export function OnDeviceHomeScreen({ executionTargets }: { executionTargets: Rea
         <LocalAction
           title="New local conversation"
           testID="on-device-new-chat"
-          disabled={operation.busy || !workspace || !preferences.modelId}
+          disabled={operation.busy || !readiness.canStart}
           onPress={() =>
             operation.run(async () => {
               const thread = await runtime.createThread();
@@ -63,6 +91,7 @@ export function OnDeviceHomeScreen({ executionTargets }: { executionTargets: Rea
             })
           }
         />
+        {readiness.reason ? <LocalText>{readiness.reason}</LocalText> : null}
       </LocalCard>
       <LocalText title>Local conversations</LocalText>
       {runtime.threads.list().map((thread) => (
@@ -85,7 +114,7 @@ export function OnDeviceHomeScreen({ executionTargets }: { executionTargets: Rea
             title="Delete conversation"
             destructive
             disabled={operation.busy || thread.status === 'running'}
-            onPress={() => operation.run(() => runtime.threads.remove(thread.id))}
+            onPress={() => operation.run(() => runtime.deleteThread(thread.id))}
           />
         </LocalCard>
       ))}

@@ -6,7 +6,13 @@ import type { LocalMessage, LocalThread } from '../runtime/types';
 import type { LocalWorkspace } from '../workspaces/types';
 import type { LocalAgentPort, LocalGitPort } from './port';
 
-const IDLE: LocalRunSnapshot = { phase: 'idle', threadId: null, turnId: null, toolName: null };
+const IDLE: LocalRunSnapshot = {
+  phase: 'idle',
+  threadId: null,
+  turnId: null,
+  toolName: null,
+  approval: null,
+};
 
 /**
  * Scripted, in-memory `LocalAgentPort` for transport and shell tests. Tests drive a run step by
@@ -16,7 +22,7 @@ const IDLE: LocalRunSnapshot = { phase: 'idle', threadId: null, turnId: null, to
 export class FakeAgentPort implements LocalAgentPort {
   readonly listeners = new Set<() => void>();
   readonly threadMap = new Map<string, LocalThread>();
-  workspaceList: LocalWorkspace[] = [{ id: 'ws-one', name: 'Demo' }];
+  workspaceList: LocalWorkspace[] = [{ id: 'ws-one', name: 'Demo', isRepository: true }];
   models: LocalModelDefinition[] = [localModelDefinition('qwen3-1.7b-q4-k-m')];
   defaultValues: { workspaceId: string | null; modelId: string | null } = {
     workspaceId: null,
@@ -148,7 +154,7 @@ export class FakeAgentPort implements LocalAgentPort {
       return Promise.reject(this.sendError);
     }
     const turnId = `turn-${String(++this.counter)}`;
-    this.runValue = { phase: 'preparing', threadId: id, turnId, toolName: null };
+    this.runValue = { phase: 'preparing', threadId: id, turnId, toolName: null, approval: null };
     this.change(id, (thread) => ({
       ...thread,
       status: 'running',
@@ -177,6 +183,28 @@ export class FakeAgentPort implements LocalAgentPort {
     this.emit();
     this.settle(threadId, 'interrupted', 'Stopped. Completed edits are preserved.');
   };
+
+  readonly approvals: { callId: string; approved: boolean }[] = [];
+
+  resolveApproval = (callId: string, approved: boolean) => {
+    if (this.runValue.approval?.callId !== callId) {
+      throw new Error('This approval request is no longer pending.');
+    }
+    this.approvals.push({ callId, approved });
+    this.runValue = { ...this.runValue, phase: 'tool', approval: null };
+    this.emit();
+  };
+
+  /** Asks for approval of a tool call, as the loop does for network side effects. */
+  requestApproval(threadId: string, callId: string, toolName: string, summary: string): void {
+    this.runValue = {
+      ...this.runValue,
+      phase: 'approval',
+      toolName,
+      approval: { threadId, turnId: this.runValue.turnId ?? '', callId, toolName, summary },
+    };
+    this.emit();
+  }
 
   /** Appends or grows an assistant message, as streamed tokens do. */
   streamAssistant(threadId: string, messageId: string, content: string, reasoning = ''): void {
