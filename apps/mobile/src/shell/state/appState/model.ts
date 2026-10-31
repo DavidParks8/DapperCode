@@ -53,6 +53,8 @@ export interface AppSettingsState {
   localDefaultStartCwd: string | null;
   /** The user hid the On this iPhone first-run checklist. */
   localSetupDismissed: boolean;
+  /** A local chat has had a message, so first-run setup is over even if every chat is deleted. */
+  localSetupCompleted: boolean;
   preferredAgentId: AgentId | null;
   agentSettings: AgentDefaultSettingsMap;
   approvalMode: ApprovalMode;
@@ -129,6 +131,7 @@ export function createDefaultAppSettings(): AppSettingsState {
     defaultStartCwd: null,
     localDefaultStartCwd: null,
     localSetupDismissed: false,
+    localSetupCompleted: false,
     preferredAgentId: null,
     agentSettings: {},
     approvalMode: 'all',
@@ -293,6 +296,7 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
     defaultStartCwd: parsed.defaultStartCwd,
     localDefaultStartCwd: normalizeNullableString(record['localDefaultStartCwd']),
     localSetupDismissed: record['localSetupDismissed'] === true,
+    localSetupCompleted: record['localSetupCompleted'] === true,
     preferredAgentId: parsed.preferredAgentId,
     agentSettings: parsed.agentSettings,
     approvalMode: parsed.approvalMode,

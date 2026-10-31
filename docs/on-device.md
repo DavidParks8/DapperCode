@@ -10,7 +10,7 @@ continue to use desktop agents.
 1. Choose **On this iPhone** wherever you pick where agents run: the onboarding choices, the
    **Runs on** row in the drawer, the profile capsule under **Let's build** in a new chat, or
    **Settings → Profiles**. Each opens a new chat in the local profile.
-2. Until the first local chat has a message, the new chat shows a **Set up On this iPhone**
+2. Until a local chat first has a message, the new chat shows a **Set up On this iPhone**
    checklist: download a model (Settings → Models), clone or create a workspace (the workspace
    picker), add a Git author (Settings → Git & GitHub; recommended, since commits need it), and
    start your first chat. Only the model and workspace are required; **Hide setup guide** removes
@@ -194,6 +194,30 @@ and that prompt is passed straight to completion.
   tools are marked interrupted and are **never automatically replayed**. Inspect the workspace and,
   for push, the remote before retrying. Streamed text, tool results, and run settlement are
   coalesced into one write shortly afterwards (and on backgrounding).
+- Conversations are stored append-first (`runtime/threads.ts`, `runtime/threadJournal.ts`) using
+  only the native runtime-document store. `thread-<id>.json` is the base: the whole conversation
+  plus `segment`, the last journal position it contains. Each save after that writes one small
+  `threadseg-<id>-<position>.json` segment holding only what changed (conversation fields, updated
+  or new messages, removed message ids), so a tool turn writes a few hundred bytes per journal step
+  regardless of conversation length. A segment is durable before the step it journals continues.
+  The journal is compacted into a new base when a run settles, when a change would exceed a 512 KiB
+  segment, or when the journal reaches 64 segments or the base's size (at least 256 KiB); every
+  document stays far below the native 8 MiB limit. The base is written first and the segments it
+  contains are removed afterwards, so a crash at any point replays to the same conversation.
+- At startup, the contiguous segments after the base are replayed; segments the base already
+  contains (an interrupted compaction) are discarded. A damaged, unreadable, or out-of-order segment
+  ends the replay: it and every later segment are set aside with their bytes preserved, the
+  conversation opens at the last good step, and its next write is a new base positioned past every
+  set-aside segment, so no name is ever reused. A segment that cannot be moved is left in place
+  and recorded in the base's `skipped` list, so it is never applied or deleted as already folded;
+  it is set aside at a later start. A damaged base is set aside together with its segments (and
+  stays in place while any of them cannot be moved).
+- Whole-conversation documents from older builds (no `segment`) are read as a base and rewritten
+  once as a positioned base on their first save, before any segment follows them. Because an older
+  build ignores segments and rewrites the base without `segment`, segments found next to such a
+  base are never applied: they are set aside with their bytes preserved and the base's content
+  wins. Deleting a conversation removes the base first and then its segments; segments left
+  without a base by an interrupted delete are discarded at the next start.
 - Composer drafts are the shared chat drafts, stored per profile and chat exactly like desktop
   chats; the runtime never writes drafts. Unsent drafts from older builds (inline in
   `preferences.json` or in per-conversation `draft-…` documents) are imported once into the
@@ -455,8 +479,10 @@ The shared screens serve the local profile through the transport; nothing branch
   progress), so a first download started from the library without selecting a model still counts.
   It also reports a Git author step (`recommended` until `preferences().author` is set) and whether
   any local conversation has a message. `LocalSetupGuide` renders model → workspace → author →
-  first chat in the new chat until that first message exists or the user hides it
-  (`localSetupDismissed` in app settings). Only model and workspace feed readiness, so a missing
+  first chat in the new chat until that first message exists or the user hides it. The runtime
+  host records the first message once as `localSetupCompleted` (`useRecordLocalSetupCompletion`),
+  so deleting every chat later does not bring the guide back; hiding it sets
+  `localSetupDismissed`. Both are device-wide app settings. Only model and workspace feed readiness, so a missing
   author never blocks a chat. The workspace step opens the chat's workspace picker
   (`openWorkspaceModalAtom`); the model and author steps open Settings → Models and Settings →
   Git & GitHub through `LOCAL_SETUP_DESTINATIONS` (`shell/profiles/localSetup.ts`). Missing

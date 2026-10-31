@@ -12,6 +12,7 @@ import { OnDeviceOfflineError, type OnDeviceNetworkPort } from './network';
 import { emptyLocalPreferences } from './preferences';
 import { OnDeviceRuntime } from './runtime';
 import { localAgentStatus, type LocalDownloadState } from './status';
+import { storedLocalThread } from './testing';
 import { THREAD_PROGRESS_SAVE_DELAY_MS } from './threads';
 import type { LocalThread, OnDeviceReachability } from './types';
 
@@ -322,7 +323,7 @@ test('backgrounding flushes history, unloads native context, and successful writ
   await h.runtime.background();
   expect(h.context.release).toHaveBeenCalledTimes(1);
   expect(h.runtime.models.snapshot().phase).toBe('empty');
-  expect(h.documents.get(`thread-${h.thread.id}.json`)).toContain('Renamed');
+  expect(storedLocalThread(h.documents, h.thread.id)?.title).toBe('Renamed');
   // Drafts belong to the shared composer; the runtime never writes draft documents.
   expect([...h.documents.keys()].some((name) => name.startsWith('draft-'))).toBe(false);
   expect(h.runtime.error()?.message).toBe('Earlier operation failed');
@@ -891,14 +892,25 @@ describe('persistence volume', () => {
       const h = await ready();
       const name = `thread-${h.thread.id}.json`;
       const threadWrites = () =>
-        h.native.writeRuntimeDocument.mock.calls.filter(([document]) => document === name);
+        h.native.writeRuntimeDocument.mock.calls.filter(([document]) =>
+          document.includes(h.thread.id),
+        );
       h.native.writeRuntimeDocument.mockClear();
       await h.runtime.sendMessage(h.thread.id, 'hello', 'submission', jest.fn());
       expect(threadWrites()).toHaveLength(1);
-      expect(JSON.parse(threadWrites()[0]?.[1] ?? '{}')).toMatchObject({ status: 'running' });
+      // The user turn is appended as a journal segment, not a rewrite of the conversation.
+      expect(threadWrites()[0]?.[0]).toBe(`threadseg-${h.thread.id}-0000000001.json`);
+      expect(JSON.parse(threadWrites()[0]?.[1] ?? '{}')).toMatchObject({
+        set: { status: 'running' },
+        messages: [{ role: 'user', content: 'hello' }],
+      });
       await jest.advanceTimersByTimeAsync(THREAD_PROGRESS_SAVE_DELAY_MS);
       expect(threadWrites()).toHaveLength(2);
+      // Settlement compacts the journal into a new base and removes the segment.
+      expect(threadWrites()[1]?.[0]).toBe(name);
+      expect([...h.documents.keys()].filter((key) => key.startsWith('threadseg-'))).toEqual([]);
       expect(JSON.parse(h.documents.get(name) ?? '{}')).toMatchObject({
+        segment: 1,
         status: 'complete',
         messages: [{ role: 'user' }, { role: 'assistant', content: 'Finished' }],
       });

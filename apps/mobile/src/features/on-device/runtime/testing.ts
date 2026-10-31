@@ -14,9 +14,38 @@ import {
 } from '../native/services.types';
 import type { LocalGitStatus, LocalWorkspace } from '../workspaces/types';
 import type { OnDeviceNetworkPort } from './network';
-import type { OnDeviceReachability } from './types';
+import { parseLocalThreadBase, threadDocument } from './threadCodec';
+import {
+  applyLocalThreadDelta,
+  parseLocalThreadSegment,
+  threadSegmentDocument,
+} from './threadJournal';
+import type { LocalThread, OnDeviceReachability } from './types';
 
 const MiB = 1024 * 1024;
+
+/** The durable state of a conversation: its base document plus contiguous journal segments. */
+export function storedLocalThread(
+  documents: ReadonlyMap<string, string>,
+  id: string,
+): LocalThread | null {
+  const raw = documents.get(threadDocument(id));
+  if (raw === undefined) {
+    return null;
+  }
+  const base = parseLocalThreadBase(raw, id);
+  let thread = base.thread;
+  if (base.legacy) {
+    return thread;
+  }
+  for (let sequence = base.sequence + 1; ; sequence += 1) {
+    const segment = documents.get(threadSegmentDocument(id, sequence));
+    if (segment === undefined) {
+      return thread;
+    }
+    thread = applyLocalThreadDelta(thread, parseLocalThreadSegment(segment, id, sequence));
+  }
+}
 
 /** One scripted model reply. Tool calls are emitted the way llama.rn reports them. */
 export interface ScriptedReply {

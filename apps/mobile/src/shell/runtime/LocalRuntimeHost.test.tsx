@@ -7,11 +7,12 @@ jest.mock('../../features/on-device/runtime/OnDeviceProvider', () => {
     workspaces: [{ id: 'ws-one', name: 'Demo', isRepository: true }],
     legacy: new Map<string, string>(),
     issues: [] as { id: string; message: string }[],
+    threads: [] as { messages: unknown[] }[],
   };
   const runtime = {
     id: 'runtime',
     preferences: () => ({ modelId: 'qwen3-1.7b-q4-k-m', workspaceId: null }),
-    threads: { list: () => [] },
+    threads: { list: () => state.threads },
     downloads: {
       snapshot: () => ({ phase: state.downloaded ? 'ready' : 'idle', bytesWritten: 0 }),
     },
@@ -69,7 +70,7 @@ import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import { createDefaultAppStateData } from '@shell/state/appState';
 import { appStateSnapshotAtom } from '@shell/state/appState/atoms';
 import { localProfileAvailableAtom, wsClientAtom } from '@shell/state/bridge/atoms';
-import { defaultStartCwdAtom } from '@shell/state/appState/settings';
+import { defaultStartCwdAtom, localSetupCompletedAtom } from '@shell/state/appState/settings';
 import {
   localAgentPresenceAtom,
   localRuntimeAtom,
@@ -175,6 +176,23 @@ describe('LocalRuntimeHost', () => {
     act(() => setActive(store, 'bridge-1'));
     expect(store.get(localAgentPresenceAtom)).toBeNull();
     act(() => mockRuntime.change({ downloaded: true }));
+    act(() => tree.unmount());
+  });
+
+  it('records the first local chat for good, so deleting every chat never restarts setup', () => {
+    const store = storeWith(LOCAL_PROFILE_ID);
+    const tree = render(store);
+    expect(store.get(localSetupCompletedAtom)).toBe(false);
+
+    // An opened but empty chat is not a started one.
+    act(() => mockRuntime().change({ threads: [{ messages: [] }] }));
+    expect(store.get(localSetupCompletedAtom)).toBe(false);
+    act(() => mockRuntime().change({ threads: [{ messages: [] }, { messages: ['hello'] }] }));
+    expect(store.get(localSetupCompletedAtom)).toBe(true);
+
+    // Deleted (or unrestorable) chats leave the thread list; completion stays recorded.
+    act(() => mockRuntime().change({ threads: [] }));
+    expect(store.get(localSetupCompletedAtom)).toBe(true);
     act(() => tree.unmount());
   });
 
