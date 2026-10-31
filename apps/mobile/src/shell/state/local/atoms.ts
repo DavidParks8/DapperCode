@@ -5,8 +5,8 @@ import type { OnDeviceRuntime } from '../../../features/on-device/runtime/runtim
 
 /**
  * The on-device runtime while the shell's local runtime host owns one. `null` while the local
- * profile is closed or the runtime is still starting. Legacy `/on-device/*` screens and Settings
- * entry points read it; chat surfaces never do — they use the transport below.
+ * profile is closed or the runtime is still starting. On this iPhone Settings pages (models, Git
+ * & GitHub) read it; chat surfaces never do — they use the transport below.
  */
 export const localRuntimeAtom = atom<OnDeviceRuntime | null>(null);
 

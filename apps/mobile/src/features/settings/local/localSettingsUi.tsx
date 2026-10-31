@@ -385,7 +385,8 @@ function createStyles(theme: AppTheme) {
       gap: theme.spacing.sm,
       minHeight: 40,
       paddingHorizontal: 10,
-      borderRadius: 10,
+      borderRadius: theme.radius.md,
+      borderCurve: 'continuous',
       backgroundColor: colors.bgItem,
     },
     searchInput: {
@@ -397,12 +398,16 @@ function createStyles(theme: AppTheme) {
     },
     progressTrack: {
       height: 4,
-      borderRadius: 2,
+      borderRadius: theme.radius.full,
       backgroundColor: colors.bgInput,
       overflow: 'hidden',
       marginTop: 2,
     },
-    progressFill: { height: '100%', borderRadius: 2, backgroundColor: colors.accent },
+    progressFill: {
+      height: '100%',
+      borderRadius: theme.radius.full,
+      backgroundColor: colors.accent,
+    },
     badge: {
       alignSelf: 'center',
       borderRadius: theme.radius.full,
@@ -446,7 +451,8 @@ function createStyles(theme: AppTheme) {
     detailIcon: {
       width: 28,
       height: 28,
-      borderRadius: 7,
+      borderRadius: theme.radius.sm,
+      borderCurve: 'continuous',
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: colors.bgInput,

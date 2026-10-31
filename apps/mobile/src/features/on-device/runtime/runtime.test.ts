@@ -4,14 +4,16 @@ import { localModelDefinition } from '../models/catalog';
 import type { LocalModelContext, LocalModelReply } from '../models/engine';
 import { loadNativeModelContext } from '../models/engine';
 import type { OnDeviceNativeServices } from '../native/services.types';
-import { localChatControls } from '../screens/chatControls';
+import type { LocalModelSessionSnapshot } from '../models/session';
+import { retryableLocalMessages, type LocalRunSnapshot } from './agentLoop';
 import { draftDocument, DRAFT_SAVE_DELAY_MS } from './drafts';
 import { COALESCED_EMIT_INTERVAL_MS } from './emitter';
 import { OnDeviceOfflineError, type OnDeviceNetworkPort } from './network';
 import { emptyLocalPreferences } from './preferences';
 import { OnDeviceRuntime } from './runtime';
+import { localAgentStatus, type LocalDownloadState } from './status';
 import { THREAD_PROGRESS_SAVE_DELAY_MS } from './threads';
-import type { OnDeviceReachability } from './types';
+import type { LocalThread, OnDeviceReachability } from './types';
 
 jest.mock('expo-crypto', () => ({ randomUUID: jest.fn() }));
 jest.mock('../models/engine', () => ({ loadNativeModelContext: jest.fn() }));
@@ -1025,6 +1027,42 @@ describe('legacy inline drafts are kept until their draft documents are written'
     await h.runtime.dispose();
   });
 });
+
+/**
+ * The chat controls a runtime snapshot implies (busy, stop, submit, retry, and status). Asserting
+ * them after each transition proves the runtime never leaves a settled turn looking busy.
+ */
+function localChatControls(
+  thread: LocalThread,
+  run: LocalRunSnapshot,
+  model: LocalModelSessionSnapshot,
+  workspaceActivity: string | null,
+  download?: LocalDownloadState | null,
+) {
+  const active = run.phase !== 'idle';
+  const ownRun = active && run.threadId === thread.id;
+  const loading = model.phase === 'loading';
+  const status = localAgentStatus({
+    run,
+    model,
+    thread,
+    modelId: thread.modelId,
+    workspaceActivity,
+    ...(download === undefined ? {} : { download }),
+  });
+  return {
+    isLoading: active || loading,
+    isStopping: ownRun && run.phase === 'stopping',
+    showStopButton: ownRun,
+    submitDisabled: active || loading || Boolean(workspaceActivity) || status.blocking,
+    status: status.label,
+    statusKind: status.kind,
+    statusDetail: status.detail,
+    progress: status.progress,
+    approval: ownRun ? run.approval : null,
+    canRetry: !active && !workspaceActivity && retryableLocalMessages(thread) !== null,
+  };
+}
 
 function controlsFor(h: Awaited<ReturnType<typeof ready>>) {
   return localChatControls(

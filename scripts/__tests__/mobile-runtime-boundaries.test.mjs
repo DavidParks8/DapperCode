@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import test from 'node:test';
@@ -98,6 +99,53 @@ test('local implementations can reuse genuinely shared helpers directly', async 
     ).length,
     0,
   );
+});
+
+// On this iPhone is a built-in profile of the shared shell. The feature owns the runtime and the
+// in-process transport; screens, routes, and design-system UI belong to the shell and Settings.
+test('the on-device feature cannot grow its own screens, routes, or UI kit again', async () => {
+  for (const source of [
+    'import { Pressable } from "react-native"; void Pressable;',
+    'import { useRouter } from "expo-router"; void useRouter;',
+    'import { useAppTheme } from "@shared/theme"; void useAppTheme;',
+    'import { SelectionSheet } from "@shared/ui/SelectionSheet"; void SelectionSheet;',
+    'import { routes } from "@shell/navigation/routes"; void routes;',
+    'import { SettingsGroup } from "../../settings/SettingsList"; void SettingsGroup;',
+    'import { ChatInput } from "../../chat/composer/ChatInput"; void ChatInput;',
+  ]) {
+    assert.equal(
+      (await restrictedImports('src/features/on-device/runtime/status.ts', source)).length,
+      1,
+      source,
+    );
+  }
+  assert.equal(
+    (
+      await restrictedImports(
+        'src/features/on-device/runtime/OnDeviceProvider.tsx',
+        'import { AppState } from "react-native"; void AppState;',
+      )
+    ).length,
+    0,
+    'the runtime owner may observe app lifecycle',
+  );
+  assert.equal(
+    (
+      await restrictedImports(
+        'src/shell/runtime/LocalRuntimeRecovery.tsx',
+        'import { SettingsGroup } from "../../features/settings/SettingsList"; import type { OnDeviceStartup } from "../../features/on-device/runtime/OnDeviceProvider"; void SettingsGroup; export type S = OnDeviceStartup;',
+      )
+    ).length,
+    0,
+    'the shell renders local startup recovery with shared Settings components',
+  );
+});
+
+test('retired on-device URLs are redirects, not screens', () => {
+  const routes = path.join(mobile, 'src/app/on-device');
+  assert.deepEqual(fs.readdirSync(routes).sort(), ['[...path].tsx', 'index.tsx']);
+  assert.match(fs.readFileSync(path.join(routes, '[...path].tsx'), 'utf8'), /<Redirect /);
+  assert.equal(fs.existsSync(path.join(mobile, 'src/features/on-device/screens')), false);
 });
 
 test('native product fixture typechecks without generated Expo environment files', () => {

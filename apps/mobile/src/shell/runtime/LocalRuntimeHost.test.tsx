@@ -170,13 +170,13 @@ describe('LocalRuntimeHost', () => {
     act(() => tree.unmount());
   });
 
-  it('keeps the runtime for legacy on-device screens and never mounts where unsupported', () => {
+  it('owns no runtime outside the local profile, even at a retired /on-device link, or where unsupported', () => {
     const store = storeWith('bridge-1');
     act(() => router.replace('/on-device/models'));
     const tree = render(store);
-    expect(store.get(localRuntimeAtom)).not.toBeNull();
-    act(() => tree.unmount());
     expect(store.get(localRuntimeAtom)).toBeNull();
+    expect((tree as unknown as { toJSON: () => unknown }).toJSON()).toBeNull();
+    act(() => tree.unmount());
 
     const unsupported = storeWith(LOCAL_PROFILE_ID, false);
     const hidden = render(unsupported);

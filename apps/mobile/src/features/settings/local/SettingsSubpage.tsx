@@ -15,7 +15,8 @@ import { LARGE_TITLE_COLLAPSE_OFFSET, SettingsHeader } from '../SettingsHeader';
 
 /**
  * A page pushed onto the Settings stack: back button, iOS large title that collapses into the bar,
- * and grouped sections on the grouped background. Matches the root Settings page.
+ * and grouped sections on the grouped background. Matches the root Settings page. Without `onBack`
+ * it is a standalone page (such as startup recovery) with no navigation control.
  */
 export function SettingsSubpage({
   title,
@@ -24,7 +25,7 @@ export function SettingsSubpage({
   testID,
 }: {
   title: string;
-  onBack: () => void;
+  onBack?: () => void;
   children: ReactNode;
   testID?: string;
 }) {
@@ -43,15 +44,19 @@ export function SettingsSubpage({
 
   return (
     <SceneToolbarHost
-      items={[
-        {
-          key: 'back',
-          icon: 'chevron-back',
-          label: backLabel,
-          onPress: onBack,
-          group: 'navigation',
-        },
-      ]}
+      items={
+        onBack
+          ? [
+              {
+                key: 'back',
+                icon: 'chevron-back',
+                label: backLabel,
+                onPress: onBack,
+                group: 'navigation',
+              },
+            ]
+          : []
+      }
     >
       <SafeAreaView style={[styles.safeArea, sceneInsets]} edges={['top']} testID={testID}>
         <SettingsHeader
