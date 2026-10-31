@@ -14,11 +14,13 @@ continue to use desktop agents.
    conversation returns directly to that conversation.
    Downloads are pinned by revision, byte count, and SHA-256; unverified weights cannot be loaded.
    See [Model downloads](#model-downloads).
-3. Open **Workspaces** and clone an HTTPS repository. Public repositories need no account.
+3. Open the chat's workspace picker and choose **Clone repository** with an HTTPS URL (the name is
+   taken from the URL; progress shows and **Stop** cancels). Public repositories need no account.
    Sign in under **GitHub and author** before cloning a private GitHub repository.
-   An empty file workspace is also available; **Initialize Git** on its Git page (optionally with
-   an HTTPS origin) to stage, commit, and later push or pull. Workspaces can be renamed or deleted;
-   deleting one removes its files but keeps conversations that used it readable.
+   **New workspace** creates an empty one; **Initialize Git** on its Git page (optionally with an
+   HTTPS origin) to stage, commit, and later push or pull. Touch and hold a workspace to rename it
+   or browse its files, and swipe left to delete it; deleting removes its files but keeps
+   conversations that used it readable.
 4. Set your Git author name/email, then start a **New chat**. Pick the model with the chat's
    **Choose a model** sheet (downloaded models) and the workspace with the workspace picker.
 5. After preparation, inference, file edits, search, diffs, staging, discarding, branch creation and
@@ -120,8 +122,9 @@ and that prompt is passed straight to completion.
   interpreters, test runners, downloaded executable plugins, and JIT workarounds are unavailable.
   SSH, submodule/LFS hydration, custom providers' private credentials, and force-push are out of scope.
 - The workspace root is the empty path `''` everywhere (`'.'` is accepted as an alias for listing).
-  The Files page creates files in the open folder, shows the total size of large previews, renames or
-  deletes the open file, and refreshes when a native change token moves after agent edits.
+  The Files screen (from the Git screen or the workspace picker) creates files in the open folder,
+  shows the total size of large read-only previews, renames (touch and hold) or deletes (swipe)
+  entries, and refreshes when a native change token moves after agent edits.
 - Git status reports origin, upstream, ahead/behind counts, and staged-file counts. Push, fetch, and
   pull are disabled without an origin; commit is disabled (and rejected natively) with nothing staged.
 - Pull fetches origin and only fast-forwards. Diverged histories (`GIT_NON_FAST_FORWARD`) and local
@@ -267,9 +270,10 @@ the local profile. `LocalBridgeWsClient` is connected from creation until dispos
 | Chats        | `thread/list`, `thread/loaded/list`, `bridge/thread/list/stream/start`/`cancel`, `thread/read`, `thread/start`, `bridge/thread/create`, `thread/name/update`, `thread/delete`, `thread/config/set` (model), `thread/resume` |
 | Turns        | `bridge/thread/queue/send`, `turn/start`, `turn/interrupt`, `bridge/thread/queue/read`, `bridge/thread/schedules/read` (always empty)                              |
 | Models       | `model/list` (downloaded, runnable catalog models)                                                                                                                |
-| Workspaces   | `bridge/workspaces/list`, `bridge/fs/list` (workspace roots only)                                                                                                 |
+| Workspaces   | `bridge/workspaces/list`, `bridge/fs/list` (workspace roots only), `bridge/git/clone` (HTTPS, into a new workspace)                                               |
 | Attention    | `bridge/approvals/list`, `bridge/approvals/resolve` (the loop's pending tool approval, such as a push), `bridge/userInput/list` (always empty)                     |
 | Git          | `bridge/git/status`, `diff`, `history`, `branches`, `stage`, `stageAll`, `unstage`, `unstageAll`, `commit`, `switch`, `push`                                     |
+| Extensions   | `workspace/list`, `create`, `rename`, `delete`, `changeToken`, `clone/progress`, `clone/cancel`, `workspace/git/fetch`, `pull`, `init`, `discard`, `branch/create`, `workspace/files/list`, `read`, `write`, `create`, `rename`, `remove` |
 
 Every other method rejects with JSON-RPC `-32601` and `data.error = 'unsupported_on_device'`
 (surfaced as `RpcRequestError`). Other stable `data.error` reasons are `thread_not_found`,
@@ -287,8 +291,10 @@ model when the composer sends none or a desktop path.
 
 - Wire capabilities (`localCapabilities()`): one agent, `threadDelete` only; steer, fork, plan mode,
   review, browser preview, bridge UI surfaces, and fast mode are false, so the shell hides them.
-- Client profile features (`activeProfileFeaturesAtom`): `attachments`, `pushNotifications`,
-  `connectionSettings`, and `gitClone` are false for the local profile. The composer disables
+- Client profile features (`activeProfileFeaturesAtom`): `attachments`, `pushNotifications`, and
+  `connectionSettings` are false for the local profile; `managedWorkspaces`, `workspaceFiles`,
+  `gitSync`, `gitDiscard`, `gitBranchCreate`, and `gitInit` are true only for it (see
+  [Workspaces, Git, and Files](#workspaces-git-and-files)). The composer disables
   attach/paste, the workspace picker hides **Clone Repo**, and Settings hides notifications and
   approvals.
 
@@ -303,6 +309,42 @@ stops). Snapshot message, reasoning, and tool ids match the event ids, so the re
 performs after a run converges with what was streamed. Text that is not an append of the streamed
 draft is corrected by that reload.
 
+### Workspaces, Git, and Files
+
+The shared screens serve the local profile through the transport; nothing branches on "local".
+
+- **Workspace host extensions.** Methods beyond the Rust bridge contract are declared once in
+  `features/workspace/api/protocol.ts` (`WORKSPACE_HOST_METHODS`) and called through
+  `WorkspaceHostClient` (`workspaceHostClientAtom`). They are only called when the active profile
+  advertises the matching `activeProfileFeaturesAtom` flag, so desktop bridges are never asked.
+  They are deliberately outside `src/bridge`, whose requests must match the contract manifest.
+  `transport/workspaceHandlers.ts` and `transport/gitHandlers.ts` implement them over
+  `LocalAgentPort` (`git`, `workspaceAdmin`, `files`, `network`), with mutations serialized by
+  `runtime.workspaceTask`.
+- **Git status** keeps the bridge shape: untracked files are stageable, `raw` starts with the
+  porcelain `## branch...upstream [ahead n, behind m]` header, and an optional `remote`
+  (`GitRemoteState`: origin, upstream, ahead/behind, detached, unborn, reachability) lets the Git
+  screen disable push, fetch, and pull with a reason. Typed native failures reach the screen as
+  `data.nativeCode` and are shown through `describeHostError` copy; `on_device_not_repository`
+  turns into the **Initialize Git** card (`gitInit`).
+- **Git screen** (`features/git`): human change labels, swipe-to-discard per file and a
+  press-and-hold **Discard all** (no dialogs; discarding never touches staged or ignored files),
+  **Fetch**/**Pull** (fast-forward only), and branch creation in the branch panel. With
+  `managedWorkspaces` the workspace row is read-only and links to Files.
+- **Workspace picker** (`picker/ManagedView.tsx`, `managedWorkspaces`): a flat list from
+  `workspace/list` with branch and origin, tap to use, touch-and-hold to rename or browse files,
+  swipe to delete, plus **New workspace** and **Clone repository**. The clone screen validates
+  HTTPS (`api/remoteUrl.ts`), derives the name from the URL, polls `workspace/clone/progress`, and
+  offers **Stop**.
+- **Files** (`features/workspace/files`, route `chats/[chatId]/files?cwd=…`, `workspaceFiles`):
+  grouped-list browser and monospace editor. Edits are explicit: a dirty dot, **Save**, and leaving
+  a dirty file or the screen is refused with an inline Save/Discard banner. The listing follows
+  `workspace/changeToken`, so agent edits appear without re-entering; a dirty file that changes on
+  disk is flagged and a stale save offers **Overwrite** or **Discard edits**. Files over 64 KiB open
+  read-only with their total size.
+
+The legacy `/on-device/workspaces`, `/on-device/git`, and `/on-device/files` routes are gone.
+
 ### Extension points for the next tracks
 
 - **Chat parity** (activity, tool titles, errors, retry): tool kinds and titles come from
@@ -310,9 +352,7 @@ draft is corrected by that reload.
   message; add richer error data in `events.ts` `finish()` and in `server.ts` error reasons rather than
   branching in `MainScreen`. Runtime phases (`preparing`, model loading progress) can be streamed as
   `ACTIVITY_SNAPSHOT`/custom events from the projector.
-- **Git, workspaces, files**: add methods to `createLocalGitHandlers` or the server handler table and
-  to `LocalAgentPort`. Implementing `bridge/git/clone` (native clone exists) means flipping
-  `gitClone` in `activeProfileFeaturesAtom`. `bridge/fs/list` currently lists workspace roots only.
+- **Git, workspaces, files**: implemented; see [Workspaces, Git, and Files](#workspaces-git-and-files).
 - **Models and account in Settings**: `features/settings/LocalProfileSection.tsx` is mounted for the
   local profile and still links to the legacy `/on-device/models`, `/workspaces`, and `/account`
   screens. Replace those rows with Settings sections; `model/list` and the model config option can
@@ -328,12 +368,16 @@ legacy screens, and the in-process transport (`transport/`, which may use bridge
 bridge transports). The Expo module under `modules/on-device-agent` owns native memory, Keychain,
 workspace containment, atomic document/model storage, and Git. Native ABI version mismatches fail
 locally with a rebuild message. `src/shell/runtime` composes the runtime host and the
-`LocalBridgeWsClient` adapter; `src/app/on-device` keeps the legacy model, workspace, account, and
-files screens on the shell-owned runtime until Settings replaces them.
+`LocalBridgeWsClient` adapter; `src/app/on-device` keeps the legacy model and account screens on
+the shell-owned runtime until Settings replaces them.
 
 Transport behaviour is covered by `transport/server.test.ts` (wire shapes, events, stop, unsupported
 methods), `shell/runtime/LocalBridgeWsClient.test.ts` (the real API client over the transport), and
 `features/chat/screen/MainScreen.local.test.tsx` (send, stream, and stop in the real chat screen).
+Workspaces, Git, and Files are covered over the real transport by
+`transport/workspaceHandlers.test.ts`, `features/git/GitScreen.local.test.tsx`,
+`features/workspace/picker/ManagedView.test.tsx`, `features/workspace/checkout/Screen.local.test.tsx`,
+and `features/workspace/files/Screen.test.tsx`.
 
 See the [native module guide](../apps/mobile/modules/on-device-agent/README.md) for build and native
 scenario commands. Run mobile lint/typecheck/tests, `typecheck:native`, architectural boundary tests,

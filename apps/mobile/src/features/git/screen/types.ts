@@ -1,4 +1,5 @@
 import type { GitBranchSummary, GitHistoryCommit } from '@bridge/types/types';
+import type { GitRemoteState } from '../../workspace/api/protocol';
 import type { UnifiedDiffDocument } from '../diff/unified';
 import type { ChangedFileEntry } from './utils';
 
@@ -37,6 +38,13 @@ export interface GitScreenDerivedState {
   reviewHighlights: GitChangedFileWithStats[];
   pushButtonLabel: string;
   branchSwitchDisabled: boolean;
+  /** Host-reported remote state; null for hosts that only send the porcelain header. */
+  remote: GitRemoteState | null;
+  pushBlockedReason: string | null;
+  fetchBlockedReason: string | null;
+  pullBlockedReason: string | null;
+  /** Origin without scheme or `.git`, such as `github.com/owner/repo`. */
+  originDisplay: string | null;
   branchRows: GitBranchSummary[];
   filesListMaxHeight: number;
   diffViewerMaxHeight: number;

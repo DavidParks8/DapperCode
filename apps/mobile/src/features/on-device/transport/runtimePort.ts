@@ -63,6 +63,65 @@ export function createRuntimeAgentPort(runtime: OnDeviceRuntime): LocalAgentPort
           native.switchWorkspaceGitBranch(id, branch),
         ),
       push: (id) => runtime.workspaceTask('Pushing', () => runtime.pushWorkspace(id)),
+      fetch: (id) =>
+        runtime.workspaceTask('Fetching', async () => {
+          runtime.requireNetwork('fetch');
+          await native.fetchWorkspaceGit(id, await runtime.credential(id));
+        }),
+      pull: (id) =>
+        runtime.workspaceTask('Pulling', async () => {
+          runtime.requireNetwork('pull');
+          return native.pullWorkspaceGit(id, await runtime.credential(id));
+        }),
+      init: (id, branch, origin) =>
+        runtime.workspaceTask('Initializing Git', () =>
+          native.initWorkspaceGit(id, branch, origin).finally(() => runtime.refreshWorkspaces()),
+        ),
+      discard: (id, path, removeUntracked) =>
+        runtime.workspaceTask('Discarding changes', () =>
+          native.discardWorkspaceGit(id, path, removeUntracked),
+        ),
+      createBranch: (id, name) =>
+        runtime.workspaceTask('Creating branch', () =>
+          native.createWorkspaceGitBranch(id, name, true),
+        ),
     },
+    workspaceAdmin: {
+      create: (name) => runtime.createWorkspace(name),
+      rename: (id, name) => runtime.workspaceAdmin.rename(id, name),
+      delete: (id) => runtime.workspaceAdmin.delete(id),
+      clone: (name, url) => runtime.cloneWorkspace(name, url),
+      cloneProgress: () => native.getGitTransferProgress(),
+      cancelTransfer: () => native.cancelGitTransfer(),
+      changeToken: (id) => native.getWorkspaceChangeToken(id),
+      metadata: async (id) => {
+        const [branches, origin] = await Promise.allSettled([
+          native.getWorkspaceGitBranches(id),
+          native.getWorkspaceGitOrigin(id),
+        ]);
+        return {
+          branch:
+            branches.status === 'fulfilled'
+              ? (branches.value.current ??
+                branches.value.branches.find((branch) => branch.current)?.name ??
+                null)
+              : null,
+          origin: origin.status === 'fulfilled' ? origin.value : null,
+        };
+      },
+    },
+    files: {
+      list: (id, path, limit) => native.listWorkspaceFiles(id, path, limit),
+      read: (id, path, offset, limit) => native.readWorkspaceFile(id, path, offset, limit),
+      write: (id, path, content, revision) =>
+        runtime.workspaceTask('Saving file', () =>
+          native.writeWorkspaceFile(id, path, content, revision),
+        ),
+      rename: (id, path, destination) =>
+        runtime.workspaceTask('Renaming', () => native.renameWorkspaceEntry(id, path, destination)),
+      remove: (id, path) =>
+        runtime.workspaceTask('Deleting', () => native.removeWorkspaceEntry(id, path)),
+    },
+    network: () => runtime.network(),
   };
 }

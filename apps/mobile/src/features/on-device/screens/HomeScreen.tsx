@@ -74,8 +74,6 @@ export function OnDeviceHomeScreen({ executionTargets }: { executionTargets: Rea
           testID="on-device-model-library"
           onPress={() => router.push('/on-device/models')}
         />
-        <LocalAction title="Workspaces" onPress={() => router.push('/on-device/workspaces')} />
-        <LocalAction title="Git changes" onPress={() => router.push('/on-device/git')} />
         <LocalAction title="GitHub and author" onPress={() => router.push('/on-device/account')} />
         <LocalAction
           title="New local conversation"

@@ -80,12 +80,6 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
       alignItems: 'center',
       gap: theme.spacing.sm,
     },
-    reviewFileCode: {
-      ...theme.typography.metadata,
-      fontFamily: theme.typography.mono.fontFamily,
-      width: 24,
-      color: theme.colors.textMuted,
-    },
     reviewFilePath: {
       ...theme.typography.caption,
       flex: 1,
@@ -205,11 +199,6 @@ export function createGitScreenReviewFilesStyles(theme: AppTheme) {
       paddingVertical: theme.spacing.sm,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: theme.colors.borderLight,
-    },
-    fileCode: {
-      ...theme.typography.mono,
-      color: theme.colors.textMuted,
-      width: 24,
     },
     filePath: {
       ...theme.typography.body,

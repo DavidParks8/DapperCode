@@ -125,24 +125,6 @@ export function LocalChatScreen() {
               disabled={controls.isLoading}
               onPress={() => router.push({ pathname: '/on-device/models', params: { threadId } })}
             />
-            <LocalAction
-              title="Git"
-              onPress={() =>
-                router.push({
-                  pathname: '/on-device/git',
-                  params: { workspaceId: thread.workspaceId },
-                })
-              }
-            />
-            <LocalAction
-              title="Files"
-              onPress={() =>
-                router.push({
-                  pathname: '/on-device/files',
-                  params: { workspaceId: thread.workspaceId },
-                })
-              }
-            />
           </View>
         </View>
         <ChatTranscriptView

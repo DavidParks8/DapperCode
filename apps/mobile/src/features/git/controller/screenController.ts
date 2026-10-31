@@ -6,16 +6,22 @@ import type { HostBridgeApiClient } from '@bridge/client/client';
 import type {
   ApprovalMode,
   Chat,
-  GitBranchesResponse,
   GitBranchSummary,
   GitDiffResponse,
   GitHistoryCommit,
-  GitHistoryResponse,
   GitStatusResponse,
 } from '@bridge/types/types';
 import { feedback } from '@shared/feedback';
 import { toApprovalPolicyForMode } from '../../chat/helpers/helpers';
+import type { WorkspaceHostClient } from '../../workspace/api/client';
+import { describeHostError, isNotRepositoryError } from '../../workspace/api/errors';
 import { useGitScreenDerived } from './derived';
+import { NO_GIT_HOST_FEATURES, useGitHostActions, type GitHostFeatures } from './hostActions';
+import {
+  applyGitRefreshSuccess,
+  setGitRefreshLoadingState,
+  shouldApplyGitRefreshResult,
+} from './refresh';
 import { useGitScreenReviewController } from './reviewController';
 
 interface UseGitScreenControllerArgs {
@@ -24,60 +30,15 @@ interface UseGitScreenControllerArgs {
   approvalMode?: ApprovalMode;
   onBack: () => void;
   onChatUpdated?: (chat: Chat) => void;
+  /** Host extensions (fetch, pull, discard, ...) the active profile advertises. */
+  features?: GitHostFeatures;
+  host?: WorkspaceHostClient | null;
 }
 
 export const GIT_SCREEN_REFRESH_INTERVAL_MS = 15_000;
 
 export function gitErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
-}
-
-function setGitRefreshLoadingState(
-  initialLoad: boolean,
-  setLoading: (value: boolean) => void,
-  setRefreshing: (value: boolean) => void,
-): void {
-  if (initialLoad) {
-    setLoading(true);
-  } else {
-    setRefreshing(true);
-  }
-}
-
-function shouldApplyGitRefreshResult(
-  mountedRef: { current: boolean },
-  refreshRequestIdRef: { current: number },
-  requestedCwdRef: { current: string | undefined },
-  requestId: number,
-  requestCwd: string | undefined,
-): boolean {
-  return (
-    mountedRef.current &&
-    requestId === refreshRequestIdRef.current &&
-    requestCwd === requestedCwdRef.current
-  );
-}
-
-interface GitRefreshSetters {
-  setStatus: (value: GitStatusResponse) => void;
-  setDiff: (value: GitDiffResponse) => void;
-  setHistory: (value: GitHistoryCommit[]) => void;
-  setBranches: (value: GitBranchSummary[]) => void;
-  setBranchDraft: (value: string) => void;
-}
-
-function applyGitRefreshSuccess(
-  setters: GitRefreshSetters,
-  nextStatus: GitStatusResponse,
-  nextDiff: GitDiffResponse,
-  nextHistory: GitHistoryResponse,
-  nextBranches: GitBranchesResponse | null,
-): void {
-  setters.setStatus(nextStatus);
-  setters.setDiff(nextDiff);
-  setters.setHistory(nextHistory.commits);
-  setters.setBranches(nextBranches?.branches ?? []);
-  setters.setBranchDraft(nextBranches?.current ?? nextStatus.branch ?? '');
+  return describeHostError(error, fallback);
 }
 
 export function useGitScreenController({
@@ -86,8 +47,11 @@ export function useGitScreenController({
   approvalMode,
   onBack,
   onChatUpdated,
+  features = NO_GIT_HOST_FEATURES,
+  host = null,
 }: UseGitScreenControllerArgs) {
   const [activeChat, setActiveChat] = useState(chat);
+  const [notRepository, setNotRepository] = useState(false);
   const [status, setStatus] = useState<GitStatusResponse | null>(null);
   const [diff, setDiff] = useState<GitDiffResponse | null>(null);
   const [history, setHistory] = useState<GitHistoryCommit[]>([]);
@@ -176,6 +140,7 @@ export function useGitScreenController({
         nextBranches,
       );
       hasLoadedRef.current = true;
+      setNotRepository(false);
       setError(null);
     } catch (err) {
       if (
@@ -191,7 +156,16 @@ export function useGitScreenController({
         // manual retry is treated as a lightweight background refresh instead of re-triggering
         // the full-screen "loading" spinner indefinitely.
         hasLoadedRef.current = true;
-        setError((err as Error).message);
+        if (isNotRepositoryError(err)) {
+          setNotRepository(true);
+          setStatus(null);
+          setDiff(null);
+          setHistory([]);
+          setBranches([]);
+          setError(null);
+        } else {
+          setError(gitErrorMessage(err, 'Could not read Git status.'));
+        }
       }
     } finally {
       if (requestId === refreshRequestIdRef.current) {
@@ -220,6 +194,7 @@ export function useGitScreenController({
     setDiff(null);
     setHistory([]);
     setBranches([]);
+    setNotRepository(false);
     setRefreshing(false);
     setLoading(true);
     void refresh();
@@ -295,7 +270,7 @@ export function useGitScreenController({
       setError(null);
       onChatUpdated?.(updated);
     } catch (err) {
-      setError((err as Error).message);
+      setError(gitErrorMessage(err, 'The Git operation failed.'));
     } finally {
       setSavingWorkspace(false);
     }
@@ -323,7 +298,7 @@ export function useGitScreenController({
       await refresh();
     } catch (err) {
       void feedback.error();
-      setError((err as Error).message);
+      setError(gitErrorMessage(err, 'The Git operation failed.'));
     } finally {
       setCommitting(false);
     }
@@ -343,7 +318,7 @@ export function useGitScreenController({
       await refresh();
     } catch (err) {
       void feedback.error();
-      setError((err as Error).message);
+      setError(gitErrorMessage(err, 'The Git operation failed.'));
     } finally {
       setPushing(false);
     }
@@ -391,7 +366,7 @@ export function useGitScreenController({
           await refresh();
         }
       } catch (err) {
-        setError((err as Error).message);
+        setError(gitErrorMessage(err, 'The Git operation failed.'));
       } finally {
         setSwitchingBranch(false);
       }
@@ -419,7 +394,7 @@ export function useGitScreenController({
         }
         await refresh();
       } catch (err) {
-        setError((err as Error).message);
+        setError(gitErrorMessage(err, 'The Git operation failed.'));
       } finally {
         setStagingPath((current) => (current === path ? null : current));
       }
@@ -447,7 +422,7 @@ export function useGitScreenController({
         }
         await refresh();
       } catch (err) {
-        setError((err as Error).message);
+        setError(gitErrorMessage(err, 'The Git operation failed.'));
       } finally {
         setUnstagingPath((current) => (current === path ? null : current));
       }
@@ -467,7 +442,7 @@ export function useGitScreenController({
       }
       await refresh();
     } catch (err) {
-      setError((err as Error).message);
+      setError(gitErrorMessage(err, 'The Git operation failed.'));
     } finally {
       setStagingAll(false);
     }
@@ -485,7 +460,7 @@ export function useGitScreenController({
       }
       await refresh();
     } catch (err) {
-      setError((err as Error).message);
+      setError(gitErrorMessage(err, 'The Git operation failed.'));
     } finally {
       setUnstagingAll(false);
     }
@@ -515,6 +490,8 @@ export function useGitScreenController({
     switchingBranch,
     windowHeight,
   });
+
+  const hostActions = useGitHostActions({ host, features, requestedCwd, refresh, setError });
 
   const reviewController = useGitScreenReviewController({
     api,
@@ -588,6 +565,8 @@ export function useGitScreenController({
     unstageAll,
     disableBodyScroll,
     enableBodyScroll,
+    notRepository,
+    ...hostActions,
     ...reviewController,
   };
 }
