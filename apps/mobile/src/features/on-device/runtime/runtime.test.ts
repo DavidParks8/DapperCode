@@ -6,7 +6,7 @@ import { loadNativeModelContext } from '../models/engine';
 import type { OnDeviceNativeServices } from '../native/services.types';
 import type { LocalModelSessionSnapshot } from '../models/session';
 import { retryableLocalMessages, type LocalRunSnapshot } from './agentLoop';
-import { draftDocument, DRAFT_SAVE_DELAY_MS } from './drafts';
+import { draftDocument } from './drafts';
 import { COALESCED_EMIT_INTERVAL_MS } from './emitter';
 import { OnDeviceOfflineError, type OnDeviceNetworkPort } from './network';
 import { emptyLocalPreferences } from './preferences';
@@ -312,19 +312,21 @@ test('preferences that cannot be set aside start the mode but are never overwrit
   expect(documents.get('preferences.json')).toBe('{damaged');
 });
 
-test('backgrounding flushes drafts, unloads native context, and successful writes do not hide unrelated errors', async () => {
+test('backgrounding flushes history, unloads native context, and successful writes do not hide unrelated errors', async () => {
   const h = await ready();
   h.runtime.report(new Error('Earlier operation failed'));
-  h.runtime.setDraft(h.thread.id, 'latest draft');
+  h.runtime.threads.change(h.thread.id, (thread) => ({ ...thread, title: 'Renamed' }));
+  void h.runtime.threads.save(h.thread.id).catch(() => undefined);
   await h.runtime.background();
   expect(h.context.release).toHaveBeenCalledTimes(1);
   expect(h.runtime.models.snapshot().phase).toBe('empty');
-  expect(h.documents.get(draftDocument(h.thread.id))).toContain('latest draft');
-  expect(h.documents.get('preferences.json')).not.toContain('latest draft');
+  expect(h.documents.get(`thread-${h.thread.id}.json`)).toContain('Renamed');
+  // Drafts belong to the shared composer; the runtime never writes draft documents.
+  expect([...h.documents.keys()].some((name) => name.startsWith('draft-'))).toBe(false);
   expect(h.runtime.error()?.message).toBe('Earlier operation failed');
   const restored = harness(h.documents);
   await restored.runtime.initialize();
-  expect(restored.runtime.draft(h.thread.id)).toBe('latest draft');
+  expect(restored.runtime.legacyDrafts().size).toBe(0);
   expect(restored.runtime.threads.get(h.thread.id).workspaceId).toBe('workspace-one');
   await restored.runtime.dispose();
   await h.runtime.dispose();
@@ -414,10 +416,11 @@ test('manual workspace operations exclude generation and background waits before
   await h.runtime.dispose();
 });
 
-test('disposal is idempotent and still unloads when draft persistence fails', async () => {
+test('disposal is idempotent and still unloads when history persistence fails', async () => {
   const h = await ready();
-  h.runtime.setDraft(h.thread.id, 'unsaved draft');
   h.native.writeRuntimeDocument.mockRejectedValueOnce(new Error('Disk full'));
+  h.runtime.threads.change(h.thread.id, (thread) => ({ ...thread, title: 'Unsaved' }));
+  void h.runtime.threads.save(h.thread.id).catch(() => undefined);
   const disposal = h.runtime.dispose();
   expect(h.runtime.dispose()).toBe(disposal);
   await expect(disposal).rejects.toThrow('Disk full');
@@ -803,30 +806,7 @@ describe('network awareness', () => {
 });
 
 describe('persistence volume', () => {
-  test('typing rewrites only the edited conversation draft, once per pause, never preferences', async () => {
-    jest.useFakeTimers();
-    try {
-      const h = await ready();
-      h.native.writeRuntimeDocument.mockClear();
-      for (const text of ['d', 'dr', 'dra', 'draf', 'draft']) {
-        h.runtime.setDraft(h.thread.id, text);
-        jest.advanceTimersByTime(100);
-      }
-      expect(h.native.writeRuntimeDocument).not.toHaveBeenCalled();
-      await jest.advanceTimersByTimeAsync(DRAFT_SAVE_DELAY_MS);
-      expect(h.native.writeRuntimeDocument.mock.calls.map(([name]) => name)).toEqual([
-        draftDocument(h.thread.id),
-      ]);
-      expect(h.documents.get(draftDocument(h.thread.id))).toBe(
-        JSON.stringify({ version: 1, text: 'draft' }),
-      );
-      await h.runtime.dispose();
-    } finally {
-      jest.useRealTimers();
-    }
-  });
-
-  test('inline drafts from older builds move into draft documents for existing conversations only', async () => {
+  test('inline drafts from older builds are offered for import for existing conversations only, and never rewritten', async () => {
     const source = await ready();
     await source.runtime.dispose();
     const documents = new Map(source.documents);
@@ -839,26 +819,67 @@ describe('persistence volume', () => {
     );
     const h = harness(documents);
     await h.runtime.initialize();
-    expect(h.runtime.draft(source.thread.id)).toBe('legacy draft');
-    expect(documents.get(draftDocument(source.thread.id))).toContain('legacy draft');
+    expect([...h.runtime.legacyDrafts()]).toEqual([[source.thread.id, 'legacy draft']]);
+    expect(documents.has(draftDocument(source.thread.id))).toBe(false);
+    // The orphan is obsolete; the live draft stays until the composer confirms its import.
+    expect(JSON.parse(documents.get('preferences.json') ?? '{}')).toMatchObject({
+      drafts: { [source.thread.id]: 'legacy draft' },
+    });
+    await h.runtime.settleLegacyDrafts(new Map([[source.thread.id, 'imported']]));
+    expect(h.runtime.legacyDrafts().size).toBe(0);
     expect(JSON.parse(documents.get('preferences.json') ?? '{}')).toMatchObject({ drafts: {} });
     await h.runtime.dispose();
   });
 
-  test('deleting a conversation prunes its saved draft', async () => {
-    const h = await ready();
-    h.runtime.setDraft(h.thread.id, 'pending text');
-    await h.runtime.flush();
-    expect(h.documents.has(draftDocument(h.thread.id))).toBe(true);
-    await h.runtime.deleteThread(h.thread.id);
-    expect(h.documents.has(draftDocument(h.thread.id))).toBe(false);
-    expect(h.runtime.draft(h.thread.id)).toBe('');
-    await h.runtime.flush();
-    expect(h.documents.has(draftDocument(h.thread.id))).toBe(false);
-    const restored = harness(h.documents);
+  test('draft documents from older builds are removed only once imported, or set aside when superseded', async () => {
+    const source = await ready();
+    const second = await source.runtime.createThread();
+    await source.runtime.dispose();
+    const documents = new Map(source.documents);
+    documents.set(draftDocument(source.thread.id), JSON.stringify({ version: 1, text: 'one' }));
+    documents.set(draftDocument(second.id), JSON.stringify({ version: 1, text: 'two' }));
+    const h = harness(documents);
+    await h.runtime.initialize();
+    expect(Object.fromEntries(h.runtime.legacyDrafts())).toEqual({
+      [source.thread.id]: 'one',
+      [second.id]: 'two',
+    });
+    await h.runtime.settleLegacyDrafts(
+      new Map([
+        [source.thread.id, 'imported'],
+        [second.id, 'superseded'],
+      ]),
+    );
+    expect(documents.has(draftDocument(source.thread.id))).toBe(false);
+    expect(documents.has(draftDocument(second.id))).toBe(false);
+    const setAside = [...documents].filter(([name]) => name.startsWith('quarantine-'));
+    expect(setAside).toEqual([
+      [expect.stringContaining(second.id), JSON.stringify({ version: 1, text: 'two' })],
+    ]);
+    expect(h.runtime.issues()).toEqual([
+      expect.objectContaining({
+        kind: 'recovery',
+        message: expect.stringContaining('newer draft'),
+      }),
+    ]);
+    await h.runtime.dispose();
+    const restored = harness(documents);
     await restored.runtime.initialize();
-    expect(restored.runtime.draft(h.thread.id)).toBe('');
+    expect(restored.runtime.legacyDrafts().size).toBe(0);
     await restored.runtime.dispose();
+  });
+
+  test('deleting a conversation prunes its legacy draft', async () => {
+    const source = await ready();
+    await source.runtime.dispose();
+    const documents = new Map(source.documents);
+    documents.set(draftDocument(source.thread.id), JSON.stringify({ version: 1, text: 'pending' }));
+    const h = harness(documents);
+    await h.runtime.initialize();
+    expect(h.runtime.legacyDrafts().get(source.thread.id)).toBe('pending');
+    await h.runtime.deleteThread(source.thread.id);
+    expect(documents.has(draftDocument(source.thread.id))).toBe(false);
+    expect(h.runtime.legacyDrafts().size).toBe(0);
     await h.runtime.dispose();
   });
 
@@ -951,7 +972,7 @@ describe('disposal during startup', () => {
   });
 });
 
-describe('legacy inline drafts are kept until their draft documents are written', () => {
+describe('legacy inline drafts are kept until the composer confirms them', () => {
   async function legacyDocuments() {
     const source = await ready();
     await source.runtime.dispose();
@@ -968,7 +989,7 @@ describe('legacy inline drafts are kept until their draft documents are written'
   const storedDrafts = (documents: Map<string, string>): unknown =>
     JSON.parse(documents.get('preferences.json') ?? '{}').drafts;
 
-  test('a draft for a conversation that could not be read this launch is migrated, not erased', async () => {
+  test('a draft for a conversation that could not be read this launch is kept, not erased', async () => {
     const { documents, id } = await legacyDocuments();
     const h = harness(documents);
     const read = h.native.readRuntimeDocument.getMockImplementation();
@@ -980,9 +1001,9 @@ describe('legacy inline drafts are kept until their draft documents are written'
     });
     await h.runtime.initialize();
     expect(h.runtime.threads.list()).toEqual([]);
-    expect(documents.get(draftDocument(id))).toContain('legacy draft');
+    expect(h.runtime.legacyDrafts().size).toBe(0);
     await h.runtime.selectWorkspace('workspace-one');
-    expect(storedDrafts(documents)).toEqual({});
+    expect(storedDrafts(documents)).toEqual({ [id]: 'legacy draft' });
     await h.runtime.dispose();
   });
 
@@ -1003,26 +1024,19 @@ describe('legacy inline drafts are kept until their draft documents are written'
     expect(documents.has(draftDocument(id))).toBe(false);
   });
 
-  test('a failed migration write keeps the legacy draft until a retry succeeds', async () => {
+  test('a failed settle keeps the legacy draft so the import is retried', async () => {
     const { documents, id } = await legacyDocuments();
     const h = harness(documents);
-    const write = h.native.writeRuntimeDocument.getMockImplementation();
-    let failDrafts = true;
-    h.native.writeRuntimeDocument.mockImplementation(async (name: string, value: string) => {
-      if (failDrafts && name.startsWith('draft-')) {
-        throw new Error('Disk full');
-      }
-      await write?.(name, value);
-    });
     await h.runtime.initialize();
-    expect(h.runtime.issues()).toEqual([
-      expect.objectContaining({ id: 'persistence:drafts', retryable: true }),
-    ]);
-    await h.runtime.selectWorkspace('workspace-one');
+    h.native.writeRuntimeDocument.mockRejectedValueOnce(new Error('Disk full'));
+    await expect(h.runtime.settleLegacyDrafts(new Map([[id, 'imported']]))).rejects.toThrow(
+      'Disk full',
+    );
     expect(storedDrafts(documents)).toEqual({ [id]: 'legacy draft' });
-    failDrafts = false;
+    expect(h.runtime.issues()).toEqual([
+      expect.objectContaining({ id: 'persistence:preferences', retryable: true }),
+    ]);
     await h.runtime.retryPersistence();
-    expect(documents.get(draftDocument(id))).toContain('legacy draft');
     expect(storedDrafts(documents)).toEqual({});
     await h.runtime.dispose();
   });

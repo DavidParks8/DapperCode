@@ -4,12 +4,10 @@ const MAX_OPERATION_ISSUES = 5;
 
 export function persistenceFailures(
   preferences: Error | null,
-  drafts: Error | null,
   threads: ReadonlyMap<string, Error>,
 ): PersistenceFailure[] {
   return [
     ...(preferences ? [{ id: 'persistence:preferences', error: preferences, threadId: null }] : []),
-    ...(drafts ? [{ id: 'persistence:drafts', error: drafts, threadId: null }] : []),
     ...[...threads].map(([threadId, error]) => ({
       id: `persistence:thread:${threadId}`,
       error,
@@ -55,6 +53,11 @@ export function recoveryNotices(threads: SkippedDocuments, drafts: SkippedDocume
     );
   }
   return notices;
+}
+
+/** Explains legacy drafts set aside because their chats already had newer composer drafts. */
+export function supersededDraftNotice(count: number): string {
+  return `${plural(count, 'older draft was', 'older drafts were')} set aside because ${count === 1 ? 'its chat' : 'their chats'} already had a newer draft. ${count === 1 ? 'Its' : 'Their'} data was preserved.`;
 }
 
 export interface PersistenceFailure {

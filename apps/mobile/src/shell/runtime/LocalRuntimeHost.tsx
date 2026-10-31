@@ -22,6 +22,7 @@ import {
   sameLocalAgentPresence,
 } from './localAgentPresence';
 import { LocalBridgeWsClient } from './LocalBridgeWsClient';
+import { importLegacyLocalDrafts } from './localDraftImport';
 import { LocalRuntimeRecovery } from './LocalRuntimeRecovery';
 
 /**
@@ -56,16 +57,36 @@ function LocalTransportBinder() {
   const setRuntime = useSetAtom(localRuntimeAtom);
   const setTransport = useSetAtom(localTransportAtom);
   useEffect(() => {
-    const transport = new LocalBridgeWsClient(
-      new LocalBridgeServer(createRuntimeAgentPort(runtime)),
-    );
-    transport.connect();
-    setRuntime(runtime);
-    setTransport(transport);
+    let active = true;
+    let transport: LocalBridgeWsClient | null = null;
+    const publish = () => {
+      if (!active) {
+        return;
+      }
+      transport = new LocalBridgeWsClient(new LocalBridgeServer(createRuntimeAgentPort(runtime)));
+      transport.connect();
+      setRuntime(runtime);
+      setTransport(transport);
+    };
+    if (runtime.legacyDrafts().size === 0) {
+      publish();
+    } else {
+      // Chats open only once the transport exists, so no composer can overwrite the import.
+      void importLegacyLocalDrafts(runtime)
+        .catch((error: unknown) =>
+          runtime.report(
+            new Error(
+              `Unsent drafts from an earlier version could not be moved into your chats and were kept on this iPhone. ${error instanceof Error ? error.message : ''}`.trim(),
+            ),
+          ),
+        )
+        .finally(publish);
+    }
     return () => {
+      active = false;
       setTransport(null);
       setRuntime(null);
-      transport.dispose();
+      transport?.dispose();
     };
   }, [runtime, setRuntime, setTransport]);
   return null;

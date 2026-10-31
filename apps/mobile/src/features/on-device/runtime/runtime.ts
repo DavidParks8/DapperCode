@@ -9,12 +9,13 @@ import { LocalModelSession } from '../models/session';
 import type { OnDeviceNativeServices } from '../native/services.types';
 import type { LocalWorkspace } from '../workspaces/types';
 import { LocalAgentLoop } from './agentLoop';
-import { LocalDraftStore, type LocalDraftRestore } from './drafts';
+import { LegacyDraftReader, type LegacyDraftOutcome, type LocalDraftRestore } from './drafts';
 import { RuntimeSliceEmitter } from './emitter';
 import { LOCAL_TOOL_DEFINITIONS, localToolExecutor } from './localTools';
 import { NetworkMonitor, unknownNetwork, type OnDeviceNetworkPort } from './network';
 import {
   recoveryNotices,
+  supersededDraftNotice,
   RuntimeIssueLog,
   throwFirstRejection,
   persistenceFailures,
@@ -38,8 +39,6 @@ export interface OnDeviceRuntimeOptions {
   emitIntervalMs?: number;
   /** Delay for coalescing non-journal conversation writes during a run. */
   threadProgressDelayMs?: number;
-  /** Typing pause before a conversation's draft is saved. */
-  draftDelayMs?: number;
 }
 
 type SuspensionMode = 'background' | 'memory' | 'dispose';
@@ -53,7 +52,7 @@ export class OnDeviceRuntime {
   private readonly githubClientId =
     process.env.EXPO_PUBLIC_GITHUB_CLIENT_ID?.trim() ?? 'Ov23ctzKpdigHwQUbG8X';
   private readonly emitter: RuntimeSliceEmitter;
-  private readonly drafts: LocalDraftStore;
+  private readonly drafts: LegacyDraftReader;
   private readonly networkMonitor: NetworkMonitor;
   private readonly settings: LocalPreferencesStore;
   readonly workspaceAdmin: LocalWorkspaceAdmin;
@@ -81,12 +80,7 @@ export class OnDeviceRuntime {
       }
     });
     this.issueLog = new RuntimeIssueLog(
-      () =>
-        persistenceFailures(
-          this.settings.failure(),
-          this.drafts.failure(),
-          this.threads.persistenceFailures(),
-        ),
+      () => persistenceFailures(this.settings.failure(), this.threads.persistenceFailures()),
       () => this.emitter.emit('issues'),
     );
     this.settings = new LocalPreferencesStore(native, (kind) =>
@@ -105,11 +99,7 @@ export class OnDeviceRuntime {
       },
       options.threadProgressDelayMs,
     );
-    this.drafts = new LocalDraftStore(
-      native,
-      () => this.issueLog.invalidate(),
-      options.draftDelayMs,
-    );
+    this.drafts = new LegacyDraftReader(native);
     this.models = new LocalModelSession(native, loadNativeModelContext, () =>
       this.emitter.coalesce('models'),
     );
@@ -456,12 +446,27 @@ export class OnDeviceRuntime {
     await this.drafts.remove(id);
   }
 
-  draft(id: string): string {
-    return this.drafts.get(id);
+  /**
+   * Unsent drafts written by builds before the shared chat shell, by conversation (= chat) id. The
+   * shell imports them into the composer's draft store once, then settles them here.
+   */
+  legacyDrafts(): ReadonlyMap<string, string> {
+    return this.drafts.pending();
   }
 
-  setDraft(id: string, text: string): void {
-    this.drafts.set(id, text);
+  /**
+   * Drops legacy drafts the composer now holds and sets aside, bytes preserved, those whose chat
+   * already had a newer composer draft. Call only after the composer's write succeeded.
+   */
+  async settleLegacyDrafts(outcomes: ReadonlyMap<string, LegacyDraftOutcome>): Promise<void> {
+    const results = await Promise.allSettled(
+      [...outcomes].map(([threadId, outcome]) => this.drafts.settle(threadId, outcome)),
+    );
+    const superseded = [...outcomes.values()].filter((outcome) => outcome === 'superseded');
+    if (superseded.length > 0) {
+      this.issueLog.recover(supersededDraftNotice(superseded.length));
+    }
+    throwFirstRejection([...results, ...(await Promise.allSettled([this.settings.flush()]))]);
   }
 
   async saveAuthor(author: LocalGitIdentity): Promise<void> {
@@ -557,7 +562,6 @@ export class OnDeviceRuntime {
       throwFirstRejection(previous);
     } finally {
       this.networkMonitor.close();
-      this.drafts.close();
       this.threads.close();
       this.emitter.close();
     }
@@ -630,14 +634,12 @@ export class OnDeviceRuntime {
     );
   }
 
-  /** Writes settings, drafts, and conversation progress that has not been saved yet. */
+  /** Writes settings and conversation progress that have not been saved yet. */
   flush(): Promise<void> {
     return this.persist(this.threads.flush());
   }
 
   private async persist(threads: Promise<void>): Promise<void> {
-    const stores = await Promise.allSettled([this.drafts.flush(), threads]);
-    // Settings follow drafts so confirmed legacy inline drafts are dropped in the same pass.
-    throwFirstRejection([...stores, ...(await Promise.allSettled([this.settings.flush()]))]);
+    throwFirstRejection(await Promise.allSettled([threads, this.settings.flush()]));
   }
 }
