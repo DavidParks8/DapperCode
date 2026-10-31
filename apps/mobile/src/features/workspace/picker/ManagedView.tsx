@@ -27,6 +27,8 @@ import { NAV_BAR_TEXT_BUTTON_HEIGHT, NAV_BAR_TEXT_BUTTON_WIDTH } from './stylesL
 export interface ManagedWorkspacePickerProps {
   selectedPath: string | null;
   entries: ManagedWorkspaceSummary[];
+  /** Changed-file counts of Git workspaces by path, loaded after the list. */
+  changedFiles?: Readonly<Record<string, number>>;
   loading: boolean;
   error: string | null;
   onSelect: (path: string) => void;
@@ -40,8 +42,21 @@ export interface ManagedWorkspacePickerProps {
 
 type SheetState = { kind: 'create' } | { kind: 'rename'; entry: ManagedWorkspaceSummary };
 
-/** "main · github.com/owner/repo", or why a workspace has no Git details. */
-export function managedWorkspaceSubtitle(entry: ManagedWorkspaceSummary): string {
+function workingTreeLabel(changedFiles: number | undefined): string | null {
+  if (changedFiles === undefined) {
+    return null;
+  }
+  return changedFiles === 0 ? 'Clean' : `${String(changedFiles)} changed`;
+}
+
+/**
+ * "main · 2 changed · github.com/owner/repo", or why a workspace has no Git details. The
+ * working-tree state is left out until it has loaded.
+ */
+export function managedWorkspaceSubtitle(
+  entry: ManagedWorkspaceSummary,
+  changedFiles?: number,
+): string {
   if (!entry.isRepository) {
     return 'Not a Git repository';
   }
@@ -49,12 +64,17 @@ export function managedWorkspaceSubtitle(entry: ManagedWorkspaceSummary): string
     ?.replace(/^https?:\/\//u, '')
     .replace(/\.git$/u, '')
     .replace(/\/+$/u, '');
-  const parts = [entry.branch ?? null, origin ?? 'No remote'].filter(Boolean);
+  const parts = [
+    entry.branch ?? null,
+    workingTreeLabel(changedFiles),
+    origin ?? 'No remote',
+  ].filter(Boolean);
   return parts.length ? parts.join(' · ') : 'Git repository';
 }
 
 function WorkspaceRow({
   entry,
+  changedFiles,
   first,
   last,
   selected,
@@ -65,6 +85,7 @@ function WorkspaceRow({
   onOpenMenu,
 }: {
   entry: ManagedWorkspaceSummary;
+  changedFiles: number | undefined;
   first: boolean;
   last: boolean;
   selected: boolean;
@@ -75,6 +96,7 @@ function WorkspaceRow({
   onOpenMenu: (target: View | null) => void;
 }) {
   const rowRef = useRef<View>(null);
+  const subtitle = managedWorkspaceSubtitle(entry, changedFiles);
   return (
     <View
       style={[
@@ -96,13 +118,18 @@ function WorkspaceRow({
           theme={theme}
           icon={entry.isRepository ? 'git-branch' : 'folder'}
           title={entry.name}
-          subtitle={managedWorkspaceSubtitle(entry)}
+          subtitle={subtitle}
           accessory="check"
           selected={selected}
           last={last}
-          accessibilityLabel={`${entry.name}, ${managedWorkspaceSubtitle(entry)}`}
-          accessibilityHint="Uses this workspace for new chats. Touch and hold for more actions."
-          onPress={onSelect}
+          accessibilityLabel={`${entry.name}, ${subtitle}`}
+          accessibilityHint={
+            selected
+              ? 'New chats use this workspace. Touch and hold for more actions.'
+              : 'Uses this workspace for new chats. Touch and hold for more actions.'
+          }
+          // The workspace in use is already chosen; tapping it again does nothing.
+          onPress={selected ? () => undefined : onSelect}
           onLongPress={() => onOpenMenu(rowRef.current)}
         />
       </SwipeToDeleteRow>
@@ -248,20 +275,21 @@ export function ManagedWorkspacePicker(props: ManagedWorkspacePickerProps) {
 
   const openMenu = (entry: ManagedWorkspaceSummary, target: View | null) => {
     void feedback.selection();
-    const items: WorkspacePickerMenuItem[] = [
-      {
+    const items: WorkspacePickerMenuItem[] = [];
+    if (entry.path !== props.selectedPath) {
+      items.push({
         key: 'use',
         label: `Use ${entry.name}`,
         icon: 'checkmark-circle-outline',
         onPress: () => select(entry.path),
-      },
-      {
-        key: 'rename',
-        label: 'Rename',
-        icon: 'pencil-outline',
-        onPress: () => setSheet({ kind: 'rename', entry }),
-      },
-    ];
+      });
+    }
+    items.push({
+      key: 'rename',
+      label: 'Rename',
+      icon: 'pencil-outline',
+      onPress: () => setSheet({ kind: 'rename', entry }),
+    });
     if (props.onBrowseFiles) {
       const browse = props.onBrowseFiles;
       items.push({
@@ -362,6 +390,7 @@ export function ManagedWorkspacePicker(props: ManagedWorkspacePickerProps) {
           renderItem={({ item, index }) => (
             <WorkspaceRow
               entry={item}
+              changedFiles={props.changedFiles?.[item.path]}
               first={index === 0}
               last={index === entries.length - 1}
               selected={item.path === props.selectedPath}

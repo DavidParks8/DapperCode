@@ -6,6 +6,7 @@ import {
   type CloneProgressResponse,
   type GitPullResponse,
   type ManagedWorkspaceResponse,
+  type ManagedWorkspaceState,
   type ManagedWorkspaceSummary,
   type WorkspaceFileListResponse,
   type WorkspaceFileReadResponse,
@@ -38,6 +39,10 @@ export class WorkspaceHostClient {
 
   listWorkspaces(): Promise<{ workspaces: ManagedWorkspaceSummary[] }> {
     return this.transport.request(M.workspaceList, {});
+  }
+  /** Working-tree state of each Git workspace; workspaces whose state is unknown are omitted. */
+  workspaceStates(): Promise<{ states: ManagedWorkspaceState[] }> {
+    return this.transport.request(M.workspaceStates, {});
   }
   /** Makes the workspace the host's default for new chats. */
   selectWorkspace(cwd: string): Promise<{ ok: true; cwd: string }> {

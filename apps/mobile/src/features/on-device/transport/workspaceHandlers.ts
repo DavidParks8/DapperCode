@@ -2,13 +2,14 @@ import type { GitCloneResponse } from '@bridge/types/types';
 import {
   WORKSPACE_HOST_METHODS as M,
   type ManagedWorkspaceResponse,
+  type ManagedWorkspaceState,
   type ManagedWorkspaceSummary,
   type WorkspaceFileListResponse,
   type WorkspaceFileReadResponse,
 } from '../../workspace/api/protocol';
 import { httpsRemoteError } from '../../workspace/api/remoteUrl';
 import { isOnDeviceNativeError } from '../native/services.errors';
-import type { LocalWorkspace } from '../workspaces/types';
+import type { LocalGitStatus, LocalWorkspace } from '../workspaces/types';
 import { LOCAL_RPC_ERROR, LocalRpcError } from './errors';
 import { readParam, type RpcParams } from './params';
 import type { LocalAgentPort } from './port';
@@ -21,6 +22,7 @@ import { LOCAL_WORKSPACE_ROOT, localWorkspacePaths } from './wire';
 export const LOCAL_WORKSPACE_METHODS = [
   'bridge/git/clone',
   M.workspaceList,
+  M.workspaceStates,
   M.workspaceSelect,
   M.gitFetch,
   M.gitPull,
@@ -92,11 +94,60 @@ function managedWorkspace(
   };
 }
 
+function changedFileCount(status: LocalGitStatus): number {
+  return status.clean ? 0 : Math.max(status.totalFiles, status.files.length, 1);
+}
+
+/**
+ * Working-tree states keyed by workspace id. Each is reused until the workspace's change token
+ * moves, so reopening the picker reads Git status only for workspaces that changed.
+ */
+function createWorkspaceStateReader(port: LocalAgentPort) {
+  const cache = new Map<string, { token: string; changedFiles: number }>();
+  const read = async (workspace: LocalWorkspace): Promise<number> => {
+    const token = await port.workspaceAdmin.changeToken(workspace.id);
+    const cached = cache.get(workspace.id);
+    if (cached?.token === token) {
+      return cached.changedFiles;
+    }
+    const changedFiles = changedFileCount(await port.git.status(workspace.id));
+    cache.set(workspace.id, { token, changedFiles });
+    return changedFiles;
+  };
+  return async (): Promise<ManagedWorkspaceState[]> => {
+    const workspaces = port.workspaces();
+    const ids = new Set(workspaces.map((entry) => entry.id));
+    for (const id of cache.keys()) {
+      if (!ids.has(id)) {
+        cache.delete(id);
+      }
+    }
+    const paths = localWorkspacePaths(workspaces);
+    const states = await Promise.all(
+      workspaces
+        .filter((entry) => entry.isRepository)
+        .map(async (entry) => {
+          try {
+            return {
+              path: paths.get(entry.id) ?? `${LOCAL_WORKSPACE_ROOT}/${entry.name}`,
+              changedFiles: await read(entry),
+            };
+          } catch {
+            // One unreadable repository leaves only its own row without a state.
+            return null;
+          }
+        }),
+    );
+    return states.filter((state): state is ManagedWorkspaceState => state !== null);
+  };
+}
+
 /**
  * Workspace lifecycle, clone, and file handlers for the workspace host extensions
  * (`features/workspace/api/protocol.ts`) plus `bridge/git/clone`.
  */
 export function createLocalWorkspaceHandlers(port: LocalAgentPort, workspace: ResolveWorkspace) {
+  const workspaceStates = createWorkspaceStateReader(port);
   return {
     'bridge/git/clone': async (params: RpcParams): Promise<GitCloneResponse> => {
       const url = readParam(params, 'url') ?? '';
@@ -143,6 +194,9 @@ export function createLocalWorkspaceHandlers(port: LocalAgentPort, workspace: Re
         ),
       };
     },
+    [M.workspaceStates]: async (): Promise<{ states: ManagedWorkspaceState[] }> => ({
+      states: await workspaceStates(),
+    }),
     [M.workspaceSelect]: async (params: RpcParams) => {
       const { id, cwd } = await workspace(params);
       await port.workspaceAdmin.select(id);

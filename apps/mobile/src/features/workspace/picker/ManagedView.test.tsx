@@ -20,6 +20,7 @@ import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
 import { LocalBridgeServer } from '../../on-device/transport/server';
 import { FakeAgentPort } from '../../on-device/transport/testing';
 import { LOCAL_WORKSPACE_ROOT } from '../../on-device/transport/wire';
+import { loadManagedWorkspacesAtom } from '../state/managedWorkspaces';
 import { managedWorkspaceSubtitle } from './ManagedView';
 import { WorkspacePickerScreen } from './Screen';
 
@@ -31,6 +32,7 @@ type Node = ReactTestInstance & {
 };
 
 const DEMO = `${LOCAL_WORKSPACE_ROOT}/Demo`;
+const DEMO_LABEL = 'Demo, main · 1 changed · github.com/acme/demo';
 
 async function flush(): Promise<void> {
   for (let round = 0; round < 4; round += 1) {
@@ -143,13 +145,85 @@ describe('managed workspace picker', () => {
   it('lists workspaces with Git metadata and marks the selected one', async () => {
     const { root } = await renderPicker(twoWorkspaces());
     const screen = text(root);
-    expect(screen).toContain('main · github.com/acme/demo');
+    expect(screen).toContain('main · 1 changed · github.com/acme/demo');
     expect(screen).toContain('Not a Git repository');
     expect(screen).not.toContain('Default workspace');
     expect(screen).not.toContain(' · Selected');
     // Selection is a checkmark on the row, not a " · Selected" suffix.
-    expect(control(root, 'Demo, main · github.com/acme/demo').props['selected']).toBe(true);
+    expect(control(root, DEMO_LABEL).props['selected']).toBe(true);
     expect(control(root, 'Scratch, Not a Git repository').props['selected']).toBe(false);
+  });
+
+  it('loads working-tree state after the list and rereads it only when a workspace changes', async () => {
+    const port = twoWorkspaces();
+    port.workspaceList = [
+      ...port.workspaceList,
+      { id: 'ws-three', name: 'Broken', isRepository: true },
+    ];
+    const original = port.git.status;
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const status = jest.spyOn(port.git, 'status').mockImplementation(async (id) => {
+      if (id === 'ws-three') {
+        throw new Error('The repository could not be read.');
+      }
+      await held;
+      return original(id);
+    });
+    const { root, store } = await renderPicker(port);
+    // The list is usable before any Git status read finishes.
+    expect(text(root)).toContain('main · github.com/acme/demo');
+    expect(text(root)).not.toContain('changed');
+
+    release();
+    await act(flush);
+    expect(control(root, DEMO_LABEL).props['selected']).toBe(true);
+    // A workspace without Git is never asked for status; an unreadable one just shows no state.
+    expect(status.mock.calls.map(([id]) => id).sort()).toEqual(['ws-one', 'ws-three']);
+    expect(control(root, 'Broken, main · github.com/acme/demo')).toBeTruthy();
+
+    // Reopening without a change reuses the cached state instead of reading Git again.
+    status.mockClear();
+    await act(async () => {
+      await store.set(loadManagedWorkspacesAtom);
+      await flush();
+    });
+    expect(status.mock.calls.map(([id]) => id)).toEqual(['ws-three']);
+
+    // A change moves the workspace's change token, so its state is read again.
+    status.mockImplementation(async (id) => ({
+      ...(await original(id)),
+      clean: true,
+      files: [],
+      totalFiles: 0,
+    }));
+    port.fileMap.set('ws-one:README.md', 'committed');
+    await act(async () => {
+      await store.set(loadManagedWorkspacesAtom);
+      await flush();
+    });
+    expect(control(root, 'Demo, main · Clean · github.com/acme/demo').props['selected']).toBe(true);
+  });
+
+  it('keeps the workspace in use checked and inert', async () => {
+    const port = twoWorkspaces();
+    const { root, store } = await renderPicker(port);
+    const selected = control(root, DEMO_LABEL);
+    const button = selected.findAll((node) => node.props['accessibilityRole'] === 'button')[0]!;
+    expect(button.props['accessibilityState']).toMatchObject({ selected: true });
+    expect(text(root)).toContain('checkmark');
+
+    await invoke(selected);
+    expect(port.calls).not.toContain('workspace.select:ws-one');
+    expect(router.back).not.toHaveBeenCalled();
+    expect(store.get(defaultStartCwdAtom)).toBe(DEMO);
+
+    // Its menu offers no "Use" action; another workspace's menu still does.
+    await invoke(control(root, DEMO_LABEL, 'onLongPress'), 'onLongPress');
+    expect(root.findAll((node) => node.props['accessibilityLabel'] === 'Use Demo')).toHaveLength(0);
+    expect(control(root, 'Rename')).toBeTruthy();
   });
 
   it('selects a workspace with one tap and records it for first-run setup', async () => {
@@ -186,7 +260,7 @@ describe('managed workspace picker', () => {
   it('renames from the long-press menu and keeps the selection on the renamed workspace', async () => {
     const port = twoWorkspaces();
     const { root, store } = await renderPicker(port);
-    await invoke(control(root, 'Demo, main · github.com/acme/demo', 'onLongPress'), 'onLongPress');
+    await invoke(control(root, DEMO_LABEL, 'onLongPress'), 'onLongPress');
     await invoke(control(root, 'Rename'));
     await invoke(input(root, 'workspace-rename-sheet-input'), 'onChangeText', 'Demo app');
     await invoke(control(root, 'workspace-rename-sheet-submit'));
@@ -211,7 +285,7 @@ describe('managed workspace picker', () => {
     expect(router.push).toHaveBeenLastCalledWith(
       expect.objectContaining({ pathname: '/profiles/[profileId]/chats/[chatId]/git-checkout' }),
     );
-    await invoke(control(root, 'Demo, main · github.com/acme/demo', 'onLongPress'), 'onLongPress');
+    await invoke(control(root, DEMO_LABEL, 'onLongPress'), 'onLongPress');
     await invoke(control(root, 'Browse files'));
     expect(router.push).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -228,6 +302,15 @@ describe('managedWorkspaceSubtitle', () => {
     expect(managedWorkspaceSubtitle({ ...base, isRepository: false })).toBe('Not a Git repository');
     expect(managedWorkspaceSubtitle({ ...base, isRepository: true, branch: 'dev' })).toBe(
       'dev · No remote',
+    );
+    expect(managedWorkspaceSubtitle({ ...base, isRepository: true, branch: 'dev' }, 0)).toBe(
+      'dev · Clean · No remote',
+    );
+    expect(managedWorkspaceSubtitle({ ...base, isRepository: true, branch: 'dev' }, 3)).toBe(
+      'dev · 3 changed · No remote',
+    );
+    expect(managedWorkspaceSubtitle({ ...base, isRepository: false }, 3)).toBe(
+      'Not a Git repository',
     );
   });
 });

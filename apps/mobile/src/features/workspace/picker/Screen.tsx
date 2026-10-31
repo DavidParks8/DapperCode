@@ -7,6 +7,7 @@ import {
   deleteManagedWorkspaceAtom,
   loadManagedWorkspacesAtom,
   managedWorkspacesAtom,
+  managedWorkspaceChangesAtom,
   managedWorkspacesErrorAtom,
   managedWorkspacesLoadingAtom,
   renameManagedWorkspaceAtom,
@@ -76,6 +77,7 @@ export function WorkspacePickerScreen() {
   const managedWorkspaces = useAtomValue(managedWorkspacesAtom);
   const managedLoading = useAtomValue(managedWorkspacesLoadingAtom);
   const managedError = useAtomValue(managedWorkspacesErrorAtom);
+  const managedChanges = useAtomValue(managedWorkspaceChangesAtom);
   const loadManagedWorkspaces = useSetAtom(loadManagedWorkspacesAtom);
   const selectManagedWorkspace = useSetAtom(selectManagedWorkspaceAtom);
   useEffect(() => {
@@ -95,6 +97,7 @@ export function WorkspacePickerScreen() {
       <ManagedWorkspacePicker
         selectedPath={normalizeWorkspacePath(defaultStartCwd)}
         entries={managedWorkspaces ?? []}
+        changedFiles={managedChanges}
         loading={managedLoading && managedWorkspaces === null}
         error={managedError}
         onSelect={(path) => void selectManagedWorkspace(path)}
