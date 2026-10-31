@@ -95,6 +95,7 @@ describe('local profile state', () => {
       pushNotifications: false,
       connectionSettings: false,
       gitClone: false,
+      browserPreview: false,
     });
 
     const unsupported = storeWith(LOCAL_PROFILE_ID, false);

@@ -69,6 +69,8 @@ export interface ActiveProfileFeatures {
   connectionSettings: boolean;
   /** Cloning from the workspace picker (`bridge/git/clone`). */
   gitClone: boolean;
+  /** The desktop preview browser, which proxies through the bridge host. */
+  browserPreview: boolean;
 }
 
 export const activeProfileFeaturesAtom = atom<ActiveProfileFeatures>((get) => {
@@ -78,6 +80,7 @@ export const activeProfileFeaturesAtom = atom<ActiveProfileFeatures>((get) => {
     pushNotifications: !local,
     connectionSettings: !local,
     gitClone: !local,
+    browserPreview: !local,
   };
 });
 
