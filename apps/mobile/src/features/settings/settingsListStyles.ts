@@ -61,6 +61,7 @@ export function createSettingsListStyles(theme: AppTheme) {
       flexShrink: 1,
     },
     rowChevron: { opacity: 0.5 },
+    rowCheckPlaceholder: { width: 20, height: 20 },
     note: {
       paddingHorizontal: theme.spacing.lg,
       paddingVertical: theme.spacing.md,

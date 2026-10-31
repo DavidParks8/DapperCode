@@ -47,14 +47,25 @@ export function SettingsGroup({
 /** Trailing affordance a row carries: iOS uses distinct glyphs for push, in-place pick, and choice. */
 export type SettingsRowAccessory = 'none' | 'chevron' | 'expand' | 'check';
 
-function RowAccessory({ accessory }: { accessory: SettingsRowAccessory }) {
+function RowAccessory({
+  accessory,
+  selected,
+}: {
+  accessory: SettingsRowAccessory;
+  selected: boolean;
+}) {
   const theme = useAppTheme();
   const styles = useMemo(() => createSettingsListStyles(theme), [theme]);
   if (accessory === 'none') {
     return null;
   }
   if (accessory === 'check') {
-    return <Ionicons name="checkmark" size={20} color={theme.colors.accent} />;
+    // Unselected choices keep the slot so values stay aligned across rows.
+    return selected ? (
+      <Ionicons name="checkmark" size={20} color={theme.colors.accent} />
+    ) : (
+      <View style={styles.rowCheckPlaceholder} />
+    );
   }
   return (
     <Ionicons
@@ -106,7 +117,7 @@ export function SettingsRow({
             {value}
           </Text>
         ) : null}
-        <RowAccessory accessory={accessory} />
+        <RowAccessory accessory={accessory} selected={selected} />
       </View>
     </Pressable>
   );
