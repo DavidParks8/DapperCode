@@ -34,6 +34,7 @@ jest.mock('../../features/on-device/runtime/OnDeviceProvider', () => {
     },
     workspaceActivity: () => null,
     legacyDrafts: () => new Map(),
+    issues: () => [],
     subscribe: (listener: () => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);

@@ -6,7 +6,7 @@ import type { LocalModelSessionSnapshot } from '../../on-device/models/session';
 import type { DeviceMemory } from '../../on-device/models/types';
 import type { LocalPreferences } from '../../on-device/runtime/preferences';
 import type { OnDeviceRuntime } from '../../on-device/runtime/runtime';
-import type { OnDeviceRuntimeSlice } from '../../on-device/runtime/types';
+import type { OnDeviceIssue, OnDeviceRuntimeSlice } from '../../on-device/runtime/types';
 
 const GiB = 1024 ** 3;
 
@@ -122,6 +122,10 @@ export class FakeSettingsRuntime {
 
   authConfigured = () => this.configured;
   preferences = () => this.preferenceValue;
+  readonly issueList: OnDeviceIssue[] = [];
+  issues = () => this.issueList;
+  readonly dismissIssue = jest.fn();
+  readonly retryPersistence = jest.fn(async () => undefined);
 
   subscribe = (listener: () => void, slices?: readonly OnDeviceRuntimeSlice[]) => {
     const entry = { listener, slices };

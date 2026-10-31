@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/require-await -- the fake mirrors the async port contract */
 import type { LocalModelDefinition } from '../models/types';
 import { localModelDefinition } from '../models/catalog';
-import type { LocalRunSnapshot } from '../runtime/agentLoop';
+import { localConversationTitle, type LocalRunSnapshot } from '../runtime/agentLoop';
 import type { LocalMessage, LocalThread } from '../runtime/types';
 import { OnDeviceNativeError } from '../native/services.errors';
 import type { LocalWorkspace } from '../workspaces/types';
@@ -322,7 +322,7 @@ export class FakeAgentPort implements LocalAgentPort {
         activeTurnId: turnId,
         lastSubmissionId: submissionId,
         lastError: null,
-        title: thread.messages.length === 0 ? text.slice(0, 60) : thread.title,
+        title: thread.messages.length === 0 ? localConversationTitle(text) : thread.title,
         messages: [
           ...thread.messages,
           { id: `user-${submissionId}`, role: 'user', content: text, createdAt: this.now() },
@@ -509,7 +509,10 @@ export class FakeAgentPort implements LocalAgentPort {
     }));
   }
 
+  /** Settles the run the way the loop does: it saves (`persisting`), then the thread settles. */
   settle(threadId: string, status: LocalThread['status'], error: string | null = null): void {
+    this.runValue = { ...this.runValue, phase: 'persisting', toolName: null, approval: null };
+    this.emit();
     const thread = this.change(threadId, (current) => ({
       ...current,
       status,
