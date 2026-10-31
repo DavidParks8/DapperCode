@@ -1,27 +1,23 @@
-import { LOCAL_MODEL_CATALOG, localModelDefinition } from '../models/catalog';
-import type { ModelDownloadController, ModelDownloadSnapshot } from '../models/downloads';
+import { localModelDefinition } from '../models/catalog';
+import type { ModelDownloadController } from '../models/downloads';
 import { modelMemoryAdmission } from '../models/memory';
 import type { LocalModelSession } from '../models/session';
 import type { DeviceMemory } from '../models/types';
 
-const TRANSFERRING: readonly ModelDownloadSnapshot['phase'][] = ['preparing', 'downloading'];
-
 export interface ModelResidencyPorts {
   models: Pick<LocalModelSession, 'snapshot' | 'load' | 'unload'>;
-  downloads: Pick<ModelDownloadController, 'snapshot' | 'resume'>;
+  downloads: Pick<ModelDownloadController, 'snapshot'>;
   /** True when no conversation run is active. */
   idle: () => boolean;
   memory: () => DeviceMemory;
-  report: (error: unknown) => void;
 }
 
 /**
- * Serializes model loads/unloads and restores what backgrounding paused: the download that was
- * transferring and the model that was loaded. Turns are never replayed.
+ * Serializes model loads/unloads and restores the model that backgrounding unloaded. Turns are
+ * never replayed; downloads continue in the background and are not tracked here.
  */
 export class ModelResidency {
   private model: string | null = null;
-  private download: string | null = null;
   private pending: Promise<void> | null = null;
 
   constructor(private readonly ports: ModelResidencyPorts) {}
@@ -47,38 +43,18 @@ export class ModelResidency {
     return task;
   }
 
-  /** Records the loaded model and active transfer before backgrounding pauses them. */
+  /** Records the loaded model before backgrounding unloads it. */
   rememberForBackground(): void {
     const model = this.ports.models.snapshot();
     if (model.modelId && model.phase !== 'empty' && model.phase !== 'error') {
       this.model = model.modelId;
     }
-    this.download =
-      LOCAL_MODEL_CATALOG.find((entry) =>
-        TRANSFERRING.includes(this.ports.downloads.snapshot(entry.id).phase),
-      )?.id ?? this.download;
   }
 
-  /** Forgets resume intent for one model, or the model warm-up when `id` is omitted. */
+  /** Forgets the warm-up for one model, or for any model when `id` is omitted. */
   forget(id?: string): void {
     if (id === undefined || this.model === id) {
       this.model = null;
-    }
-    if (id !== undefined && this.download === id) {
-      this.download = null;
-    }
-  }
-
-  /** Resumes the download paused by backgrounding; only if it is still paused and resumable. */
-  resumeDownload(): void {
-    const id = this.download;
-    if (!id) {
-      return;
-    }
-    this.download = null;
-    const snapshot = this.ports.downloads.snapshot(id);
-    if (snapshot.phase === 'paused' && snapshot.canResume) {
-      void this.ports.downloads.resume(id).catch((error: unknown) => this.ports.report(error));
     }
   }
 

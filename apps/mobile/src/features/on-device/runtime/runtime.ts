@@ -5,7 +5,6 @@ import type { LocalGitIdentity } from '../git/gitTools';
 import { LOCAL_MODEL_CATALOG, localModelDefinition } from '../models/catalog';
 import { ModelDownloadController, type ModelDownloadSnapshot } from '../models/downloads';
 import { loadNativeModelContext } from '../models/engine';
-import { expoModelTransfers, modelResumeStorage } from '../models/expoDownloads';
 import { LocalModelSession } from '../models/session';
 import type { OnDeviceNativeServices } from '../native/services.types';
 import type { LocalWorkspace } from '../workspaces/types';
@@ -114,12 +113,8 @@ export class OnDeviceRuntime {
     this.models = new LocalModelSession(native, loadNativeModelContext, () =>
       this.emitter.coalesce('models'),
     );
-    this.downloads = new ModelDownloadController(
-      LOCAL_MODEL_CATALOG,
-      native,
-      expoModelTransfers,
-      modelResumeStorage,
-      () => this.emitter.coalesce('downloads'),
+    this.downloads = new ModelDownloadController(LOCAL_MODEL_CATALOG, native, () =>
+      this.emitter.coalesce('downloads'),
     );
     this.authentication = new GitHubAuthStrategy({
       clientId: this.githubClientId,
@@ -146,7 +141,6 @@ export class OnDeviceRuntime {
       downloads: this.downloads,
       idle: () => this.loop.snapshot().phase === 'idle',
       memory: () => native.getMemoryInfo(),
-      report: (error) => this.report(error),
     });
   }
 
@@ -504,8 +498,8 @@ export class OnDeviceRuntime {
   }
 
   /**
-   * The app moved to the background: stops local work, pauses transfers, unloads the model, and
-   * flushes state. `foreground()` resumes what this paused.
+   * The app moved to the background: stops local work, unloads the model, and flushes state.
+   * Model downloads keep running in their background URL session.
    */
   background(): Promise<void> {
     this.backgrounded = true;
@@ -518,7 +512,8 @@ export class OnDeviceRuntime {
   }
 
   /**
-   * The app is active again: resumes a download paused by backgrounding (once online) and warms
+   * The app is active (after startup or a return from the background): re-attaches downloads and,
+   * once online, continues transfers or verification the system interrupted, then warms
    * the previously loaded model if memory admits it. Interrupted turns are never replayed.
    */
   async foreground(): Promise<void> {
@@ -592,9 +587,13 @@ export class OnDeviceRuntime {
       mode !== 'memory' && this.workspaceOperation
         ? await Promise.allSettled([this.workspaceOperation])
         : [];
+    // Model downloads run in a background URL session and are never paused by the lifecycle;
+    // disposal only stops progress polling, and a later runtime re-attaches them.
+    if (mode === 'dispose') {
+      this.downloads.dispose();
+    }
     const results = await Promise.allSettled([
       mode === 'dispose' ? this.models.dispose() : this.models.unload(),
-      mode === 'memory' ? Promise.resolve() : this.downloads.pause(),
       this.flush(),
     ]);
     throwFirstRejection([...stopping, ...workspace, ...results]);
@@ -607,7 +606,7 @@ export class OnDeviceRuntime {
       !this.disposal &&
       this.networkMonitor.current() !== 'offline'
     ) {
-      this.residency.resumeDownload();
+      void this.downloads.resumeLifecyclePaused().catch((error: unknown) => this.report(error));
     }
   }
 

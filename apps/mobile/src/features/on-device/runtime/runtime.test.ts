@@ -5,7 +5,6 @@ import type { LocalModelContext, LocalModelReply } from '../models/engine';
 import { loadNativeModelContext } from '../models/engine';
 import type { OnDeviceNativeServices } from '../native/services.types';
 import { localChatControls } from '../screens/chatControls';
-import { ModelDownloadController, type ModelDownloadSnapshot } from '../models/downloads';
 import { draftDocument, DRAFT_SAVE_DELAY_MS } from './drafts';
 import { COALESCED_EMIT_INTERVAL_MS } from './emitter';
 import { OnDeviceOfflineError, type OnDeviceNetworkPort } from './network';
@@ -16,10 +15,6 @@ import type { OnDeviceReachability } from './types';
 
 jest.mock('expo-crypto', () => ({ randomUUID: jest.fn() }));
 jest.mock('../models/engine', () => ({ loadNativeModelContext: jest.fn() }));
-jest.mock('../models/expoDownloads', () => ({
-  expoModelTransfers: { create: jest.fn(), restore: jest.fn() },
-  modelResumeStorage: { read: jest.fn(async () => null), write: jest.fn(), remove: jest.fn() },
-}));
 
 const modelId = 'qwen3-1.7b-q4-k-m';
 const reply: LocalModelReply = {
@@ -134,6 +129,33 @@ function harness(documents = new Map<string, string>()) {
       Parameters<OnDeviceNativeServices['finalizeModelDownload']>
     >(),
     removeModelFile: jest.fn(async () => undefined),
+    attachModelDownloads: jest.fn(async () => []),
+    startModelDownload: jest.fn<
+      ReturnType<OnDeviceNativeServices['startModelDownload']>,
+      Parameters<OnDeviceNativeServices['startModelDownload']>
+    >(),
+    pauseModelDownload: jest.fn<
+      ReturnType<OnDeviceNativeServices['pauseModelDownload']>,
+      Parameters<OnDeviceNativeServices['pauseModelDownload']>
+    >(),
+    cancelModelDownload: jest.fn(async () => undefined),
+    getModelDownload: jest.fn((id: string) => ({
+      id,
+      state: 'idle' as const,
+      bytesWritten: 0,
+      totalBytes: 0,
+      resumable: false,
+      interrupted: false,
+      error: null,
+    })),
+    getModelVerificationProgress: jest.fn(() => ({ active: false, completed: 0, total: 0 })),
+    cancelModelVerification: jest.fn(),
+    getModelStorageInfo: jest.fn(async () => ({
+      usedBytes: 0,
+      freeBytes: 0,
+      capacityBytes: 0,
+      models: [],
+    })),
     getWorkspaceGitStatus: jest.fn<
       ReturnType<OnDeviceNativeServices['getWorkspaceGitStatus']>,
       Parameters<OnDeviceNativeServices['getWorkspaceGitStatus']>
@@ -503,36 +525,22 @@ function fakeNetwork(initial: OnDeviceReachability) {
   };
 }
 
-function pausedSnapshot(id: string): ModelDownloadSnapshot {
-  return {
-    modelId: id,
-    phase: 'paused',
-    bytesWritten: 10,
-    canResume: true,
-    verificationPending: false,
-    file: null,
-    error: null,
-  };
-}
-
 const otherModelId = 'qwen3-0.6b-q4-0';
 
 describe('lifecycle', () => {
-  test('backgrounding unloads, and returning warms the model and resumes the paused download without replaying turns', async () => {
+  test('backgrounding unloads without pausing downloads; returning warms the model and resumes interrupted downloads', async () => {
     const h = await ready();
-    const snapshot = jest.spyOn(h.runtime.downloads, 'snapshot');
-    const real = ModelDownloadController.prototype.snapshot.bind(h.runtime.downloads);
-    snapshot.mockImplementation((id) =>
-      id === otherModelId ? { ...pausedSnapshot(id), phase: 'downloading' } : real(id),
-    );
+    const pause = jest.spyOn(h.runtime.downloads, 'pause');
+    const pauseAll = jest.spyOn(h.runtime.downloads, 'pauseAll');
     const resume = jest
-      .spyOn(h.runtime.downloads, 'resume')
-      .mockImplementation(async (id) => pausedSnapshot(id));
+      .spyOn(h.runtime.downloads, 'resumeLifecyclePaused')
+      .mockResolvedValue(undefined);
     await h.runtime.background();
     expect(h.runtime.models.snapshot().phase).toBe('empty');
-    snapshot.mockImplementation((id) => (id === otherModelId ? pausedSnapshot(id) : real(id)));
+    expect(pause).not.toHaveBeenCalled();
+    expect(pauseAll).not.toHaveBeenCalled();
     await h.runtime.foreground();
-    expect(resume).toHaveBeenCalledWith(otherModelId);
+    expect(resume).toHaveBeenCalledTimes(1);
     expect(loadNativeModelContext).toHaveBeenCalledTimes(2);
     expect(h.runtime.models.snapshot()).toMatchObject({ phase: 'ready', modelId });
     expect(h.context.completion).not.toHaveBeenCalled();
@@ -553,28 +561,30 @@ describe('lifecycle', () => {
     await h.runtime.dispose();
   });
 
-  test('a lifecycle-paused download waits for the network before resuming', async () => {
+  test('interrupted downloads resume only once the network is back', async () => {
     const network = fakeNetwork('online');
     const h = harness();
     const runtime = new OnDeviceRuntime(h.native, { network: network.port });
     await runtime.initialize();
-    const real = ModelDownloadController.prototype.snapshot.bind(runtime.downloads);
-    const snapshot = jest
-      .spyOn(runtime.downloads, 'snapshot')
-      .mockImplementation((id) =>
-        id === otherModelId ? { ...pausedSnapshot(id), phase: 'downloading' } : real(id),
-      );
     const resume = jest
-      .spyOn(runtime.downloads, 'resume')
-      .mockImplementation(async (id) => pausedSnapshot(id));
+      .spyOn(runtime.downloads, 'resumeLifecyclePaused')
+      .mockResolvedValue(undefined);
     await runtime.background();
-    snapshot.mockImplementation((id) => (id === otherModelId ? pausedSnapshot(id) : real(id)));
     network.change('offline');
     await runtime.foreground();
     expect(resume).not.toHaveBeenCalled();
     network.change('online');
-    expect(resume).toHaveBeenCalledWith(otherModelId);
+    expect(resume).toHaveBeenCalledTimes(1);
     await runtime.dispose();
+  });
+
+  test('disposal stops download polling without pausing the background transfers', async () => {
+    const h = await ready();
+    const dispose = jest.spyOn(h.runtime.downloads, 'dispose');
+    const pauseAll = jest.spyOn(h.runtime.downloads, 'pauseAll');
+    await h.runtime.dispose();
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(pauseAll).not.toHaveBeenCalled();
   });
 
   test('a memory warning unloads the model without pausing downloads or warming it later', async () => {

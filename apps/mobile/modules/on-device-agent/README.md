@@ -20,12 +20,30 @@ See [product setup and limitations](../../../../docs/on-device.md).
   the empty path; `"."` is accepted as a root alias where the root is allowed.
 - `ios/NativeServiceError.swift` defines the stable error codes. Every workspace, Git, and credential
   failure is described as `[ondevice:CODE] message`; `src/features/on-device/native/services.errors.ts`
-  maps Expo's wrapped rejections to `OnDeviceNativeError` with that code and a clean message.
-- `ios/ModelFileStore.swift` verifies size/SHA-256 before atomic ready publication.
+  maps Expo's wrapped rejections to `OnDeviceNativeError` with that code and a clean message. Model
+  file and download failures are untagged and surface as `NATIVE_FAILURE` with a clean message.
+- `ios/ModelFileStore.swift` verifies size/SHA-256 before atomic ready publication. Hashing runs off
+  the store actor in 1 MiB chunks, reports progress (`getModelVerificationProgress`), and stops
+  cooperatively (`cancelModelVerification`) while keeping the staged file for a later retry. It also
+  reports model disk usage and free/total capacity (`getModelStorageInfo`).
+- `ios/ModelDownloadSession.swift` owns one background `URLSession`; each task's description is its
+  model ID, so several models transfer concurrently and keep running while the app is suspended.
+  `attachModelDownloads` adopts tasks that outlived the process. Completed files are moved to
+  `partial.gguf` by the delegate even when JavaScript is not running; pause and system interruptions
+  persist resume data (`resume.data`/`transfer.json`). When iOS relaunches the app for transfer events,
+  `ModelDownloadEvents.swift` recreates the session and takes the system completion handler
+  directly: `plugins/withOnDeviceAgentNative.js` adds an `AppDelegate` override ahead of Expo's
+  subscriber aggregation, because in SDK 57 expo-file-system's handler and
+  `EXLegacyAppDelegateWrapper` never complete their share for another library's session, so the
+  aggregated handler would never reach iOS. A checksum or size mismatch deletes the staged file so
+  a corrupt download is not re-verified on every activation. A pause whose checkpoint cannot be
+  written releases the transfer and records the failure. Checkpoints from the earlier
+  JavaScript transfer (`resume.json`) are imported on the next resume.
   `RuntimeDocumentStore.swift` owns separate atomic, size-limited local journals/preferences.
 - The native ABI is versioned (currently 7: workspace rename/delete, change tokens, UI file
-  rename/delete, fetch/pull, init, branch creation, discard, remote-aware status, typed errors). An old
-  binary is rejected before loading model variants that need the newer inference engine, including
+  rename/delete, fetch/pull, init, branch creation, discard, remote-aware status, typed errors,
+  background model downloads, verification progress/cancellation, storage info). An old binary is
+  rejected before loading model variants that need the newer inference engine, including
   Bonsai 2's activation transforms.
 - `scripts/build-git.mjs` builds pinned libgit2 1.9.7 for iOS arm64 and simulator arm64/x86_64.
   The source archive is SHA-256 verified. HTTPS uses SecureTransport; SSH, the CLI, and tests are
@@ -131,13 +149,30 @@ node .agents/skills/local-e2e-validation/scripts/run.mjs \
   apps/mobile/modules/on-device-agent/tests/native-workspaces.mjs
 ```
 
-The model-file scenario also exercises atomic local runtime documents, preservation on rejected
-writes, prefix enumeration, and idempotent removal:
+The model-file scenario also exercises verification progress and cooperative cancellation (without
+blocking other models' file operations), the storage overview, atomic local runtime documents,
+preservation on rejected writes, prefix enumeration, and idempotent removal:
 
 ```bash
 node .agents/skills/local-e2e-validation/scripts/run.mjs \
   --evidence /absolute/path/to/new-storage-evidence.jsonl \
   apps/mobile/modules/on-device-agent/tests/native-model-files.mjs
+```
+
+The download scenario bundles the production `ModelDownloadController` against a local HTTPS
+fixture. It downloads two models concurrently, pauses one while the other continues, resumes with
+an HTTP Range request, then terminates the app mid-transfer and relaunches it. The background
+session must re-attach (or have delivered the finished file) without restarting either transfer,
+before verification, checksum rejection (which discards the staged file), the storage overview,
+removal, and a pause whose checkpoint cannot be written are checked. While the app is terminated,
+the scenario waits for iOS to relaunch it in the background and asserts (from the simulator log)
+that the system's background-session completion handler is called. It needs the
+Release simulator build above:
+
+```bash
+node .agents/skills/local-e2e-validation/scripts/run.mjs \
+  --evidence /absolute/path/to/new-downloads-evidence.jsonl \
+  apps/mobile/modules/on-device-agent/tests/native-downloads.mjs
 ```
 
 `native-product.mjs` bundles the production router/screens behind an isolated fixture bootstrap.

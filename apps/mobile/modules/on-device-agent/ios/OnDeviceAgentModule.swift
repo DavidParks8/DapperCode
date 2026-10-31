@@ -116,7 +116,41 @@ public class OnDeviceAgentModule: Module {
     }
 
     AsyncFunction("removeModelFile") { (id: String) in
+      try await ModelDownloadSession.shared.cancel(id)
       try await self.models.remove(id)
+    }
+
+    // Background model transfers, verification progress, and storage overview (API 7).
+    AsyncFunction("attachModelDownloads") {
+      await ModelDownloadSession.shared.attach().map(\.payload)
+    }
+
+    AsyncFunction("startModelDownload") { (id: String, url: String, expectedBytes: Int64) in
+      try ModelDownloadSession.shared.start(id, url: url, expectedBytes: expectedBytes).payload
+    }
+
+    AsyncFunction("pauseModelDownload") { (id: String) in
+      try await ModelDownloadSession.shared.pause(id).payload
+    }
+
+    AsyncFunction("cancelModelDownload") { (id: String) in
+      try await ModelDownloadSession.shared.cancel(id)
+    }
+
+    Function("getModelDownload") { (id: String) in
+      try ModelDownloadSession.shared.snapshot(id).payload
+    }
+
+    Function("getModelVerificationProgress") { (id: String) in
+      ModelVerificationProgress.shared.snapshot(id)
+    }
+
+    Function("cancelModelVerification") { (id: String) in
+      ModelVerificationProgress.shared.cancel(id)
+    }
+
+    AsyncFunction("getModelStorageInfo") {
+      try await self.models.storage().payload
     }
 
     AsyncFunction("readRuntimeDocument") { (name: String) in

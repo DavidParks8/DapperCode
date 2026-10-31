@@ -150,6 +150,9 @@ export function OnDeviceProvider({
       };
       if (backgrounded) {
         await next.background().catch((failure: unknown) => next.report(failure));
+      } else {
+        // Startup counts as becoming active: re-attach and continue interrupted downloads.
+        void next.foreground().catch((failure: unknown) => next.report(failure));
       }
       if (mounted) {
         setOwner(next);

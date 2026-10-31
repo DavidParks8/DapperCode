@@ -8,6 +8,11 @@ import type {
   LocalWorkspace,
 } from '../workspaces/types';
 import type { DeviceMemory, LocalModelFile, LocalModelPaths } from '../models/types';
+import type {
+  NativeModelStorageInfo,
+  NativeModelTransfer,
+  NativeModelVerificationProgress,
+} from '../models/downloadState';
 
 export const ON_DEVICE_NATIVE_API_VERSION = 7;
 
@@ -84,6 +89,14 @@ export interface OnDeviceNativeServices {
   getDownloadedModelFile(id: string): Promise<LocalModelFile | null>;
   finalizeModelDownload(id: string, sha256: string, bytes: number): Promise<LocalModelFile>;
   removeModelFile(id: string): Promise<void>;
+  attachModelDownloads(): Promise<NativeModelTransfer[]>;
+  startModelDownload(id: string, url: string, expectedBytes: number): Promise<NativeModelTransfer>;
+  pauseModelDownload(id: string): Promise<NativeModelTransfer>;
+  cancelModelDownload(id: string): Promise<void>;
+  getModelDownload(id: string): NativeModelTransfer;
+  getModelVerificationProgress(id: string): NativeModelVerificationProgress;
+  cancelModelVerification(id: string): void;
+  getModelStorageInfo(): Promise<NativeModelStorageInfo>;
   readRuntimeDocument(name: string): Promise<string | null>;
   writeRuntimeDocument(name: string, content: string): Promise<void>;
   listRuntimeDocuments(prefix: string): Promise<string[]>;

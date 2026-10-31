@@ -16,7 +16,7 @@ const RAW_AUDIT_FAILURE =
   'UnexpectedException: Paths must stay inside the workspace and outside Git metadata. (at ExpoModulesCore/ConcurrentFunctionDefinition.swift:90)';
 
 test('old native builds are rejected before exposing models requiring the updated engine', () => {
-  mockNativeLookup.mockReturnValue({ getAPIVersion: () => 6 });
+  mockNativeLookup.mockReturnValue({ getAPIVersion: () => ON_DEVICE_NATIVE_API_VERSION - 1 });
   expect(() => getOnDeviceNativeServices()).toThrow('Rebuild the native iOS app');
 });
 

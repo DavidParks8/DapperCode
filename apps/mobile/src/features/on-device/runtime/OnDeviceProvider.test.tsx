@@ -75,17 +75,19 @@ test('only a real background transition suspends local work; returning to active
     </OnDeviceProvider>,
   );
   await screen.findByText('ready');
+  // Starting while active counts as becoming active, which resumes interrupted downloads.
+  expect(runtime.foreground).toHaveBeenCalledTimes(1);
   const change = (state: AppStateStatus) => act(() => handlers.get('change')?.(state));
   change('inactive');
   change('active');
   expect(runtime.background).not.toHaveBeenCalled();
-  expect(runtime.foreground).not.toHaveBeenCalled();
+  expect(runtime.foreground).toHaveBeenCalledTimes(1);
   change('inactive');
   change('background');
   expect(runtime.background).toHaveBeenCalledTimes(1);
   change('inactive');
   change('active');
-  expect(runtime.foreground).toHaveBeenCalledTimes(1);
+  expect(runtime.foreground).toHaveBeenCalledTimes(2);
   act(() => handlers.get('memoryWarning')?.());
   expect(runtime.relieveMemory).toHaveBeenCalledTimes(1);
   expect(runtime.background).toHaveBeenCalledTimes(1);
@@ -154,4 +156,20 @@ test('a remounted provider starts its runtime only after the previous one finish
   await screen.findByText('ready');
   expect(OnDeviceRuntime).toHaveBeenCalledTimes(2);
   expect(second.initialize).toHaveBeenCalledTimes(1);
+});
+
+test('starting in the background suspends instead of resuming downloads', async () => {
+  Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'background' });
+  const runtime = runtimeDouble();
+  jest.mocked(OnDeviceRuntime).mockImplementation(() => runtime as unknown as OnDeviceRuntime);
+  render(
+    <OnDeviceProvider>
+      <Text>ready</Text>
+    </OnDeviceProvider>,
+  );
+  await screen.findByText('ready');
+  expect(runtime.background).toHaveBeenCalledTimes(1);
+  expect(runtime.foreground).not.toHaveBeenCalled();
+  act(() => handlers.get('change')?.('active'));
+  expect(runtime.foreground).toHaveBeenCalledTimes(1);
 });
