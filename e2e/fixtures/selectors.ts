@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 
 export const nativeOnDeviceSelectors = {
-  entry: 'On this iPhone',
+  entry: 'onboarding-choice-local',
   modelLibrary: 'on-device-model-library',
   qwen35Family: 'Qwen3.5 model family',
   bonsaiFamily: 'Bonsai 2 model family',
@@ -34,6 +34,15 @@ export const selectors = {
   drawerNewChat: (page: Page): Locator => page.getByLabel('New chat').first(),
   drawerSearch: (page: Page): Locator => page.getByLabel('Search sessions'),
   drawerSettings: (page: Page): Locator => page.getByLabel('Open settings'),
+  drawerProfileSwitcher: (page: Page): Locator => page.getByTestId('drawer-profile-switcher'),
+  drawerFolderFilter: (page: Page): Locator => page.getByLabel(/^Filter sessions by folder/),
+  newChatProfileSwitcher: (page: Page): Locator => page.getByTestId('new-chat-profile-switcher'),
+  newChatWorkspace: (page: Page): Locator => page.getByLabel(/^Workspace, /),
+  profileOption: (page: Page, name: string): Locator =>
+    page.getByRole('button', { name, exact: true }),
+  localSetupGuide: (page: Page): Locator => page.getByTestId('local-setup-guide'),
+  onboardingBridgeChoice: (page: Page): Locator => page.getByTestId('onboarding-choice-bridge'),
+  onboardingLocalChoice: (page: Page): Locator => page.getByTestId('onboarding-choice-local'),
   sceneToolbarButtonGlass: (page: Page, key: string): Locator =>
     page.getByTestId(`scene-toolbar-button-glass-${key}`),
   chatPreviewLink: (page: Page, url: string): Locator =>

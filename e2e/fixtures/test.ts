@@ -11,6 +11,8 @@ import { seedBridgeProfileScript } from './seed.ts';
 export interface AppOptions extends RealBridgeOptions {
   /** Chat to open directly. Defaults to the app's own landing redirect. */
   readonly chatId?: string;
+  /** Extra inactive bridge profiles to save, so the profile switchers have a choice to offer. */
+  readonly additionalProfileNames?: readonly string[];
 }
 
 export interface AppHandle {
@@ -157,6 +159,7 @@ async function launchApp(
     bridgeUrl: bridge.url,
     bridgeToken: bridge.token,
     nowMs: FIXED_NOW_MS,
+    additionalProfileNames: options.additionalProfileNames,
   });
 
   const target = options.chatId ? `${site.url}${chatRoute(options.chatId)}` : site.url;

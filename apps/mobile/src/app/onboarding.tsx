@@ -1,6 +1,7 @@
 import { ConnectionScreen } from '@shell/boot/AppShells';
-import { OnDeviceEntry } from '@shell/runtime/OnDeviceEntry';
+import { useOnDeviceEntry } from '@shell/runtime/OnDeviceEntry';
 
 export default function OnboardingRoute() {
-  return <ConnectionScreen mode="initial" introAction={<OnDeviceEntry />} />;
+  const localChoice = useOnDeviceEntry();
+  return <ConnectionScreen mode="initial" introAction={localChoice} />;
 }

@@ -40,11 +40,17 @@ import {
   bridgeConnectedAtom,
   shellProfilesAtom,
 } from '@shell/state/bridge/atoms';
-import { isLocalProfile, type ShellProfile } from '@shell/state/localProfile';
+import type { ShellProfile } from '@shell/state/localProfile';
+import { openProfileAtom } from '@shell/profiles/actions';
+import { useLocalSetup } from '@shell/profiles/localSetup';
+import {
+  describeProfile,
+  installedAgentsFooter,
+  profilesFooter,
+} from '@shell/profiles/profilePresentation';
 import { useBridgeCapabilitiesResource } from '@shell/state/bridge/capabilities';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { routes } from '@shell/navigation/routes';
-import { replaceRoot } from '@shell/navigation/routeNavigation';
 import { useAppTheme, type AppTheme } from '@shared/theme';
 import { LARGE_TITLE_COLLAPSE_OFFSET, SettingsHeader } from './SettingsHeader';
 import {
@@ -75,6 +81,8 @@ function cycleWorkspaceChatLimit(current: WorkspaceChatLimit): WorkspaceChatLimi
 interface ConnectionSectionProps {
   activeProfile: ShellProfile | null;
   bridgeConnected: boolean;
+  /** Whether the open profile has a bridge URL and token to edit. */
+  connectionSettings: boolean;
   profiles: ShellProfile[];
   profileId: string;
   router: ReturnType<typeof useRouter>;
@@ -83,24 +91,33 @@ interface ConnectionSectionProps {
 function ConnectionSection({
   activeProfile,
   bridgeConnected,
+  connectionSettings,
   profiles,
   profileId,
   router,
 }: ConnectionSectionProps) {
-  const local = isLocalProfile(activeProfile);
+  const localSetup = useLocalSetup();
+  const openProfile = useSetAtom(openProfileAtom);
+  const present = (profile: ShellProfile) =>
+    describeProfile(profile, {
+      active: profile.id === activeProfile?.id,
+      bridgeConnected,
+      localSetup,
+    });
+  const activeStatus = activeProfile ? present(activeProfile).status : null;
   return (
     <>
       <SettingsGroup title="Connection">
-        {local ? (
-          <SettingsRow label={activeProfile.name} value="Offline" />
-        ) : (
-          <SettingsRow
-            label={activeProfile?.name ?? 'Current bridge'}
-            value={bridgeConnected ? 'Connected' : 'Disconnected'}
-            accessory="chevron"
-            onPress={() => router.push(routes.settingsConnection(profileId, 'edit'))}
-          />
-        )}
+        <SettingsRow
+          label={activeProfile?.name ?? 'Current bridge'}
+          value={activeStatus ?? undefined}
+          accessory={connectionSettings ? 'chevron' : 'none'}
+          onPress={
+            connectionSettings
+              ? () => router.push(routes.settingsConnection(profileId, 'edit'))
+              : undefined
+          }
+        />
         <SettingsRow
           label="Add bridge"
           tone="accent"
@@ -108,17 +125,15 @@ function ConnectionSection({
         />
       </SettingsGroup>
       {profiles.length > 0 ? (
-        <SettingsGroup
-          title="Profiles"
-          footer="Switching profiles opens a new chat there. On this iPhone runs offline."
-        >
+        <SettingsGroup title="Profiles" footer={profilesFooter(profiles)}>
           {profiles.map((profile) => (
             <SettingsRow
               key={profile.id}
               label={profile.name}
+              value={present(profile).detail}
               accessory="check"
               selected={profile.id === activeProfile?.id}
-              onPress={() => replaceRoot(routes.newChat(profile.id))}
+              onPress={() => openProfile(profile.id)}
             />
           ))}
         </SettingsGroup>
@@ -130,14 +145,20 @@ function ConnectionSection({
 interface InstalledAgentsSectionProps {
   loading: boolean;
   capabilities: BridgeCapabilities | null | undefined;
+  footer: string;
   theme: AppTheme;
 }
 
-function InstalledAgentsSection({ loading, capabilities, theme }: InstalledAgentsSectionProps) {
+function InstalledAgentsSection({
+  loading,
+  capabilities,
+  footer,
+  theme,
+}: InstalledAgentsSectionProps) {
   return (
     <SettingsGroup
       title="Installed ACP agents"
-      footer="Agents are installed and registered on the desktop host."
+      footer={footer}
       separatorInset={ICON_ROW_SEPARATOR_INSET}
     >
       {loading ? (
@@ -393,13 +414,19 @@ export function SettingsScreen() {
           <ConnectionSection
             activeProfile={activeProfile}
             bridgeConnected={bridgeConnected}
+            connectionSettings={features.connectionSettings}
             profiles={profiles}
             profileId={profileId}
             router={router}
           />
           {localProfile ? <LocalProfileSection /> : null}
 
-          <InstalledAgentsSection loading={loading} capabilities={capabilities} theme={theme} />
+          <InstalledAgentsSection
+            loading={loading}
+            capabilities={capabilities}
+            footer={installedAgentsFooter(activeProfile)}
+            theme={theme}
+          />
 
           <ChatSettingsSection
             api={api}
