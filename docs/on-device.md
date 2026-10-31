@@ -59,10 +59,18 @@ support needed by Bonsai 2 Q2_0. This is a pre-release binding and requires a re
 inference through a JavaScript-only update.
 
 Compatibility uses physical RAM plus a fresh native app-memory-headroom measurement. Admission
-includes weights, the configured FP16 KV cache, working space, and a 384 MiB reserve. A model switch
-releases the previous context before checking memory again. A loaded model is not double-counted
-when starting generation. iOS can still reclaim memory or terminate an app; admission is an
-estimate, not a Jetsam exemption.
+includes weights, an FP16 KV cache at the model's minimum context (4,096 tokens), working space, the
+prompt-state budget of hybrid/sliding-window models, and a 384 MiB reserve. When fresh headroom
+allows, a load doubles the context up to the catalog maximum (8,192 tokens for Qwen3; 16,384 for
+Qwen3.5, Bonsai 2, and Gemma 4). The library credits the memory of a currently loaded model when
+judging another one, because loading always releases the previous context first and then checks
+memory again. A loaded model is not double-counted when starting generation.
+
+iOS builds request Apple's `com.apple.developer.kernel.increased-memory-limit` entitlement (added by
+`plugins/withOnDeviceAgentNative.js`) so local models can use the larger per-app limit iOS grants
+on supported devices. It raises the limit `os_proc_available_memory()` reports; it is not a Jetsam
+exemption, and admission still uses the fresh measurement. iOS can still reclaim memory or terminate
+an app; admission is an estimate.
 
 The three original Qwen3 variants have passed simulator CPU checks with the complete production tool
 schemas, native file reads, JSON tool-result consumption, streaming, stop, and unload/reload.
@@ -73,8 +81,27 @@ Simulator headroom is explicitly labelled as host estimation. Physical-iPhone RA
 performance, thermal behavior, and offline battery use have **not** been certified. Do not publish
 specific supported-phone or performance claims from simulator results.
 
-Only one local context and one local turn run at a time. Context is bounded rather than silently
-discarding history: start a new conversation or request smaller file chunks if a context fills.
+Only one local context and one local turn run at a time. Each round measures the prompt with the
+model's real chat template and tokenizer, then lets generation use all remaining context (minus a
+small safety margin) rather than a fixed output cap, so long `write_file`/`edit_file` payloads are
+not cut off. A round starts only if at least a quarter of the context (up to 2,048 tokens) remains
+free. When it would not, the model input is compacted, while the saved conversation and transcript
+stay unchanged:
+
+1. Earlier turns' tool output is replaced by a short `{"elided": true, ...}` marker that keeps
+   identifying fields such as `path`, `revision`, and `error`, and long earlier tool arguments and
+   reasoning are dropped.
+2. The oldest turns are omitted, with a note to the model.
+3. Only if the current turn still does not fit are its older tool results elided.
+
+The current user message is never removed. If a single turn cannot fit even then, it fails with a
+clear message and the next conversation turn can continue. File reads default to 3 KiB chunks (16 KiB
+maximum) and directory listings to 64 entries (200 maximum).
+
+Native tuning (verify on a physical iPhone): 4 CPU threads on device with every layer on Metal, 6 on
+the CPU-only simulator, 512-token batches, one sequence, and native prompt-prefix reuse across rounds
+(state snapshots for hybrid/sliding-window models). The chat template is rendered once per attempt
+and that prompt is passed straight to completion.
 
 ## Tool and lifecycle boundaries
 
@@ -88,15 +115,48 @@ discarding history: start a new conversation or request smaller file chunks if a
 - Git diffs label staged (HEAD to index) and unstaged (index to working tree) patches separately.
   Opposing changes are not collapsed away; only the staged content is committed. Both sections,
   including their labels, share the reported output byte limit.
-- Local tools run without per-tool approval dialogs. Choose workspaces accordingly and review
-  changes before pushing. Desktop approval settings are unchanged.
-- Stop waits for current work to settle. Git cancellation is cooperative; unresponsive transports
-  have a 15-second connection/read/write timeout. A cancelled push may already have reached its remote.
-- Backgrounding or a memory warning stops local work, unloads the context, and flushes
-  drafts/history. Model downloads keep running in the background (see below). There is no promise of continuous background inference on iOS.
+- File, status, diff, history, stage, and commit tools run without per-tool approval. A
+  model-requested `git_push` always waits for explicit approval in the conversation; declining
+  returns a tool error to the model, and Stop leaves the push unrun. Manual pushes from the Git
+  screen are user actions and are unaffected. Desktop approval settings are unchanged.
+- Stop waits for current tool work to settle. Stop during a model load settles the turn immediately;
+  the native load cannot be aborted, so its context is released as soon as it returns. Git
+  cancellation is cooperative; unresponsive transports have a 15-second connection/read/write
+  timeout. A cancelled push may already have reached its remote.
+- A message is recorded (journaled), and the composer draft cleared, only after the model has
+  loaded. If loading fails or is stopped, the draft stays in the composer. A failed or stopped turn
+  can be retried: an answer with no tool activity is regenerated, and a turn whose tools already ran
+  continues from their recorded results. Tools are never replayed. Like sending, retrying waits for
+  a pending model load/unload and is refused during workspace operations, backgrounding, or disposal.
+- A generation failure is a conversation failure; the resident model stays loaded and ready.
+- Only moving to the **background** stops local work, unloads the context, and flushes
+  drafts/history; model downloads keep running (see [Model downloads](#model-downloads)).
+  Transient `inactive` states (Control Center, Notification Center, the app switcher, calls,
+  Face ID, system alerts) do not interrupt anything. At startup and on each return, downloads are
+  re-attached, transfers or verification the system interrupted continue (once the network is
+  reachable), and the previously loaded model is reloaded if memory admission still passes. Interrupted turns are not resumed or replayed. There
+  is no promise of continuous background inference on iOS.
+- A memory warning stops local work and unloads the context but leaves downloads running.
+- Unrelated actions never stop a running conversation. Selecting the already-loaded model,
+  choosing a workspace for new conversations, deleting an unrelated download, and signing out (when
+  no Git transfer is active) proceed alongside the run. Actions that would replace or remove the
+  model a run is using are rejected with an explanation instead of silently stopping it.
 - User turns and tool intent are journaled before execution. After an interrupted launch, uncertain
   tools are marked interrupted and are **never automatically replayed**. Inspect the workspace and,
-  for push, the remote before retrying.
+  for push, the remote before retrying. Streamed text, tool results, and run settlement are
+  coalesced into one write shortly afterwards (and on backgrounding).
+- Drafts are stored per conversation and written after a short typing pause; deleting a
+  conversation deletes its draft. Drafts saved inline by older builds stay in `preferences.json`
+  until their own draft document has been written, so a failed or skipped migration never loses
+  them.
+- Startup is not fail-closed. Damaged or unexpected conversation, draft, or settings files are
+  moved to a `quarantine-…` name with their bytes unchanged (or skipped and left in place when they
+  cannot be moved), a dismissible notice explains what happened, and the rest of the mode starts.
+- Problems are reported as typed issues: persistence failures (retryable, cleared by a later
+  successful write), transient operation failures, and startup recovery notices. All are
+  dismissible and several can be shown at once.
+- Network reachability is observed with `expo-network`. When the device is known to be offline,
+  clone, push, sign-in, and model downloads fail immediately with a friendly message.
 - There is no automatic desktop/cloud fallback or synchronization of local workspaces.
 
 ## GitHub configuration

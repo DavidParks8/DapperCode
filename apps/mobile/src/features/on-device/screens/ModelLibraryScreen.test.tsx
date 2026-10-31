@@ -50,7 +50,7 @@ const mockRuntime = {
     pause: jest.fn(async () => undefined),
     cancel: jest.fn(async () => undefined),
   },
-  models: { snapshot: () => ({ modelId: null, phase: 'empty' }) },
+  models: { snapshot: () => ({ modelId: null, phase: 'empty' }), resident: () => null },
   selectModel: jest.fn(async () => undefined),
   error: () => null,
 };

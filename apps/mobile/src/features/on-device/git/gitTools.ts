@@ -30,7 +30,7 @@ export const GIT_TOOL_DEFINITIONS = [
   ),
   toolDefinition(
     'git_push',
-    'Push the current branch to its configured origin. Requires network and configured sign-in.',
+    'Push the current branch to its configured origin. The user must approve each push. Requires network and sign-in.',
     {},
     [],
   ),
@@ -50,6 +50,15 @@ export type GitToolPort = Pick<
   | 'commitWorkspaceGit'
   | 'pushWorkspaceGit'
 >;
+
+const APPROVAL_SUMMARIES: ReadonlyMap<string, string> = new Map([
+  ['git_push', 'Push the current branch to its remote'],
+]);
+
+/** A user-facing summary when a model tool call needs explicit approval, otherwise null. */
+export function gitToolApproval(name: string): string | null {
+  return APPROVAL_SUMMARIES.get(name) ?? null;
+}
 
 export function isGitTool(name: string): boolean {
   return GIT_TOOL_DEFINITIONS.some((definition) => definition.function.name === name);

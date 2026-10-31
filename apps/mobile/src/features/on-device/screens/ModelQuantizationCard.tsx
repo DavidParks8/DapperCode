@@ -19,7 +19,8 @@ export function ModelQuantizationCard({
 }) {
   const runtime = useOnDeviceRuntime();
   const download = runtime.downloads.snapshot(model.id);
-  const admission = modelMemoryAdmission(model, memory);
+  // Loading releases the resident model first, so its memory counts toward a switch.
+  const admission = modelMemoryAdmission(model, memory, runtime.models.resident());
   const loaded =
     runtime.models.snapshot().modelId === model.id && runtime.models.snapshot().phase === 'ready';
   return (
@@ -29,11 +30,13 @@ export function ModelQuantizationCard({
         {model.recommended ? ' · Recommended' : ''}
       </LocalText>
       <LocalText>
-        {modelSize(model.bytes)} download · {model.contextTokens} context
+        {modelSize(model.bytes)} download · {model.contextTokens}–{model.maxContextTokens} context
       </LocalText>
       <LocalText>Estimated load budget {modelSize(modelMemoryBytes(model))}.</LocalText>
       {model.runtimeIssue ? <LocalText>{model.runtimeIssue}</LocalText> : null}
-      {admission.status !== 'ready' && !loaded ? <LocalText>{admission.message}</LocalText> : null}
+      {(admission.status !== 'ready' || admission.unloadsResident) && !loaded ? (
+        <LocalText>{admission.message}</LocalText>
+      ) : null}
       <LocalText>
         {downloadStatus(download)}
         {loaded ? ' · Loaded' : ''}
@@ -128,8 +131,8 @@ function DownloadActions({
             download.verificationPending
               ? runtime.downloads.verify(model.id)
               : download.canResume
-                ? runtime.downloads.resume(model.id)
-                : runtime.downloads.download(model.id),
+                ? runtime.resumeModelDownload(model.id)
+                : runtime.downloadModel(model.id),
           )
         }
       />

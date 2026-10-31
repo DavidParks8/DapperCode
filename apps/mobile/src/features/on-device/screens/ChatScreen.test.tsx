@@ -1,7 +1,7 @@
-import { act, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { Dimensions, Keyboard, type KeyboardEvent } from 'react-native';
 import { ChatInput } from '../../chat/composer/ChatInput';
-import type { LocalThread } from '../runtime/types';
+import type { LocalThread, OnDeviceIssue } from '../runtime/types';
 import { LocalChatScreen } from './ChatScreen';
 
 jest.mock('expo-router', () => ({
@@ -36,12 +36,16 @@ const thread: LocalThread = {
 };
 const mockRuntime = {
   draft: () => '',
-  threads: { list: () => [thread] },
+  threads: { list: jest.fn(() => [thread]) },
   workspaces: () => [{ id: 'workspace', name: 'Workspace' }],
   loop: { snapshot: () => ({ phase: 'idle', threadId: null }) },
   models: { snapshot: () => ({ phase: 'empty', modelId: null }) },
+  downloads: { snapshot: () => ({ phase: 'ready', bytesWritten: 0 }) },
   workspaceActivity: () => null,
-  error: () => null,
+  issues: jest.fn((): OnDeviceIssue[] => []),
+  dismissIssue: jest.fn(),
+  dismissThreadError: jest.fn(async () => undefined),
+  report: jest.fn(),
 };
 
 afterEach(() => {
@@ -87,4 +91,33 @@ test('typing moves the local composer above the measured keyboard once and resto
   expect(layout()).toMatchObject({ paddingBottom: 0 });
   expect(composer()?.keyboardVisible).toBe(false);
   view.unmount();
+});
+
+test('every relevant error is shown at once and one action dismisses them', () => {
+  mockRuntime.threads.list.mockReturnValue([
+    { ...thread, status: 'failed', lastError: 'The model failed to load.' },
+  ]);
+  mockRuntime.issues.mockReturnValue([
+    {
+      id: 'persistence:drafts',
+      kind: 'persistence',
+      message: 'Disk full',
+      threadId: null,
+      retryable: true,
+    },
+    {
+      id: 'operation:1',
+      kind: 'operation',
+      message: 'Another conversation failed.',
+      threadId: '00000000-0000-4000-8000-000000000002',
+      retryable: false,
+    },
+  ]);
+  render(<LocalChatScreen />);
+  expect(screen.getByText('Disk full')).toBeTruthy();
+  expect(screen.getByText('The model failed to load.')).toBeTruthy();
+  expect(screen.queryByText('Another conversation failed.')).toBeNull();
+  fireEvent.press(screen.getByText('Dismiss'));
+  expect(mockRuntime.dismissIssue).toHaveBeenCalledWith('persistence:drafts');
+  expect(mockRuntime.dismissThreadError).toHaveBeenCalledWith(thread.id);
 });

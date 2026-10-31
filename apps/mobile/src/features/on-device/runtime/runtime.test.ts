@@ -5,8 +5,13 @@ import type { LocalModelContext, LocalModelReply } from '../models/engine';
 import { loadNativeModelContext } from '../models/engine';
 import type { OnDeviceNativeServices } from '../native/services.types';
 import { localChatControls } from '../screens/chatControls';
+import { draftDocument, DRAFT_SAVE_DELAY_MS } from './drafts';
+import { COALESCED_EMIT_INTERVAL_MS } from './emitter';
+import { OnDeviceOfflineError, type OnDeviceNetworkPort } from './network';
 import { emptyLocalPreferences } from './preferences';
 import { OnDeviceRuntime } from './runtime';
+import { THREAD_PROGRESS_SAVE_DELAY_MS } from './threads';
+import type { OnDeviceReachability } from './types';
 
 jest.mock('expo-crypto', () => ({ randomUUID: jest.fn() }));
 jest.mock('../models/engine', () => ({ loadNativeModelContext: jest.fn() }));
@@ -36,7 +41,10 @@ function harness(documents = new Map<string, string>()) {
   const native = {
     getAPIVersion: jest.fn(() => 7),
     cancelGitTransfer: jest.fn(),
-    getGitTransferProgress: jest.fn(() => ({
+    getGitTransferProgress: jest.fn<
+      ReturnType<OnDeviceNativeServices['getGitTransferProgress']>,
+      []
+    >(() => ({
       active: false,
       cancelled: false,
       completed: 0,
@@ -89,7 +97,10 @@ function harness(documents = new Map<string, string>()) {
       verificationBytes: null,
       availableBytes: 32 * 1024 ** 3,
     })),
-    getDownloadedModelFile: jest.fn(async (id: string) => {
+    getDownloadedModelFile: jest.fn<
+      ReturnType<OnDeviceNativeServices['getDownloadedModelFile']>,
+      Parameters<OnDeviceNativeServices['getDownloadedModelFile']>
+    >(async (id: string) => {
       const model = localModelDefinition(id);
       return { id, uri: `file:///models/${id}.gguf`, bytes: model.bytes, sha256: model.sha256 };
     }),
@@ -236,13 +247,37 @@ test('initialization is single-owner, preserves settings, and selecting a loaded
   expect(h.context.release).toHaveBeenCalledTimes(1);
 });
 
-test('failed preference loading cannot overwrite preserved data during backgrounding or disposal', async () => {
+test('damaged preferences are set aside with their bytes preserved and the mode still starts', async () => {
+  jest.spyOn(Date, 'now').mockReturnValue(1234);
   const documents = new Map([['preferences.json', '{damaged']]);
   const h = harness(documents);
-  await expect(h.runtime.initialize()).rejects.toThrow('preserved');
-  await expect(h.runtime.background()).rejects.toThrow('have not loaded');
-  await expect(h.runtime.dispose()).rejects.toThrow('have not loaded');
-  expect(h.native.writeRuntimeDocument).not.toHaveBeenCalled();
+  await h.runtime.initialize();
+  expect(documents.has('preferences.json')).toBe(false);
+  expect(documents.get('quarantine-1234-preferences.json')).toBe('{damaged');
+  expect(h.runtime.preferences()).toEqual(emptyLocalPreferences());
+  expect(h.runtime.issues()).toEqual([
+    expect.objectContaining({ kind: 'recovery', message: expect.stringContaining('set aside') }),
+  ]);
+  await h.runtime.selectWorkspace('workspace-one');
+  expect(JSON.parse(documents.get('preferences.json') ?? '{}')).toMatchObject({
+    workspaceId: 'workspace-one',
+  });
+  await h.runtime.dispose();
+  jest.restoreAllMocks();
+});
+
+test('preferences that cannot be set aside start the mode but are never overwritten', async () => {
+  const documents = new Map([['preferences.json', '{damaged']]);
+  const h = harness(documents);
+  h.native.writeRuntimeDocument.mockRejectedValueOnce(new Error('Disk full'));
+  await h.runtime.initialize();
+  expect(h.runtime.issues()[0]).toMatchObject({
+    kind: 'recovery',
+    message: expect.stringContaining('left in place'),
+  });
+  await h.runtime.background();
+  await expect(h.runtime.selectWorkspace('workspace-one')).rejects.toThrow('left in place');
+  await h.runtime.dispose();
   expect(documents.get('preferences.json')).toBe('{damaged');
 });
 
@@ -253,7 +288,8 @@ test('backgrounding flushes drafts, unloads native context, and successful write
   await h.runtime.background();
   expect(h.context.release).toHaveBeenCalledTimes(1);
   expect(h.runtime.models.snapshot().phase).toBe('empty');
-  expect(h.documents.get('preferences.json')).toContain('latest draft');
+  expect(h.documents.get(draftDocument(h.thread.id))).toContain('latest draft');
+  expect(h.documents.get('preferences.json')).not.toContain('latest draft');
   expect(h.runtime.error()?.message).toBe('Earlier operation failed');
   const restored = harness(h.documents);
   await restored.runtime.initialize();
@@ -348,6 +384,7 @@ test('manual workspace operations exclude generation and background waits before
 
 test('disposal is idempotent and still unloads when draft persistence fails', async () => {
   const h = await ready();
+  h.runtime.setDraft(h.thread.id, 'unsaved draft');
   h.native.writeRuntimeDocument.mockRejectedValueOnce(new Error('Disk full'));
   const disposal = h.runtime.dispose();
   expect(h.runtime.dispose()).toBe(disposal);
@@ -396,5 +433,623 @@ test('Git account credentials are origin-bound and author settings survive a new
     account: null,
     author: { name: 'Offline Author', email: 'author@example.invalid' },
   });
+  await h.runtime.dispose();
+});
+
+function fakeNetwork(initial: OnDeviceReachability) {
+  let listener: ((value: OnDeviceReachability) => void) | null = null;
+  return {
+    port: {
+      current: jest.fn(async () => initial),
+      subscribe: jest.fn((next: (value: OnDeviceReachability) => void) => {
+        listener = next;
+        return () => {
+          listener = null;
+        };
+      }),
+    } satisfies OnDeviceNetworkPort,
+    change: (value: OnDeviceReachability) => listener?.(value),
+  };
+}
+
+const otherModelId = 'qwen3-0.6b-q4-0';
+
+describe('lifecycle', () => {
+  test('backgrounding unloads without pausing downloads; returning warms the model and resumes interrupted downloads', async () => {
+    const h = await ready();
+    const pause = jest.spyOn(h.runtime.downloads, 'pause');
+    const pauseAll = jest.spyOn(h.runtime.downloads, 'pauseAll');
+    const resume = jest
+      .spyOn(h.runtime.downloads, 'resumeLifecyclePaused')
+      .mockResolvedValue(undefined);
+    await h.runtime.background();
+    expect(h.runtime.models.snapshot().phase).toBe('empty');
+    expect(pause).not.toHaveBeenCalled();
+    expect(pauseAll).not.toHaveBeenCalled();
+    await h.runtime.foreground();
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(loadNativeModelContext).toHaveBeenCalledTimes(2);
+    expect(h.runtime.models.snapshot()).toMatchObject({ phase: 'ready', modelId });
+    expect(h.context.completion).not.toHaveBeenCalled();
+    await h.runtime.dispose();
+  });
+
+  test('returning does not warm a model that memory admission would refuse', async () => {
+    const h = await ready();
+    await h.runtime.background();
+    h.native.getMemoryInfo.mockReturnValue({
+      physicalBytes: 32 * 1024 ** 3,
+      availableBytes: 64 * 1024 ** 2,
+      isSimulator: true,
+    });
+    await h.runtime.foreground();
+    expect(loadNativeModelContext).toHaveBeenCalledTimes(1);
+    expect(h.runtime.models.snapshot()).toMatchObject({ phase: 'empty', error: null });
+    await h.runtime.dispose();
+  });
+
+  test('interrupted downloads resume only once the network is back', async () => {
+    const network = fakeNetwork('online');
+    const h = harness();
+    const runtime = new OnDeviceRuntime(h.native, { network: network.port });
+    await runtime.initialize();
+    const resume = jest
+      .spyOn(runtime.downloads, 'resumeLifecyclePaused')
+      .mockResolvedValue(undefined);
+    await runtime.background();
+    network.change('offline');
+    await runtime.foreground();
+    expect(resume).not.toHaveBeenCalled();
+    network.change('online');
+    expect(resume).toHaveBeenCalledTimes(1);
+    await runtime.dispose();
+  });
+
+  test('disposal stops download polling without pausing the background transfers', async () => {
+    const h = await ready();
+    const dispose = jest.spyOn(h.runtime.downloads, 'dispose');
+    const pauseAll = jest.spyOn(h.runtime.downloads, 'pauseAll');
+    await h.runtime.dispose();
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(pauseAll).not.toHaveBeenCalled();
+  });
+
+  test('a memory warning unloads the model without pausing downloads or warming it later', async () => {
+    const h = await ready();
+    const pause = jest.spyOn(h.runtime.downloads, 'pause');
+    await h.runtime.relieveMemory();
+    expect(h.runtime.models.snapshot().phase).toBe('empty');
+    expect(pause).not.toHaveBeenCalled();
+    await h.runtime.foreground();
+    expect(loadNativeModelContext).toHaveBeenCalledTimes(1);
+    await h.runtime.dispose();
+  });
+});
+
+describe('unrelated actions never interrupt a running conversation', () => {
+  async function running() {
+    const h = await ready();
+    const generated = deferred<LocalModelReply>();
+    const started = deferred<void>();
+    h.context.completion.mockImplementationOnce(() => {
+      started.resolve();
+      return generated.promise;
+    });
+    const run = h.runtime.sendMessage(h.thread.id, 'hello', 'submission', jest.fn());
+    await started.promise;
+    const other = await h.runtime.threads.create('workspace-one', modelId);
+    const finish = async () => {
+      generated.resolve(reply);
+      return run;
+    };
+    return { ...h, other, finish };
+  }
+
+  test('selecting the loaded model for another conversation, the workspace, and signing out keep the run going', async () => {
+    const h = await running();
+    await h.runtime.selectModel(modelId, h.other.id);
+    await h.runtime.selectWorkspace('workspace-one', h.other.id);
+    await h.runtime.signOut();
+    expect(h.context.stopCompletion).not.toHaveBeenCalled();
+    expect(h.native.cancelGitTransfer).not.toHaveBeenCalled();
+    expect((await h.finish()).status).toBe('complete');
+    await h.runtime.dispose();
+  });
+
+  test('removing an unrelated download does not stop the run', async () => {
+    const h = await running();
+    await h.runtime.removeModel(otherModelId);
+    expect(h.native.removeModelFile).toHaveBeenCalledWith(otherModelId);
+    expect(h.context.stopCompletion).not.toHaveBeenCalled();
+    expect((await h.finish()).status).toBe('complete');
+    await h.runtime.dispose();
+  });
+
+  test('actions that would affect the run are rejected with a clear error instead of stopping it', async () => {
+    const h = await running();
+    await expect(h.runtime.selectModel(otherModelId, h.other.id)).rejects.toThrow(
+      'conversation is running',
+    );
+    await expect(h.runtime.selectModel(otherModelId, h.thread.id)).rejects.toThrow(
+      'Stop this conversation',
+    );
+    await expect(h.runtime.removeModel(modelId)).rejects.toThrow('Stop the running');
+    await expect(h.runtime.unloadModel()).rejects.toThrow('Stop the running');
+    h.native.getGitTransferProgress.mockReturnValueOnce({
+      active: true,
+      cancelled: false,
+      completed: 1,
+      total: 2,
+    });
+    await expect(h.runtime.signOut()).rejects.toThrow('Git transfer');
+    expect(h.context.stopCompletion).not.toHaveBeenCalled();
+    expect(h.native.removeModelFile).not.toHaveBeenCalled();
+    expect((await h.finish()).status).toBe('complete');
+    await h.runtime.dispose();
+  });
+});
+
+describe('fail-open startup', () => {
+  const damagedId = '00000000-0000-4000-8000-00000000dead';
+
+  test('damaged and unexpected conversation files are set aside and the rest of the mode starts', async () => {
+    const source = await ready();
+    await source.runtime.dispose();
+    const documents = new Map(source.documents);
+    documents.set(`thread-${damagedId}.json`, '{not json');
+    documents.set('thread-unexpected.json', '{"id":"unexpected"}');
+    const h = harness(documents);
+    await h.runtime.initialize();
+    expect(h.runtime.threads.list().map((thread) => thread.id)).toEqual([source.thread.id]);
+    const quarantined = [...documents.entries()].filter(([name]) => name.startsWith('quarantine-'));
+    expect(quarantined.map(([, value]) => value).sort()).toEqual([
+      '{"id":"unexpected"}',
+      '{not json',
+    ]);
+    expect(documents.has(`thread-${damagedId}.json`)).toBe(false);
+    expect(h.runtime.issues()).toEqual([
+      expect.objectContaining({
+        kind: 'recovery',
+        message: '2 damaged local conversations were set aside with their data preserved.',
+      }),
+    ]);
+    expect(h.runtime.preferences().modelId).toBe(modelId);
+    await h.runtime.dispose();
+  });
+
+  test('a conversation file that cannot be read is skipped and left in place', async () => {
+    const documents = new Map([[`thread-${damagedId}.json`, 'unreadable']]);
+    const h = harness(documents);
+    h.native.readRuntimeDocument.mockImplementation(async (name: string) => {
+      if (name.startsWith('thread-')) {
+        throw new Error('Local runtime documents must be regular files no larger than 8 MiB.');
+      }
+      return documents.get(name) ?? null;
+    });
+    await h.runtime.initialize();
+    expect(h.runtime.threads.list()).toEqual([]);
+    expect(documents.get(`thread-${damagedId}.json`)).toBe('unreadable');
+    expect(h.runtime.issues()[0]?.message).toContain('left in place');
+    await h.runtime.dispose();
+  });
+});
+
+describe('typed issues', () => {
+  test('a failed conversation write is a retryable persistence issue that clears after retry', async () => {
+    const h = await ready();
+    h.native.writeRuntimeDocument.mockRejectedValueOnce(new Error('Disk full'));
+    h.runtime.threads.change(h.thread.id, (thread) => ({ ...thread, title: 'Renamed' }));
+    await expect(h.runtime.threads.save(h.thread.id)).rejects.toThrow('Disk full');
+    h.runtime.report(new Error('Transient failure'));
+    expect(h.runtime.issues()).toEqual([
+      expect.objectContaining({
+        id: `persistence:thread:${h.thread.id}`,
+        kind: 'persistence',
+        retryable: true,
+        threadId: h.thread.id,
+      }),
+      expect.objectContaining({
+        kind: 'operation',
+        message: 'Transient failure',
+        retryable: false,
+      }),
+    ]);
+    expect(h.runtime.issues()).toBe(h.runtime.issues());
+    await h.runtime.retryPersistence();
+    expect(h.runtime.issues().map((issue) => issue.kind)).toEqual(['operation']);
+    h.runtime.dismissIssue(h.runtime.issues()[0]?.id ?? '');
+    expect(h.runtime.issues()).toEqual([]);
+    await h.runtime.dispose();
+  });
+
+  test('a stale conversation error can be dismissed and stays cleared after a restart', async () => {
+    const h = await ready();
+    h.context.completion.mockRejectedValueOnce(new Error('Model failed'));
+    await expect(
+      h.runtime.sendMessage(h.thread.id, 'hello', 'submission', jest.fn()),
+    ).rejects.toThrow('Model failed');
+    h.runtime.report(new Error('Model failed'), h.thread.id);
+    expect(h.runtime.threads.get(h.thread.id).lastError).toBe('Model failed');
+    await h.runtime.dismissThreadError(h.thread.id);
+    expect(h.runtime.threads.get(h.thread.id).lastError).toBeNull();
+    expect(h.runtime.issues()).toEqual([]);
+    await h.runtime.dispose();
+    const restored = harness(h.documents);
+    await restored.runtime.initialize();
+    expect(restored.runtime.threads.get(h.thread.id).lastError).toBeNull();
+    await restored.runtime.dispose();
+  });
+});
+
+describe('network awareness', () => {
+  test('offline clone, push, sign-in, and download fail fast with a friendly message', async () => {
+    const network = fakeNetwork('offline');
+    const h = harness();
+    const fetch = jest.spyOn(globalThis, 'fetch');
+    const runtime = new OnDeviceRuntime(h.native, { network: network.port });
+    const listener = jest.fn();
+    runtime.subscribe(listener, ['network']);
+    await runtime.initialize();
+    expect(runtime.network()).toBe('offline');
+    expect(listener).toHaveBeenCalled();
+    await expect(runtime.cloneWorkspace('repo', 'https://github.com/o/r.git')).rejects.toThrow(
+      OnDeviceOfflineError,
+    );
+    await expect(runtime.pushWorkspace('workspace-one')).rejects.toThrow("You're offline");
+    await expect(runtime.signIn(jest.fn())).rejects.toThrow('sign in to GitHub');
+    await expect(runtime.downloadModel(otherModelId)).rejects.toThrow('download models');
+    expect(h.native.cloneWorkspace).not.toHaveBeenCalled();
+    expect(h.native.pushWorkspaceGit).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    network.change('online');
+    expect(runtime.network()).toBe('online');
+    await runtime.pushWorkspace('workspace-one');
+    expect(h.native.pushWorkspaceGit).toHaveBeenCalledWith('workspace-one', null);
+    await runtime.dispose();
+    jest.restoreAllMocks();
+  });
+});
+
+describe('persistence volume', () => {
+  test('typing rewrites only the edited conversation draft, once per pause, never preferences', async () => {
+    jest.useFakeTimers();
+    try {
+      const h = await ready();
+      h.native.writeRuntimeDocument.mockClear();
+      for (const text of ['d', 'dr', 'dra', 'draf', 'draft']) {
+        h.runtime.setDraft(h.thread.id, text);
+        jest.advanceTimersByTime(100);
+      }
+      expect(h.native.writeRuntimeDocument).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(DRAFT_SAVE_DELAY_MS);
+      expect(h.native.writeRuntimeDocument.mock.calls.map(([name]) => name)).toEqual([
+        draftDocument(h.thread.id),
+      ]);
+      expect(h.documents.get(draftDocument(h.thread.id))).toBe(
+        JSON.stringify({ version: 1, text: 'draft' }),
+      );
+      await h.runtime.dispose();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('inline drafts from older builds move into draft documents for existing conversations only', async () => {
+    const source = await ready();
+    await source.runtime.dispose();
+    const documents = new Map(source.documents);
+    documents.set(
+      'preferences.json',
+      JSON.stringify({
+        ...JSON.parse(documents.get('preferences.json') ?? '{}'),
+        drafts: { [source.thread.id]: 'legacy draft', 'deleted-thread': 'orphan' },
+      }),
+    );
+    const h = harness(documents);
+    await h.runtime.initialize();
+    expect(h.runtime.draft(source.thread.id)).toBe('legacy draft');
+    expect(documents.get(draftDocument(source.thread.id))).toContain('legacy draft');
+    expect(JSON.parse(documents.get('preferences.json') ?? '{}')).toMatchObject({ drafts: {} });
+    await h.runtime.dispose();
+  });
+
+  test('deleting a conversation prunes its saved draft', async () => {
+    const h = await ready();
+    h.runtime.setDraft(h.thread.id, 'pending text');
+    await h.runtime.flush();
+    expect(h.documents.has(draftDocument(h.thread.id))).toBe(true);
+    await h.runtime.deleteThread(h.thread.id);
+    expect(h.documents.has(draftDocument(h.thread.id))).toBe(false);
+    expect(h.runtime.draft(h.thread.id)).toBe('');
+    await h.runtime.flush();
+    expect(h.documents.has(draftDocument(h.thread.id))).toBe(false);
+    const restored = harness(h.documents);
+    await restored.runtime.initialize();
+    expect(restored.runtime.draft(h.thread.id)).toBe('');
+    await restored.runtime.dispose();
+    await h.runtime.dispose();
+  });
+
+  test('a turn journals the user message immediately and coalesces progress into one later write', async () => {
+    jest.useFakeTimers();
+    try {
+      const h = await ready();
+      const name = `thread-${h.thread.id}.json`;
+      const threadWrites = () =>
+        h.native.writeRuntimeDocument.mock.calls.filter(([document]) => document === name);
+      h.native.writeRuntimeDocument.mockClear();
+      await h.runtime.sendMessage(h.thread.id, 'hello', 'submission', jest.fn());
+      expect(threadWrites()).toHaveLength(1);
+      expect(JSON.parse(threadWrites()[0]?.[1] ?? '{}')).toMatchObject({ status: 'running' });
+      await jest.advanceTimersByTimeAsync(THREAD_PROGRESS_SAVE_DELAY_MS);
+      expect(threadWrites()).toHaveLength(2);
+      expect(JSON.parse(h.documents.get(name) ?? '{}')).toMatchObject({
+        status: 'complete',
+        messages: [{ role: 'user' }, { role: 'assistant', content: 'Finished' }],
+      });
+      await h.runtime.dispose();
+      expect(threadWrites()).toHaveLength(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+describe('render granularity', () => {
+  test('token streaming notifies thread subscribers at most once per interval and never download subscribers', async () => {
+    jest.useFakeTimers();
+    try {
+      const h = await ready();
+      const threads = jest.fn();
+      const downloads = jest.fn();
+      h.runtime.subscribe(threads, ['threads']);
+      h.runtime.subscribe(downloads, ['downloads']);
+      const generated = deferred<LocalModelReply>();
+      let stream: ((value: TokenData) => void) | undefined;
+      h.context.completion.mockImplementationOnce((_params, callback) => {
+        stream = callback;
+        return generated.promise;
+      });
+      const run = h.runtime.sendMessage(h.thread.id, 'hello', 'submission', jest.fn());
+      while (!stream) {
+        await jest.advanceTimersByTimeAsync(1);
+      }
+      threads.mockClear();
+      let text = '';
+      for (let index = 0; index < 100; index += 1) {
+        text += 'x';
+        stream({ token: 'x', accumulated_text: text, content: text });
+      }
+      expect(threads.mock.calls.length).toBeLessThanOrEqual(1);
+      await jest.advanceTimersByTimeAsync(COALESCED_EMIT_INTERVAL_MS);
+      expect(threads.mock.calls.length).toBeLessThanOrEqual(2);
+      expect(h.runtime.threads.get(h.thread.id).messages.at(-1)?.content).toBe(text);
+      generated.resolve(reply);
+      await run;
+      expect(downloads).not.toHaveBeenCalled();
+      await h.runtime.dispose();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+describe('disposal during startup', () => {
+  test('waits for initialization, registers no network listener, and skips later startup work', async () => {
+    const network = fakeNetwork('online');
+    const h = harness();
+    const listing = deferred<string[]>();
+    h.native.listRuntimeDocuments.mockImplementationOnce(() => listing.promise);
+    const runtime = new OnDeviceRuntime(h.native, { network: network.port });
+    const initializing = runtime.initialize();
+    let disposed = false;
+    const disposal = runtime.dispose().then(() => {
+      disposed = true;
+    });
+    for (let tick = 0; tick < 10; tick += 1) {
+      await Promise.resolve();
+    }
+    expect(disposed).toBe(false);
+    listing.resolve([]);
+    await initializing;
+    await disposal;
+    expect(network.port.subscribe).not.toHaveBeenCalled();
+    expect(h.native.listWorkspaces).not.toHaveBeenCalled();
+    expect(h.native.listRuntimeDocuments).not.toHaveBeenCalledWith('draft-');
+  });
+});
+
+describe('legacy inline drafts are kept until their draft documents are written', () => {
+  async function legacyDocuments() {
+    const source = await ready();
+    await source.runtime.dispose();
+    const documents = new Map(source.documents);
+    documents.set(
+      'preferences.json',
+      JSON.stringify({
+        ...JSON.parse(documents.get('preferences.json') ?? '{}'),
+        drafts: { [source.thread.id]: 'legacy draft' },
+      }),
+    );
+    return { documents, id: source.thread.id };
+  }
+  const storedDrafts = (documents: Map<string, string>): unknown =>
+    JSON.parse(documents.get('preferences.json') ?? '{}').drafts;
+
+  test('a draft for a conversation that could not be read this launch is migrated, not erased', async () => {
+    const { documents, id } = await legacyDocuments();
+    const h = harness(documents);
+    const read = h.native.readRuntimeDocument.getMockImplementation();
+    h.native.readRuntimeDocument.mockImplementation(async (name: string) => {
+      if (name.startsWith('thread-')) {
+        throw new Error('Temporarily unreadable.');
+      }
+      return (await read?.(name)) ?? null;
+    });
+    await h.runtime.initialize();
+    expect(h.runtime.threads.list()).toEqual([]);
+    expect(documents.get(draftDocument(id))).toContain('legacy draft');
+    await h.runtime.selectWorkspace('workspace-one');
+    expect(storedDrafts(documents)).toEqual({});
+    await h.runtime.dispose();
+  });
+
+  test('a failed draft restore keeps legacy drafts through later settings saves', async () => {
+    const { documents, id } = await legacyDocuments();
+    const h = harness(documents);
+    const list = h.native.listRuntimeDocuments.getMockImplementation();
+    h.native.listRuntimeDocuments.mockImplementation(async (prefix: string) => {
+      if (prefix === 'draft-') {
+        throw new Error('Draft listing failed.');
+      }
+      return (await list?.(prefix)) ?? [];
+    });
+    await h.runtime.initialize();
+    await h.runtime.selectWorkspace('workspace-one');
+    await h.runtime.dispose();
+    expect(storedDrafts(documents)).toEqual({ [id]: 'legacy draft' });
+    expect(documents.has(draftDocument(id))).toBe(false);
+  });
+
+  test('a failed migration write keeps the legacy draft until a retry succeeds', async () => {
+    const { documents, id } = await legacyDocuments();
+    const h = harness(documents);
+    const write = h.native.writeRuntimeDocument.getMockImplementation();
+    let failDrafts = true;
+    h.native.writeRuntimeDocument.mockImplementation(async (name: string, value: string) => {
+      if (failDrafts && name.startsWith('draft-')) {
+        throw new Error('Disk full');
+      }
+      await write?.(name, value);
+    });
+    await h.runtime.initialize();
+    expect(h.runtime.issues()).toEqual([
+      expect.objectContaining({ id: 'persistence:drafts', retryable: true }),
+    ]);
+    await h.runtime.selectWorkspace('workspace-one');
+    expect(storedDrafts(documents)).toEqual({ [id]: 'legacy draft' });
+    failDrafts = false;
+    await h.runtime.retryPersistence();
+    expect(documents.get(draftDocument(id))).toContain('legacy draft');
+    expect(storedDrafts(documents)).toEqual({});
+    await h.runtime.dispose();
+  });
+});
+
+function controlsFor(h: Awaited<ReturnType<typeof ready>>) {
+  return localChatControls(
+    h.runtime.threads.get(h.thread.id),
+    h.runtime.loop.snapshot(),
+    h.runtime.models.snapshot(),
+    h.runtime.workspaceActivity(),
+    h.runtime.downloads.snapshot(modelId),
+  );
+}
+
+async function settle(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100 && !condition(); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  expect(condition()).toBe(true);
+}
+
+test('Stop during a model load settles the turn promptly, shows load progress, and keeps the draft', async () => {
+  const h = await ready();
+  await h.runtime.models.unload();
+  const pending = deferred<LocalModelContext>();
+  jest.mocked(loadNativeModelContext).mockImplementationOnce(async (_m, _f, _o, progress) => {
+    progress(37);
+    return pending.promise;
+  });
+  const accepted = jest.fn();
+  const running = h.runtime.sendMessage(h.thread.id, 'Hello', 'submission', accepted);
+  await settle(() => h.runtime.models.snapshot().progress === 37);
+  expect(controlsFor(h)).toMatchObject({
+    status: 'Loading Qwen3 1.7B Q4_K_M · 37%',
+    progress: 37,
+    showStopButton: true,
+  });
+  await h.runtime.stop();
+  await running;
+  expect(accepted).not.toHaveBeenCalled();
+  expect(h.runtime.threads.get(h.thread.id).messages).toHaveLength(0);
+  expect(controlsFor(h)).toMatchObject({ showStopButton: false, isLoading: false });
+  const late = { ...h.context, release: jest.fn(async () => undefined) };
+  pending.resolve(late);
+  await settle(() => h.runtime.models.snapshot().phase === 'empty');
+  expect(late.release).toHaveBeenCalledTimes(1);
+  await h.runtime.dispose();
+});
+
+test('a model that fails to load is reported as an error, never as ready', async () => {
+  const h = await ready();
+  await h.runtime.models.unload();
+  h.native.getDownloadedModelFile.mockResolvedValueOnce(null);
+  await expect(
+    h.runtime.sendMessage(h.thread.id, 'Hello', 'submission', jest.fn()),
+  ).rejects.toThrow('Download and verify');
+  const controls = controlsFor(h);
+  expect(controls).toMatchObject({
+    status: "Couldn't load Qwen3 1.7B Q4_K_M",
+    statusKind: 'error',
+    statusDetail: 'Download and verify this catalog model before loading it.',
+    canRetry: false,
+  });
+  expect(controls.status).not.toMatch(/ready/i);
+  await h.runtime.dispose();
+});
+
+test('a model-initiated push waits for approval and a decline never reaches the network', async () => {
+  const h = await ready();
+  h.context.completion.mockResolvedValueOnce({
+    ...reply,
+    content: '',
+    tool_calls: [{ id: 'push', type: 'function', function: { name: 'git_push', arguments: '{}' } }],
+  });
+  const running = h.runtime.sendMessage(h.thread.id, 'Push my work', 'submission', jest.fn());
+  await settle(() => h.runtime.loop.snapshot().phase === 'approval');
+  const controls = controlsFor(h);
+  expect(controls.status).toBe('Waiting for your approval · Push the current branch to its remote');
+  expect(controls.approval).toMatchObject({ toolName: 'git_push' });
+  h.runtime.loop.resolveApproval(controls.approval!.callId, false);
+  await running;
+  expect(h.native.pushWorkspaceGit).not.toHaveBeenCalled();
+  expect(h.runtime.threads.get(h.thread.id).status).toBe('complete');
+  await h.runtime.dispose();
+});
+
+test('a failed turn can be retried through the runtime without resending the message', async () => {
+  const h = await ready();
+  h.context.completion.mockRejectedValueOnce(new Error('Decode failed'));
+  await expect(
+    h.runtime.sendMessage(h.thread.id, 'Explain', 'submission', jest.fn()),
+  ).rejects.toThrow('Decode failed');
+  expect(controlsFor(h)).toMatchObject({ canRetry: true, status: 'Local turn failed' });
+  expect(h.runtime.models.snapshot().phase).toBe('ready');
+  const retried = await h.runtime.retryTurn(h.thread.id);
+  expect(retried.status).toBe('complete');
+  expect(retried.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+  expect(loadNativeModelContext).toHaveBeenCalledTimes(1);
+  await h.runtime.dispose();
+});
+
+test('retrying a failed turn waits for a pending model unload instead of racing it', async () => {
+  const h = await ready();
+  h.context.completion.mockRejectedValueOnce(new Error('Decode failed'));
+  await expect(
+    h.runtime.sendMessage(h.thread.id, 'Explain', 'submission', jest.fn()),
+  ).rejects.toThrow('Decode failed');
+  const release = deferred<undefined>();
+  h.context.release.mockImplementationOnce(() => release.promise);
+  const unloading = h.runtime.unloadModel();
+  await settle(() => h.runtime.models.snapshot().phase === 'stopping');
+  const retried = h.runtime.retryTurn(h.thread.id);
+  await Promise.resolve();
+  expect(h.runtime.loop.snapshot().phase).toBe('idle');
+  release.resolve(undefined);
+  await unloading;
+  await expect(retried).resolves.toMatchObject({ status: 'complete' });
+  expect(loadNativeModelContext).toHaveBeenCalledTimes(2);
+  expect(controlsFor(h)).toMatchObject({ canRetry: false, showStopButton: false });
   await h.runtime.dispose();
 });

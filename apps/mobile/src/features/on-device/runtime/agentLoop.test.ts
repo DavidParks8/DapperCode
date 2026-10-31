@@ -3,6 +3,7 @@ import type { LocalModelReply } from '../models/engine';
 import { LocalModelInterrupted } from '../models/session';
 import type { LocalModelSession } from '../models/session';
 import { FILE_TOOL_DEFINITIONS } from '../workspaces/fileToolDefinitions';
+import { gitToolApproval } from '../git/gitTools';
 import { LocalAgentLoop, type LocalRunSnapshot, type LocalToolExecutor } from './agentLoop';
 import { LocalThreadRepository, type LocalDocumentPort } from './threads';
 import { parseLocalThread, threadDocument } from './threadCodec';
@@ -43,7 +44,10 @@ function response(content: string, names: string[] = []): LocalModelReply {
   };
 }
 
-async function harness(contents = new Map<string, string>()) {
+async function harness(
+  contents = new Map<string, string>(),
+  approval: (name: string) => string | null = () => null,
+) {
   const storage = {
     readRuntimeDocument: jest.fn(async (name: string) => contents.get(name) ?? null),
     writeRuntimeDocument: jest.fn(async (name: string, value: string) => {
@@ -65,6 +69,7 @@ async function harness(contents = new Map<string, string>()) {
       modelId: thread.modelId,
       progress: 100,
       error: null,
+      contextTokens: 8192,
     })),
     load: jest.fn(async () => undefined),
     generate: jest.fn<
@@ -77,8 +82,13 @@ async function harness(contents = new Map<string, string>()) {
     async () => ({ path: 'main.txt', content: 'actual contents' }),
   );
   const events: LocalRunSnapshot[] = [];
-  const loop = new LocalAgentLoop(threads, model, FILE_TOOL_DEFINITIONS, execute, (state) =>
-    events.push(state),
+  const loop = new LocalAgentLoop(
+    threads,
+    model,
+    FILE_TOOL_DEFINITIONS,
+    execute,
+    (state) => events.push(state),
+    approval,
   );
   return { contents, storage, threads, thread, model, execute, events, loop };
 }
@@ -284,3 +294,224 @@ test('a thread cannot change the workspace captured by an active run', async () 
   await h.loop.send(h.thread.id, 'Inspect', 'request-one');
   expect(h.execute.mock.calls[0]?.[0]).toBe('workspace-fixed');
 });
+
+function call(name: string, args: unknown): LocalModelReply {
+  return {
+    ...response(''),
+    tool_calls: [
+      { id: 'provider', type: 'function', function: { name, arguments: JSON.stringify(args) } },
+    ],
+  };
+}
+
+function unloaded(h: Awaited<ReturnType<typeof harness>>) {
+  h.model.snapshot.mockReturnValue({
+    phase: 'empty',
+    modelId: null,
+    progress: 0,
+    error: null,
+    contextTokens: null,
+  } as never);
+}
+
+test('a model load failure keeps the unsent draft and leaves history untouched for a resend', async () => {
+  const h = await harness();
+  await h.loop.send(h.thread.id, 'Earlier', 'request-zero');
+  unloaded(h);
+  h.model.load.mockRejectedValueOnce(new Error('Download and verify this catalog model first.'));
+  const accepted = jest.fn();
+  await expect(h.loop.send(h.thread.id, 'Unsent', 'request-one', accepted)).rejects.toThrow(
+    'Download and verify',
+  );
+  expect(accepted).not.toHaveBeenCalled();
+  const failed = h.threads.get(h.thread.id);
+  expect(failed.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+  expect(failed).toMatchObject({
+    status: 'complete',
+    lastError: expect.stringContaining('verify'),
+  });
+  expect(h.loop.snapshot().phase).toBe('idle');
+  const resent = await h.loop.send(h.thread.id, 'Unsent', 'request-one', accepted);
+  expect(accepted).toHaveBeenCalledTimes(1);
+  expect(resent).toMatchObject({ status: 'complete', lastError: null });
+  expect(resent.messages.filter((message) => message.role === 'user').at(-1)?.content).toBe(
+    'Unsent',
+  );
+});
+
+test('stop during a model load settles promptly without starting the turn or clearing the draft', async () => {
+  const h = await harness();
+  unloaded(h);
+  const loading = deferred<undefined>();
+  h.model.load.mockReturnValueOnce(loading.promise);
+  const accepted = jest.fn();
+  const running = h.loop.send(h.thread.id, 'Hello', 'request-one', accepted);
+  expect(h.loop.snapshot()).toMatchObject({ phase: 'preparing', threadId: h.thread.id });
+  await h.loop.stop();
+  const settled = await running;
+  expect(h.model.stop).toHaveBeenCalledTimes(1);
+  expect(accepted).not.toHaveBeenCalled();
+  expect(settled.messages).toHaveLength(0);
+  expect(settled.status).toBe('idle');
+  expect(h.loop.snapshot().phase).toBe('idle');
+  expect(h.model.generate).not.toHaveBeenCalled();
+  loading.resolve(undefined);
+});
+
+test('retry regenerates a failed answer without duplicating the user message', async () => {
+  const h = await harness();
+  h.model.generate.mockRejectedValueOnce(new Error('Decode failed'));
+  await expect(h.loop.send(h.thread.id, 'Explain', 'request-one')).rejects.toThrow('Decode');
+  const failed = h.threads.get(h.thread.id);
+  expect(failed.status).toBe('failed');
+  expect(failed.messages.map((message) => message.role)).toEqual(['user']);
+  const retried = await h.loop.retry(h.thread.id);
+  expect(retried).toMatchObject({ status: 'complete', lastError: null });
+  expect(retried.messages.map((message) => message.role)).toEqual(['user', 'assistant']);
+  expect(h.model.generate.mock.calls[1]?.[0].at(-1)).toMatchObject({
+    role: 'user',
+    content: 'Explain',
+  });
+  await expect(h.loop.retry(h.thread.id)).rejects.toThrow('no failed or stopped turn');
+});
+
+test('retry continues after completed tools and never replays them', async () => {
+  const h = await harness();
+  h.model.generate
+    .mockResolvedValueOnce(call('write_file', { path: 'a.txt', content: 'new' }))
+    .mockRejectedValueOnce(new Error('Decode failed'));
+  await expect(h.loop.send(h.thread.id, 'Write a.txt', 'request-one')).rejects.toThrow('Decode');
+  expect(h.execute).toHaveBeenCalledTimes(1);
+  await h.loop.retry(h.thread.id);
+  expect(h.execute).toHaveBeenCalledTimes(1);
+  const continued = h.model.generate.mock.calls[2]?.[0] ?? [];
+  expect(continued.at(-1)).toMatchObject({ role: 'tool', name: 'write_file' });
+  expect(continued.filter((message) => message.role === 'user')).toHaveLength(1);
+});
+
+test('retry after stopping a partial answer that followed a tool regenerates only that answer', async () => {
+  const h = await harness();
+  const answer = deferred<LocalModelReply>();
+  const streaming = deferred<void>();
+  h.model.generate
+    .mockResolvedValueOnce(call('read_file', { path: 'a.txt' }))
+    .mockImplementationOnce((_messages, _tools, update) => {
+      update({ content: 'Partial ans', reasoning: '' });
+      streaming.resolve();
+      return answer.promise;
+    })
+    .mockResolvedValueOnce(response('Complete answer.'));
+  h.model.stop.mockImplementation(async () => {
+    answer.reject(new LocalModelInterrupted());
+  });
+  const running = h.loop.send(h.thread.id, 'Read a.txt', 'request-one');
+  await streaming.promise;
+  await h.loop.stop();
+  const stopped = await running;
+  expect(stopped.status).toBe('interrupted');
+  expect(stopped.messages.at(-1)).toMatchObject({ role: 'assistant', content: 'Partial ans' });
+  const retried = await h.loop.retry(h.thread.id);
+  expect(h.execute).toHaveBeenCalledTimes(1);
+  expect(h.model.generate.mock.calls[2]?.[0].at(-1)).toMatchObject({
+    role: 'tool',
+    name: 'read_file',
+  });
+  expect(retried.messages.map((message) => message.role)).toEqual([
+    'user',
+    'assistant',
+    'tool',
+    'assistant',
+  ]);
+  expect(retried.messages.at(-1)?.content).toBe('Complete answer.');
+});
+
+test('retry after an output-limited answer that followed a tool does not keep the truncated text', async () => {
+  const h = await harness();
+  h.model.generate
+    .mockResolvedValueOnce(call('read_file', { path: 'a.txt' }))
+    .mockResolvedValueOnce({ ...response('<tool_call>{"name": "write_fi'), stopped_limit: 1 })
+    .mockResolvedValueOnce(response('Complete answer.'));
+  const limited = await h.loop.send(h.thread.id, 'Read a.txt', 'request-one');
+  expect(limited).toMatchObject({ status: 'interrupted' });
+  const retried = await h.loop.retry(h.thread.id);
+  expect(h.model.generate.mock.calls[2]?.[0].at(-1)).toMatchObject({ role: 'tool' });
+  expect(JSON.stringify(h.model.generate.mock.calls[2]?.[0])).not.toContain('write_fi');
+  expect(retried.messages.filter((message) => message.role === 'assistant')).toHaveLength(2);
+  expect(retried.messages.at(-1)?.content).toBe('Complete answer.');
+});
+
+test('long write_file payloads reach the tool intact', async () => {
+  const h = await harness();
+  const content = 'const value = 1;\n'.repeat(2000);
+  h.model.generate.mockResolvedValueOnce(call('write_file', { path: 'big.ts', content }));
+  await h.loop.send(h.thread.id, 'Write big.ts', 'request-one');
+  expect(h.execute).toHaveBeenCalledWith('workspace-fixed', 'write_file', {
+    path: 'big.ts',
+    content,
+  });
+});
+
+describe('model-initiated push approval', () => {
+  test('push waits for approval, and a decline returns a tool error to the model', async () => {
+    const h = await harness(new Map(), gitToolApproval);
+    h.model.generate.mockResolvedValueOnce(call('git_push', {}));
+    const running = h.loop.send(h.thread.id, 'Push it', 'request-one');
+    await waitFor(() => h.loop.snapshot().phase === 'approval');
+    const approval = h.loop.snapshot().approval;
+    expect(approval).toMatchObject({
+      threadId: h.thread.id,
+      toolName: 'git_push',
+      summary: 'Push the current branch to its remote',
+    });
+    expect(h.execute).not.toHaveBeenCalled();
+    expect(() => h.loop.resolveApproval('other-call', true)).toThrow('no longer pending');
+    h.loop.resolveApproval(approval!.callId, false);
+    const settled = await running;
+    expect(h.execute).not.toHaveBeenCalled();
+    expect(settled.messages.find((message) => message.role === 'tool')).toMatchObject({
+      tool: { name: 'git_push', status: 'failed' },
+      content: expect.stringContaining('declined'),
+    });
+    expect(h.model.generate.mock.calls[1]?.[0].at(-1)).toMatchObject({
+      role: 'tool',
+      content: expect.stringContaining('declined'),
+    });
+  });
+
+  test('an approved push runs exactly once', async () => {
+    const h = await harness(new Map(), gitToolApproval);
+    h.model.generate.mockResolvedValueOnce(call('git_push', {}));
+    h.execute.mockResolvedValueOnce({ pushed: true });
+    const running = h.loop.send(h.thread.id, 'Push it', 'request-one');
+    await waitFor(() => h.loop.snapshot().phase === 'approval');
+    h.loop.resolveApproval(h.loop.snapshot().approval!.callId, true);
+    await running;
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    expect(h.execute).toHaveBeenCalledWith('workspace-fixed', 'git_push', {});
+  });
+
+  test('stop while awaiting approval interrupts without pushing', async () => {
+    const h = await harness(new Map(), gitToolApproval);
+    h.model.generate.mockResolvedValueOnce(call('git_push', {}));
+    const running = h.loop.send(h.thread.id, 'Push it', 'request-one');
+    await waitFor(() => h.loop.snapshot().phase === 'approval');
+    await h.loop.stop();
+    const settled = await running;
+    expect(settled.status).toBe('interrupted');
+    expect(h.execute).not.toHaveBeenCalled();
+    expect(settled.messages.find((message) => message.role === 'tool')).toMatchObject({
+      tool: { status: 'interrupted' },
+      content: expect.stringContaining('did not run'),
+    });
+  });
+});
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (condition()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error('Condition was not reached.');
+}

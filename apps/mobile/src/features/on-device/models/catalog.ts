@@ -52,6 +52,16 @@ export function requireLocalModelRuntime(model: LocalModelDefinition): void {
   }
 }
 
+export function findLocalModelDefinition(id: string): LocalModelDefinition | null {
+  return LOCAL_MODEL_CATALOG.find((entry) => entry.id === id) ?? null;
+}
+
+/** A user-facing model name such as "Qwen3 1.7B Q4_K_M"; never the raw catalog identifier. */
+export function localModelDisplayName(id: string): string {
+  const model = findLocalModelDefinition(id);
+  return model ? `${model.name} ${model.quantization}` : 'Unavailable model';
+}
+
 export function localModelDefinition(id: string): LocalModelDefinition {
   const model = LOCAL_MODEL_CATALOG.find((entry) => entry.id === id);
   if (!model) {
