@@ -11,6 +11,14 @@ export interface FakeSetupRuntimeState {
 }
 
 /** The slice of the on-device runtime that setup progress reads, with a change trigger. */
+const EMPTY_MODEL_SESSION = {
+  phase: 'empty',
+  modelId: null,
+  progress: 0,
+  error: null,
+  contextTokens: null,
+} as const;
+
 export function createFakeSetupRuntime(initial: FakeSetupRuntimeState) {
   let state = initial;
   let version = 0;
@@ -23,6 +31,10 @@ export function createFakeSetupRuntime(initial: FakeSetupRuntimeState) {
     version: () => version,
     preferences: () => ({ modelId: state.modelId, workspaceId: state.workspaceId }),
     workspaces: () => state.workspaces,
+    models: {
+      snapshot: () => EMPTY_MODEL_SESSION,
+      resident: () => null,
+    },
     downloads: {
       snapshot: (id: string) => ({
         phase:

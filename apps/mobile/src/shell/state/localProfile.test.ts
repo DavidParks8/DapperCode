@@ -96,6 +96,7 @@ describe('local profile state', () => {
       connectionSettings: false,
       gitClone: true,
       browserPreview: false,
+      modelLibrary: true,
       turnRetry: true,
       managedWorkspaces: true,
       workspaceFiles: true,
@@ -106,6 +107,7 @@ describe('local profile state', () => {
     });
     expect(storeWith('bridge-1', true).get(activeProfileFeaturesAtom)).toMatchObject({
       gitClone: true,
+      modelLibrary: false,
       managedWorkspaces: false,
       workspaceFiles: false,
       gitSync: false,
@@ -118,6 +120,7 @@ describe('local profile state', () => {
     expect(unsupported.get(activeProfileAtom)).toBeNull();
     expect(unsupported.get(shellProfilesAtom).map((profile) => profile.id)).toEqual(['bridge-1']);
     expect(storeWith('bridge-1', true).get(activeProfileFeaturesAtom).attachments).toBe(true);
+    expect(storeWith('bridge-1', true).get(activeProfileFeaturesAtom).modelLibrary).toBe(false);
     expect(storeWith('bridge-1', true).get(activeProfileFeaturesAtom).turnRetry).toBe(false);
   });
 

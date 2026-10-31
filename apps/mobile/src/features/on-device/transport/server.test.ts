@@ -509,6 +509,54 @@ describe('LocalBridgeServer', () => {
     expect(port.calls.filter((call) => call.startsWith('send:'))).toHaveLength(1);
   });
 
+  it('lists downloaded models with load state and marks the model a new chat would use', async () => {
+    const { server, port } = setup();
+    const second = { ...port.models[0]!, id: 'qwen3-4b-q4-k-m', name: 'Qwen3 4B' };
+    port.models = [...port.models, second];
+    port.defaultValues = { workspaceId: null, modelId: 'qwen3-4b-q4-k-m' };
+    port.loadedModelId = 'qwen3-1.7b-q4-k-m';
+    const list = (await server.request('model/list', {})) as {
+      data: Record<string, unknown>[];
+    };
+    expect(list.data).toEqual([
+      {
+        id: 'qwen3-1.7b-q4-k-m',
+        displayName: 'Qwen3 1.7B · Q4_K_M',
+        description: 'Loaded · 8K context',
+        providerId: 'on-device',
+        isDefault: false,
+      },
+      {
+        id: 'qwen3-4b-q4-k-m',
+        displayName: 'Qwen3 4B · Q4_K_M',
+        description: 'Loads when you send · up to 8K context',
+        providerId: 'on-device',
+        isDefault: true,
+      },
+    ]);
+    port.models = [];
+    expect(await server.request('model/list', {})).toEqual({ data: [] });
+  });
+
+  it('changes a chat model through the model config option and makes it the new-chat default', async () => {
+    const { server, port } = setup();
+    port.models = [...port.models, { ...port.models[0]!, id: 'qwen3-4b-q4-k-m', name: 'Qwen3 4B' }];
+    const threadId = await createChat(server);
+    const response = (await server.request('thread/config/set', {
+      threadId,
+      configId: 'model',
+      value: 'qwen3-4b-q4-k-m',
+    })) as { thread: { acpSnapshot: { config: { id: string; value: unknown }[] } } };
+    expect(port.calls).toContain(`chooseModel:${threadId}:qwen3-4b-q4-k-m`);
+    expect(response.thread.acpSnapshot.config.find((option) => option.id === 'model')?.value).toBe(
+      'qwen3-4b-q4-k-m',
+    );
+    const list = (await server.request('model/list', {})) as {
+      data: { id: string; isDefault: boolean }[];
+    };
+    expect(list.data.find((entry) => entry.isDefault)?.id).toBe('qwen3-4b-q4-k-m');
+  });
+
   it('renames, changes model, and deletes chats through thread notifications', async () => {
     const { server, port, notifications } = setup();
     port.models = [...port.models, { ...port.models[0]!, id: 'qwen3-4b-q4-k-m', name: 'Qwen3 4B' }];

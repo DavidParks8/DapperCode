@@ -9,8 +9,7 @@ export const LOCAL_MODEL_FAMILIES: readonly LocalModelFamily[] = [
     name: 'Bonsai 2',
     publisher: 'Prism ML',
     icon: 'leaf-outline',
-    description:
-      'Compact ternary models with small downloads. Choose a size and packing on the next page.',
+    description: 'Compact ternary models with small downloads and memory use.',
     quantizationNote:
       'These are different packings of the same ternary weights, not different precision levels. Q2_0 works in the bundled runtime; PQ2_0 and PTQ1_0 require PrismML-specific kernels.',
     badge: 'Compact',

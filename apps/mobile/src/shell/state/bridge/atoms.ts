@@ -74,6 +74,11 @@ export interface ActiveProfileFeatures {
   /** Continuing a failed turn in place (`bridge/turn/retry`) instead of resending it. */
   turnRetry: boolean;
   /**
+   * Models are downloaded and loaded on this device and managed in Settings, so the model picker
+   * lists downloaded models and links there instead of offering an agent-side default.
+   */
+  modelLibrary: boolean;
+  /**
    * Workspaces are a flat, app-managed list rather than host folders: the picker creates, renames,
    * and deletes them, clones go into a new workspace over HTTPS, and clone progress can be read
    * and cancelled. Uses the workspace host extensions in `features/workspace/api/protocol.ts`.
@@ -99,6 +104,7 @@ export const activeProfileFeaturesAtom = atom<ActiveProfileFeatures>((get) => {
     connectionSettings: !local,
     gitClone: true,
     browserPreview: !local,
+    modelLibrary: local,
     turnRetry: local,
     managedWorkspaces: local,
     workspaceFiles: local,
@@ -170,6 +176,8 @@ export const apiClientAtom = atom(
       bridgeUrl: bridgeUrl ?? undefined,
       authToken: local ? null : (get(bridgeTokenAtom) ?? env.hostBridgeToken),
       profileId: get(activeProfileIdAtom),
+      // Local models download and load while the app runs, so the list is always read fresh.
+      ...(local ? { modelListCacheTtlMs: 0 } : {}),
     });
   },
   (get, set, client: HostBridgeApiClient | null) => {

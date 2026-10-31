@@ -67,7 +67,7 @@ function NewChatRoute() {
   ) : null;
 }
 
-function LegacyModelsRoute() {
+function SettingsModelsRoute() {
   return <Text>Model library</Text>;
 }
 
@@ -106,7 +106,7 @@ function render(store: ReturnType<typeof storeWith>) {
       overrides: {
         _layout: RootLayout,
         'profiles/[profileId]/(drawer)/chats/[chatId]/index': NewChatRoute,
-        'on-device/models': LegacyModelsRoute,
+        'profiles/[profileId]/(drawer)/settings/models/index': SettingsModelsRoute,
         'on-device/workspaces': LegacyWorkspacesRoute,
       },
     },
