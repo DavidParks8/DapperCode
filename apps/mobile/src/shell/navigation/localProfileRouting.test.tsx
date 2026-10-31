@@ -1,4 +1,4 @@
-import { Stack, useGlobalSearchParams } from 'expo-router';
+import { router, Stack, useGlobalSearchParams } from 'expo-router';
 jest.mock('react-native-drawer-layout', () => {
   const React = jest.requireActual('react');
   const progress = { value: 0 };
@@ -93,6 +93,7 @@ function render(store: ReturnType<typeof storeWith>, initialUrl: string) {
       overrides: {
         _layout: RootLayout,
         'profiles/[profileId]/(drawer)/chats/[chatId]/index': ReadyMainRoute,
+        'on-device/models': () => <Text>Model library</Text>,
       },
     },
     { initialUrl, wrapper: Wrapper },
@@ -159,5 +160,29 @@ describe('local profile routing', () => {
     await waitFor(() => {
       expect(chat.getPathname()).toBe('/profiles/on-device/chats/thread-7');
     });
+  });
+
+  it('keeps a switched profile after returning from a screen outside the profile', async () => {
+    const store = storeWith('profile-1', true);
+    store.set(localRuntimeAtom, {} as OnDeviceRuntime);
+    const transport = new LocalBridgeWsClient(new LocalBridgeServer(new FakeAgentPort()));
+    transport.connect();
+    store.set(localTransportAtom, transport);
+    const result = render(store, '/profiles/profile-1/chats/new');
+
+    act(() => replaceRoot(routes.newChat(LOCAL_PROFILE_ID)));
+    await waitFor(() => {
+      expect(screen.getByText('Main on-device new')).toBeTruthy();
+    });
+    act(() => router.push('/on-device/models'));
+    expect(screen.getByText('Model library')).toBeTruthy();
+    act(() => router.back());
+
+    await waitFor(() => {
+      expect(screen.getByText('Main on-device new')).toBeTruthy();
+    });
+    expect(result.getPathname()).toBe('/profiles/on-device/chats/new');
+    expect(store.get(activeProfileIdAtom)).toBe(LOCAL_PROFILE_ID);
+    transport.dispose();
   });
 });

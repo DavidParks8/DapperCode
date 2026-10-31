@@ -20,7 +20,14 @@ import {
   showToolCallsAtom,
   workspaceChatLimitAtom,
 } from '@shell/state/appState/settings';
-import { apiClientAtom, bridgeConnectedAtom } from '@shell/state/bridge/atoms';
+import {
+  apiClientAtom,
+  bridgeConnectedAtom,
+  localProfileAvailableAtom,
+} from '@shell/state/bridge/atoms';
+import { localRuntimeAtom } from '@shell/state/local/atoms';
+import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
+import { createFakeSetupRuntime } from '@shell/profiles/testing';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { createMemoryPersistence, createTestStore, withAppStore } from '@shell/state/testing';
 import { windowTraitsAtom } from '@shell/state/layout/atoms';
@@ -338,6 +345,56 @@ describe('SettingsScreen behavior', () => {
     );
     await press(drawer);
     expect(drawerToggle).toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+
+  it('presents On this iPhone as a profile with setup state instead of an offline connection', async () => {
+    const store = createSettingsStore({ activeProfileId: LOCAL_PROFILE_ID });
+    store.set(localProfileAvailableAtom, true);
+    const fake = createFakeSetupRuntime({
+      modelId: null,
+      workspaceId: null,
+      workspaces: [],
+      downloadPhase: 'not_downloaded',
+    });
+    store.set(localRuntimeAtom, fake.runtime);
+    const { tree } = await renderSettings({ store, connected: true });
+    const root = tree.root as Queryable;
+    const byLabel = (label: string) =>
+      root.findAll(
+        (node) => typeof node.type === 'string' && node.props['accessibilityLabel'] === label,
+      );
+
+    // Connection names the open profile with its setup state; there is no URL to edit.
+    const connection = requireTestValue(byLabel('On this iPhone, Needs a model')[0], 'local row');
+    expect(connection.props['accessibilityRole']).toBeUndefined();
+    expect(byLabel('On this iPhone, Offline')).toHaveLength(0);
+    act(() => fake.update({ modelId: 'qwen3-1.7b-q4-k-m', downloadPhase: 'ready' }));
+    expect(byLabel('On this iPhone, Needs a workspace')).toHaveLength(1);
+
+    // Profiles lists every profile the same way, the built-in one included.
+    expect(byLabel('On this iPhone, Active')).toHaveLength(1);
+    expect(byLabel('Secondary, 127.0.0.1:3002')).toHaveLength(1);
+    expect(hasText(root, 'On this iPhone runs private models offline')).toBe(true);
+    const bridgeRow = root.findAll(
+      (node) =>
+        node.props['accessibilityLabel'] === 'Primary, 127.0.0.1:3001' &&
+        typeof node.props['onPress'] === 'function',
+    )[0];
+    await press(requireTestValue(bridgeRow, 'bridge row'));
+    expect(router.replace).toHaveBeenCalledWith(routes.newChat('profile-1'));
+
+    expect(hasText(root, 'The built-in agent runs models downloaded to this iPhone.')).toBe(true);
+    expect(hasText(root, 'registered on the desktop host')).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('explains that bridge agents are installed on the desktop host', async () => {
+    const { tree } = await renderSettings();
+    const root = tree.root as Queryable;
+    expect(hasText(root, 'Agents are installed and registered on the desktop host.')).toBe(true);
+    expect(hasText(root, 'Switching profiles opens a new chat there.')).toBe(true);
+    expect(hasText(root, 'On this iPhone')).toBe(false);
     act(() => tree.unmount());
   });
 

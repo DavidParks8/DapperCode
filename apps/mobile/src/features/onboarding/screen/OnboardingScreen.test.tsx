@@ -2,7 +2,8 @@ import { requireTestValue } from '@shared/testing/requireTestValue';
 import * as Clipboard from 'expo-clipboard';
 import type * as fsNode from 'fs';
 import type * as pathNode from 'path';
-import { KeyboardAvoidingView, Modal, Platform, Share } from 'react-native';
+import type { ReactNode } from 'react';
+import { KeyboardAvoidingView, Modal, Platform, Share, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -11,6 +12,7 @@ import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { setMockReducedMotionEnabled } from '@shared/testing/reanimatedMock';
 import { OnboardingScreen, type OnboardingMode } from './OnboardingScreen';
+import { INTRO_BRIDGE_CHOICE, introCopy } from './IntroSection';
 
 const mockRequestCameraPermission = jest.fn().mockResolvedValue({ granted: false });
 const mockWsConstructor = jest.fn();
@@ -115,6 +117,7 @@ async function renderOnboarding(
     allowInsecureRemoteBridge?: boolean;
     allowQueryTokenAuth?: boolean;
     themeMode?: 'dark' | 'light';
+    introAction?: ReactNode;
   } = {},
 ): Promise<{
   tree: ReactTestRenderer;
@@ -133,6 +136,7 @@ async function renderOnboarding(
     >
       <AppThemeProvider theme={props.themeMode === 'light' ? lightTheme : theme}>
         <OnboardingScreen
+          introAction={props.introAction}
           mode={props.mode}
           initialBridgeUrl={props.initialBridgeUrl}
           initialBridgeToken={props.initialBridgeToken}
@@ -184,12 +188,49 @@ describe('OnboardingScreen behavior', () => {
     const { tree } = await renderOnboarding();
     const root = tree.root as Queryable;
     expect(hasText(root, 'DapperCode')).toBe(true);
-    expect(hasText(root, 'Pair this device with your own machine.')).toBe(true);
-    await press(findPressableByText(root, 'Private connection'));
+    expect(hasText(root, introCopy(false).description)).toBe(true);
+    // Without a local choice the hero never promises agents running on the phone.
+    expect(hasText(root, 'Choose where agents run')).toBe(false);
+    await press(findPressableByText(root, INTRO_BRIDGE_CHOICE.title));
     expect(findByLabel(root, 'Bridge URL')).toBeTruthy();
     expect(hasText(root, '1. Start')).toBe(true);
     await press(findPressableByText(root, 'Back'));
-    expect(hasText(root, 'Private connection')).toBe(true);
+    expect(hasText(root, INTRO_BRIDGE_CHOICE.title)).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  it('presents both places agents can run when this device offers a local choice', async () => {
+    const { tree } = await renderOnboarding({
+      introAction: <Text testID="local-choice">On this iPhone</Text>,
+    });
+    const root = tree.root as Queryable;
+    const offered = introCopy(true);
+    expect(hasText(root, offered.titleTail)).toBe(true);
+    expect(hasText(root, offered.description)).toBe(true);
+    expect(offered.description).toMatch(/this iPhone/);
+    expect(offered.description).toMatch(/your own machine/);
+    expect(hasText(root, 'Choose where agents run')).toBe(true);
+    // Pairing stays the first, primary choice; the local choice follows it.
+    const order = root
+      .findAll(
+        (node) =>
+          typeof node.type === 'string' &&
+          (node.props['testID'] === 'onboarding-choice-bridge' ||
+            node.props['testID'] === 'local-choice'),
+      )
+      .map((node) => String(node.props['testID']));
+    expect(order).toEqual(['onboarding-choice-bridge', 'local-choice']);
+    const bridge = requireTestValue(
+      root.findAll(
+        (node) =>
+          typeof node.type === 'string' && node.props['testID'] === 'onboarding-choice-bridge',
+      )[0],
+      'bridge choice',
+    );
+    expect(bridge.props['accessibilityRole']).toBe('button');
+    expect(bridge.props['accessibilityLabel']).toBe(
+      `${INTRO_BRIDGE_CHOICE.title}, ${INTRO_BRIDGE_CHOICE.meta}`,
+    );
     act(() => tree.unmount());
   });
 
@@ -666,7 +707,7 @@ describe('OnboardingScreen behavior', () => {
 
   it('reacts to mode and initial credential prop changes', async () => {
     const result = await renderOnboarding();
-    expect(hasText(result.tree.root as Queryable, 'Private connection')).toBe(true);
+    expect(hasText(result.tree.root as Queryable, INTRO_BRIDGE_CHOICE.title)).toBe(true);
     await result.rerender({
       mode: 'edit',
       initialBridgeUrl: 'http://127.0.0.1:4999',
@@ -677,7 +718,7 @@ describe('OnboardingScreen behavior', () => {
     expect(findByLabel(root, 'Bridge token').props['value']).toBe('rerender-token');
     expect(findByLabel(root, 'Save URL')).toBeTruthy();
     await result.rerender({ mode: 'initial', initialBridgeUrl: null, initialBridgeToken: null });
-    expect(hasText(root, 'Private connection')).toBe(true);
+    expect(hasText(root, INTRO_BRIDGE_CHOICE.title)).toBe(true);
     act(() => result.tree.unmount());
   });
 
@@ -929,7 +970,7 @@ describe('OnboardingScreen behavior', () => {
     const result = await renderOnboarding();
     const root = result.tree.root as Queryable;
 
-    await press(findPressableByText(root, 'Private connection'));
+    await press(findPressableByText(root, INTRO_BRIDGE_CHOICE.title));
     expect(feedback.selection as jest.Mock).toHaveBeenCalled();
     (feedback.selection as jest.Mock).mockClear();
 
@@ -955,7 +996,7 @@ describe('OnboardingScreen behavior', () => {
   it('meets the platform touch-target minimum and exposes accessibility roles/labels/hints', async () => {
     const initial = await renderOnboarding();
     const initialRoot = initial.tree.root as Queryable;
-    await press(findPressableByText(initialRoot, 'Private connection'));
+    await press(findPressableByText(initialRoot, INTRO_BRIDGE_CHOICE.title));
 
     const backButton = findByLabel(initialRoot, 'Back');
     expect(backButton.props['accessibilityRole']).toBe('button');
@@ -1098,7 +1139,7 @@ describe('OnboardingScreen behavior', () => {
     it('renders the compact stepper pill index using the metadata semantic role', async () => {
       const result = await renderOnboarding({ mode: 'initial' });
       const root = result.tree.root as Queryable;
-      await press(findPressableByText(root, 'Private connection'));
+      await press(findPressableByText(root, INTRO_BRIDGE_CHOICE.title));
       const pillIndexNode = root.findAll((node) => node.children.map(String).join('') === '1')[0];
       const style = Array.isArray(pillIndexNode?.props['style'])
         ? Object.assign({}, ...pillIndexNode.props['style'])
