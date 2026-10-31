@@ -136,6 +136,10 @@ pub struct SnapshotTool {
     /// first one. Without a durable flag a running sub-agent renders as an ordinary tool until
     /// its `<task …>` result lands, which for a foreground task is when it has already finished.
     pub subagent: bool,
+    /// The run was cancelled while this call was still active. ACP has no cancelled tool status,
+    /// so the call keeps `Failed` for its lifecycle while the wire reports it as interrupted.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub interrupted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -554,7 +558,7 @@ impl SessionSnapshot {
                 ..
             } => {
                 if let Some(active_generation) = self.active_generation {
-                    self.terminalize_active_tools(ToolCallStatus::Failed, observed_at_ms);
+                    self.terminalize_active_tools(ToolCallStatus::Failed, false, observed_at_ms);
                     self.terminalize_unresolved_subagents("failed", active_generation);
                 }
                 self.active_run_id = Some(run_id.clone());
@@ -571,10 +575,10 @@ impl SessionSnapshot {
                     stop_reason,
                     agent_client_protocol::schema::v1::StopReason::Cancelled
                 ) {
-                    self.terminalize_active_tools(ToolCallStatus::Failed, observed_at_ms);
+                    self.terminalize_active_tools(ToolCallStatus::Failed, true, observed_at_ms);
                     self.terminalize_unresolved_subagents("cancelled", *generation);
                 } else {
-                    self.terminalize_active_tools(ToolCallStatus::Completed, observed_at_ms);
+                    self.terminalize_active_tools(ToolCallStatus::Completed, false, observed_at_ms);
                 }
                 self.active_run_id = None;
                 self.active_source_turn_id = None;
@@ -584,7 +588,7 @@ impl SessionSnapshot {
             CanonicalEvent::RunFailed { generation, .. }
                 if self.active_generation == Some(*generation) =>
             {
-                self.terminalize_active_tools(ToolCallStatus::Failed, observed_at_ms);
+                self.terminalize_active_tools(ToolCallStatus::Failed, false, observed_at_ms);
                 self.terminalize_unresolved_subagents("failed", *generation);
                 self.active_run_id = None;
                 self.active_source_turn_id = None;
@@ -1131,6 +1135,7 @@ impl SessionSnapshot {
             subagent: existing.as_ref().is_some_and(|tool| tool.subagent)
                 || self.subagent_headers.contains_key(id)
                 || is_subagent_task_tool(*projection.kind, projection.title),
+            interrupted: false,
         };
         tool.truncated |= apply_tool_text(&mut tool.content, projection.content);
         if let Some(header) = Self::latest_valid_task_header(&tool.content) {
@@ -1294,13 +1299,19 @@ impl SessionSnapshot {
         )
     }
 
-    fn terminalize_active_tools(&mut self, status: ToolCallStatus, completed_at_ms: i64) {
+    fn terminalize_active_tools(
+        &mut self,
+        status: ToolCallStatus,
+        interrupted: bool,
+        completed_at_ms: i64,
+    ) {
         let active_tool_ids = self.active_tool_ids.iter().cloned().collect::<Vec<_>>();
         let updates = active_tool_ids
             .iter()
             .filter_map(|tool_call_id| {
                 let tool = self.tools.get_mut(tool_call_id)?;
                 tool.status = status;
+                tool.interrupted = interrupted;
                 tool.completed_at_ms = Some(
                     tool.completed_at_ms
                         .unwrap_or(completed_at_ms.max(tool.started_at_ms)),
@@ -1331,6 +1342,7 @@ impl SessionSnapshot {
                     return;
                 };
                 tool.status = status;
+                tool.interrupted = interrupted;
                 tool.completed_at_ms = Some(
                     tool.completed_at_ms
                         .unwrap_or(completed_at_ms.max(tool.started_at_ms)),
@@ -3422,6 +3434,7 @@ mod tests {
                 locations: vec![serde_json::json!({"path":"src/file.ts","line":7})],
                 truncated: false,
                 subagent: false,
+                interrupted: false,
             },
         );
         snapshot.plan = vec![PlanEntry {
@@ -3666,6 +3679,7 @@ mod tests {
             locations: Vec::new(),
             truncated: false,
             subagent: false,
+            interrupted: false,
         });
         tools.history_bytes = MAX_HISTORY_BYTES + 1;
         tools.enforce_history_bounds();
@@ -3693,6 +3707,7 @@ mod tests {
             locations: Vec::new(),
             truncated: false,
             subagent: false,
+            interrupted: false,
         });
         assert!(absent.history.is_empty());
     }

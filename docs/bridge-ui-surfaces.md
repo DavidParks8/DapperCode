@@ -125,7 +125,7 @@ The projected AG-UI event shape is:
 ## Implemented Tool Metadata Example
 
 Every ACP tool call carries a `kind` (`read`, `edit`, `execute`, …) and a per-call `status`
-(`pending`, `in_progress`, `completed`, `failed`). Neither fits an AG-UI `TOOL_CALL_START`, so the
+(`pending`, `in_progress`, `completed`, `failed`, plus the bridge's `interrupted`). Neither fits an AG-UI `TOOL_CALL_START`, so the
 projector emits them as a `CUSTOM` event named `dappercode.dev/tool-meta` whenever the metadata
 revision moves. It cannot ride on `dappercode.dev/tool-content`, which only fires when structured
 content changes: a pure `in_progress` → `completed` transition would be lost.
@@ -154,6 +154,15 @@ pair, holding the same payload plus the bounded `content`, `locations`, and `tru
 Mobile folds it into the tool row and never renders it on its own. Sub-agent tools are excluded from
 both paths because they already have their own `dappercode.subagent` card.
 
+The status set extends ACP's four values with a bridge-owned `interrupted`: a call that was still
+active when the user cancelled its run (`StopReason::Cancelled`). ACP has no cancelled tool status,
+so the bridge emits `interrupted` on the run's terminal `tool-meta` event and in the snapshot's
+`dappercode.tool` activity, and the snapshot's tool-result message carries no `error`. The raw
+`acpSnapshot` tool keeps ACP's `failed` and adds `"interrupted": true`. Mobile renders interrupted
+rows neutrally ("Stopped running …" with a muted stop icon), never with the failure treatment. A
+failed or superseded run still reports its dangling calls as `failed`. The full status inventory is
+pinned by `toolMetaStatuses` in `contracts/bridge-rpc/v2/manifest.json`.
+
 `startedAtMs` and `completedAtMs` are Unix epoch milliseconds measured by the bridge. The start is
 the first time the bridge observes the call and remains stable across updates. Completion is frozen
 on the first completed or failed update; run termination also completes any dangling active call,
@@ -173,6 +182,7 @@ structured diffs arrive without reordering the chips. Agents that do not send in
 until completion cannot provide earlier file discovery.
 
 For a local smoke test of the generic renderer only, open a chat in the mobile app and run:
+
 ```bash
 pnpm run bridge:ui:demo
 ```

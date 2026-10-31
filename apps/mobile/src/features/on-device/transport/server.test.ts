@@ -383,7 +383,8 @@ describe('LocalBridgeServer', () => {
     const { thread } = (await server.request('thread/read', { threadId })) as { thread: unknown };
     const chat = mapChat(toRawThread(thread));
     expect(chat.messages.find((message) => message.role === 'tool')?.toolMeta).toMatchObject({
-      title: 'Edit src/app.ts · Interrupted',
+      title: 'Edit src/app.ts',
+      status: 'interrupted',
     });
   });
 

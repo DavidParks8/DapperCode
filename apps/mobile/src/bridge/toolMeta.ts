@@ -21,7 +21,13 @@ const TOOL_KINDS: ChatToolKind[] = [
   'other',
 ];
 
-const TOOL_STATUSES: ChatToolStatus[] = ['pending', 'in_progress', 'completed', 'failed'];
+const TOOL_STATUSES: ChatToolStatus[] = [
+  'pending',
+  'in_progress',
+  'completed',
+  'failed',
+  'interrupted',
+];
 
 export function toToolKind(value: unknown): ChatToolKind {
   const normalized = nonEmptyString(value)?.toLowerCase().replace(/-/g, '_');

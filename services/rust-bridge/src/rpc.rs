@@ -198,6 +198,27 @@ mod tests {
                 case["agentCapabilities"]["sessionDelete"]
             );
         }
+        use agent_client_protocol::schema::v1::ToolCallStatus;
+        let mut tool_statuses = [
+            ToolCallStatus::Pending,
+            ToolCallStatus::InProgress,
+            ToolCallStatus::Completed,
+            ToolCallStatus::Failed,
+        ]
+        .map(crate::agui::tool_status_wire)
+        .to_vec();
+        tool_statuses.push(crate::agui::TOOL_STATUS_INTERRUPTED.to_string());
+        tool_statuses.sort();
+        assert_eq!(
+            manifest["fixtures"]["toolMetaStatuses"],
+            json!(tool_statuses)
+        );
+        let interrupted = &manifest["fixtures"]["interruptedToolMeta"];
+        assert_eq!(interrupted["name"], "dappercode.dev/tool-meta");
+        assert_eq!(
+            interrupted["value"]["status"],
+            crate::agui::TOOL_STATUS_INTERRUPTED
+        );
         assert_eq!(manifest["fixtures"]["runtimeActivity"]["canRetire"], false);
         assert_eq!(
             manifest["fixtures"]["brokerPairing"]["type"],

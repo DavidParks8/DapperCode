@@ -427,6 +427,19 @@
         }
       }
     ],
+    "toolMetaStatuses": ["completed", "failed", "in_progress", "interrupted", "pending"],
+    "interruptedToolMeta": {
+      "type": "CUSTOM",
+      "name": "dappercode.dev/tool-meta",
+      "value": {
+        "toolCallId": "tool-interrupted",
+        "kind": "execute",
+        "status": "interrupted",
+        "title": "pnpm test",
+        "startedAtMs": 1784371200000,
+        "completedAtMs": 1784371200500
+      }
+    },
     "threadSnapshot": {
       "id": "agent-alpha:thread-snapshot",
       "agentId": "agent-alpha",

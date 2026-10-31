@@ -181,8 +181,6 @@ export function localToolStatus(
   switch (status) {
     case 'running':
       return 'in_progress';
-    case 'interrupted':
-      return 'failed';
     default:
       return status;
   }
@@ -206,11 +204,7 @@ export function describeLocalToolMessage(
   if (!tool) {
     return { kind: 'other', title: 'Tool', activity: 'Running a tool' };
   }
-  const described = describeLocalTool(tool.name, toolArguments(thread, tool.callId));
-  // The wire has no interrupted tool status, so the title says what happened instead of "failed".
-  return tool.status === 'interrupted'
-    ? { ...described, title: `${described.title} · Interrupted` }
-    : described;
+  return describeLocalTool(tool.name, toolArguments(thread, tool.callId));
 }
 
 /**
@@ -418,7 +412,9 @@ export function localThreadSnapshot(
       id: tool.callId,
       generation: null,
       kind: described.kind,
-      status: localToolStatus(tool.status),
+      // Like the bridge snapshot, an interrupted call keeps ACP's `failed` plus the flag.
+      status: tool.status === 'interrupted' ? 'failed' : localToolStatus(tool.status),
+      ...(tool.status === 'interrupted' ? { interrupted: true } : {}),
       title: described.title,
       startedAtMs: Date.parse(tool.startedAt),
       completedAtMs: tool.completedAt ? Date.parse(tool.completedAt) : null,

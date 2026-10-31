@@ -71,7 +71,11 @@ export type ChatToolKind =
   | 'switch_mode'
   | 'other';
 
-export type ChatToolStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+/**
+ * ACP's tool statuses plus the bridge-owned `interrupted`: a call still active when the user
+ * cancelled its run. It is terminal but not a failure.
+ */
+export type ChatToolStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'interrupted';
 
 /**
  * The ACP facts a tool row needs that an AG-UI message cannot carry: the kind

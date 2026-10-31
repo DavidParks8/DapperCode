@@ -92,6 +92,7 @@ function parseSnapshotTools(snapshot: Record<string, unknown>): RawAcpSnapshot['
       locations: Array.isArray(entry['locations']) ? entry['locations'] : [],
       truncated: entry['truncated'] === true,
       subagent: entry['subagent'] === true,
+      interrupted: entry['interrupted'] === true,
     }))
     .filter((entry) => entry.id);
 }

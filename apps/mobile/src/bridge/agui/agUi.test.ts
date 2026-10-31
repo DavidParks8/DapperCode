@@ -13,12 +13,15 @@ import {
   renderAgUiCustomContent,
   updateAgUiLiveAssistantMessages,
 } from '@bridge/agui/agUi';
+import { toToolStatus } from '@bridge/toolMeta';
 import type { RpcNotification } from '@bridge/types/types';
 
 interface ContractManifest {
   fixtures: {
     agUiEvents: unknown[];
     toolRevisionEvents: unknown[];
+    toolMetaStatuses: string[];
+    interruptedToolMeta: unknown;
   };
 }
 
@@ -149,6 +152,29 @@ describe('AG-UI bridge notifications', () => {
     expect(toolResult?.content).toContain('terminal-2');
     expect(toolResult?.content).not.toContain('firstsecond');
     expect(toolResult?.content).not.toContain('terminal-1');
+  });
+
+  it('accepts every bridge tool status, including interrupted, without remapping it', () => {
+    const manifest = JSON.parse(
+      readFileSync(
+        path.resolve(__dirname, '../../../../../contracts/bridge-rpc/v2/manifest.json'),
+        'utf8',
+      ),
+    ) as ContractManifest;
+
+    expect(manifest.fixtures.toolMetaStatuses).toContain('interrupted');
+    for (const status of manifest.fixtures.toolMetaStatuses) {
+      expect(toToolStatus(status)).toBe(status);
+    }
+
+    const event = EventSchema.parse(manifest.fixtures.interruptedToolMeta);
+    const state = updateAgUiLiveAssistantMessages({}, { threadId: 'thread', runId: 'run', event });
+    expect(state['thread']?.toolMetaByCallId['tool-interrupted']).toMatchObject({
+      status: 'interrupted',
+      title: 'pnpm test',
+    });
+    expect(state['thread']?.messages).toHaveLength(1);
+    expect(state['thread']?.messages[0]?.toolMeta?.status).toBe('interrupted');
   });
 
   it('handles current AG-UI event types and rejects deprecated thinking events', () => {

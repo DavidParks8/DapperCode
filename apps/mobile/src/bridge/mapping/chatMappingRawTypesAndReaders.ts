@@ -92,6 +92,8 @@ export interface RawAcpSnapshot {
     locations: unknown[];
     truncated: boolean;
     subagent: boolean;
+    /** The run was cancelled while this call was active; `status` stays ACP's `failed`. */
+    interrupted?: boolean;
   }>;
   messageCollection?: RawSnapshotCollectionMetadata;
   reasoningCollection?: RawSnapshotCollectionMetadata;
