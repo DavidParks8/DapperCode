@@ -33,6 +33,9 @@ function setup() {
   return { port, server, notifications, events };
 }
 
+/** Lets an RPC handler reach the port (handlers await before calling it). */
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 async function rpcError(promise: Promise<unknown>): Promise<LocalRpcError> {
   try {
     await promise;
@@ -191,8 +194,9 @@ describe('LocalBridgeServer', () => {
     port.settle(threadId, 'complete');
 
     expect(events().map((event) => event.type)).toEqual([
-      EventType.RUN_STARTED,
+      // "Preparing" is reported while the model loads, before the message starts the run.
       EventType.CUSTOM,
+      EventType.RUN_STARTED,
       EventType.REASONING_MESSAGE_START,
       EventType.REASONING_MESSAGE_CONTENT,
       EventType.REASONING_MESSAGE_END,
@@ -222,18 +226,34 @@ describe('LocalBridgeServer', () => {
   });
 
   it('names each phase of a run as activity: loading progress, generating, and the tool', async () => {
-    const { server, port, events } = setup();
+    const { server, port, events, notifications } = setup();
     const threadId = await createChat(server);
-    await server.request('bridge/thread/queue/send', {
+    // As in the real loop, the model loads before the user message is recorded.
+    port.holdModelLoad = true;
+    const sent = server.request('bridge/thread/queue/send', {
       threadId,
       submissionId: 'submit-1',
       content: 'Hello',
       turnStart: {},
     });
+    await tick();
+    expect(port.thread(threadId)?.status).toBe('idle');
+    // No run exists until the message is recorded; the load is reported as activity for that turn.
+    expect(events().map((event) => event.type)).toEqual([EventType.CUSTOM]);
     port.setModel({ phase: 'loading', modelId: 'qwen3-1.7b-q4-k-m', progress: 12.6 });
     port.setModel({ progress: 12.9 });
     port.setModel({ progress: 57 });
     port.setModel({ phase: 'ready', progress: 100 });
+    port.finishModelLoad();
+    const response = (await sent) as { turnId: string };
+    const started = events().filter((event) => event.type === EventType.RUN_STARTED);
+    expect(started).toHaveLength(1);
+    expect(started[0]).toMatchObject({ runId: `${threadId}::turn::${response.turnId}` });
+    const loadingEnvelope = notifications.find((entry) => entry.method === 'bridge/agui.event');
+    expect(loadingEnvelope?.params).toMatchObject({
+      runId: `${threadId}::turn::${response.turnId}`,
+      sourceTurnId: response.turnId,
+    });
     port.streamAssistant(threadId, 'assistant-1', 'Reading');
     port.startTool(threadId, 'assistant-1', 'call-1', 'read_file', '{"path":"src/app.ts"}');
     port.finishTool(threadId, 'call-1', '{"content":"x"}', 'completed');
@@ -255,6 +275,42 @@ describe('LocalBridgeServer', () => {
       { title: 'Generating' },
     ]);
     expect(events().at(-1)?.type).toBe(EventType.RUN_FINISHED);
+  });
+
+  it('reports a failed or stopped model load without starting or ending a run', async () => {
+    const { server, port, events } = setup();
+    const threadId = await createChat(server);
+    port.holdModelLoad = true;
+    const failed = server.request('bridge/thread/queue/send', {
+      threadId,
+      submissionId: 'submit-1',
+      content: 'Hello',
+      turnStart: {},
+    });
+    await tick();
+    port.setModel({ phase: 'loading', modelId: 'qwen3-1.7b-q4-k-m', progress: 30 });
+    port.failModelLoad('Not enough memory to load Qwen3 1.7B.');
+    // The rejected send carries the failure, so the shell keeps the unsent draft.
+    await expect(failed).rejects.toThrow('Not enough memory');
+    expect(events().map((event) => event.type)).toEqual([EventType.CUSTOM, EventType.CUSTOM]);
+    expect(events()[1]).toMatchObject({ value: { title: 'Loading Qwen3 1.7B', detail: '30%' } });
+    expect(port.thread(threadId)?.messages).toEqual([]);
+
+    const before = events().length;
+    port.setModel({ phase: 'loading', progress: 10 });
+    const stopped = server.request('bridge/thread/queue/send', {
+      threadId,
+      submissionId: 'submit-2',
+      content: 'Again',
+      turnStart: {},
+    });
+    await tick();
+    await server.request('turn/interrupt', { threadId });
+    await stopped;
+    const later = events().slice(before);
+    expect(later.map((event) => event.type)).toEqual([EventType.CUSTOM, EventType.CUSTOM]);
+    expect(later[1]).toMatchObject({ value: { title: 'Cancelling model load' } });
+    expect(port.thread(threadId)?.messages).toEqual([]);
   });
 
   it('continues a failed turn in place through bridge/turn/retry', async () => {

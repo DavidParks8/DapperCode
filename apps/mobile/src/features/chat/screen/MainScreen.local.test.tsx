@@ -12,7 +12,7 @@ jest.mock('../message/ChatMessage', () => ({
 }));
 jest.mock('./AtomGlyph', () => ({ AtomGlyph: () => null }));
 
-import { AppState, FlatList, Text, TextInput } from 'react-native';
+import { AccessibilityInfo, AppState, FlatList, Text, TextInput } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -211,9 +211,14 @@ describe('MainScreen on the local profile', () => {
   });
 
   it('shows what the local run is doing: model load progress, generating, then the tool', async () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+    announce.mockClear();
     const { tree, root, port } = await renderLocalMain();
+    // As in the real loop, the model loads before the message is recorded and the thread runs.
+    port.holdModelLoad = true;
     await submit(root, 'Read the README');
     const [thread] = port.threads();
+    expect(thread?.status).toBe('idle');
 
     await act(async () => {
       port.setModel({ phase: 'loading', modelId: 'qwen3-1.7b-q4-k-m', progress: 42 });
@@ -222,15 +227,17 @@ describe('MainScreen on the local profile', () => {
     await settle();
     expect(hasText(root, 'Loading Qwen3 1.7B')).toBe(true);
     expect(hasText(root, ' · 42%')).toBe(true);
+    expect(hasText(root, 'Sending message')).toBe(false);
     expect(labeled(root, 'Stop agent')).toBeTruthy();
 
     await act(async () => {
       port.setModel({ phase: 'ready', progress: 100 });
+      port.finishModelLoad();
       port.streamAssistant(thread!.id, 'assistant-1', 'Let me look.');
       await flush();
     });
     await settle();
-    expect(hasText(root, 'Generating')).toBe(true);
+    expect(port.thread(thread!.id)?.status).toBe('running');
     expect(hasText(root, 'Loading Qwen3 1.7B')).toBe(false);
 
     await act(async () => {
@@ -249,6 +256,40 @@ describe('MainScreen on the local profile', () => {
     await settle();
     expect(hasText(root, 'Reading README.md')).toBe(false);
     expect(hasText(root, 'Generating')).toBe(false);
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    const spoken = announce.mock.calls.map(([message]) => message);
+    expect(spoken).toEqual(
+      expect.arrayContaining(['Loading Qwen3 1.7B', 'Generating', 'Reading README.md']),
+    );
+    expect(spoken.filter((message) => message === 'Turn completed')).toHaveLength(1);
+    expect(spoken).not.toContain('Sending message');
+    expect(spoken).not.toContain('Opening chat');
+    // Load progress is shown, not re-announced for every percent.
+    expect(spoken.filter((message) => message.startsWith('Loading'))).toHaveLength(1);
+    announce.mockRestore();
+    act(() => tree.unmount());
+  });
+
+  it('keeps the draft and ends the run when the model fails to load', async () => {
+    const { tree, root, port } = await renderLocalMain();
+    port.holdModelLoad = true;
+    await submit(root, 'Explain the workspace');
+    const [thread] = port.threads();
+    await act(async () => {
+      port.setModel({ phase: 'loading', modelId: 'qwen3-1.7b-q4-k-m', progress: 10 });
+      await flush();
+    });
+    await settle();
+    expect(hasText(root, 'Loading Qwen3 1.7B')).toBe(true);
+
+    await act(async () => {
+      port.failModelLoad('Not enough memory to load Qwen3 1.7B.');
+      await flush();
+    });
+    await settle();
+    expect(port.thread(thread!.id)?.messages).toEqual([]);
+    expect(hasText(root, 'Not enough memory to load Qwen3 1.7B.')).toBe(true);
+    expect(hasText(root, 'Loading Qwen3 1.7B')).toBe(false);
     expect(labeled(root, 'Stop agent')).toBeUndefined();
     act(() => tree.unmount());
   });

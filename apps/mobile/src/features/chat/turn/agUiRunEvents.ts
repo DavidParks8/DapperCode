@@ -166,7 +166,7 @@ export function processAgUiRunEvents(
     if (!activity) {
       return;
     }
-    const next: ActivityState = { tone: 'running', ...activity };
+    const next: ActivityState = { tone: 'running', ...activity, announce: true };
     if (envelope.threadId === currentId) {
       setActivity(next);
       bumpRunWatchdog();

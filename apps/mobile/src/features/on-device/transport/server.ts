@@ -127,6 +127,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
     this.projector = new LocalEventProjector(
       () => this.context(),
       (thread) => localRunActivity(thread, this.port.run(), this.port.modelSession()),
+      () => this.port.run(),
     );
     this.approvals = new LocalApprovalRelay(port);
     this.handlers = this.createHandlers();

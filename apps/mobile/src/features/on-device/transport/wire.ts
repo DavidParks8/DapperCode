@@ -223,7 +223,9 @@ export function localRunActivity(
   run: LocalRunSnapshot,
   model: Pick<LocalModelSessionSnapshot, 'phase' | 'modelId' | 'progress'>,
 ): RunActivity | null {
-  if (thread.status !== 'running' || run.threadId !== thread.id) {
+  // Before the model loads the thread is not running yet; the loop already names it.
+  const loading = run.phase === 'preparing' || run.phase === 'stopping';
+  if (run.threadId !== thread.id || (thread.status !== 'running' && !loading)) {
     return null;
   }
   switch (run.phase) {
