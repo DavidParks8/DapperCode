@@ -1,4 +1,5 @@
 import { requireOptionalNativeModule } from 'expo';
+import { withNativeErrorMapping } from './services.errors';
 import { ON_DEVICE_NATIVE_API_VERSION } from './services.types';
 import type { OnDeviceNativeServices } from './services.types';
 
@@ -11,5 +12,5 @@ export function getOnDeviceNativeServices(): OnDeviceNativeServices {
   ) {
     throw new Error('On-device services are unavailable or outdated. Rebuild the native iOS app.');
   }
-  return services;
+  return withNativeErrorMapping(services);
 }

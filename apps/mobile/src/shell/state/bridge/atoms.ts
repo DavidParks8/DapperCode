@@ -5,13 +5,115 @@ import { HostBridgeApiClient } from '@bridge/client/client';
 import { MOBILE_BRIDGE_CLIENT_NAME, MOBILE_BRIDGE_CLIENT_TYPE } from '@bridge/ws/types';
 import { HostBridgeWsClient } from '@bridge/ws/ws';
 import { isUserPresentAppState, supportsNativePushPresence } from '@shell/session/appVisibility';
+import { detectLocalProfileSupport } from '@shell/runtime/localProfileSupport';
 import { getActiveBridgeProfile } from '@shell/state/bridgeProfiles';
+import {
+  isLocalProfile,
+  LOCAL_PROFILE,
+  LOCAL_PROFILE_ID,
+  type ShellProfile,
+} from '@shell/state/localProfile';
+import { localTransportAtom } from '@shell/state/local/atoms';
 import { env } from '@shared/config';
-import { bridgeProfileStoreAtom } from '@shell/state/appState/atoms';
+import { bridgeProfilesAtom, bridgeProfileStoreAtom } from '@shell/state/appState/atoms';
 
+const localProfileSupportOverrideAtom = atom<boolean | null>(null);
+let detectedLocalProfileSupport: boolean | null = null;
+
+/**
+ * Whether the built-in "On this iPhone" profile can open in this build. Writing installs an
+ * override, which is the injection seam used by tests.
+ */
+export const localProfileAvailableAtom = atom(
+  (get) =>
+    get(localProfileSupportOverrideAtom) ??
+    (detectedLocalProfileSupport ??= detectLocalProfileSupport()),
+  (_get, set, available: boolean | null) => {
+    set(localProfileSupportOverrideAtom, available);
+  },
+);
+
+/** Every profile the shell can open, bridge profiles first. */
+export const shellProfilesAtom = atom<ShellProfile[]>((get) => [
+  ...get(bridgeProfilesAtom),
+  ...(get(localProfileAvailableAtom) ? [LOCAL_PROFILE] : []),
+]);
+
+/**
+ * The open profile: a saved bridge profile or the built-in local profile. A persisted local
+ * selection resolves to `null` where the local agent is unsupported (Android, web, old builds).
+ */
+export const activeProfileAtom = atom<ShellProfile | null>((get) => {
+  const store = get(bridgeProfileStoreAtom);
+  if (store.activeProfileId === LOCAL_PROFILE_ID) {
+    return get(localProfileAvailableAtom) ? LOCAL_PROFILE : null;
+  }
+  return getActiveBridgeProfile(store);
+});
+
+export const activeProfileIdAtom = atom((get) => get(activeProfileAtom)?.id ?? null);
+
+export const activeProfileIsLocalAtom = atom((get) => isLocalProfile(get(activeProfileAtom)));
+
+/** The active profile when it is a bridge connection; `null` while the local profile is open. */
 export const activeBridgeProfileAtom = atom((get) =>
   getActiveBridgeProfile(get(bridgeProfileStoreAtom)),
 );
+
+/** Client-side affordances that depend on the kind of profile rather than on the wire protocol. */
+export interface ActiveProfileFeatures {
+  /** Attachments are uploaded over the bridge's HTTP endpoint. */
+  attachments: boolean;
+  pushNotifications: boolean;
+  /** Bridge URL/token editing, reconnect, and pairing. */
+  connectionSettings: boolean;
+  /** Cloning from the workspace picker (`bridge/git/clone`). */
+  gitClone: boolean;
+  /** The desktop preview browser, which proxies through the bridge host. */
+  browserPreview: boolean;
+  /** Continuing a failed turn in place (`bridge/turn/retry`) instead of resending it. */
+  turnRetry: boolean;
+  /**
+   * Models are downloaded and loaded on this device and managed in Settings, so the model picker
+   * lists downloaded models and links there instead of offering an agent-side default.
+   */
+  modelLibrary: boolean;
+  /**
+   * Workspaces are a flat, app-managed list rather than host folders: the picker creates, renames,
+   * and deletes them, clones go into a new workspace over HTTPS, and clone progress can be read
+   * and cancelled. Uses the workspace host extensions in `features/workspace/api/protocol.ts`.
+   */
+  managedWorkspaces: boolean;
+  /** The Files browser and editor (`workspace/files/*`). */
+  workspaceFiles: boolean;
+  /** Fetch and fast-forward pull on the Git screen. */
+  gitSync: boolean;
+  /** Discarding unstaged changes per file or for the whole working tree. */
+  gitDiscard: boolean;
+  /** Creating (and switching to) a branch on the Git screen. */
+  gitBranchCreate: boolean;
+  /** Initializing Git in a workspace that has none. */
+  gitInit: boolean;
+}
+
+export const activeProfileFeaturesAtom = atom<ActiveProfileFeatures>((get) => {
+  const local = get(activeProfileIsLocalAtom);
+  return {
+    attachments: !local,
+    pushNotifications: !local,
+    connectionSettings: !local,
+    gitClone: true,
+    browserPreview: !local,
+    modelLibrary: local,
+    turnRetry: local,
+    managedWorkspaces: local,
+    workspaceFiles: local,
+    gitSync: local,
+    gitDiscard: local,
+    gitBranchCreate: local,
+    gitInit: local,
+  };
+});
 
 export const bridgeUrlAtom = atom((get) => get(activeBridgeProfileAtom)?.bridgeUrl ?? null);
 
@@ -32,6 +134,9 @@ export const wsClientAtom = atom(
     const override = get(wsClientOverrideAtom);
     if (override) {
       return override;
+    }
+    if (get(activeProfileIsLocalAtom)) {
+      return get(localTransportAtom);
     }
     const bridgeUrl = get(bridgeUrlAtom);
     if (!bridgeUrl) {
@@ -65,11 +170,14 @@ export const apiClientAtom = atom(
     if (!ws) {
       return null;
     }
+    const local = get(activeProfileIsLocalAtom);
     return new HostBridgeApiClient({
       ws,
       bridgeUrl: bridgeUrl ?? undefined,
-      authToken: get(bridgeTokenAtom) ?? env.hostBridgeToken,
-      profileId: get(activeBridgeProfileAtom)?.id ?? null,
+      authToken: local ? null : (get(bridgeTokenAtom) ?? env.hostBridgeToken),
+      profileId: get(activeProfileIdAtom),
+      // Local models download and load while the app runs, so the list is always read fresh.
+      ...(local ? { modelListCacheTtlMs: 0 } : {}),
     });
   },
   (get, set, client: HostBridgeApiClient | null) => {

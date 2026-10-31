@@ -166,6 +166,13 @@ function ToolTrailing({
           size={13}
           color={theme.colors.statusError}
         />
+      ) : status === 'interrupted' ? (
+        <Ionicons
+          {...decorativeAccessibilityProps}
+          name="stop-circle-outline"
+          size={13}
+          color={theme.colors.textMuted}
+        />
       ) : status === 'pending' ? (
         <Ionicons
           {...decorativeAccessibilityProps}

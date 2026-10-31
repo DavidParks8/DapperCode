@@ -21,6 +21,7 @@ const TOOL_KINDS: ChatToolKind[] = [
   'other',
 ];
 
+/** Statuses the wire carries. `interrupted` is never sent; it is the `interrupted: true` flag. */
 const TOOL_STATUSES: ChatToolStatus[] = ['pending', 'in_progress', 'completed', 'failed'];
 
 export function toToolKind(value: unknown): ChatToolKind {
@@ -45,7 +46,7 @@ export function parseToolMeta(value: unknown, fallbackToolCallId?: string): Chat
   return {
     toolCallId,
     kind,
-    status: toToolStatus(entry['status']),
+    status: entry['interrupted'] === true ? 'interrupted' : toToolStatus(entry['status']),
     title: nonEmptyString(entry['title']) ?? kind,
     ...(startedAtMs === null ? {} : { startedAtMs }),
     ...(completedAtMs === null ? {} : { completedAtMs }),

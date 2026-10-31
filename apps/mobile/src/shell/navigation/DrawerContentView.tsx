@@ -22,6 +22,9 @@ import type { DrawerScreen } from '@shell/navigation/drawerContentTypes';
 import { useDrawerContentAtoms } from '@shell/navigation/drawerContentViewContext';
 import { DrawerChatList } from '@shell/navigation/DrawerChatList';
 import { DrawerToolbar } from '@shell/navigation/DrawerToolbar';
+import { DrawerProfileRow } from '@shell/profiles/ProfileSwitcher';
+import { activeProfileFeaturesAtom, activeProfileIsLocalAtom } from '@shell/state/bridge/atoms';
+import { localAgentPresenceAtom, type LocalAgentPresence } from '@shell/state/local/atoms';
 import {
   formatBulkDeleteLabel,
   formatSelectionSummary,
@@ -133,6 +136,28 @@ const DrawerSelectionToolbar = memo(function DrawerSelectionToolbar({
   );
 });
 
+/** The local agent's own state (model loading, ready, needs a model) instead of a socket state. */
+function localFooterStatus(
+  presence: LocalAgentPresence | null,
+  sessions: string,
+  styles: DrawerContentStyles,
+) {
+  const meta = presence?.status.label ?? sessions;
+  const dots: Record<LocalAgentPresence['status']['kind'], object> = {
+    ready: styles.connectionDotConnected,
+    busy: styles.connectionDotBusy,
+    attention: styles.connectionDotDisconnected,
+    error: styles.connectionDotError,
+  };
+  return {
+    title: 'On this iPhone',
+    meta,
+    label: `On this iPhone, ${meta}. Open settings`,
+    hint: 'Opens Settings for models, workspaces, and profiles.',
+    dot: dots[presence?.status.kind ?? 'ready'],
+  };
+}
+
 interface DrawerFooterProps extends DrawerVisualProps {
   handleNavigate: (screen: DrawerScreen) => void;
   handleOpenConnection: () => void;
@@ -147,57 +172,68 @@ const DrawerFooter = memo(function DrawerFooter({
 }: DrawerFooterProps) {
   const atoms = useDrawerContentAtoms();
   const { totalChatCount, wsConnected } = useAtomValue(atoms.footerStateAtom);
+  const localProfile = useAtomValue(activeProfileIsLocalAtom);
+  const localPresence = useAtomValue(localAgentPresenceAtom);
+  const { browserPreview } = useAtomValue(activeProfileFeaturesAtom);
+  const sessions = `${formatCompactCount(totalChatCount)} sessions`;
+  const status = localProfile
+    ? {
+        ...localFooterStatus(localPresence, sessions, styles),
+        onPress: () => handleNavigate('Settings'),
+      }
+    : {
+        title: wsConnected ? 'Bridge connected' : 'Bridge offline',
+        meta: sessions,
+        label: wsConnected
+          ? 'Bridge connected. Edit connection'
+          : 'Bridge offline. Reconnect or edit connection',
+        hint: wsConnected
+          ? 'Opens the bridge connection settings.'
+          : 'Opens the bridge connection settings to reconnect.',
+        dot: wsConnected ? styles.connectionDotConnected : styles.connectionDotDisconnected,
+        onPress: handleOpenConnection,
+      };
 
   return (
     <View style={styles.footer}>
       <Pressable
-        accessibilityHint={
-          wsConnected
-            ? 'Opens the bridge connection settings.'
-            : 'Opens the bridge connection settings to reconnect.'
-        }
-        accessibilityLabel={
-          wsConnected
-            ? 'Bridge connected. Edit connection'
-            : 'Bridge offline. Reconnect or edit connection'
-        }
+        accessibilityHint={status.hint}
+        accessibilityLabel={status.label}
         accessibilityLiveRegion="polite"
         accessibilityRole="button"
-        onPress={handleOpenConnection}
+        onPress={status.onPress}
         style={({ pressed }) => [
           styles.connectionStatus,
           pressed && styles.connectionStatusPressed,
         ]}
       >
-        <View
-          style={[
-            styles.connectionDot,
-            wsConnected ? styles.connectionDotConnected : styles.connectionDotDisconnected,
-          ]}
-        />
+        <View style={[styles.connectionDot, status.dot]} />
         <View style={styles.connectionCopy}>
-          <Text style={styles.connectionTitle}>
-            {wsConnected ? 'Bridge connected' : 'Bridge offline'}
-          </Text>
-          <Text style={styles.connectionMeta}>
-            {`${formatCompactCount(totalChatCount)} sessions`}
+          <Text style={styles.connectionTitle}>{status.title}</Text>
+          <Text style={styles.connectionMeta} numberOfLines={1}>
+            {status.meta}
           </Text>
         </View>
       </Pressable>
-      <Pressable
-        accessibilityLabel="Open preview browser"
-        accessibilityRole="button"
-        onPress={() => handleNavigate('Browser')}
-        style={({ pressed }) => [styles.footerBrowserButton, pressed && styles.footerActionPressed]}
-      >
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name="globe-outline"
-          size={17}
-          color={theme.colors.userBubble}
-        />
-        <Text style={styles.footerBrowserText}>Browser</Text>
-      </Pressable>
+      {browserPreview ? (
+        <Pressable
+          accessibilityLabel="Open preview browser"
+          accessibilityRole="button"
+          onPress={() => handleNavigate('Browser')}
+          style={({ pressed }) => [
+            styles.footerBrowserButton,
+            pressed && styles.footerActionPressed,
+          ]}
+        >
+          <Ionicons
+            {...decorativeAccessibilityProps}
+            name="globe-outline"
+            size={17}
+            color={theme.colors.userBubble}
+          />
+          <Text style={styles.footerBrowserText}>Browser</Text>
+        </Pressable>
+      ) : null}
       {inlineToolbar ? (
         <CircularToolbarButton
           accessibilityLabel="Open settings"
@@ -368,6 +404,15 @@ const DrawerHeader = memo(function DrawerHeader({
             : `${String(searchResultCount)} ${searchResultCount === 1 ? 'session matches' : 'sessions match'} "${searchQuery.trim()}"`}
         </Text>
       ) : null}
+
+      <DrawerProfileRow
+        styles={{
+          row: styles.folderFilter,
+          rowPressed: styles.folderFilterPressed,
+          label: styles.folderFilterLabel,
+          value: styles.folderFilterValue,
+        }}
+      />
 
       <Pressable
         accessibilityLabel={`Filter sessions by folder, ${selectedFolderLabel}`}

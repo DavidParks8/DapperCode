@@ -2,11 +2,13 @@ import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 
+import { SwipeToDeleteRow } from '@shared/ui/SwipeToDeleteRow';
 import { createGitReviewTarget } from '../../diff/review';
 import type { GitScreenController } from '../../controller/screenController';
 import type { GitChangedFileWithStats } from '../types';
-import { formatDiffLineNumber, formatStatusCode } from '../utils';
+import { formatDiffLineNumber } from '../utils';
 import type { GitSectionCommonProps } from '../sectionTypes';
+import { GitChangeBadge } from './HostSections';
 
 function isFileStageActionDisabled(controller: GitScreenController, stagePath: string): boolean {
   return (
@@ -15,8 +17,10 @@ function isFileStageActionDisabled(controller: GitScreenController, stagePath: s
     controller.pushing ||
     controller.stagingAll ||
     controller.unstagingAll ||
+    controller.discardingAll ||
     controller.stagingPath === stagePath ||
-    controller.unstagingPath === stagePath
+    controller.unstagingPath === stagePath ||
+    controller.discardingPath === stagePath
   );
 }
 
@@ -24,15 +28,17 @@ function GitDiffFileRow({
   entry,
   controller,
   styles,
+  theme,
 }: {
   entry: GitChangedFileWithStats;
   controller: GitScreenController;
   styles: GitSectionCommonProps['styles'];
+  theme: GitSectionCommonProps['theme'];
 }) {
   const actionDisabled = isFileStageActionDisabled(controller, entry.stagePath);
-  return (
+  const row = (
     <View style={styles.fileRow}>
-      <Text style={styles.fileCode}>{formatStatusCode(entry.code)}</Text>
+      <GitChangeBadge entry={entry} styles={styles} theme={theme} />
       {entry.diffFileId ? (
         <Pressable
           style={styles.filePathPressable}
@@ -100,6 +106,27 @@ function GitDiffFileRow({
       </View>
     </View>
   );
+  if (!controller.features.gitDiscard || !entry.unstaged) {
+    return row;
+  }
+  // Discarding is a deliberate swipe (or the accessibility action), never a single tap.
+  return (
+    <SwipeToDeleteRow
+      onDelete={async () => controller.discardFile(entry.stagePath)}
+      deleteLabel="Discard"
+      deleteAccessibilityLabel={`Discard changes to ${entry.stagePath}`}
+      actionIconName="arrow-undo-outline"
+      actionAccessibilityHint={
+        entry.untracked
+          ? 'Deletes this new file.'
+          : 'Restores the file to its staged or last committed version.'
+      }
+      contentBackgroundColor={theme.colors.bgItem}
+      enabled={!actionDisabled}
+    >
+      {row}
+    </SwipeToDeleteRow>
+  );
 }
 
 export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCommonProps) {
@@ -158,6 +185,7 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
               entry={entry}
               controller={controller}
               styles={styles}
+              theme={theme}
             />
           ))}
         </ScrollView>
@@ -195,7 +223,7 @@ export function GitScreenDiffSection({ controller, styles, theme }: GitSectionCo
       <View style={styles.diffCard}>
         {derived.parsedDiff.files.length === 0 ? (
           <Text style={styles.emptyFilesText}>
-            No patch output for current changes yet (likely untracked files only).
+            No line changes to show. Binary files, empty files, and pure renames have no text diff.
           </Text>
         ) : (
           <>

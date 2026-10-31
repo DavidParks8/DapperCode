@@ -26,7 +26,8 @@ import {
 } from '@shell/state/chat/atoms';
 import { isPendingChatId } from '@shell/session/interruptedChatCreation';
 import {
-  activeBridgeProfileAtom,
+  activeProfileIdAtom,
+  activeProfileIsLocalAtom,
   apiClientAtom,
   bridgeConnectedAtom,
   wsClientAtom,
@@ -59,7 +60,9 @@ export function useAppBridgeLifecycle(): void {
   const pathname = usePathname();
   const isOnboarding = pathname === '/onboarding' || pathname.endsWith('/connection');
   const isWorkspacePicker = pathname.endsWith('/workspace-picker');
-  const activeBridgeProfileId = useAtomValue(activeBridgeProfileAtom)?.id ?? null;
+  const activeProfileId = useAtomValue(activeProfileIdAtom);
+  // The local profile has no socket, push registration, or presence; its runtime host owns it.
+  const localProfile = useAtomValue(activeProfileIsLocalAtom);
   const settingsLoaded = useAtomValue(appStateLoadedAtom);
   const selectedChatId = useAtomValue(selectedChatIdAtom);
   const activeChat = useAtomValue(activeChatAtom);
@@ -77,6 +80,9 @@ export function useAppBridgeLifecycle(): void {
       store.set(bridgeConnectedAtom, false);
       return;
     }
+    if (localProfile) {
+      return;
+    }
 
     const unbindPresence = supportsNativePushPresence(Platform.OS)
       ? bindPushForegroundPresence(ws)
@@ -86,10 +92,10 @@ export function useAppBridgeLifecycle(): void {
       unbindPresence();
       unbindWebSocket();
     };
-  }, [store, ws]);
+  }, [localProfile, store, ws]);
 
   useEffect(() => {
-    if (!api || !ws || !activeBridgeProfileId || !settingsLoaded || isOnboarding) {
+    if (!api || !ws || !activeProfileId || !settingsLoaded || isOnboarding) {
       return;
     }
     let cancelled = false;
@@ -154,10 +160,10 @@ export function useAppBridgeLifecycle(): void {
         clearTimeout(retryTimer);
       }
     };
-  }, [activeBridgeProfileId, api, isOnboarding, settingsLoaded, store, ws]);
+  }, [activeProfileId, api, isOnboarding, settingsLoaded, store, ws]);
 
   useEffect(() => {
-    if (!api || !ws || !activeBridgeProfileId) {
+    if (!api || !ws || !activeProfileId) {
       return;
     }
     return bindBridgeCapabilitiesRevalidation(ws, () => {
@@ -165,10 +171,10 @@ export function useAppBridgeLifecycle(): void {
         ttlMs: BRIDGE_CAPABILITIES_TTL_MS,
       });
     });
-  }, [activeBridgeProfileId, api, store, ws]);
+  }, [activeProfileId, api, store, ws]);
 
   useEffect(() => {
-    if (!api || !ws || !activeBridgeProfileId || !isWorkspacePicker) {
+    if (!api || !ws || !activeProfileId || !isWorkspacePicker) {
       return;
     }
     return bindWorkspaceResourcesRevalidation(ws, () => {
@@ -176,7 +182,7 @@ export function useAppBridgeLifecycle(): void {
         ttlMs: WORKSPACE_RESOURCES_TTL_MS,
       });
     });
-  }, [activeBridgeProfileId, api, isWorkspacePicker, store, ws]);
+  }, [activeProfileId, api, isWorkspacePicker, store, ws]);
 
   useEffect(() => {
     if (!ws) {
@@ -191,7 +197,7 @@ export function useAppBridgeLifecycle(): void {
   }, [store, ws]);
 
   useEffect(() => {
-    if (!api || !ws || !activeBridgeProfileId || isOnboarding) {
+    if (!api || !ws || !activeProfileId || isOnboarding || localProfile) {
       return;
     }
     let cancelled = false;
@@ -203,7 +209,7 @@ export function useAppBridgeLifecycle(): void {
         return;
       }
       inFlight = true;
-      void syncPushRegistration(api, store, activeBridgeProfileId)
+      void syncPushRegistration(api, store, activeProfileId)
         .then(() => {
           retryDelay = 1000;
         })
@@ -232,7 +238,7 @@ export function useAppBridgeLifecycle(): void {
         clearTimeout(retryTimer);
       }
     };
-  }, [activeBridgeProfileId, api, isOnboarding, store, ws]);
+  }, [activeProfileId, api, isOnboarding, localProfile, store, ws]);
 
   useEffect(() => {
     if (!api || !ws || isOnboarding) {
@@ -278,7 +284,7 @@ export function useAppBridgeLifecycle(): void {
   }, [api, isOnboarding, ws]);
 
   useEffect(() => {
-    if (!api || !chatSnapshotCache || chatSnapshotCache.profileId !== activeBridgeProfileId) {
+    if (!api || !chatSnapshotCache || chatSnapshotCache.profileId !== activeProfileId) {
       return;
     }
     for (const entry of chatSnapshotCache.entries) {
@@ -286,7 +292,7 @@ export function useAppBridgeLifecycle(): void {
         api.rememberChat(entry.chat);
       }
     }
-  }, [activeBridgeProfileId, api, chatSnapshotCache]);
+  }, [activeProfileId, api, chatSnapshotCache]);
 
   // Declared before the debounce-scheduling effect below so its cleanup runs
   // first on unmount (React runs effect cleanups in declaration order): the
@@ -304,11 +310,11 @@ export function useAppBridgeLifecycle(): void {
   const chatSnapshotCacheHydrated = chatSnapshotCache !== undefined;
 
   useEffect(() => {
-    if (!activeBridgeProfileId || !settingsLoaded || !chatSnapshotCacheHydrated) {
+    if (!activeProfileId || !settingsLoaded || !chatSnapshotCacheHydrated) {
       return;
     }
 
-    const generation = getChatSnapshotCacheGeneration(activeBridgeProfileId);
+    const generation = getChatSnapshotCacheGeneration(activeProfileId);
     persistScheduler.schedule(() => {
       // The pending snapshot is the durable operation identity. Do not replace it with an
       // optimistic real-chat handoff until create+send is acknowledged or explicitly abandoned.
@@ -317,9 +323,9 @@ export function useAppBridgeLifecycle(): void {
       }
       const previous = store.get(chatSnapshotCacheAtom);
       const base =
-        previous?.profileId === activeBridgeProfileId
+        previous?.profileId === activeProfileId
           ? previous
-          : createEmptyChatSnapshotCache(activeBridgeProfileId);
+          : createEmptyChatSnapshotCache(activeProfileId);
       const next = updateChatSnapshotCache(base, selectedChatId, activeChat);
       void saveChatSnapshotCache(next, generation).catch(() => {});
       store.set(chatSnapshotCacheAtom, next);
@@ -334,7 +340,7 @@ export function useAppBridgeLifecycle(): void {
       persistScheduler.cancel();
     };
   }, [
-    activeBridgeProfileId,
+    activeProfileId,
     activeChat,
     chatSnapshotCacheHydrated,
     persistScheduler,

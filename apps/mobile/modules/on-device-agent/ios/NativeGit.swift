@@ -44,7 +44,7 @@ enum NativeGit {
           )
         }
         guard matched != 0 else {
-          throw GitOperationError("The requested Git path does not exist and is not tracked.")
+          throw GitOperationError(.pathNotFound, "The requested Git path does not exist and is not tracked.")
         }
       }
       try requireSuccess(git_index_write(index), "Write index")
@@ -57,7 +57,7 @@ enum NativeGit {
         $0 == "." || $0 == ".." || $0.lowercased() == ".git"
       })
     else {
-      throw GitOperationError("Git requires a workspace-relative path outside Git metadata.")
+      throw GitOperationError(.pathOutsideWorkspace, "Git requires a workspace-relative path outside Git metadata.")
     }
   }
 
@@ -84,7 +84,7 @@ enum NativeGit {
       !authorName.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
       !authorEmail.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
     else {
-      throw GitOperationError("A commit message and author identity are required.")
+      throw GitOperationError(.invalidArgument, "A commit message and author identity are required.")
     }
     return try withRepository(repository) { repository in
       var index: OpaquePointer?
@@ -108,10 +108,10 @@ enum NativeGit {
       defer { git_commit_free(parent) }
       if let parent, let parentTree = git_commit_tree_id(parent) {
         guard git_oid_equal(parentTree, &treeID) == 0 else {
-          throw GitOperationError("There are no staged changes to commit.")
+          throw GitOperationError(.gitNothingToCommit, "There are no staged changes to commit.")
         }
       } else if git_index_entrycount(index) == 0 {
-        throw GitOperationError("There are no staged changes to commit.")
+        throw GitOperationError(.gitNothingToCommit, "There are no staged changes to commit.")
       }
       var parents: [OpaquePointer?] = parent.map { [$0] } ?? []
       var commitID = git_oid()
@@ -129,13 +129,9 @@ enum NativeGit {
 
   static func push(repository: URL, credential: StoredGitCredential?) throws {
     try withRepository(repository) { repository in
-      var remote: OpaquePointer?
-      try requireSuccess(git_remote_lookup(&remote, repository, "origin"), "Read origin")
+      let remote = try lookupOrigin(repository)
       defer { git_remote_free(remote) }
-      guard let rawURL = git_remote_url(remote), let url = String(validatingCString: rawURL) else {
-        throw GitOperationError("Origin does not have a valid UTF-8 URL.")
-      }
-      _ = try remoteURL(url, credential: credential)
+      _ = try remoteURL(try originURL(remote), credential: credential)
       var head: OpaquePointer?
       try requireSuccess(git_repository_head(&head, repository), "Read HEAD")
       defer { git_reference_free(head) }
@@ -143,7 +139,7 @@ enum NativeGit {
         let rawName = git_reference_name(head), let name = String(validatingCString: rawName),
         name.hasPrefix("refs/heads/")
       else {
-        throw GitOperationError("Select a local branch before pushing.")
+        throw GitOperationError(.gitDetachedHead, "Select a local branch before pushing.")
       }
       try withCredentials(credential) { callbacks in
         var options = git_push_options()
@@ -156,24 +152,57 @@ enum NativeGit {
           try requireRemoteSuccess(git_remote_push(remote, &specs, &options), "Push branch")
         }
       }
+      trackPushedBranch(repository, head: head, branch: String(name.dropFirst(11)))
     }
   }
 
-  private static func remoteURL(_ raw: String, credential: StoredGitCredential?) throws -> URL {
+  /// A first push of a new local branch records `origin/<branch>` as its upstream, so later status
+  /// reads can report ahead/behind counts and pulls know what to fast-forward to.
+  private static func trackPushedBranch(_ repository: OpaquePointer, head: OpaquePointer?, branch: String) {
+    var upstream: OpaquePointer?
+    let existing = git_branch_upstream(&upstream, head)
+    git_reference_free(upstream)
+    guard existing == GIT_ENOTFOUND.rawValue else { return }
+    var tracking: OpaquePointer?
+    guard git_branch_lookup(&tracking, repository, "origin/\(branch)", GIT_BRANCH_REMOTE) == 0 else { return }
+    git_reference_free(tracking)
+    // The push already succeeded; failing to record tracking must not report it as failed.
+    _ = git_branch_set_upstream(head, "origin/\(branch)")
+  }
+
+  static func lookupOrigin(_ repository: OpaquePointer) throws -> OpaquePointer {
+    var remote: OpaquePointer?
+    let found = git_remote_lookup(&remote, repository, "origin")
+    if found == GIT_ENOTFOUND.rawValue {
+      throw GitOperationError(.gitNoOrigin, "This repository has no origin remote.")
+    }
+    try requireSuccess(found, "Read origin")
+    guard let remote else { throw GitOperationError(.gitNoOrigin, "This repository has no origin remote.") }
+    return remote
+  }
+
+  static func originURL(_ remote: OpaquePointer) throws -> String {
+    guard let raw = git_remote_url(remote), let url = String(validatingCString: raw) else {
+      throw GitOperationError(.gitInsecureRemote, "Origin does not have a valid UTF-8 URL.")
+    }
+    return url
+  }
+
+  static func remoteURL(_ raw: String, credential: StoredGitCredential?) throws -> URL {
     guard let url = URL(string: raw), url.scheme == "https", let host = url.host,
       !host.isEmpty, url.user == nil, url.password == nil, url.query == nil, url.fragment == nil
     else {
-      throw GitOperationError("Only HTTPS Git URLs without embedded credentials are supported.")
+      throw GitOperationError(.gitInsecureRemote, "Only HTTPS Git URLs without embedded credentials are supported.")
     }
     if let credential {
       guard credential.host == host, credential.port == (url.port ?? 443) else {
-        throw GitOperationError("Git credentials cannot be sent to this origin.")
+        throw GitOperationError(.gitCredentialOrigin, "Git credentials cannot be sent to this origin.")
       }
     }
     return url
   }
 
-  private static func withLibrary<T>(_ action: () throws -> T) throws -> T {
+  static func withLibrary<T>(_ action: () throws -> T) throws -> T {
     try requireSuccess(git_libgit2_init(), "Initialize Git")
     defer { _ = git_libgit2_shutdown() }
     try requireSuccess(DapperGitConfigureNetworkTimeouts(), "Configure Git network timeouts")
@@ -185,14 +214,19 @@ enum NativeGit {
   {
     try withLibrary {
       var repository: OpaquePointer?
-      try requireSuccess(git_repository_open(&repository, url.path), "Open repository")
-      guard let repository else { throw GitOperationError("Git did not return a repository.") }
+      let opened = git_repository_open(&repository, url.path)
+      if opened == GIT_ENOTFOUND.rawValue {
+        throw GitOperationError(
+          .gitNotRepository, "This workspace is not a Git repository. Initialize Git to track changes.")
+      }
+      try requireSuccess(opened, "Open repository")
+      guard let repository else { throw GitOperationError(.gitFailure, "Git did not return a repository.") }
       defer { git_repository_free(repository) }
       return try action(repository)
     }
   }
 
-  private static func withCredentials<T>(
+  static func withCredentials<T>(
     _ credential: StoredGitCredential?,
     _ action: (git_remote_callbacks) throws -> T
   ) throws -> T {
@@ -249,16 +283,16 @@ enum NativeGit {
 
   static func objectID(_ id: UnsafePointer<git_oid>) throws -> String {
     guard let string = git_oid_tostr_s(id), let result = String(validatingCString: string) else {
-      throw GitOperationError("Git returned an invalid object ID.")
+      throw GitOperationError(.gitFailure, "Git returned an invalid object ID.")
     }
     return result
   }
 
-  private static func withStringArray(
+  static func withStringArray(
     _ value: String, _ action: (inout git_strarray) throws -> Void
   ) throws {
     guard let string = strdup(value) else {
-      throw GitOperationError("Could not allocate a Git path.")
+      throw GitOperationError(.gitFailure, "Could not allocate a Git path.")
     }
     defer { free(string) }
     var strings: [UnsafeMutablePointer<CChar>?] = [string]
@@ -268,27 +302,36 @@ enum NativeGit {
     }
   }
 
-  private static func requireRemoteSuccess(_ code: Int32, _ operation: String) throws {
+  static func requireRemoteSuccess(_ code: Int32, _ operation: String) throws {
     if GitNetworkOperation.shared.progress() != 0 {
-      throw GitOperationError("Git transfer was interrupted. A remote update may already have completed; inspect the repository before retrying.")
+      throw GitOperationError(
+        .gitTransferInterrupted,
+        "Git transfer was interrupted. A remote update may already have completed; inspect the repository before retrying."
+      )
     }
     guard code < 0 else { return }
     let detail: String
+    let category: NativeErrorCode
     switch code {
     case GIT_EAUTH.rawValue:
+      category = .gitAuthFailed
       detail = "Authentication failed. Sign in again and check repository access."
     case GIT_ECERTIFICATE.rawValue:
+      category = .gitCertificate
       detail = "TLS certificate verification failed."
     case GIT_ENONFASTFORWARD.rawValue:
+      category = .gitNonFastForward
       detail =
-        "The remote contains changes that are not in this branch. No force-push was attempted."
+        "The remote contains changes that are not in this branch. Pull, then try again. No force-push was attempted."
     case GIT_EUSER.rawValue:
+      category = .gitRemoteRejected
       detail = "The remote rejected the update or credential use was not permitted."
     default:
+      category = .gitNetwork
       detail =
         "Check the connection, canonical HTTPS URL, permissions, and remote branch rules. Redirects are not followed."
     }
-    throw GitOperationError("\(operation) failed (\(code)): \(detail)")
+    throw GitOperationError(category, "\(operation) failed (\(code)): \(detail)")
   }
 
   static func requireSuccess(_ code: Int32, _ operation: String) throws {
@@ -296,7 +339,17 @@ enum NativeGit {
       let message = git_error_last().flatMap { $0.pointee.message }.flatMap {
         String(validatingCString: $0)
       }
+      let category: NativeErrorCode
+      switch code {
+      case GIT_ECONFLICT.rawValue, GIT_EMERGECONFLICT.rawValue:
+        category = .gitConflict
+      case GIT_ELOCKED.rawValue:
+        category = .gitLocked
+      default:
+        category = .gitFailure
+      }
       throw GitOperationError(
+        category,
         "\(operation) failed (\(code)): \(message ?? "No Git error detail was provided.")")
     }
   }
@@ -306,9 +359,4 @@ private final class GitCredentialPayload {
   let credential: StoredGitCredential?
   var suppliedPassword = false
   init(_ credential: StoredGitCredential?) { self.credential = credential }
-}
-
-struct GitOperationError: LocalizedError {
-  let errorDescription: String?
-  init(_ message: String) { errorDescription = message }
 }

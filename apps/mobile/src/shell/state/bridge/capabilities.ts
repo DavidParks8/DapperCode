@@ -3,7 +3,8 @@ import { useCallback, useEffect, useRef } from 'react';
 
 import type { HostBridgeApiClient } from '@bridge/client/client';
 import type { BridgeCapabilities } from '@bridge/types/types';
-import { activeBridgeProfileAtom, apiClientAtom } from '@shell/state/bridge/atoms';
+import { activeProfileAtom, apiClientAtom } from '@shell/state/bridge/atoms';
+import { profileIdentityKey } from '@shell/state/localProfile';
 
 export const BRIDGE_CAPABILITIES_TTL_MS = 60_000;
 
@@ -39,14 +40,10 @@ const requestsByClient = new WeakMap<
 >();
 
 const activeBridgeCapabilitiesIdentityAtom = atom((get) => {
-  const profile = get(activeBridgeProfileAtom);
+  const profile = get(activeProfileAtom);
   const client = get(apiClientAtom);
   return profile && client
-    ? {
-        profileId: profile.id,
-        identityKey: `${profile.id}\u0000${profile.updatedAt}\u0000${profile.bridgeUrl}`,
-        client,
-      }
+    ? { profileId: profile.id, identityKey: profileIdentityKey(profile), client }
     : null;
 });
 

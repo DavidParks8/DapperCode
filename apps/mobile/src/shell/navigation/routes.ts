@@ -32,6 +32,13 @@ export const routes = {
       params: { profileId, chatId },
     };
   },
+  /** Files browser for a workspace path presented by the profile's host. */
+  files(profileId: string, chatId: string, cwd: string): Href {
+    return {
+      pathname: '/profiles/[profileId]/chats/[chatId]/files',
+      params: { profileId, chatId, cwd },
+    };
+  },
   gitCheckout(profileId: string, chatId: string): Href {
     return {
       pathname: '/profiles/[profileId]/chats/[chatId]/git-checkout',
@@ -52,6 +59,20 @@ export const routes = {
   },
   terms(profileId: string): Href {
     return { pathname: '/profiles/[profileId]/settings/terms', params: { profileId } };
+  },
+  /** On this iPhone: model families, downloads, storage, and the loaded model. */
+  settingsModels(profileId: string): Href {
+    return { pathname: '/profiles/[profileId]/settings/models', params: { profileId } };
+  },
+  settingsModelFamily(profileId: string, familyId: string): Href {
+    return {
+      pathname: '/profiles/[profileId]/settings/models/[familyId]',
+      params: { profileId, familyId },
+    };
+  },
+  /** On this iPhone: GitHub sign-in and the Git commit author. */
+  settingsGitHub(profileId: string): Href {
+    return { pathname: '/profiles/[profileId]/settings/github', params: { profileId } };
   },
   connection(profileId: string, chatId: string, mode: ConnectionMode): Href {
     return {

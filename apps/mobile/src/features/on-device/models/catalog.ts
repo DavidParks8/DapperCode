@@ -9,8 +9,7 @@ export const LOCAL_MODEL_FAMILIES: readonly LocalModelFamily[] = [
     name: 'Bonsai 2',
     publisher: 'Prism ML',
     icon: 'leaf-outline',
-    description:
-      'Compact ternary models with small downloads. Choose a size and packing on the next page.',
+    description: 'Compact ternary models with small downloads and memory use.',
     quantizationNote:
       'These are different packings of the same ternary weights, not different precision levels. Q2_0 works in the bundled runtime; PQ2_0 and PTQ1_0 require PrismML-specific kernels.',
     badge: 'Compact',
@@ -50,6 +49,16 @@ export function requireLocalModelRuntime(model: LocalModelDefinition): void {
   if (model.runtimeIssue) {
     throw new Error(model.runtimeIssue);
   }
+}
+
+export function findLocalModelDefinition(id: string): LocalModelDefinition | null {
+  return LOCAL_MODEL_CATALOG.find((entry) => entry.id === id) ?? null;
+}
+
+/** A user-facing model name such as "Qwen3 1.7B Q4_K_M"; never the raw catalog identifier. */
+export function localModelDisplayName(id: string): string {
+  const model = findLocalModelDefinition(id);
+  return model ? `${model.name} ${model.quantization}` : 'Unavailable model';
 }
 
 export function localModelDefinition(id: string): LocalModelDefinition {

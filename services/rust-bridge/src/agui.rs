@@ -183,6 +183,7 @@ impl AgUiProjector {
                         timestamp,
                         &mut projection.events,
                         "failed",
+                        false,
                         true,
                     );
                 }
@@ -963,6 +964,7 @@ impl AgUiProjector {
                     timestamp,
                     &mut projection.events,
                     if run_failed { "failed" } else { "completed" },
+                    run_cancelled,
                     false,
                 );
                 let source_turn_id = canonical_source_turn_id(canonical).map(str::to_string);
@@ -1222,7 +1224,7 @@ impl AgUiProjector {
             return;
         };
         self.observed_runs.retain(|entry| entry != thread_id);
-        close_run(thread_id, run, timestamp, events, "completed", false);
+        close_run(thread_id, run, timestamp, events, "completed", false, false);
         events.push(envelope(
             thread_id,
             &observed_run_id.clone(),
@@ -1613,17 +1615,20 @@ pub(super) fn messages_snapshot_envelope(
                 messages.push(activity_message(
                     format!("tool-meta:{}", tool.id),
                     "dappercode.tool",
-                    json!({
-                        "toolCallId": tool.id,
-                        "kind": tool_kind_wire(tool.kind),
-                        "status": tool_status_wire(tool.status),
-                        "title": bounded(&tool.title, 256),
-                        "startedAtMs": tool.started_at_ms,
-                        "completedAtMs": tool.completed_at_ms,
-                        "content": tool.structured_content,
-                        "locations": tool.locations,
-                        "truncated": tool.truncated,
-                    }),
+                    with_interrupted(
+                        json!({
+                            "toolCallId": tool.id,
+                            "kind": tool_kind_wire(tool.kind),
+                            "status": tool_status_wire(tool.status),
+                            "title": bounded(&tool.title, 256),
+                            "startedAtMs": tool.started_at_ms,
+                            "completedAtMs": tool.completed_at_ms,
+                            "content": tool.structured_content,
+                            "locations": tool.locations,
+                            "truncated": tool.truncated,
+                        }),
+                        tool.interrupted,
+                    ),
                 ));
                 messages.push(Message {
                     id: format!("tool-call:{}", tool.id),
@@ -1663,11 +1668,11 @@ pub(super) fn messages_snapshot_envelope(
                     subagent_run_id: None,
                     name: None,
                     tool_calls: None,
-                    error: matches!(
+                    error: (matches!(
                         tool.status,
                         agent_client_protocol::schema::v1::ToolCallStatus::Failed
-                    )
-                    .then(|| "Tool failed".to_string()),
+                    ) && !tool.interrupted)
+                        .then(|| "Tool failed".to_string()),
                     tool_call_id: Some(tool.id.clone()),
                     activity_type: None,
                 });
@@ -2427,6 +2432,7 @@ fn close_run(
     timestamp: i64,
     events: &mut Vec<AgUiEventEnvelope>,
     dangling_tool_status: &str,
+    dangling_interrupted: bool,
     superseded: bool,
 ) {
     if let Some(message_id) = run.open_user_id.take() {
@@ -2480,14 +2486,17 @@ fn close_run(
                     &run,
                     "dappercode.dev/tool-meta",
                     tool_call_id,
-                    json!({
-                        "toolCallId": tool_call_id,
-                        "kind": kind,
-                        "status": dangling_tool_status,
-                        "title": title,
-                        "startedAtMs": started_at_ms,
-                        "completedAtMs": tool.completed_at_ms.unwrap_or(timestamp.max(started_at_ms)),
-                    }),
+                    with_interrupted(
+                        json!({
+                            "toolCallId": tool_call_id,
+                            "kind": kind,
+                            "status": dangling_tool_status,
+                            "title": title,
+                            "startedAtMs": started_at_ms,
+                            "completedAtMs": tool.completed_at_ms.unwrap_or(timestamp.max(started_at_ms)),
+                        }),
+                        dangling_interrupted,
+                    ),
                     timestamp,
                 );
             }
@@ -2787,8 +2796,24 @@ fn tool_kind_wire(kind: agent_client_protocol::schema::v1::ToolKind) -> String {
     acp_wire_value(&kind)
 }
 
-fn tool_status_wire(status: agent_client_protocol::schema::v1::ToolCallStatus) -> String {
+pub(crate) fn tool_status_wire(
+    status: agent_client_protocol::schema::v1::ToolCallStatus,
+) -> String {
     acp_wire_value(&status)
+}
+
+/// Marks tool metadata for a call that was still active when the user cancelled its run. ACP has
+/// no cancelled tool status, and clients map unknown statuses to `pending`, so the status stays
+/// `failed` and the separate `interrupted` flag lets newer clients render it neutrally.
+pub(crate) const TOOL_META_INTERRUPTED_FIELD: &str = "interrupted";
+
+fn with_interrupted(mut meta: Value, interrupted: bool) -> Value {
+    if interrupted {
+        if let Some(fields) = meta.as_object_mut() {
+            fields.insert(TOOL_META_INTERRUPTED_FIELD.to_string(), Value::Bool(true));
+        }
+    }
+    meta
 }
 
 #[cfg(test)]
@@ -2860,6 +2885,7 @@ mod tests {
             locations: vec![json!({"path": "src/math.ts", "line": 7})],
             truncated: false,
             subagent: false,
+            interrupted: false,
         };
 
         let text = tool_snapshot_text(&tool);
@@ -2997,6 +3023,7 @@ mod tests {
             locations: vec![],
             truncated: false,
             subagent: false,
+            interrupted: false,
         };
 
         let text = tool_snapshot_text(&tool);
@@ -5449,6 +5476,115 @@ mod tests {
                 .expect("tool completion timestamp")
                 >= started_at_ms
         );
+    }
+
+    #[test]
+    fn cancelled_run_flags_a_dangling_tool_interrupted_and_keeps_it_failed() {
+        let running_tool = CanonicalEvent::Tool {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: TEST_THREAD.to_string(),
+            run_id: Some("run-1".to_string()),
+            source_turn_id: Some("turn-1".to_string()),
+            generation: Some(1),
+            tool_call_id: "dangling-tool".to_string(),
+            kind: ToolKind::Execute,
+            status: ToolCallStatus::InProgress,
+            title: "npm test".to_string(),
+            content: FieldUpdate::Unchanged,
+            structured_content: FieldUpdate::Unchanged,
+            locations: FieldUpdate::Unchanged,
+        };
+        let finished = |stop_reason| CanonicalEvent::RunFinished {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: TEST_THREAD.to_string(),
+            run_id: "run-1".to_string(),
+            source_turn_id: "turn-1".to_string(),
+            generation: 1,
+            stop_reason,
+        };
+        let dangling_status = |terminal: &CanonicalEvent| {
+            let mut projector = AgUiProjector::default();
+            projector.project_canonical(&canonical_run_started());
+            projector.project_canonical(&running_tool);
+            let projection = projector.project_canonical(terminal);
+            let meta = projection
+                .events
+                .iter()
+                .filter_map(|event| serde_json::to_value(event).ok())
+                .find(|value| value["event"]["name"] == "dappercode.dev/tool-meta")
+                .expect("dangling tool meta");
+            json!({
+                "status": meta["event"]["value"]["status"],
+                "interrupted": meta["event"]["value"]["interrupted"],
+            })
+        };
+        // Older clients map unknown statuses to `pending`, so the status stays `failed`.
+        assert_eq!(
+            dangling_status(&finished(StopReason::Cancelled)),
+            json!({ "status": "failed", "interrupted": true })
+        );
+        assert_eq!(
+            dangling_status(&finished(StopReason::EndTurn)),
+            json!({ "status": "completed", "interrupted": null })
+        );
+        assert_eq!(
+            dangling_status(&CanonicalEvent::RunFailed {
+                agent_id: "alpha-agent".to_string(),
+                thread_id: TEST_THREAD.to_string(),
+                run_id: "run-1".to_string(),
+                source_turn_id: "turn-1".to_string(),
+                generation: 1,
+                message: "boom".to_string(),
+            }),
+            json!({ "status": "failed", "interrupted": null })
+        );
+
+        let mut snapshot = SessionSnapshot::new("alpha-agent".to_string(), TEST_THREAD.to_string());
+        snapshot.apply(&canonical_run_started());
+        snapshot.apply(&running_tool);
+        snapshot.apply(&finished(StopReason::Cancelled));
+        let tool = &snapshot.tools["dangling-tool"];
+        assert_eq!(tool.status, ToolCallStatus::Failed);
+        assert!(tool.interrupted);
+        let raw_tool = serde_json::to_value(tool).unwrap();
+        assert_eq!(raw_tool["status"], "failed");
+        assert_eq!(raw_tool["interrupted"], true);
+        let messages = serde_json::to_value(
+            messages_snapshot_envelope(&snapshot, "run-1".to_string(), Some("turn-1".to_string()))
+                .event
+                .messages
+                .expect("snapshot messages"),
+        )
+        .unwrap();
+        let messages = messages.as_array().expect("snapshot message list");
+        let meta = messages
+            .iter()
+            .find(|message| message["id"] == "tool-meta:dangling-tool")
+            .expect("snapshot tool meta");
+        assert_eq!(meta["content"]["status"], "failed");
+        assert_eq!(meta["content"][TOOL_META_INTERRUPTED_FIELD], true);
+        let result = messages
+            .iter()
+            .find(|message| message["id"] == "tool-result:dangling-tool")
+            .expect("snapshot tool result");
+        assert!(result.get("error").is_none_or(Value::is_null));
+
+        let mut failed = SessionSnapshot::new("alpha-agent".to_string(), TEST_THREAD.to_string());
+        failed.apply(&canonical_run_started());
+        failed.apply(&running_tool);
+        failed.apply(&CanonicalEvent::RunFailed {
+            agent_id: "alpha-agent".to_string(),
+            thread_id: TEST_THREAD.to_string(),
+            run_id: "run-1".to_string(),
+            source_turn_id: "turn-1".to_string(),
+            generation: 1,
+            message: "boom".to_string(),
+        });
+        assert!(!failed.tools["dangling-tool"].interrupted);
+        assert!(serde_json::to_value(&failed.tools["dangling-tool"])
+            .unwrap()
+            .get("interrupted")
+            .is_none());
     }
 
     #[test]
