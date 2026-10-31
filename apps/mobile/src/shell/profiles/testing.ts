@@ -8,6 +8,9 @@ export interface FakeSetupRuntimeState {
   downloadPhase: string;
   /** Per-model phases, for models other than the selected one. */
   downloadPhases?: Record<string, string>;
+  author?: { name: string; email: string } | null;
+  /** Message counts of the local conversations. */
+  threadMessages?: readonly number[];
 }
 
 /** The slice of the on-device runtime that setup progress reads, with a change trigger. */
@@ -31,7 +34,15 @@ export function createFakeSetupRuntime(initial: FakeSetupRuntimeState) {
       return () => listeners.delete(listener);
     },
     version: () => version,
-    preferences: () => ({ modelId: state.modelId, workspaceId: state.workspaceId }),
+    preferences: () => ({
+      modelId: state.modelId,
+      workspaceId: state.workspaceId,
+      author: state.author ?? null,
+    }),
+    threads: {
+      list: () =>
+        (state.threadMessages ?? []).map((count) => ({ messages: new Array<unknown>(count) })),
+    },
     workspaces: () => state.workspaces,
     issues: () => NO_ISSUES,
     models: {

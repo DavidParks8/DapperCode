@@ -43,6 +43,7 @@ import {
   bridgeConnectedAtom,
   localProfileAvailableAtom,
 } from '@shell/state/bridge/atoms';
+import { localSetupDismissedAtom } from '@shell/state/appState/settings';
 import { localRuntimeAtom, localTransportAtom } from '@shell/state/local/atoms';
 import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 import { AppStateProvider } from '@shell/state/store';
@@ -69,6 +70,10 @@ function NewChatRoute() {
 
 function SettingsModelsRoute() {
   return <Text>Model library</Text>;
+}
+
+function SettingsGitHubRoute() {
+  return <Text>Git and GitHub settings</Text>;
 }
 
 function LegacyWorkspacesRoute() {
@@ -107,6 +112,7 @@ function render(store: ReturnType<typeof storeWith>) {
         _layout: RootLayout,
         'profiles/[profileId]/(drawer)/chats/[chatId]/index': NewChatRoute,
         'profiles/[profileId]/(drawer)/settings/models/index': SettingsModelsRoute,
+        'profiles/[profileId]/(drawer)/settings/github': SettingsGitHubRoute,
         'on-device/workspaces': LegacyWorkspacesRoute,
       },
     },
@@ -156,6 +162,8 @@ describe('profile switching', () => {
     expect(screen.getByTestId('local-setup-guide')).toBeTruthy();
     expect(screen.getByLabelText('1. Download a model, Required')).toBeTruthy();
     expect(screen.getByLabelText('2. Clone or create a workspace, Required')).toBeTruthy();
+    expect(screen.getByLabelText('3. Add a Git author, Recommended')).toBeTruthy();
+    expect(screen.getByLabelText('4. Start your first chat, After steps 1 and 2')).toBeTruthy();
 
     act(() => fake.update({ downloadPhase: 'downloading' }));
     expect(screen.getByLabelText('1. Download a model, Downloading')).toBeTruthy();
@@ -181,10 +189,36 @@ describe('profile switching', () => {
     });
 
     act(() => fake.update({ workspaceId: 'w1', workspaces: [{ id: 'w1', name: 'demo' }] }));
-    expect(screen.queryByTestId('local-setup-guide')).toBeNull();
+    // A missing Git author never blocks chatting: the profile is ready and the guide says so.
     expect(screen.getByTestId('drawer-profile-switcher').props['accessibilityLabel']).toBe(
       'Where agents run, On this iPhone, Ready · Private offline models',
     );
+    expect(screen.getByLabelText('2. Clone or create a workspace, Done')).toBeTruthy();
+    expect(screen.getByLabelText('4. Start your first chat, Ready')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'Type a message below to start your first chat. Add a Git author before the agent commits.',
+      ),
+    ).toBeTruthy();
+
+    fireEvent.press(screen.getByLabelText('3. Add a Git author, Recommended'));
+    expect(result.getPathname()).toBe(LOCAL_SETUP_DESTINATIONS.author);
+    expect(screen.getByText('Git and GitHub settings')).toBeTruthy();
+    act(() => fake.update({ author: { name: 'Ada', email: 'ada@example.com' } }));
+    act(() => {
+      router.navigate('/profiles/on-device/chats/new');
+    });
+    await waitFor(() => {
+      expect(screen.getByText('New chat in on-device')).toBeTruthy();
+    });
+    expect(screen.getByLabelText('3. Add a Git author, Done')).toBeTruthy();
+    expect(screen.getByText('Type a message below to start your first chat.')).toBeTruthy();
+
+    // An opened but empty chat is not a started one; the first message completes setup.
+    act(() => fake.update({ threadMessages: [0] }));
+    expect(screen.getByTestId('local-setup-guide')).toBeTruthy();
+    act(() => fake.update({ threadMessages: [0, 2] }));
+    expect(screen.queryByTestId('local-setup-guide')).toBeNull();
 
     // The drawer switches back in two taps.
     fireEvent.press(screen.getByTestId('drawer-profile-switcher'));
@@ -227,8 +261,42 @@ describe('profile switching', () => {
     expect(switcher()).toContain('Downloading model');
 
     act(() => fake.update({ downloadPhases: { [MODEL]: 'ready' } }));
-    expect(screen.queryByTestId('local-setup-guide')).toBeNull();
+    expect(screen.getByLabelText('1. Download a model, Done')).toBeTruthy();
+    expect(screen.getByLabelText('4. Start your first chat, Ready')).toBeTruthy();
     expect(switcher()).toBe('Where agents run, On this iPhone, Ready · Private offline models');
+    transport.dispose();
+  });
+
+  it('hides the setup guide for good once dismissed, without blocking a chat', async () => {
+    const store = storeWith(true);
+    render(store);
+    const fake = createFakeSetupRuntime({
+      modelId: MODEL,
+      workspaceId: null,
+      workspaces: [],
+      downloadPhase: 'not_downloaded',
+    });
+    const transport = new LocalBridgeWsClient(new LocalBridgeServer(new FakeAgentPort()));
+    transport.connect();
+    act(() => {
+      store.set(localRuntimeAtom, fake.runtime);
+      store.set(localTransportAtom, transport);
+    });
+    fireEvent.press(screen.getByTestId('new-chat-profile-switcher'));
+    fireEvent.press(screen.getByLabelText('On this iPhone'));
+    await waitFor(() => {
+      expect(screen.getByTestId('local-setup-guide')).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText('Hide setup guide'));
+    expect(screen.queryByTestId('local-setup-guide')).toBeNull();
+    expect(store.get(localSetupDismissedAtom)).toBe(true);
+    // Hiding the guide changes nothing about readiness, and later progress does not bring it back.
+    expect(
+      String(screen.getByTestId('new-chat-profile-switcher').props['accessibilityLabel']),
+    ).toContain('Needs a model');
+    act(() => fake.update({ downloadPhase: 'ready' }));
+    expect(screen.queryByTestId('local-setup-guide')).toBeNull();
     transport.dispose();
   });
 

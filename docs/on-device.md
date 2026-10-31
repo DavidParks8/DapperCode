@@ -10,8 +10,11 @@ continue to use desktop agents.
 1. Choose **On this iPhone** wherever you pick where agents run: the onboarding choices, the
    **Runs on** row in the drawer, the profile capsule under **Let's build** in a new chat, or
    **Settings → Profiles**. Each opens a new chat in the local profile.
-2. Until a model and a workspace are ready, the new chat shows a **Set up On this iPhone**
-   checklist whose rows open Settings → Models and the workspaces screen. On **Settings → On this
+2. Until the first local chat has a message, the new chat shows a **Set up On this iPhone**
+   checklist: download a model (Settings → Models), clone or create a workspace (the workspace
+   picker), add a Git author (Settings → Git & GitHub; recommended, since commits need it), and
+   start your first chat. Only the model and workspace are required; **Hide setup guide** removes
+   it for good. On **Settings → On this
    iPhone → Models**, search across families, sizes, and quants (for example "q8" or "2b");
    **Downloaded only** and **Include models too large for this iPhone** sit together under the
    search field. Choose a family to compare its sizes and quants, then **Download** one and
@@ -443,10 +446,14 @@ The shared screens serve the local profile through the transport; nothing branch
 - **First-run setup**: `useLocalSetup` derives model and workspace steps from the open runtime via
   `localConversationReadiness`, resolving the model the way the server's `resolveModel` does (the
   selected model when downloaded, otherwise any downloaded runnable model, otherwise a download in
-  progress), so a first download started from the library without selecting a model still counts; `LocalSetupGuide` renders them in the new chat until a chat can
-  start. The workspace step opens the chat's workspace picker (`openWorkspaceModalAtom`); the model
-  step opens Settings → Models through `LOCAL_SETUP_DESTINATIONS` (`shell/profiles/localSetup.ts`,
-  `/profiles/on-device/settings/models`). Missing
+  progress), so a first download started from the library without selecting a model still counts.
+  It also reports a Git author step (`recommended` until `preferences().author` is set) and whether
+  any local conversation has a message. `LocalSetupGuide` renders model → workspace → author →
+  first chat in the new chat until that first message exists or the user hides it
+  (`localSetupDismissed` in app settings). Only model and workspace feed readiness, so a missing
+  author never blocks a chat. The workspace step opens the chat's workspace picker
+  (`openWorkspaceModalAtom`); the model and author steps open Settings → Models and Settings →
+  Git & GitHub through `LOCAL_SETUP_DESTINATIONS` (`shell/profiles/localSetup.ts`). Missing
   prerequisites still reject chat creation with `on_device_model_required`/
   `on_device_workspace_required`.
 - **Profile routes**: `app/profiles/_layout.tsx` gives `[profileId]` its own stack. Expo Router only

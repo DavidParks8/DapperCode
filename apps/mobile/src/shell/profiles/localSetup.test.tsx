@@ -66,6 +66,27 @@ describe('local setup progress', () => {
     },
   );
 
+  it('recommends a Git author and tracks the first chat without changing readiness', () => {
+    const ready = {
+      modelId: MODEL,
+      workspaceId: 'w1',
+      workspaces: [workspace],
+      downloadPhase: 'ready',
+    };
+    const { runtime, update } = createFakeSetupRuntime(ready);
+    expect(localSetupState(runtime)).toMatchObject({
+      author: 'recommended',
+      chatStarted: false,
+      summary: 'Ready',
+    });
+    expect(localSetupState(runtime).readiness.canStart).toBe(true);
+
+    update({ author: { name: 'Ada', email: 'ada@example.com' }, threadMessages: [0] });
+    expect(localSetupState(runtime)).toMatchObject({ author: 'done', chatStarted: false });
+    update({ threadMessages: [0, 1] });
+    expect(localSetupState(runtime).chatStarted).toBe(true);
+  });
+
   it('is ready with an unselected downloaded model, as the server would start the chat', () => {
     const { runtime } = createFakeSetupRuntime({
       modelId: null,

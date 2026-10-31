@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useSetAtom } from 'jotai';
+import { useAtom, useSetAtom } from 'jotai';
 import { useMemo, useState } from 'react';
 import {
   Pressable,
@@ -18,8 +18,14 @@ import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared
 import { useAppTheme, type AppTheme } from '@shared/theme';
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { SelectionSheet } from '@shared/ui/SelectionSheet';
+import { localSetupDismissedAtom } from '@shell/state/appState/settings';
 import { LOCAL_PROFILE_NAME } from '@shell/state/localProfile';
-import { LOCAL_SETUP_DESTINATIONS, useLocalSetup, type LocalSetupStepStatus } from './localSetup';
+import {
+  LOCAL_SETUP_DESTINATIONS,
+  useLocalSetup,
+  type LocalSetupState,
+  type LocalSetupStepStatus,
+} from './localSetup';
 import { profileSummary } from './profilePresentation';
 import { useProfileChoices, type ProfileChoices } from './useProfileChoices';
 
@@ -112,23 +118,35 @@ const STEP_VALUE: Record<LocalSetupStepStatus, string> = {
   done: 'Done',
   'in-progress': 'Downloading',
   todo: 'Required',
+  recommended: 'Recommended',
 };
 
-/** First-run checklist for the built-in profile: download a model, then add a workspace. */
+function setupFooter(setup: LocalSetupState): string {
+  if (setup.readiness.reason) {
+    return setup.readiness.reason;
+  }
+  return setup.author === 'done'
+    ? 'Type a message below to start your first chat.'
+    : 'Type a message below to start your first chat. Add a Git author before the agent commits.';
+}
+
+/**
+ * First-run checklist for the built-in profile: download a model, add a workspace, set a Git
+ * author, and start a chat. Only the model and workspace are required; the guide never blocks a
+ * chat and stays until the first local chat has a message or the user hides it.
+ */
 export function LocalSetupGuide() {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const setup = useLocalSetup();
+  const [dismissed, setDismissed] = useAtom(localSetupDismissedAtom);
   const openWorkspacePicker = useSetAtom(openWorkspaceModalAtom);
-  if (!setup || setup.readiness.canStart) {
+  if (!setup || setup.chatStarted || dismissed) {
     return null;
   }
   return (
     <View style={styles.guide} testID="local-setup-guide">
-      <SettingsGroup
-        title={`Set up ${LOCAL_PROFILE_NAME}`}
-        footer={setup.readiness.reason ?? undefined}
-      >
+      <SettingsGroup title={`Set up ${LOCAL_PROFILE_NAME}`} footer={setupFooter(setup)}>
         <SettingsRow
           label="1. Download a model"
           value={STEP_VALUE[setup.model]}
@@ -141,6 +159,17 @@ export function LocalSetupGuide() {
           accessory="chevron"
           onPress={() => openWorkspacePicker()}
         />
+        <SettingsRow
+          label="3. Add a Git author"
+          value={STEP_VALUE[setup.author]}
+          accessory="chevron"
+          onPress={() => router.push(LOCAL_SETUP_DESTINATIONS.author)}
+        />
+        <SettingsRow
+          label="4. Start your first chat"
+          value={setup.readiness.canStart ? 'Ready' : 'After steps 1 and 2'}
+        />
+        <SettingsRow label="Hide setup guide" tone="accent" onPress={() => setDismissed(true)} />
       </SettingsGroup>
     </View>
   );

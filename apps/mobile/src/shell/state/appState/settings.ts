@@ -47,6 +47,7 @@ export const defaultStartCwdAtom = atom(
     );
   },
 );
+export const localSetupDismissedAtom = settingAtom('localSetupDismissed');
 export const preferredAgentIdAtom = settingAtom('preferredAgentId');
 export const agentSettingsAtom = settingAtom('agentSettings');
 export const approvalModeAtom = settingAtom('approvalMode');

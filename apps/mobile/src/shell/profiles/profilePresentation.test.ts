@@ -22,6 +22,8 @@ const needsModel: LocalSetupState = {
   readiness: { canStart: false, reason: 'Choose a model.', action: 'choose-model' },
   model: 'todo',
   workspace: 'todo',
+  author: 'recommended',
+  chatStarted: false,
   summary: 'Needs a model',
 };
 
