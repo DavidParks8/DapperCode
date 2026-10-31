@@ -21,6 +21,7 @@ import {
   LOCAL_PRESENCE_SLICES,
   sameLocalAgentPresence,
 } from './localAgentPresence';
+import { useRecordLocalSetupCompletion } from '@shell/profiles/localSetup';
 import { LocalBridgeWsClient } from './LocalBridgeWsClient';
 import { importLegacyLocalDrafts } from './localDraftImport';
 import { LocalRuntimeRecovery } from './LocalRuntimeRecovery';
@@ -48,6 +49,7 @@ export function LocalRuntimeHost() {
         <LocalTransportBinder />
         <LocalPresencePublisher />
         <LocalIssueAnnouncer />
+        <LocalSetupCompletionRecorder />
       </OnDeviceProvider>
     </View>
   );
@@ -90,6 +92,11 @@ function LocalTransportBinder() {
       transport?.dispose();
     };
   }, [runtime, setRuntime, setTransport]);
+  return null;
+}
+
+function LocalSetupCompletionRecorder() {
+  useRecordLocalSetupCompletion(useOnDeviceRuntime());
   return null;
 }
 

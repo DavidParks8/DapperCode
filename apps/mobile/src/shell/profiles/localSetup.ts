@@ -1,6 +1,6 @@
 import type { Href } from 'expo-router';
-import { useAtomValue } from 'jotai';
-import { useCallback, useSyncExternalStore } from 'react';
+import { useAtom, useAtomValue } from 'jotai';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
 import {
   findLocalModelDefinition,
@@ -12,6 +12,7 @@ import {
   type LocalConversationReadiness,
 } from '../../features/on-device/runtime/status';
 import type { OnDeviceRuntimeSlice } from '../../features/on-device/runtime/types';
+import { localSetupCompletedAtom } from '@shell/state/appState/settings';
 import { localRuntimeAtom } from '@shell/state/local/atoms';
 
 /**
@@ -75,6 +76,11 @@ function effectiveModelId(runtime: LocalSetupRuntime, selected: string | null): 
   return runnable.find((model) => IN_PROGRESS_PHASES.has(phase(model.id)))?.id ?? selected;
 }
 
+/** Whether any local conversation has a message. */
+export function localChatStarted(runtime: Pick<OnDeviceRuntime, 'threads'>): boolean {
+  return runtime.threads.list().some((thread) => thread.messages.length > 0);
+}
+
 export function localSetupState(runtime: LocalSetupRuntime): LocalSetupState {
   const { modelId: selected, workspaceId, author } = runtime.preferences();
   const workspaces = runtime.workspaces();
@@ -109,7 +115,7 @@ export function localSetupState(runtime: LocalSetupRuntime): LocalSetupState {
     model,
     workspace,
     author: author ? 'done' : 'recommended',
-    chatStarted: runtime.threads.list().some((thread) => thread.messages.length > 0),
+    chatStarted: localChatStarted(runtime),
     summary,
   };
 }
@@ -132,4 +138,26 @@ export function useLocalSetup(): LocalSetupState | null {
   const version = useCallback(() => (runtime ? runtime.version(SETUP_SLICES) : -1), [runtime]);
   useSyncExternalStore(subscribe, version, version);
   return runtime ? localSetupState(runtime) : null;
+}
+
+/**
+ * Records once, in device-wide app settings, that a local chat has started. Deleted and
+ * unrestorable chats leave the thread list, so first-run setup must not be derived from it alone.
+ */
+export function useRecordLocalSetupCompletion(
+  runtime: Pick<OnDeviceRuntime, 'threads' | 'subscribe'>,
+): void {
+  const [completed, setCompleted] = useAtom(localSetupCompletedAtom);
+  useEffect(() => {
+    if (completed) {
+      return;
+    }
+    const record = () => {
+      if (localChatStarted(runtime)) {
+        setCompleted(true);
+      }
+    };
+    record();
+    return runtime.subscribe(record, ['threads']);
+  }, [completed, runtime, setCompleted]);
 }

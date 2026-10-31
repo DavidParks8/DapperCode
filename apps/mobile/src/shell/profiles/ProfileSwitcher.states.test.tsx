@@ -12,11 +12,12 @@ import { StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { createDefaultAppStateData } from '@shell/state/appState';
+import { localSetupCompletedAtom, localSetupDismissedAtom } from '@shell/state/appState/settings';
 import { localProfileAvailableAtom, bridgeConnectedAtom } from '@shell/state/bridge/atoms';
 import { localRuntimeAtom } from '@shell/state/local/atoms';
 import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 import { createTestStore } from '@shell/state/testing';
-import { LOCAL_SETUP_DESTINATIONS } from './localSetup';
+import { LOCAL_SETUP_DESTINATIONS, useRecordLocalSetupCompletion } from './localSetup';
 import {
   DrawerProfileRow,
   LocalSetupGuide,
@@ -230,7 +231,7 @@ describe('new chat run target states', () => {
     expect(iconNames()[0]).toBe('swap-horizontal-outline');
   });
 
-  it('follows local setup status live and hides the checklist once ready', () => {
+  it('follows local setup status live and keeps the checklist until the first chat', () => {
     const store = storeWith({
       profiles: [],
       activeProfileId: LOCAL_PROFILE_ID,
@@ -253,8 +254,53 @@ describe('new chat run target states', () => {
         workspaces: [{ id: 'w1', name: 'demo' }],
       }),
     );
-    expect(screen.getByText('Ready')).toBeTruthy();
+    expect(screen.getAllByText('Ready').length).toBeGreaterThan(0);
+    // Ready to chat, the checklist stays to offer the Git author and the first chat.
+    expect(screen.getByLabelText('4. Start your first chat, Ready')).toBeTruthy();
+
+    act(() => fake.update({ threadMessages: [1] }));
     expect(screen.queryByTestId('local-setup-guide')).toBeNull();
+  });
+
+  it('keeps the checklist hidden after the first chat even once every chat is deleted', () => {
+    const store = storeWith({
+      profiles: [],
+      activeProfileId: LOCAL_PROFILE_ID,
+      localAvailable: true,
+    });
+    const fake = setupRuntime({
+      downloadPhase: 'ready',
+      workspaceId: 'w1',
+      workspaces: [{ id: 'w1', name: 'demo' }],
+    });
+    store.set(localRuntimeAtom, fake.runtime);
+    // The runtime host records completion app-wide; this stands in for it.
+    function CompletionRecorder() {
+      useRecordLocalSetupCompletion(fake.runtime);
+      return null;
+    }
+    const screenWithGuide = (
+      <>
+        <CompletionRecorder />
+        <NewChatRunTarget />
+      </>
+    );
+    const view = renderIn(store, screenWithGuide);
+    expect(screen.getByTestId('local-setup-guide')).toBeTruthy();
+
+    act(() => fake.update({ threadMessages: [3] }));
+    expect(screen.queryByTestId('local-setup-guide')).toBeNull();
+    expect(store.get(localSetupCompletedAtom)).toBe(true);
+
+    act(() => fake.update({ threadMessages: [] }));
+    expect(screen.queryByTestId('local-setup-guide')).toBeNull();
+    view.unmount();
+    renderIn(store, <NewChatRunTarget />);
+    expect(
+      screen.getByLabelText('Where agents run, On this iPhone, Ready · Private offline models'),
+    ).toBeTruthy();
+    expect(screen.queryByTestId('local-setup-guide')).toBeNull();
+    expect(store.get(localSetupDismissedAtom)).toBe(false);
   });
 
   it('scales the capsule while pressed and opens the sheet', () => {

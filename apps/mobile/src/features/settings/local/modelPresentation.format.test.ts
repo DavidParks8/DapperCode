@@ -112,6 +112,7 @@ describe('download transfer presentation', () => {
       kind: 'downloading',
       label: 'Downloading 25% · 250 MB of 1.0 GB · 2 min left',
       progress: 25,
+      progressText: '25%, 250 MB of 1.0 GB, 2 min left',
       active: true,
     });
     expect(
@@ -152,6 +153,7 @@ describe('download transfer presentation', () => {
       kind: 'verifying',
       label: 'Verifying 40% · less than a minute left',
       progress: 40,
+      progressText: '40%, less than a minute left',
       active: true,
     });
     expect(
@@ -170,6 +172,7 @@ describe('download transfer presentation', () => {
       kind: 'paused',
       label: 'Paused at 30% · 300 MB of 1.0 GB',
       progress: 30,
+      progressText: '30%, paused',
       active: false,
     });
     expect(
@@ -181,6 +184,7 @@ describe('download transfer presentation', () => {
       kind: 'paused',
       label: 'Downloaded · verification paused',
       progress: null,
+      progressText: null,
       active: false,
     });
   });
@@ -199,6 +203,7 @@ describe('download transfer presentation', () => {
       kind: 'ready',
       label: 'Downloaded',
       progress: null,
+      progressText: null,
       active: false,
     });
     expect(describeTransfer(download({ phase: 'queued' }), MODEL)).toMatchObject({
@@ -210,6 +215,7 @@ describe('download transfer presentation', () => {
       kind: 'downloading',
       label: 'Starting download…',
       progress: 0,
+      progressText: 'Starting download',
       active: true,
     });
     expect(describeTransfer(download({ phase: 'loading' }), MODEL)).toMatchObject({
@@ -221,6 +227,7 @@ describe('download transfer presentation', () => {
       kind: 'none',
       label: 'Not downloaded',
       progress: null,
+      progressText: null,
       active: false,
     });
   });

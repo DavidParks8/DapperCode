@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useAtom, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useMemo, useState } from 'react';
 import {
   Pressable,
@@ -18,7 +18,7 @@ import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared
 import { useAppTheme, type AppTheme } from '@shared/theme';
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { SelectionSheet } from '@shared/ui/SelectionSheet';
-import { localSetupDismissedAtom } from '@shell/state/appState/settings';
+import { localSetupCompletedAtom, localSetupDismissedAtom } from '@shell/state/appState/settings';
 import { LOCAL_PROFILE_NAME } from '@shell/state/localProfile';
 import {
   LOCAL_SETUP_DESTINATIONS,
@@ -133,15 +133,17 @@ function setupFooter(setup: LocalSetupState): string {
 /**
  * First-run checklist for the built-in profile: download a model, add a workspace, set a Git
  * author, and start a chat. Only the model and workspace are required; the guide never blocks a
- * chat and stays until the first local chat has a message or the user hides it.
+ * chat and stays until the first local chat has a message (recorded for good by
+ * `useRecordLocalSetupCompletion`) or the user hides it.
  */
 export function LocalSetupGuide() {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const setup = useLocalSetup();
   const [dismissed, setDismissed] = useAtom(localSetupDismissedAtom);
+  const completed = useAtomValue(localSetupCompletedAtom);
   const openWorkspacePicker = useSetAtom(openWorkspaceModalAtom);
-  if (!setup || setup.chatStarted || dismissed) {
+  if (!setup || setup.chatStarted || completed || dismissed) {
     return null;
   }
   return (
