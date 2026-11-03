@@ -10,6 +10,8 @@ import { createBridgeTestStore } from '@shell/state/testing';
 import {
   createManagedWorkspaceAtom,
   deleteManagedWorkspaceAtom,
+  managedWorkspacesAtom,
+  managedWorkspacesErrorAtom,
   renameManagedWorkspaceAtom,
   selectManagedWorkspaceAtom,
 } from './managedWorkspaces';
@@ -115,6 +117,104 @@ describe('managed workspace actions', () => {
     expect(settings()).toMatchObject({
       defaultStartCwd: '/Users/ada/repo',
       localDefaultStartCwd: '/On this iPhone/Scratch',
+    });
+  });
+
+  describe('when the change succeeds but the list cannot be refreshed', () => {
+    const demo = {
+      path: '/On this iPhone/Demo',
+      name: 'Demo',
+      isRepository: true,
+      branch: 'main',
+      origin: null,
+    };
+    const scratch = {
+      path: '/On this iPhone/Scratch',
+      name: 'Scratch',
+      isRepository: false,
+      branch: null,
+      origin: null,
+    };
+
+    /** Confirms every change, but the follow-up `workspace/list` reload fails. */
+    function setupFailingRefresh() {
+      const request = jest.fn((method: string, params: Record<string, unknown>) => {
+        switch (method) {
+          case 'workspace/create':
+            return Promise.resolve({
+              path: '/On this iPhone/New',
+              name: 'New',
+              isRepository: false,
+            });
+          case 'workspace/rename':
+            return Promise.resolve({
+              path: '/On this iPhone/Renamed',
+              name: 'Renamed',
+              isRepository: true,
+            });
+          case 'workspace/delete':
+            return Promise.resolve({ ok: true, cwd: params['cwd'] });
+          case 'workspace/list':
+            return Promise.reject(new Error('The local transport is busy.'));
+          default:
+            return Promise.resolve({});
+        }
+      });
+      const ws = { request } as unknown as HostBridgeWsClient;
+      const store = createBridgeTestStore({
+        api: new HostBridgeApiClient({ ws, profileId: 'bridge-1' }),
+        ws,
+        bridgeProfileId: 'bridge-1',
+      });
+      store.set(localProfileAvailableAtom, true);
+      const snapshot = store.get(appStateSnapshotAtom);
+      store.set(appStateSnapshotAtom, {
+        ...snapshot,
+        data: {
+          ...snapshot.data,
+          settings: { ...snapshot.data.settings, localDefaultStartCwd: demo.path },
+          bridgeProfiles: { ...snapshot.data.bridgeProfiles, activeProfileId: LOCAL_PROFILE_ID },
+        },
+      });
+      store.set(managedWorkspacesAtom, [demo, scratch]);
+      const paths = () => store.get(managedWorkspacesAtom)?.map((entry) => entry.path);
+      const settings = () => store.get(appStateSnapshotAtom).data.settings;
+      return { store, paths, settings };
+    }
+
+    it('no longer lists or selects a deleted workspace, and says it was deleted', async () => {
+      const { store, paths, settings } = setupFailingRefresh();
+      await expect(store.set(deleteManagedWorkspaceAtom, demo.path)).resolves.toBe(true);
+      expect(paths()).toEqual([scratch.path]);
+      expect(settings().localDefaultStartCwd).toBeNull();
+      expect(store.get(managedWorkspacesErrorAtom)).toBe(
+        'Deleted the workspace. The workspace list could not be refreshed.',
+      );
+    });
+
+    it('shows a renamed workspace under its new name and keeps it selected', async () => {
+      const { store, settings } = setupFailingRefresh();
+      await expect(
+        store.set(renameManagedWorkspaceAtom, { path: demo.path, name: 'Renamed' }),
+      ).resolves.toBe(true);
+      expect(store.get(managedWorkspacesAtom)).toEqual([
+        { ...demo, path: '/On this iPhone/Renamed', name: 'Renamed' },
+        scratch,
+      ]);
+      expect(settings().localDefaultStartCwd).toBe('/On this iPhone/Renamed');
+      expect(store.get(managedWorkspacesErrorAtom)).toBe(
+        'Renamed to Renamed. The workspace list could not be refreshed.',
+      );
+    });
+
+    it('lists and selects a created workspace', async () => {
+      const { store, paths, settings } = setupFailingRefresh();
+      await expect(store.set(createManagedWorkspaceAtom, 'New')).resolves.toBe(true);
+      expect(paths()).toEqual([demo.path, '/On this iPhone/New', scratch.path]);
+      expect(settings().localDefaultStartCwd).toBe('/On this iPhone/New');
+      expect(store.get(managedWorkspacesErrorAtom)).toBe(
+        'Created New. The workspace list could not be refreshed.',
+      );
     });
   });
 });

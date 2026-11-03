@@ -1,4 +1,4 @@
-import { atom, type Getter } from 'jotai';
+import { atom, type Getter, type Setter } from 'jotai';
 
 import { defaultStartCwdAtom } from '@shell/state/appState/settings';
 import { activeProfileIdAtom } from '@shell/state/bridge/atoms';
@@ -6,7 +6,11 @@ import { normalizeWorkspacePath } from '../../chat/helpers/helpers';
 import { screenAtom } from '../../chat/state/registry';
 import { workspaceHostClientAtom } from '../api/atoms';
 import { describeHostError } from '../api/errors';
-import type { ManagedWorkspaceState, ManagedWorkspaceSummary } from '../api/protocol';
+import type {
+  ManagedWorkspaceResponse,
+  ManagedWorkspaceState,
+  ManagedWorkspaceSummary,
+} from '../api/protocol';
 import { refreshWorkspaceRootsAtom, selectWorkspaceAtom } from './workspaceActions';
 import { returnToChat } from './workspaceRouteNavigation';
 
@@ -49,26 +53,71 @@ export const loadManagedWorkspaceStatesAtom = atom(null, async (get, set): Promi
   }
 });
 
-export const loadManagedWorkspacesAtom = atom(null, async (get, set): Promise<void> => {
-  const host = get(workspaceHostClientAtom);
-  if (!host) {
-    return;
-  }
-  set(managedWorkspacesLoadingAtom, true);
-  try {
-    const { workspaces } = await host.listWorkspaces();
-    set(managedWorkspacesAtom, workspaces);
-    void set(loadManagedWorkspaceStatesAtom);
-  } catch (error) {
-    set(managedWorkspacesErrorAtom, describeHostError(error, 'Could not load workspaces.'));
-  } finally {
-    set(managedWorkspacesLoadingAtom, false);
-  }
-});
+export const loadManagedWorkspacesAtom = atom(
+  null,
+  async (get, set, afterChange?: string): Promise<void> => {
+    const host = get(workspaceHostClientAtom);
+    if (!host) {
+      return;
+    }
+    set(managedWorkspacesLoadingAtom, true);
+    try {
+      const { workspaces } = await host.listWorkspaces();
+      set(managedWorkspacesAtom, workspaces);
+      void set(loadManagedWorkspaceStatesAtom);
+    } catch (error) {
+      // After a confirmed change, say the change worked and only the refresh did not.
+      set(
+        managedWorkspacesErrorAtom,
+        afterChange
+          ? `${afterChange} The workspace list could not be refreshed.`
+          : describeHostError(error, 'Could not load workspaces.'),
+      );
+    } finally {
+      set(managedWorkspacesLoadingAtom, false);
+    }
+  },
+);
 
-const reloadAfterChangeAtom = atom(null, async (_get, set): Promise<void> => {
+/**
+ * Shows a change the host has confirmed before the list is reloaded, so a failed refresh never
+ * leaves a deleted workspace listed (or selectable), a renamed one under its old name, or a new one
+ * missing. Its working-tree state is dropped until the reload measures it again.
+ */
+function applyConfirmedChange(
+  get: Getter,
+  set: Setter,
+  change: { remove?: string; add?: ManagedWorkspaceResponse },
+): void {
+  const list = get(managedWorkspacesAtom);
+  if (list) {
+    const kept = list.filter((entry) => entry.path !== change.remove);
+    const previous = list.find((entry) => entry.path === change.remove);
+    const added = change.add
+      ? [{ branch: previous?.branch ?? null, origin: previous?.origin ?? null, ...change.add }]
+      : [];
+    set(
+      managedWorkspacesAtom,
+      [...kept.filter((entry) => entry.path !== change.add?.path), ...added].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      ),
+    );
+  }
+  if (change.remove) {
+    const removed = change.remove;
+    set(
+      managedWorkspaceStatesAtom,
+      Object.fromEntries(
+        Object.entries(get(managedWorkspaceStatesAtom)).filter(([path]) => path !== removed),
+      ),
+    );
+  }
+}
+
+/** Reloads after a confirmed change; a failed reload says the change itself succeeded. */
+const reloadAfterChangeAtom = atom(null, async (_get, set, done: string): Promise<void> => {
   set(managedWorkspacesErrorAtom, null);
-  await set(loadManagedWorkspacesAtom);
+  await set(loadManagedWorkspacesAtom, done);
   // Recent workspaces elsewhere in the shell (drawer grouping, composer) read the roots list.
   void set(refreshWorkspaceRootsAtom, { force: true });
 });
@@ -105,19 +154,21 @@ export const createManagedWorkspaceAtom = atom(
       return false;
     }
     const profileId = get(activeProfileIdAtom);
+    let created: ManagedWorkspaceResponse;
     try {
-      const created = await host.createWorkspace(name);
-      if (!stillActive(get, profileId)) {
-        return false;
-      }
-      set(defaultStartCwdAtom, created.path);
-      await set(reloadAfterChangeAtom);
-      returnToChat();
-      return true;
+      created = await host.createWorkspace(name);
     } catch (error) {
       set(managedWorkspacesErrorAtom, describeHostError(error, 'Could not create the workspace.'));
       return false;
     }
+    if (!stillActive(get, profileId)) {
+      return false;
+    }
+    applyConfirmedChange(get, set, { add: created });
+    set(defaultStartCwdAtom, created.path);
+    await set(reloadAfterChangeAtom, `Created ${created.name}.`);
+    returnToChat();
+    return true;
   },
 );
 
@@ -132,17 +183,22 @@ export const renameManagedWorkspaceAtom = atom(
     // once the old path stopped resolving, but the user's choice is still this workspace.
     const wasDefault = normalizeWorkspacePath(get(defaultStartCwdAtom)) === path;
     const profileId = get(activeProfileIdAtom);
+    let renamed: ManagedWorkspaceResponse;
     try {
-      const renamed = await host.renameWorkspace(path, name);
-      if (wasDefault && stillActive(get, profileId)) {
-        set(defaultStartCwdAtom, renamed.path);
-      }
-      await set(reloadAfterChangeAtom);
-      return true;
+      renamed = await host.renameWorkspace(path, name);
     } catch (error) {
       set(managedWorkspacesErrorAtom, describeHostError(error, 'Could not rename the workspace.'));
       return false;
     }
+    if (!stillActive(get, profileId)) {
+      return true;
+    }
+    applyConfirmedChange(get, set, { remove: path, add: renamed });
+    if (wasDefault) {
+      set(defaultStartCwdAtom, renamed.path);
+    }
+    await set(reloadAfterChangeAtom, `Renamed to ${renamed.name}.`);
+    return true;
   },
 );
 
@@ -156,17 +212,18 @@ export const deleteManagedWorkspaceAtom = atom(
     const profileId = get(activeProfileIdAtom);
     try {
       await host.deleteWorkspace(path);
-      if (
-        stillActive(get, profileId) &&
-        normalizeWorkspacePath(get(defaultStartCwdAtom)) === path
-      ) {
-        set(defaultStartCwdAtom, null);
-      }
-      await set(reloadAfterChangeAtom);
-      return true;
     } catch (error) {
       set(managedWorkspacesErrorAtom, describeHostError(error, 'Could not delete the workspace.'));
       return false;
     }
+    if (!stillActive(get, profileId)) {
+      return true;
+    }
+    applyConfirmedChange(get, set, { remove: path });
+    if (normalizeWorkspacePath(get(defaultStartCwdAtom)) === path) {
+      set(defaultStartCwdAtom, null);
+    }
+    await set(reloadAfterChangeAtom, 'Deleted the workspace.');
+    return true;
   },
 );

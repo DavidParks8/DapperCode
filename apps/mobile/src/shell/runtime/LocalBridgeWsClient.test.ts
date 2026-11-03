@@ -128,7 +128,7 @@ describe('LocalBridgeWsClient with the unchanged HostBridgeApiClient', () => {
   it('lists downloaded models, local workspaces, and Git state through API helpers', async () => {
     const { api } = setup();
     await expect(api.listModelOptions('on-device')).resolves.toEqual([
-      expect.objectContaining({ id: 'qwen3-1.7b-q4-k-m', displayName: 'Qwen3 1.7B · Q4_K_M' }),
+      expect.objectContaining({ id: 'qwen3-1.7b-q4-k-m', displayName: 'Qwen3 1.7B Q4_K_M' }),
     ]);
     await expect(api.listWorkspaceRoots()).resolves.toMatchObject({
       bridgeRoot: LOCAL_WORKSPACE_ROOT,

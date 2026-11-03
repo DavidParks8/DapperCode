@@ -55,10 +55,18 @@ export function findLocalModelDefinition(id: string): LocalModelDefinition | nul
   return LOCAL_MODEL_CATALOG.find((entry) => entry.id === id) ?? null;
 }
 
-/** A user-facing model name such as "Qwen3 1.7B Q4_K_M"; never the raw catalog identifier. */
+/**
+ * The one user-facing model name, such as "Qwen3 1.7B Q4_K_M", used everywhere a local model is
+ * named (picker, header, drawer status, Settings, announcements); never the raw catalog id.
+ */
+export function localModelName(model: Pick<LocalModelDefinition, 'name' | 'quantization'>): string {
+  return `${model.name} ${model.quantization}`;
+}
+
+/** `localModelName` for a catalog id, or "Unavailable model" when it is no longer offered. */
 export function localModelDisplayName(id: string): string {
   const model = findLocalModelDefinition(id);
-  return model ? `${model.name} ${model.quantization}` : 'Unavailable model';
+  return model ? localModelName(model) : 'Unavailable model';
 }
 
 export function localModelDefinition(id: string): LocalModelDefinition {

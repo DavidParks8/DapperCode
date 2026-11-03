@@ -1,5 +1,5 @@
 import type { LocalModelChoice } from './port';
-import { localModelDisplayName } from './wire';
+import { localModelName } from '../models/catalog';
 
 /** Context sizes are conventionally binary: 16,384 tokens is "16K". */
 function contextLabel(tokens: number): string {
@@ -32,7 +32,7 @@ export function localModelListEntries(
 ) {
   return choices.map((choice) => ({
     id: choice.model.id,
-    displayName: localModelDisplayName(choice.model),
+    displayName: localModelName(choice.model),
     description: localModelChoiceDescription(choice),
     providerId: 'on-device',
     isDefault: choice.model.id === defaultModelId,

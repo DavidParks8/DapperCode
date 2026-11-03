@@ -15,6 +15,7 @@ import {
   LOCAL_IMPLEMENTED_METHODS,
   LOCAL_TURN_RETRY_METHOD,
 } from './server';
+import { localModelDisplayName } from '../models/catalog';
 import { FakeAgentPort } from './testing';
 import {
   describeLocalTool,
@@ -542,19 +543,21 @@ describe('LocalBridgeServer', () => {
     expect(list.data).toEqual([
       {
         id: 'qwen3-1.7b-q4-k-m',
-        displayName: 'Qwen3 1.7B · Q4_K_M',
+        displayName: 'Qwen3 1.7B Q4_K_M',
         description: 'Loaded · 8K context',
         providerId: 'on-device',
         isDefault: false,
       },
       {
         id: 'qwen3-4b-q4-k-m',
-        displayName: 'Qwen3 4B · Q4_K_M',
+        displayName: 'Qwen3 4B Q4_K_M',
         description: 'Loads when you send · up to 8K context',
         providerId: 'on-device',
         isDefault: true,
       },
     ]);
+    // The picker names a model exactly as the drawer status, chat header, and Settings do.
+    expect(list.data[0]!['displayName']).toBe(localModelDisplayName('qwen3-1.7b-q4-k-m'));
     port.models = [];
     expect(await server.request('model/list', {})).toEqual({ data: [] });
   });

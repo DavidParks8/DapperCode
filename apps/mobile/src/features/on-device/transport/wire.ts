@@ -7,7 +7,7 @@ import type {
   ChatToolStatus,
 } from '@bridge/types/types';
 import type { RunActivity } from '@bridge/runActivity';
-import { findLocalModelDefinition, localModelDefinition } from '../models/catalog';
+import { findLocalModelDefinition, localModelDefinition, localModelName } from '../models/catalog';
 import type { LocalModelSessionSnapshot } from '../models/session';
 import type { LocalModelDefinition } from '../models/types';
 import type { LocalRunSnapshot } from '../runtime/agentLoop';
@@ -71,10 +71,6 @@ export function localCapabilities(): BridgeCapabilities {
     agUiEvents: true,
     supports: LOCAL_CAPABILITY_SUPPORT,
   };
-}
-
-export function localModelDisplayName(model: LocalModelDefinition): string {
-  return `${model.name} · ${model.quantization}`;
 }
 
 /** The path segment a workspace name is presented as. */
@@ -372,12 +368,12 @@ export function localThreadSummary(
 function modelConfig(thread: LocalThread, models: readonly LocalModelDefinition[]) {
   const options = models.map((model) => ({
     value: model.id,
-    name: localModelDisplayName(model),
+    name: localModelName(model),
   }));
   if (!options.some((option) => option.value === thread.modelId)) {
     let name = thread.modelId;
     try {
-      name = localModelDisplayName(localModelDefinition(thread.modelId));
+      name = localModelName(localModelDefinition(thread.modelId));
     } catch {
       // A removed catalog entry keeps showing its raw id.
     }

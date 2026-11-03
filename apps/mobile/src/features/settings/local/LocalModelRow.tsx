@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AccessibilityInfo, Linking, View } from 'react-native';
 
+import { localModelName } from '../../on-device/models/catalog';
 import { modelMemoryAdmission } from '../../on-device/models/memory';
 import type { DeviceMemory, LocalModelDefinition } from '../../on-device/models/types';
 import { useOnDeviceSelector } from '../../on-device/runtime/OnDeviceProvider';
@@ -37,7 +38,7 @@ function errorText(error: unknown): string {
 }
 
 export function modelTitle(model: LocalModelDefinition): string {
-  return `${model.name} ${model.quantization}`;
+  return localModelName(model);
 }
 
 /**

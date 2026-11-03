@@ -4,7 +4,7 @@ import { AccessibilityInfo, AppState } from 'react-native';
 
 import type { DeviceMemory } from '../../on-device/models/types';
 import type { ModelStorageSnapshot } from '../../on-device/models/downloads';
-import { LOCAL_MODEL_CATALOG } from '../../on-device/models/catalog';
+import { LOCAL_MODEL_CATALOG, localModelName } from '../../on-device/models/catalog';
 import { useOnDeviceSelector } from '../../on-device/runtime/OnDeviceProvider';
 import type { OnDeviceRuntime } from '../../on-device/runtime/runtime';
 import type { OnDeviceRuntimeSlice } from '../../on-device/runtime/types';
@@ -168,7 +168,7 @@ export function useModelAnnouncements(): void {
       if (!was || !model) {
         continue;
       }
-      const name = `${model.name} ${model.quantization}`;
+      const name = localModelName(model);
       if (was.kind !== now.kind && was.kind !== 'checking') {
         const message = transferAnnouncement(now.kind, name, runtime.downloads.snapshot(id).error);
         if (message) {
