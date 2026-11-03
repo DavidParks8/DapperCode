@@ -47,6 +47,11 @@ export const defaultStartCwdAtom = atom(
     );
   },
 );
+/**
+ * The local profile's own new-chat workspace, regardless of which profile is active. Local-only
+ * code (the runtime host's repair and presence) uses it so it can never write a desktop default.
+ */
+export const localDefaultStartCwdAtom = settingAtom('localDefaultStartCwd');
 export const localSetupDismissedAtom = settingAtom('localSetupDismissed');
 export const localSetupCompletedAtom = settingAtom('localSetupCompleted');
 export const preferredAgentIdAtom = settingAtom('preferredAgentId');

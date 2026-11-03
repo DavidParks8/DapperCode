@@ -10,7 +10,7 @@ import {
 import { createRuntimeAgentPort } from '../../features/on-device/transport/runtimePort';
 import { LocalBridgeServer } from '../../features/on-device/transport/server';
 import { activeProfileIsLocalAtom, localProfileAvailableAtom } from '@shell/state/bridge/atoms';
-import { defaultStartCwdAtom } from '@shell/state/appState/settings';
+import { localDefaultStartCwdAtom } from '@shell/state/appState/settings';
 import {
   localAgentPresenceAtom,
   localRuntimeAtom,
@@ -138,7 +138,7 @@ function LocalIssueAnnouncer() {
 function LocalPresencePublisher() {
   const runtime = useOnDeviceRuntime();
   const store = useStore();
-  const startCwd = useAtomValue(defaultStartCwdAtom);
+  const startCwd = useAtomValue(localDefaultStartCwdAtom);
   const setPresence = useSetAtom(localAgentPresenceAtom);
   useEffect(() => {
     let current: ReturnType<typeof describeLocalAgentPresence> | null = null;
@@ -158,16 +158,18 @@ function LocalPresencePublisher() {
   useEffect(() => () => setPresence(null), [setPresence]);
   useEffect(() => {
     // Reads the remembered path when it runs, never a render's copy, so a rename that has already
-    // re-pointed it is not undone.
+    // re-pointed it is not undone. It only ever reads and writes the local profile's own default:
+    // a profile switch changes which value the shared new-chat atom shows before this host
+    // unmounts, and a desktop path must never be "repaired" into an on-device one.
     const repair = () => {
-      const next = repairedLocalStartCwd(runtime, store.get(defaultStartCwdAtom));
+      const next = repairedLocalStartCwd(runtime, store.get(localDefaultStartCwdAtom));
       if (next !== undefined) {
-        store.set(defaultStartCwdAtom, next);
+        store.set(localDefaultStartCwdAtom, next);
       }
     };
     repair();
     const stopRuntime = runtime.subscribe(repair, ['workspaces', 'preferences']);
-    const stopDefault = store.sub(defaultStartCwdAtom, repair);
+    const stopDefault = store.sub(localDefaultStartCwdAtom, repair);
     return () => {
       stopRuntime();
       stopDefault();

@@ -225,6 +225,38 @@ describe('LocalRuntimeHost', () => {
     act(() => mockRuntime().change({ workspaces: [demo], preferredWorkspaceId: null }));
   });
 
+  it('never repairs a desktop default into an on-device path when switching back to a desktop', () => {
+    const store = storeWith(LOCAL_PROFILE_ID);
+    const updateSettings = (patch: Record<string, unknown>) => {
+      const snapshot = store.get(appStateSnapshotAtom);
+      store.set(appStateSnapshotAtom, {
+        ...snapshot,
+        data: { ...snapshot.data, settings: { ...snapshot.data.settings, ...patch } },
+      });
+    };
+    updateSettings({ defaultStartCwd: '/Users/ada/repo' });
+    const tree = render(store);
+    expect(store.get(appStateSnapshotAtom).data.settings.localDefaultStartCwd).toBe(
+      '/On this iPhone/Demo',
+    );
+
+    // The shared new-chat atom switches to the desktop value while the runtime host is mounted.
+    act(() => setActive(store, 'bridge-1'));
+    expect(store.get(defaultStartCwdAtom)).toBe('/Users/ada/repo');
+    expect(store.get(appStateSnapshotAtom).data.settings).toMatchObject({
+      defaultStartCwd: '/Users/ada/repo',
+      localDefaultStartCwd: '/On this iPhone/Demo',
+    });
+
+    // Changing the desktop default afterwards is not touched by any lingering local repair.
+    act(() => store.set(defaultStartCwdAtom, '/Users/ada/other'));
+    act(() =>
+      mockRuntime().change({ workspaces: [{ id: 'ws-one', name: 'Demo', isRepository: true }] }),
+    );
+    expect(store.get(appStateSnapshotAtom).data.settings.defaultStartCwd).toBe('/Users/ada/other');
+    act(() => tree.unmount());
+  });
+
   it('records the first local chat for good, so deleting every chat never restarts setup', () => {
     const store = storeWith(LOCAL_PROFILE_ID);
     const tree = render(store);

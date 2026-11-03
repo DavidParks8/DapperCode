@@ -564,7 +564,12 @@ export const submitGitCheckoutAtom = atom(null, async (get, set): Promise<void> 
   try {
     set(gitCheckoutCloningAtom, true);
     set(gitCheckoutErrorAtom, null);
+    const startedForProfile = get(activeProfileIdAtom);
     const cloned = await api.gitClone({ url, parentPath, directoryName });
+    // A clone can take minutes; its result belongs to the profile that started it.
+    if (get(activeProfileIdAtom) !== startedForProfile) {
+      return;
+    }
     const cloneFailureMessage = formatGitCloneFailureMessage(cloned, directoryName);
     if (cloneFailureMessage) {
       set(gitCheckoutErrorAtom, cloneFailureMessage);

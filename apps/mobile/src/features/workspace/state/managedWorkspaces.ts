@@ -1,6 +1,7 @@
-import { atom } from 'jotai';
+import { atom, type Getter } from 'jotai';
 
 import { defaultStartCwdAtom } from '@shell/state/appState/settings';
+import { activeProfileIdAtom } from '@shell/state/bridge/atoms';
 import { normalizeWorkspacePath } from '../../chat/helpers/helpers';
 import { screenAtom } from '../../chat/state/registry';
 import { workspaceHostClientAtom } from '../api/atoms';
@@ -14,6 +15,15 @@ import { returnToChat } from './workspaceRouteNavigation';
  * rename, and delete. Each mutation reloads the list and keeps the new-chat workspace pointing at
  * a workspace that still exists. Failures surface in the picker as friendly copy.
  */
+/**
+ * True while the profile that started a workspace operation is still active. The new-chat default
+ * belongs to the active profile, so a result that arrives after a profile switch must not land in
+ * the other profile's default.
+ */
+function stillActive(get: Getter, profileId: string | null): boolean {
+  return get(activeProfileIdAtom) === profileId;
+}
+
 export const managedWorkspacesAtom = screenAtom<ManagedWorkspaceSummary[] | null>(null);
 export const managedWorkspacesLoadingAtom = screenAtom(false);
 export const managedWorkspacesErrorAtom = screenAtom<string | null>(null);
@@ -71,10 +81,14 @@ export const selectManagedWorkspaceAtom = atom(
     if (!host) {
       return false;
     }
+    const profileId = get(activeProfileIdAtom);
     try {
       await host.selectWorkspace(path);
     } catch (error) {
       set(managedWorkspacesErrorAtom, describeHostError(error, 'Could not use that workspace.'));
+      return false;
+    }
+    if (!stillActive(get, profileId)) {
       return false;
     }
     set(managedWorkspacesErrorAtom, null);
@@ -90,8 +104,12 @@ export const createManagedWorkspaceAtom = atom(
     if (!host) {
       return false;
     }
+    const profileId = get(activeProfileIdAtom);
     try {
       const created = await host.createWorkspace(name);
+      if (!stillActive(get, profileId)) {
+        return false;
+      }
       set(defaultStartCwdAtom, created.path);
       await set(reloadAfterChangeAtom);
       returnToChat();
@@ -113,9 +131,10 @@ export const renameManagedWorkspaceAtom = atom(
     // Read before renaming: the host may already have repaired the default to another workspace
     // once the old path stopped resolving, but the user's choice is still this workspace.
     const wasDefault = normalizeWorkspacePath(get(defaultStartCwdAtom)) === path;
+    const profileId = get(activeProfileIdAtom);
     try {
       const renamed = await host.renameWorkspace(path, name);
-      if (wasDefault) {
+      if (wasDefault && stillActive(get, profileId)) {
         set(defaultStartCwdAtom, renamed.path);
       }
       await set(reloadAfterChangeAtom);
@@ -134,9 +153,13 @@ export const deleteManagedWorkspaceAtom = atom(
     if (!host) {
       return false;
     }
+    const profileId = get(activeProfileIdAtom);
     try {
       await host.deleteWorkspace(path);
-      if (normalizeWorkspacePath(get(defaultStartCwdAtom)) === path) {
+      if (
+        stillActive(get, profileId) &&
+        normalizeWorkspacePath(get(defaultStartCwdAtom)) === path
+      ) {
         set(defaultStartCwdAtom, null);
       }
       await set(reloadAfterChangeAtom);
