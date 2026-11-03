@@ -1,4 +1,4 @@
-import { router, Stack, useGlobalSearchParams, type Href } from 'expo-router';
+import { router, Stack, useGlobalSearchParams } from 'expo-router';
 jest.mock('react-native-drawer-layout', () => {
   const React = jest.requireActual('react');
   const progress = { value: 0 };
@@ -96,7 +96,8 @@ function render(store: ReturnType<typeof storeWith>, initialUrl: string) {
         'profiles/[profileId]/(drawer)/settings/models/index': () => <Text>Models</Text>,
         'profiles/[profileId]/(drawer)/settings/models/[familyId]': () => <Text>Family</Text>,
         'profiles/[profileId]/(drawer)/settings/github': () => <Text>Git and GitHub</Text>,
-        outside: () => <Text>Outside the profile</Text>,
+        // A real route outside the profile tree, so navigation stays typed without generated routes.
+        onboarding: () => <Text>Outside the profile</Text>,
       },
     },
     { initialUrl, wrapper: Wrapper },
@@ -183,7 +184,7 @@ describe('local profile routing', () => {
     await waitFor(() => {
       expect(screen.getByText('Main on-device new')).toBeTruthy();
     });
-    act(() => router.push('/outside' as Href));
+    act(() => router.push(routes.onboarding));
     expect(screen.getByText('Outside the profile')).toBeTruthy();
     act(() => router.back());
 

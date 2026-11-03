@@ -1,0 +1,33 @@
+diff --git a/index.js b/index.js
+index 4dfca40730089d0b7a8ad9818bc918240ca8cb89..c07a05107088230026bfbcb642a9c37af7b0336f 100644
+--- a/index.js
++++ b/index.js
+@@ -136,7 +136,7 @@ function customDecodeURIComponent(input) {
+ 	return input.replace(multiMatcher, run => decode(run));
+ }
+ 
+-export default function decodeUriComponent(encodedURI) {
++function decodeUriComponent(encodedURI) {
+ 	if (typeof encodedURI !== 'string') {
+ 		throw new TypeError(`Expected \`encodedURI\` to be of type \`string\`, got \`${typeof encodedURI}\``);
+ 	}
+@@ -149,3 +149,7 @@ export default function decodeUriComponent(encodedURI) {
+ 		return customDecodeURIComponent(encodedURI);
+ 	}
+ }
++
++// CommonJS entry so query-string@7 can require() this patched release (GHSA-qr28-fpjm-wq7f).
++module.exports = decodeUriComponent;
++module.exports.default = decodeUriComponent;
+diff --git a/package.json b/package.json
+index 5991062db5af96559ed102a22431f2edf29595a0..d5b6a8d0c3ee715a62d2e6e7533baa0b64d571ef 100644
+--- a/package.json
++++ b/package.json
+@@ -10,7 +10,6 @@
+ 		"email": "sam.verschueren@gmail.com",
+ 		"url": "github.com/SamVerschueren"
+ 	},
+-	"type": "module",
+ 	"exports": {
+ 		"types": "./index.d.ts",
+ 		"default": "./index.js"
