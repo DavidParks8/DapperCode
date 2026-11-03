@@ -65,6 +65,12 @@ import {
   localProfileAvailableAtom,
 } from '@shell/state/bridge/atoms';
 import { localRuntimeAtom } from '@shell/state/local/atoms';
+import { activeChatAtom } from '@shell/state/chat/atoms';
+import { defaultStartCwdAtom } from '@shell/state/appState/settings';
+import {
+  renameManagedWorkspaceAtom,
+  selectManagedWorkspaceAtom,
+} from '../../features/workspace/state/managedWorkspaces';
 import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 import { createTestStore, withAppStore } from '@shell/state/testing';
 import { LocalRuntimeHost } from './LocalRuntimeHost';
@@ -464,6 +470,76 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
       (node) => node.props['testID'] === `drawer-chat-row-${thread!.id}`,
     );
     expect(rows.length).toBeGreaterThan(0);
+    act(() => tree.unmount());
+  });
+
+  it('keeps an open chat, its Git, and the new-chat default on their workspace through renames', async () => {
+    const { tree, root, store, runtime } = await renderShell({
+      workspaces: [
+        { id: 'ws-one', name: 'Demo', isRepository: true },
+        { id: 'ws-two', name: 'Scratch', isRepository: true },
+      ],
+    });
+    const demo = '/On this iPhone/Demo';
+    await act(async () => {
+      await store.set(selectManagedWorkspaceAtom, demo);
+      await flush();
+    });
+    await settle();
+    mockLlama.reply({ content: 'The workspace holds a demo app.' });
+    await submit(root, 'Explain the workspace');
+    expect(transcript(root)).toContain('The workspace holds a demo app.');
+    const [thread] = runtime.threads.list();
+    expect(thread?.workspaceId).toBe('ws-one');
+    expect(store.get(activeChatAtom)?.cwd).toBe(demo);
+
+    // Another workspace cannot be renamed onto this one's name and take over its path.
+    let renamed = true;
+    await act(async () => {
+      renamed = await store.set(renameManagedWorkspaceAtom, {
+        path: '/On this iPhone/Scratch',
+        name: 'demo',
+      });
+      await flush();
+    });
+    await settle();
+    expect(renamed).toBe(false);
+    expect(runtime.workspaces().map((workspace) => workspace.name)).toEqual(['Demo', 'Scratch']);
+    expect(store.get(defaultStartCwdAtom)).toBe(demo);
+    expect(store.get(activeChatAtom)?.cwd).toBe(demo);
+
+    // Renaming the chat's own workspace moves the open chat and the default to its new path, even
+    // when new chats would otherwise fall back elsewhere once the old path stops resolving.
+    const moved = '/On this iPhone/Renamed';
+    await act(async () => {
+      await runtime.selectWorkspace('ws-two');
+      await flush();
+    });
+    await settle();
+    expect(store.get(defaultStartCwdAtom)).toBe(demo);
+    await act(async () => {
+      renamed = await store.set(renameManagedWorkspaceAtom, { path: demo, name: 'Renamed' });
+      await flush();
+    });
+    await settle();
+    expect(renamed).toBe(true);
+    expect(store.get(activeChatAtom)?.cwd).toBe(moved);
+    expect(store.get(defaultStartCwdAtom)).toBe(moved);
+
+    // The chat keeps sending in place, and Git from it reads the same workspace.
+    mockLlama.reply({ content: 'Still here.' });
+    await submit(root, 'Keep going');
+    expect(transcript(root)).toContain('Still here.');
+    expect(hasText(root, 'Start a new chat')).toBe(false);
+    expect(hasText(root, 'no longer on this iPhone')).toBe(false);
+    expect(runtime.threads.list()).toHaveLength(1);
+    const api = store.get(apiClientAtom)!;
+    await act(async () => {
+      await expect(
+        api.gitStatus(store.get(activeChatAtom)?.cwd ?? undefined),
+      ).resolves.toMatchObject({ cwd: moved });
+    });
+    expect(mockNative.calls).toContain('getWorkspaceGitStatus:["ws-one"]');
     act(() => tree.unmount());
   });
 

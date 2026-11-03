@@ -10,7 +10,9 @@ import {
   describeLocalToolMessage,
   localReasoningId,
   localRunId,
+  localThreadPath,
   localThreadSummary,
+  localWorkspacePaths,
   localToolStatus,
   type LocalThreadProjectionContext,
 } from './wire';
@@ -58,6 +60,8 @@ export class LocalEventProjector {
   private readonly lastTurn = new Map<string, string>();
   /** The last loading activity sent for a run that has not started yet. */
   private loading: string | null = null;
+  /** The workspace path last presented per thread, so a rename reaches open chats. */
+  private readonly cwds = new Map<string, string>();
 
   constructor(
     private readonly context: () => LocalThreadProjectionContext,
@@ -75,8 +79,12 @@ export class LocalEventProjector {
     this.runs.clear();
     this.lastTurn.clear();
     this.loading = null;
+    this.cwds.clear();
+    const { workspaces } = this.context();
+    const paths = localWorkspacePaths(workspaces);
     for (const thread of threads) {
       this.seen.set(thread.id, thread);
+      this.cwds.set(thread.id, localThreadPath(thread, workspaces, paths));
       if (thread.status === 'running' && thread.activeTurnId) {
         this.runs.set(thread.id, this.track(thread.id, thread.activeTurnId));
       }
@@ -94,6 +102,7 @@ export class LocalEventProjector {
         this.seen.set(thread.id, thread);
       }
     }
+    this.diffCwds(threads, notifications);
     this.diffLoadingActivity(threads, notifications);
     for (const thread of threads) {
       const run = this.runs.get(thread.id);
@@ -106,10 +115,31 @@ export class LocalEventProjector {
         this.seen.delete(id);
         this.runs.delete(id);
         this.lastTurn.delete(id);
+        this.cwds.delete(id);
         notifications.push({ method: 'thread/deleted', params: { threadId: id } });
       }
     }
     return notifications;
+  }
+
+  /**
+   * A chat's presented path changes when its own workspace is renamed or removed (or an empty chat
+   * moves). Open chats only hold that path, so the new one is pushed to them.
+   */
+  private diffCwds(threads: readonly LocalThread[], out: LocalNotification[]): void {
+    const { workspaces } = this.context();
+    const paths = localWorkspacePaths(workspaces);
+    for (const thread of threads) {
+      const cwd = localThreadPath(thread, workspaces, paths);
+      const previous = this.cwds.get(thread.id);
+      this.cwds.set(thread.id, cwd);
+      if (previous !== undefined && previous !== cwd) {
+        out.push({
+          method: WORKSPACE_HOST_NOTIFICATIONS.threadCwdChanged,
+          params: { threadId: thread.id, cwd },
+        });
+      }
+    }
   }
 
   private track(threadId: string, turnId: string): RunTrack {

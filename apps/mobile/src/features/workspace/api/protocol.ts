@@ -33,6 +33,11 @@ export const WORKSPACE_HOST_METHODS = {
 export const WORKSPACE_HOST_NOTIFICATIONS = {
   /** Params are a `CloneProgressResponse`, sent whenever the host's Git transfer progress moves. */
   cloneProgress: 'workspace/clone/progressChanged',
+  /**
+   * Params are `{ threadId, cwd }`, sent when a chat's presented workspace path changes (its
+   * workspace was renamed or removed), so open chats keep targeting the same workspace.
+   */
+  threadCwdChanged: 'workspace/thread/cwdChanged',
 } as const;
 
 export type WorkspaceHostMethod =

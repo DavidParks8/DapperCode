@@ -19,6 +19,8 @@ jest.mock('./localAgentPresence', () => ({
     defaultWorkspacePath: '/On this iPhone/Demo',
   }),
   sameLocalAgentPresence: () => true,
+  repairedLocalStartCwd: (_runtime: unknown, cwd: string | null) =>
+    cwd ? undefined : '/On this iPhone/Demo',
 }));
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';

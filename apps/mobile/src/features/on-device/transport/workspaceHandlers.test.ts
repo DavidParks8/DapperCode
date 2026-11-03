@@ -283,6 +283,56 @@ describe('LocalBridgeServer workspaces', () => {
     expect(port.workspaceList.map((workspace) => workspace.name)).toEqual(['Demo']);
   });
 
+  it('numbers a new or cloned workspace whose name is taken, so no two share a path', async () => {
+    const { port, server } = setup();
+    await expect(server.request('workspace/create', { name: 'demo' })).resolves.toEqual({
+      path: `${LOCAL_WORKSPACE_ROOT}/demo 2`,
+      name: 'demo 2',
+      isRepository: false,
+    });
+    await expect(
+      server.request('bridge/git/clone', {
+        url: 'https://github.com/acme/demo.git',
+        parentPath: LOCAL_WORKSPACE_ROOT,
+        directoryName: 'Demo',
+      }),
+    ).resolves.toMatchObject({ cwd: `${LOCAL_WORKSPACE_ROOT}/Demo 3` });
+    // The placeholder shown for chats whose workspace was removed is never a workspace's path.
+    await expect(
+      server.request('workspace/create', { name: 'Workspace unavailable' }),
+    ).resolves.toMatchObject({ path: `${LOCAL_WORKSPACE_ROOT}/Workspace unavailable 2` });
+    expect(port.workspaceList.map((workspace) => workspace.name)).toEqual([
+      'Demo',
+      'demo 2',
+      'Demo 3',
+      'Workspace unavailable 2',
+    ]);
+    expect(port.calls).toContain('workspace.clone:Demo 3:https://github.com/acme/demo.git');
+    // Each keeps its own path.
+    const listed = (await server.request('bridge/workspaces/list')) as {
+      workspaces: { path: string }[];
+    };
+    expect(listed.workspaces.map((workspace) => workspace.path)).toEqual([
+      DEMO,
+      `${LOCAL_WORKSPACE_ROOT}/demo 2`,
+      `${LOCAL_WORKSPACE_ROOT}/Demo 3`,
+      `${LOCAL_WORKSPACE_ROOT}/Workspace unavailable 2`,
+    ]);
+  });
+
+  it('refuses to rename a workspace onto another workspace or the unavailable placeholder', async () => {
+    const { port, server } = setup();
+    await server.request('workspace/create', { name: 'Scratch' });
+    for (const name of ['demo', 'Workspace Unavailable']) {
+      const error = await rpcError(
+        server.request('workspace/rename', { cwd: `${LOCAL_WORKSPACE_ROOT}/Scratch`, name }),
+      );
+      expect(error.data).toEqual({ error: 'on_device_workspace_name_taken' });
+      expect(error.message).toMatch(/is already on this iPhone\. Choose another name\.$/u);
+    }
+    expect(port.workspaceList.map((workspace) => workspace.name)).toEqual(['Demo', 'Scratch']);
+  });
+
   it('lists workspaces with Git branch and origin metadata', async () => {
     const { port, server } = setup();
     port.workspaceList = [

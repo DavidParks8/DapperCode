@@ -5,6 +5,7 @@ import type { HostBridgeWsClient } from '@bridge/ws/ws';
 import { parseAgUiEventNotification } from '@bridge/agui/agUi';
 import type { DrawerRunIndicatorMap } from '@shell/navigation/drawerRuntimeIndicators';
 import { EventType } from '@ag-ui/core';
+import { WORKSPACE_HOST_NOTIFICATIONS } from '../../features/workspace/api/protocol';
 
 export const DRAWER_REFRESH_CONNECTED_MS = 10_000;
 export const DRAWER_REFRESH_DISCONNECTED_MS = 5_000;
@@ -72,6 +73,7 @@ export function drawerEventRequiresRefresh(event: RpcNotification): boolean {
     event.method === 'thread/name/updated' ||
     event.method === 'thread/deleted' ||
     event.method === 'thread/status/changed' ||
+    event.method === WORKSPACE_HOST_NOTIFICATIONS.threadCwdChanged ||
     agUiEvent?.type === EventType.RUN_STARTED ||
     agUiEvent?.type === EventType.RUN_FINISHED ||
     agUiEvent?.type === EventType.RUN_ERROR

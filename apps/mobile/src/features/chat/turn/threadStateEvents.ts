@@ -22,6 +22,7 @@ import {
   describeStartedToolEvent,
   extractNotificationThreadId,
 } from '../helpers/helpers';
+import { WORKSPACE_HOST_NOTIFICATIONS } from '../../workspace/api/protocol';
 import type { MainScreenWsEventRouterContext } from './wsEventRouter';
 
 type ThreadStateEventMethod =
@@ -30,7 +31,8 @@ type ThreadStateEventMethod =
   | 'thread/deleted'
   | 'thread/tokenUsage/updated'
   | 'thread/tokenTotals/updated'
-  | 'item/started';
+  | 'item/started'
+  | typeof WORKSPACE_HOST_NOTIFICATIONS.threadCwdChanged;
 
 const THREAD_STATE_RUNNING_ITEM_TYPES = new Set([
   'commandExecution',
@@ -71,6 +73,7 @@ const THREAD_STATE_EVENT_HANDLERS: Record<ThreadStateEventMethod, ThreadStateEve
   'thread/tokenUsage/updated': handleThreadTokenUsageUpdatedEvent,
   'thread/tokenTotals/updated': handleThreadTokenTotalsUpdatedEvent,
   'item/started': handleItemStartedEvent,
+  [WORKSPACE_HOST_NOTIFICATIONS.threadCwdChanged]: handleThreadCwdChangedEvent,
 };
 
 function createThreadStateEventContext(context: MainScreenWsEventRouterContext) {
@@ -140,6 +143,32 @@ function handleThreadNameUpdatedEvent(
   }
 
   context.loadChat(threadId, { preserveRuntimeState: true }).catch(() => {});
+}
+
+/**
+ * A host re-presented a chat's workspace path (its workspace was renamed or removed). The open
+ * chat, and the cached copy Git and reopening read, take the new path so later sends and Git
+ * requests keep targeting the same workspace.
+ */
+function handleThreadCwdChangedEvent(
+  context: ThreadStateEventContext,
+  event: RpcNotification,
+  currentId: string | null,
+): void {
+  const params = toRecord(event.params);
+  const threadId = extractNotificationThreadId(params);
+  const cwd = readString(params?.['cwd']);
+  if (!threadId || !cwd) {
+    return;
+  }
+  const cached = context.api.peekChat(threadId);
+  if (cached && cached.cwd !== cwd) {
+    context.api.rememberChat({ ...cached, cwd });
+  }
+  if (threadId !== currentId) {
+    return;
+  }
+  context.setSelectedChat((prev) => (prev?.id === threadId ? { ...prev, cwd } : prev));
 }
 
 function handleThreadDeletedEvent(

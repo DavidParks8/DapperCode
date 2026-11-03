@@ -339,7 +339,12 @@ export function createFakeOnDeviceNative(llama: FakeLlama, options: FakeNativeOp
       return workspace;
     },
     cloneWorkspace: async (name) => ({ id: 'cloned', name, isRepository: true }),
-    renameWorkspace: async (id, name) => ({ id, name, isRepository: true }),
+    renameWorkspace: async (id, name) => {
+      const current = workspaces.find((entry) => entry.id === id);
+      const renamed = { id, name, isRepository: current?.isRepository ?? true };
+      workspaces = workspaces.map((entry) => (entry.id === id ? renamed : entry));
+      return renamed;
+    },
     deleteWorkspace: async (id) => {
       workspaces = workspaces.filter((entry) => entry.id !== id);
     },
@@ -474,7 +479,10 @@ export function createFakeOnDeviceNative(llama: FakeLlama, options: FakeNativeOp
     removeRuntimeDocument: async (name) => {
       documents.delete(name);
     },
-    getWorkspaceGitStatus: async () => gitStatus(),
+    getWorkspaceGitStatus: async (id) => {
+      record('getWorkspaceGitStatus', id);
+      return gitStatus();
+    },
     getWorkspaceGitDiff: async () => ({
       diff: '',
       truncated: false,
@@ -488,7 +496,10 @@ export function createFakeOnDeviceNative(llama: FakeLlama, options: FakeNativeOp
     }),
     stageWorkspaceGit: async () => undefined,
     unstageWorkspaceGit: async () => undefined,
-    commitWorkspaceGit: async () => 'commit-hash',
+    commitWorkspaceGit: async (id, message) => {
+      record('commitWorkspaceGit', id, message);
+      return 'commit-hash';
+    },
     switchWorkspaceGitBranch: async () => undefined,
     createWorkspaceGitBranch: async () => undefined,
     discardWorkspaceGit: async () => undefined,

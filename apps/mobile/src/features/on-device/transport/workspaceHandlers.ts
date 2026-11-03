@@ -13,7 +13,13 @@ import type { LocalGitStatus, LocalWorkspace, LocalWorkspaceSize } from '../work
 import { LOCAL_RPC_ERROR, LocalRpcError } from './errors';
 import { readParam, type RpcParams } from './params';
 import type { LocalAgentPort } from './port';
-import { LOCAL_WORKSPACE_ROOT, localWorkspacePaths } from './wire';
+import {
+  LOCAL_UNAVAILABLE_WORKSPACE,
+  LOCAL_WORKSPACE_ROOT,
+  localWorkspaceDisplayName,
+  localWorkspaceNameKey,
+  localWorkspacePaths,
+} from './wire';
 
 /**
  * `bridge/git/clone` plus the workspace host extensions this transport answers
@@ -74,6 +80,32 @@ function requireName(params: RpcParams, key: string, message: string): string {
     throw invalid(message);
   }
   return value;
+}
+
+function nameTaken(port: LocalAgentPort, name: string, exceptId: string | null = null): boolean {
+  const key = localWorkspaceNameKey(name);
+  return (
+    key === localWorkspaceNameKey(LOCAL_UNAVAILABLE_WORKSPACE) ||
+    port
+      .workspaces()
+      .some(
+        (workspace) => workspace.id !== exceptId && localWorkspaceNameKey(workspace.name) === key,
+      )
+  );
+}
+
+/**
+ * A name no other workspace uses (case-insensitively), numbering a taken one like Finder does:
+ * `app`, `app 2`, `app 3`. Unique names keep every workspace's presented path its own.
+ */
+async function availableName(port: LocalAgentPort, requested: string): Promise<string> {
+  await port.refreshWorkspaces();
+  const base = requested.trim();
+  let name = base;
+  for (let index = 2; nameTaken(port, name); index += 1) {
+    name = `${base} ${String(index)}`;
+  }
+  return name;
 }
 
 function presentedPath(port: LocalAgentPort, workspace: LocalWorkspace): string {
@@ -180,7 +212,10 @@ export function createLocalWorkspaceHandlers(port: LocalAgentPort, workspace: Re
       if (parent && parent !== LOCAL_WORKSPACE_ROOT) {
         throw invalid('Repositories on this iPhone are cloned into their own workspace.');
       }
-      const name = requireName(params, 'directoryName', 'Enter a workspace name.');
+      const name = await availableName(
+        port,
+        requireName(params, 'directoryName', 'Enter a workspace name.'),
+      );
       const cloned = await port.workspaceAdmin.clone(name, url);
       return {
         code: 0,
@@ -229,12 +264,22 @@ export function createLocalWorkspaceHandlers(port: LocalAgentPort, workspace: Re
       return { ok: true };
     },
     [M.workspaceCreate]: async (params: RpcParams) => {
-      const name = requireName(params, 'name', 'Enter a workspace name.');
+      const name = await availableName(
+        port,
+        requireName(params, 'name', 'Enter a workspace name.'),
+      );
       return managedWorkspace(port, await port.workspaceAdmin.create(name));
     },
     [M.workspaceRename]: async (params: RpcParams) => {
       const { id } = await workspace(params);
       const name = requireName(params, 'name', 'Enter a workspace name.');
+      await port.refreshWorkspaces();
+      if (nameTaken(port, name, id)) {
+        throw invalid(
+          `A workspace named “${localWorkspaceDisplayName(name)}” is already on this iPhone. Choose another name.`,
+          { error: 'on_device_workspace_name_taken' },
+        );
+      }
       return managedWorkspace(port, await port.workspaceAdmin.rename(id, name));
     },
     [M.workspaceDelete]: async (params: RpcParams) => {

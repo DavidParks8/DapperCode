@@ -77,36 +77,77 @@ export function localModelDisplayName(model: LocalModelDefinition): string {
   return `${model.name} · ${model.quantization}`;
 }
 
-/** Workspace id → presented path. Duplicate names get a stable, id-derived suffix. */
+/** The path segment a workspace name is presented as. */
+export function localWorkspaceDisplayName(name: string): string {
+  return name.replace(/\//g, '-').trim() || 'Workspace';
+}
+
+/** Case-insensitive identity of a workspace name; two workspaces never share one. */
+export function localWorkspaceNameKey(name: string): string {
+  return localWorkspaceDisplayName(name).toLowerCase();
+}
+
+function workspaceTag(id: string): string {
+  return id.slice(0, 6).toLowerCase();
+}
+
+/** A trailing ` (<tag>)`, which ties a presented path to its workspace id. */
+const WORKSPACE_TAG = / \(([^()/]{1,6})\)$/u;
+/** Names that could be read as a tagged path of a native (UUID) workspace. */
+const TAG_LIKE_NAME = / \([0-9a-f]{6}\)$/iu;
+
+/**
+ * Workspace id → presented path. A path depends only on the workspace's own name and id, never on
+ * its siblings' order: a name that more than one workspace shares (or that could be mistaken for
+ * a tagged path or the unavailable placeholder) is presented with its id tag, ` (<id6>)`, for
+ * every member, so creating, renaming, or deleting another workspace cannot hand its path over.
+ */
 export function localWorkspacePaths(workspaces: readonly LocalWorkspace[]): Map<string, string> {
+  const counts = new Map<string, number>();
+  for (const workspace of workspaces) {
+    const key = localWorkspaceNameKey(workspace.name);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
   const paths = new Map<string, string>();
-  const used = new Set<string>();
-  for (const workspace of [...workspaces].sort((a, b) => a.id.localeCompare(b.id))) {
-    const name = workspace.name.replace(/\//g, '-').trim() || 'Workspace';
-    let path = `${LOCAL_WORKSPACE_ROOT}/${name}`;
-    if (used.has(path)) {
-      path = `${path} (${workspace.id.slice(0, 6).toLowerCase()})`;
-    }
-    used.add(path);
-    paths.set(workspace.id, path);
+  for (const workspace of workspaces) {
+    const name = localWorkspaceDisplayName(workspace.name);
+    const tagged =
+      (counts.get(localWorkspaceNameKey(workspace.name)) ?? 0) > 1 ||
+      name === LOCAL_UNAVAILABLE_WORKSPACE ||
+      TAG_LIKE_NAME.test(name);
+    paths.set(
+      workspace.id,
+      `${LOCAL_WORKSPACE_ROOT}/${tagged ? `${name} (${workspaceTag(workspace.id)})` : name}`,
+    );
   }
   return paths;
 }
 
+/**
+ * The workspace a presented path was issued for, or null when it cannot be told unambiguously.
+ * A current path resolves exactly; a tagged path resolves by its id tag alone, so it survives its
+ * workspace being renamed and other workspaces joining or leaving its name. A path is never
+ * guessed onto a different workspace.
+ */
 export function localWorkspaceIdForPath(
   workspaces: readonly LocalWorkspace[],
   path: string | null | undefined,
 ): string | null {
   const normalized = path?.trim().replace(/\/+$/u, '');
-  if (!normalized) {
+  if (!normalized?.startsWith(`${LOCAL_WORKSPACE_ROOT}/`)) {
     return null;
   }
-  for (const [id, candidate] of localWorkspacePaths(workspaces)) {
-    if (candidate === normalized) {
-      return id;
-    }
+  const exact = [...localWorkspacePaths(workspaces)].filter(([, candidate]) => {
+    return candidate === normalized;
+  });
+  if (exact.length > 0) {
+    return exact.length === 1 ? (exact[0]?.[0] ?? null) : null;
   }
-  return null;
+  const tag = WORKSPACE_TAG.exec(normalized.slice(LOCAL_WORKSPACE_ROOT.length + 1))?.[1];
+  const tagged = tag
+    ? workspaces.filter((workspace) => workspaceTag(workspace.id) === tag.toLowerCase())
+    : [];
+  return tagged.length === 1 ? (tagged[0]?.id ?? null) : null;
 }
 
 export function localRunId(threadId: string, turnId: string): string {
@@ -305,11 +346,9 @@ export interface LocalThreadProjectionContext {
 export function localThreadPath(
   thread: Pick<LocalThread, 'workspaceId'>,
   workspaces: readonly LocalWorkspace[],
+  paths: ReadonlyMap<string, string> = localWorkspacePaths(workspaces),
 ): string {
-  return (
-    localWorkspacePaths(workspaces).get(thread.workspaceId) ??
-    `${LOCAL_WORKSPACE_ROOT}/${LOCAL_UNAVAILABLE_WORKSPACE}`
-  );
+  return paths.get(thread.workspaceId) ?? `${LOCAL_WORKSPACE_ROOT}/${LOCAL_UNAVAILABLE_WORKSPACE}`;
 }
 
 /** Summary row used by `thread/list` and summary reads. */

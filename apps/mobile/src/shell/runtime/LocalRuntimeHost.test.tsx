@@ -8,10 +8,14 @@ jest.mock('../../features/on-device/runtime/OnDeviceProvider', () => {
     legacy: new Map<string, string>(),
     issues: [] as { id: string; message: string }[],
     threads: [] as { messages: unknown[] }[],
+    preferredWorkspaceId: null as string | null,
   };
   const runtime = {
     id: 'runtime',
-    preferences: () => ({ modelId: 'qwen3-1.7b-q4-k-m', workspaceId: null }),
+    preferences: () => ({
+      modelId: 'qwen3-1.7b-q4-k-m',
+      workspaceId: state.preferredWorkspaceId,
+    }),
     threads: { list: () => state.threads },
     downloads: {
       snapshot: () => ({ phase: state.downloaded ? 'ready' : 'idle', bytesWritten: 0 }),
@@ -78,6 +82,10 @@ import {
 } from '@shell/state/local/atoms';
 import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 import { createTestStore, withAppStore } from '@shell/state/testing';
+import {
+  localWorkspaceIdForPath,
+  localWorkspacePaths,
+} from '../../features/on-device/transport/wire';
 import { importLegacyLocalDrafts } from './localDraftImport';
 import { LocalRuntimeHost } from './LocalRuntimeHost';
 
@@ -177,6 +185,44 @@ describe('LocalRuntimeHost', () => {
     expect(store.get(localAgentPresenceAtom)).toBeNull();
     act(() => mockRuntime.change({ downloaded: true }));
     act(() => tree.unmount());
+  });
+
+  it('keeps the remembered workspace on the one it named, and repairs it once that one is gone', () => {
+    const a = { id: '3C1B0000-0000-4000-8000-000000000001', name: 'app', isRepository: true };
+    const b = { id: '8F2A0000-0000-4000-8000-000000000002', name: 'app', isRepository: true };
+    const other = { id: 'C0DE0000-0000-4000-8000-000000000003', name: 'other', isRepository: true };
+    const demo = { id: 'ws-one', name: 'Demo', isRepository: true };
+    act(() => mockRuntime().change({ workspaces: [a, b, other] }));
+    const store = storeWith(LOCAL_PROFILE_ID);
+    const chosen = localWorkspacePaths([a, b, other]).get(b.id)!;
+    store.set(defaultStartCwdAtom, chosen);
+    const tree = render(store);
+    const resolved = (workspaces: (typeof a)[]) =>
+      localWorkspaceIdForPath(workspaces, store.get(defaultStartCwdAtom));
+
+    // Deleting B's namesake leaves the remembered path naming B, as thread/start will read it.
+    act(() => mockRuntime().change({ workspaces: [b, other] }));
+    expect(resolved([b, other])).toBe(b.id);
+    expect(store.get(localAgentPresenceAtom)?.readiness).toBeNull();
+
+    // Deleting B itself moves the default to the workspace new chats fall back to.
+    act(() => mockRuntime().change({ workspaces: [other], preferredWorkspaceId: other.id }));
+    expect(store.get(defaultStartCwdAtom)).toBe('/On this iPhone/other');
+    expect(store.get(localAgentPresenceAtom)).toMatchObject({
+      readiness: null,
+      defaultWorkspacePath: '/On this iPhone/other',
+    });
+
+    // With nothing to fall back to, it is cleared and the drawer asks for a workspace, exactly
+    // when thread/start would refuse to guess one.
+    act(() => mockRuntime().change({ workspaces: [a, b], preferredWorkspaceId: other.id }));
+    expect(store.get(defaultStartCwdAtom)).toBeNull();
+    expect(store.get(localAgentPresenceAtom)?.readiness).toEqual({
+      reason: 'Choose or clone a workspace for the agent to work in.',
+      action: 'choose-workspace',
+    });
+    act(() => tree.unmount());
+    act(() => mockRuntime().change({ workspaces: [demo], preferredWorkspaceId: null }));
   });
 
   it('records the first local chat for good, so deleting every chat never restarts setup', () => {

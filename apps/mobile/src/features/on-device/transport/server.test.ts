@@ -16,7 +16,13 @@ import {
   LOCAL_TURN_RETRY_METHOD,
 } from './server';
 import { FakeAgentPort } from './testing';
-import { describeLocalTool, LOCAL_AGENT_ID, LOCAL_WORKSPACE_ROOT } from './wire';
+import {
+  describeLocalTool,
+  LOCAL_AGENT_ID,
+  LOCAL_UNAVAILABLE_WORKSPACE,
+  LOCAL_WORKSPACE_ROOT,
+  localWorkspacePaths,
+} from './wire';
 
 const DEMO = `${LOCAL_WORKSPACE_ROOT}/Demo`;
 
@@ -604,17 +610,25 @@ describe('LocalBridgeServer', () => {
       { id: 'ws-one', name: 'Demo', isRepository: true },
       { id: 'ws-two', name: 'Demo', isRepository: true },
     ];
-    const threadId = await createChat(server);
     const workspaces = (await server.request('bridge/workspaces/list')) as {
       workspaces: { path: string }[];
     };
-    const other = workspaces.workspaces[1]!.path;
-    expect(other).toBe(`${DEMO} (ws-two)`);
+    // Every workspace sharing a name carries its own id tag, never "the first one gets it bare".
+    expect(workspaces.workspaces.map((workspace) => workspace.path)).toEqual([
+      `${DEMO} (ws-one)`,
+      `${DEMO} (ws-two)`,
+    ]);
+    const [first, other] = workspaces.workspaces.map((workspace) => workspace.path);
+    const { thread } = (await server.request('thread/start', { cwd: first })) as {
+      thread: { id: string };
+    };
+    const threadId = thread.id;
+    expect(port.thread(threadId)?.workspaceId).toBe('ws-one');
     await server.request('thread/resume', { threadId, cwd: other });
     expect(port.thread(threadId)?.workspaceId).toBe('ws-two');
     await server.request('bridge/thread/queue/send', { threadId, content: 'Hi' });
     port.settle(threadId, 'complete');
-    await expect(server.request('thread/resume', { threadId, cwd: DEMO })).rejects.toThrow(
+    await expect(server.request('thread/resume', { threadId, cwd: first })).rejects.toThrow(
       'Start a new chat',
     );
   });
@@ -693,5 +707,199 @@ describe('LocalBridgeServer', () => {
     server.stop();
     await port.createThread('ws-one', 'qwen3-1.7b-q4-k-m');
     expect(notifications).toEqual([]);
+  });
+});
+
+describe('LocalBridgeServer workspace paths', () => {
+  const X = '8F2A0000-0000-4000-8000-000000000001';
+  const Y = '3C1B0000-0000-4000-8000-000000000002';
+  const path = (segment: string) => `${LOCAL_WORKSPACE_ROOT}/${segment}`;
+
+  function workspacesSetup(workspaces: { id: string; name: string }[]) {
+    const context = setup();
+    context.port.workspaceList = workspaces.map((entry) => ({ ...entry, isRepository: true }));
+    return context;
+  }
+
+  async function chatWithMessage(server: LocalBridgeServer, port: FakeAgentPort, cwd: string) {
+    const { thread } = (await server.request('thread/start', { cwd })) as {
+      thread: { id: string };
+    };
+    await server.request('bridge/thread/queue/send', { threadId: thread.id, content: 'Hi' });
+    port.settle(thread.id, 'complete');
+    return thread.id;
+  }
+
+  async function startIn(server: LocalBridgeServer, port: FakeAgentPort, cwd: string) {
+    const { thread } = (await server.request('thread/start', { cwd })) as {
+      thread: { id: string };
+    };
+    return port.thread(thread.id)?.workspaceId;
+  }
+
+  function cwdChanges(notifications: LocalNotification[]) {
+    return notifications
+      .filter((notification) => notification.method === 'workspace/thread/cwdChanged')
+      .map((notification) => notification.params);
+  }
+
+  it('never hands a workspace path to another workspace renamed onto its name', async () => {
+    const { server, port, notifications } = workspacesSetup([
+      { id: X, name: 'app' },
+      { id: Y, name: 'scratch' },
+    ]);
+    await server.request('workspace/select', { cwd: path('app') });
+    const threadId = await chatWithMessage(server, port, path('app'));
+    expect(port.thread(threadId)?.workspaceId).toBe(X);
+
+    // Renaming the other workspace onto "app" (in any case) is refused instead of taking X's path.
+    for (const name of ['app', 'APP ']) {
+      const error = await rpcError(
+        server.request('workspace/rename', { cwd: path('scratch'), name }),
+      );
+      expect(error.code).toBe(-32602);
+      expect(error.data.error).toBe('on_device_workspace_name_taken');
+      expect(error.message).toBe(
+        `A workspace named “${name.trim()}” is already on this iPhone. Choose another name.`,
+      );
+    }
+    expect(port.workspaceList.map((workspace) => workspace.name)).toEqual(['app', 'scratch']);
+    expect(port.calls.some((call) => call.startsWith('workspace.rename'))).toBe(false);
+    expect(cwdChanges(notifications)).toEqual([]);
+
+    // The remembered default, new chats, the open chat, and its Git screen all still reach X.
+    expect(await startIn(server, port, path('app'))).toBe(X);
+    await expect(
+      server.request('thread/resume', { threadId, cwd: path('app') }),
+    ).resolves.toMatchObject({ thread: { id: threadId } });
+    expect(await server.request('bridge/git/status', { cwd: path('app') })).toMatchObject({
+      cwd: path('app'),
+    });
+    await server.request('bridge/git/commit', { cwd: path('app'), message: 'Update' });
+    await server.request('workspace/git/discard', {
+      cwd: path('app'),
+      path: null,
+      includeUntracked: true,
+    });
+    await server.request('bridge/git/push', { cwd: path('app') });
+    expect(port.calls.filter((call) => call.startsWith('git.'))).toEqual([
+      `git.commit:["${X}","Update"]`,
+      `git.discard:["${X}",null,true]`,
+      `git.push:["${X}"]`,
+    ]);
+
+    // Renaming a workspace to its own name in another case is not a clash.
+    await expect(
+      server.request('workspace/rename', { cwd: path('scratch'), name: 'Scratch' }),
+    ).resolves.toMatchObject({ path: path('Scratch'), name: 'Scratch' });
+  });
+
+  it('presents shared names with every member tagged and refuses to guess between them', async () => {
+    const { server, port, notifications } = workspacesSetup([
+      { id: X, name: 'app' },
+      { id: Y, name: 'scratch' },
+    ]);
+    const threadId = await chatWithMessage(server, port, path('app'));
+
+    // Names an older build let two workspaces share: neither keeps the bare path.
+    port.setWorkspaces([
+      { id: X, name: 'app', isRepository: true },
+      { id: Y, name: 'App', isRepository: true },
+    ]);
+    const listed = (await server.request('bridge/workspaces/list')) as {
+      workspaces: { path: string }[];
+    };
+    expect(listed.workspaces.map((workspace) => workspace.path)).toEqual([
+      path('app (8f2a00)'),
+      path('App (3c1b00)'),
+    ]);
+    expect(cwdChanges(notifications)).toEqual([{ threadId, cwd: path('app (8f2a00)') }]);
+
+    // The old bare path is ambiguous now, so it fails clearly instead of picking either one.
+    for (const request of [
+      server.request('thread/start', { cwd: path('app') }),
+      server.request('bridge/git/commit', { cwd: path('app'), message: 'Update' }),
+      server.request('thread/resume', { threadId, cwd: path('app') }),
+    ]) {
+      const error = await rpcError(request);
+      expect(error.data.error).toBe('on_device_workspace_required');
+    }
+    expect(port.calls.some((call) => call.startsWith('git.'))).toBe(false);
+
+    // Each tagged path reaches its own workspace, and the open chat works at its pushed path.
+    await server.request('bridge/git/commit', { cwd: path('app (8f2a00)'), message: 'X' });
+    await server.request('bridge/git/commit', { cwd: path('App (3c1b00)'), message: 'Y' });
+    expect(port.calls.filter((call) => call.startsWith('git.'))).toEqual([
+      `git.commit:["${X}","X"]`,
+      `git.commit:["${Y}","Y"]`,
+    ]);
+    await expect(
+      server.request('thread/resume', { threadId, cwd: path('app (8f2a00)') }),
+    ).resolves.toMatchObject({ thread: { id: threadId } });
+  });
+
+  it('keeps a chosen duplicate-named workspace reachable after its namesake is deleted', async () => {
+    const { server, port, notifications } = workspacesSetup([
+      { id: Y, name: 'app' },
+      { id: X, name: 'app' },
+    ]);
+    const paths = localWorkspacePaths(port.workspaces());
+    const a = paths.get(Y)!;
+    const b = paths.get(X)!;
+    await server.request('workspace/select', { cwd: b });
+    const threadId = await chatWithMessage(server, port, b);
+    expect(port.thread(threadId)?.workspaceId).toBe(X);
+
+    await server.request('workspace/delete', { cwd: a });
+    expect(port.workspaceList.map((workspace) => workspace.id)).toEqual([X]);
+
+    // B's remembered path still names B for new chats, the open chat, and Git.
+    expect(await startIn(server, port, b)).toBe(X);
+    await expect(server.request('thread/resume', { threadId, cwd: b })).resolves.toMatchObject({
+      thread: { id: threadId },
+    });
+    await server.request('bridge/git/commit', { cwd: b, message: 'Update' });
+    expect(port.calls).toContain(`git.commit:["${X}","Update"]`);
+    // Open chats are told B's simpler path now that its name is unique again.
+    expect(cwdChanges(notifications)).toEqual([{ threadId, cwd: path('app') }]);
+  });
+
+  it('pushes a renamed workspace path to its open chats, which keep reaching it', async () => {
+    const { server, port, notifications } = workspacesSetup([
+      { id: X, name: 'app' },
+      { id: Y, name: 'scratch' },
+    ]);
+    const threadId = await chatWithMessage(server, port, path('app'));
+    const other = await chatWithMessage(server, port, path('scratch'));
+
+    await expect(
+      server.request('workspace/rename', { cwd: path('app'), name: 'web' }),
+    ).resolves.toMatchObject({ path: path('web') });
+    expect(cwdChanges(notifications)).toEqual([{ threadId, cwd: path('web') }]);
+    const summary = (await server.request('thread/read', { threadId, includeTurns: false })) as {
+      thread: { cwd: string };
+    };
+    expect(summary.thread.cwd).toBe(path('web'));
+
+    await expect(
+      server.request('thread/resume', { threadId, cwd: path('web') }),
+    ).resolves.toMatchObject({ thread: { id: threadId } });
+    await server.request('bridge/git/commit', { cwd: path('web'), message: 'Update' });
+    expect(port.calls).toContain(`git.commit:["${X}","Update"]`);
+
+    // A new workspace may take the freed name; it never reaches X's chat or Git.
+    await server.request('workspace/create', { name: 'app' });
+    const created = port.workspaceList.find((workspace) => workspace.name === 'app')!;
+    expect(await startIn(server, port, path('app'))).toBe(created.id);
+    await server.request('bridge/git/commit', { cwd: path('web'), message: 'Again' });
+    expect(port.calls).toContain(`git.commit:["${X}","Again"]`);
+    expect(cwdChanges(notifications)).toEqual([{ threadId, cwd: path('web') }]);
+
+    // Deleting a chat's workspace tells it, so it stops targeting any workspace.
+    await server.request('workspace/delete', { cwd: path('scratch') });
+    expect(cwdChanges(notifications).at(-1)).toEqual({
+      threadId: other,
+      cwd: path(LOCAL_UNAVAILABLE_WORKSPACE),
+    });
   });
 });

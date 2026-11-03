@@ -110,9 +110,12 @@ export const renameManagedWorkspaceAtom = atom(
     if (!host) {
       return false;
     }
+    // Read before renaming: the host may already have repaired the default to another workspace
+    // once the old path stopped resolving, but the user's choice is still this workspace.
+    const wasDefault = normalizeWorkspacePath(get(defaultStartCwdAtom)) === path;
     try {
       const renamed = await host.renameWorkspace(path, name);
-      if (normalizeWorkspacePath(get(defaultStartCwdAtom)) === path) {
+      if (wasDefault) {
         set(defaultStartCwdAtom, renamed.path);
       }
       await set(reloadAfterChangeAtom);

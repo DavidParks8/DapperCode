@@ -354,8 +354,26 @@ including Deny. Only one local chat runs at a time; there is no queue or steerin
 turn id once the run has started. A failed thread's snapshot lists its last turn as `failed` with
 the runtime's message, so a reopened chat shows the failure.
 
-Local workspaces are presented as `/On this iPhone/<name>` paths (duplicate names gain an id
-suffix). A chat's model is an ACP config option (`id: 'model'`), so the existing model sheet changes
+Local workspaces are presented as `/On this iPhone/<name>` paths (`transport/wire.ts`). The shell
+stores only these strings (the new-chat default, each chat's `cwd`, the Git screen), so a path
+depends only on its own workspace and is never re-resolved onto another one:
+
+- Names are unique case-insensitively. `workspace/create` and `bridge/git/clone` number a taken
+  name (`app 2`, `app 3`); `workspace/rename` onto another workspace's name fails with
+  `on_device_workspace_name_taken`. `Workspace unavailable` (the path of chats whose workspace was
+  removed) is reserved.
+- Names that older builds let workspaces share are presented as `<name> (<id6>)` for every member,
+  never "first one bare". A tagged path resolves by its id tag alone, so it keeps working after a
+  rename or once the name is unique again; a bare path resolves only while exactly one workspace
+  has that name. Anything else fails with `on_device_workspace_required` instead of guessing.
+- The transport also follows the `workspaces` slice: when a chat's presented path changes (its
+  workspace was renamed or removed) it sends `workspace/thread/cwdChanged` (`{ threadId, cwd }`),
+  which updates the open chat, the cached chat, and the drawer.
+- `LocalPresencePublisher` repairs `localDefaultStartCwd` whenever workspaces or preferences change:
+  a remembered path that no longer resolves becomes the workspace a new chat would fall back to,
+  or is cleared, so the drawer's readiness and `thread/start` always agree.
+
+A chat's model is an ACP config option (`id: 'model'`), so the existing model sheet changes
 it through `thread/config/set`, which also makes it the default for new chats without loading it. `thread/create` falls back to the runtime's remembered workspace and
 model when the composer sends none or a desktop path.
 

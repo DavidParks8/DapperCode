@@ -6,6 +6,7 @@ import {
 } from '../../features/on-device/runtime/status';
 import type { OnDeviceRuntimeSlice } from '../../features/on-device/runtime/types';
 import {
+  LOCAL_WORKSPACE_ROOT,
   localWorkspaceIdForPath,
   localWorkspacePaths,
 } from '../../features/on-device/transport/wire';
@@ -22,9 +23,15 @@ export const LOCAL_PRESENCE_SLICES: readonly OnDeviceRuntimeSlice[] = [
   'issues',
 ];
 
+/** Whether a path is one of this iPhone's presented workspace paths (or a stale one). */
+function isLocalWorkspacePath(cwd: string | null): cwd is string {
+  return cwd?.trim().startsWith(LOCAL_WORKSPACE_ROOT) === true;
+}
+
 /**
  * The model and workspace a new local chat would use, mirroring `LocalBridgeServer`'s fallbacks
- * (requested path, remembered choice, most recent chat, the only workspace).
+ * (requested path, remembered choice, most recent chat, the only workspace). Like the server, a
+ * local path that no longer resolves has no workspace rather than falling back to another one.
  */
 function newChatDefaults(runtime: OnDeviceRuntime, cwd: string | null) {
   const preferences = runtime.preferences();
@@ -43,12 +50,29 @@ function newChatDefaults(runtime: OnDeviceRuntime, cwd: string | null) {
   const workspaces = runtime.workspaces();
   const exists = (id: string | null | undefined) =>
     id && workspaces.some((workspace) => workspace.id === id) ? id : null;
-  const workspaceId =
-    localWorkspaceIdForPath(workspaces, cwd) ??
-    exists(preferences.workspaceId) ??
-    exists(recent?.workspaceId) ??
-    (workspaces.length === 1 ? (workspaces[0]?.id ?? null) : null);
+  const workspaceId = isLocalWorkspacePath(cwd)
+    ? localWorkspaceIdForPath(workspaces, cwd)
+    : (exists(preferences.workspaceId) ??
+      exists(recent?.workspaceId) ??
+      (workspaces.length === 1 ? (workspaces[0]?.id ?? null) : null));
   return { modelId, workspaceId, workspaces };
+}
+
+/**
+ * The new-chat workspace to remember instead of `cwd`, or `undefined` to keep it. A remembered
+ * path that no longer names a workspace (it was deleted, or became ambiguous) is replaced with the
+ * workspace a new chat would fall back to, or cleared, so the drawer's readiness and `thread/start`
+ * always agree.
+ */
+export function repairedLocalStartCwd(
+  runtime: OnDeviceRuntime,
+  cwd: string | null,
+): string | null | undefined {
+  if (cwd && localWorkspaceIdForPath(runtime.workspaces(), cwd)) {
+    return undefined;
+  }
+  const next = describeLocalAgentPresence(runtime, null).defaultWorkspacePath;
+  return next === cwd ? undefined : next;
 }
 
 /**

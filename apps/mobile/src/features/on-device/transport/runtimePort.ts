@@ -6,10 +6,16 @@ import type { LocalAgentPort, LocalModelChoice } from './port';
 
 /**
  * The transport projects threads, the run (including approvals), and the resident model (load
- * progress shown as run activity). Download progress and other slices are read on demand, so they
- * never wake the event projector.
+ * progress shown as run activity), plus workspaces so a rename or removal re-presents the paths of
+ * the chats in it. Download progress and other slices are read on demand, so they never wake the
+ * event projector.
  */
-const TRANSPORT_SLICES: readonly OnDeviceRuntimeSlice[] = ['threads', 'loop', 'models'];
+const TRANSPORT_SLICES: readonly OnDeviceRuntimeSlice[] = [
+  'threads',
+  'loop',
+  'models',
+  'workspaces',
+];
 
 function availableModels(runtime: OnDeviceRuntime) {
   return LOCAL_MODEL_CATALOG.filter(

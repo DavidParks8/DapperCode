@@ -147,7 +147,7 @@ export class FakeAgentPort implements LocalAgentPort {
     create: async (name) => {
       this.calls.push(`workspace.create:${name}`);
       const workspace = { id: `ws-${String(++this.counter)}`, name, isRepository: false };
-      this.workspaceList = [...this.workspaceList, workspace];
+      this.setWorkspaces([...this.workspaceList, workspace]);
       return workspace;
     },
     select: async (id) => {
@@ -156,8 +156,8 @@ export class FakeAgentPort implements LocalAgentPort {
     },
     rename: async (id, name) => {
       this.calls.push(`workspace.rename:${id}:${name}`);
-      this.workspaceList = this.workspaceList.map((entry) =>
-        entry.id === id ? { ...entry, name } : entry,
+      this.setWorkspaces(
+        this.workspaceList.map((entry) => (entry.id === id ? { ...entry, name } : entry)),
       );
       return (
         this.workspaceList.find((entry) => entry.id === id) ?? { id, name, isRepository: false }
@@ -165,12 +165,12 @@ export class FakeAgentPort implements LocalAgentPort {
     },
     delete: async (id) => {
       this.calls.push(`workspace.delete:${id}`);
-      this.workspaceList = this.workspaceList.filter((entry) => entry.id !== id);
+      this.setWorkspaces(this.workspaceList.filter((entry) => entry.id !== id));
     },
     clone: async (name, url) => {
       this.calls.push(`workspace.clone:${name}:${url}`);
       const workspace = { id: `ws-${String(++this.counter)}`, name, isRepository: true };
-      this.workspaceList = [...this.workspaceList, workspace];
+      this.setWorkspaces([...this.workspaceList, workspace]);
       return workspace;
     },
     cloneProgress: () => ({ active: false, cancelled: false, completed: 0, total: 0 }),
@@ -578,6 +578,12 @@ export class FakeAgentPort implements LocalAgentPort {
     for (const listener of [...this.listeners]) {
       listener();
     }
+  }
+
+  /** Replaces the workspaces and notifies, as the runtime does after refreshing them. */
+  setWorkspaces(workspaces: LocalWorkspace[]): void {
+    this.workspaceList = workspaces;
+    this.emit();
   }
 
   /** Delivers a native transfer progress event, as the Expo module would. */

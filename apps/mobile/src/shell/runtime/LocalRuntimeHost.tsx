@@ -1,4 +1,4 @@
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { usePathname } from 'expo-router';
 import { useEffect } from 'react';
 import { AccessibilityInfo, StyleSheet, View } from 'react-native';
@@ -19,6 +19,7 @@ import {
 import {
   describeLocalAgentPresence,
   LOCAL_PRESENCE_SLICES,
+  repairedLocalStartCwd,
   sameLocalAgentPresence,
 } from './localAgentPresence';
 import { useRecordLocalSetupCompletion } from '@shell/profiles/localSetup';
@@ -131,11 +132,13 @@ function LocalIssueAnnouncer() {
 
 /**
  * Publishes the local agent's status and new-chat readiness for the drawer and the empty chat, and
- * seeds the new-chat workspace with the one the agent would use so the picker shows it.
+ * seeds the new-chat workspace with the one the agent would use so the picker shows it. Whenever
+ * the workspaces change, a remembered workspace that no longer exists is repaired the same way.
  */
 function LocalPresencePublisher() {
   const runtime = useOnDeviceRuntime();
-  const [startCwd, setStartCwd] = useAtom(defaultStartCwdAtom);
+  const store = useStore();
+  const startCwd = useAtomValue(defaultStartCwdAtom);
   const setPresence = useSetAtom(localAgentPresenceAtom);
   useEffect(() => {
     let current: ReturnType<typeof describeLocalAgentPresence> | null = null;
@@ -154,17 +157,21 @@ function LocalPresencePublisher() {
   }, [runtime, setPresence, startCwd]);
   useEffect(() => () => setPresence(null), [setPresence]);
   useEffect(() => {
-    if (startCwd) {
-      return;
-    }
-    const seed = () => {
-      const path = describeLocalAgentPresence(runtime, null).defaultWorkspacePath;
-      if (path) {
-        setStartCwd(path);
+    // Reads the remembered path when it runs, never a render's copy, so a rename that has already
+    // re-pointed it is not undone.
+    const repair = () => {
+      const next = repairedLocalStartCwd(runtime, store.get(defaultStartCwdAtom));
+      if (next !== undefined) {
+        store.set(defaultStartCwdAtom, next);
       }
     };
-    seed();
-    return runtime.subscribe(seed, ['workspaces', 'preferences']);
-  }, [runtime, setStartCwd, startCwd]);
+    repair();
+    const stopRuntime = runtime.subscribe(repair, ['workspaces', 'preferences']);
+    const stopDefault = store.sub(defaultStartCwdAtom, repair);
+    return () => {
+      stopRuntime();
+      stopDefault();
+    };
+  }, [runtime, store]);
   return null;
 }

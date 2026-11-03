@@ -473,11 +473,16 @@ describe('runtime agent port workspace administration and files', () => {
     await harness.port.workspaceAdmin.select(WORKSPACE);
     expect(harness.port.defaults().workspaceId).toBe(WORKSPACE);
 
+    // The created workspace has no Git yet; renaming keeps that and refreshes the list.
     await expect(harness.port.workspaceAdmin.rename('ws-2', 'Renamed')).resolves.toEqual({
       id: 'ws-2',
       name: 'Renamed',
-      isRepository: true,
+      isRepository: false,
     });
+    expect(harness.port.workspaces().map((workspace) => workspace.name)).toEqual([
+      'Demo',
+      'Renamed',
+    ]);
 
     await harness.port.workspaceAdmin.delete(WORKSPACE);
     expect(harness.port.workspaces().map((workspace) => workspace.id)).toEqual(['ws-2']);
