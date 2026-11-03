@@ -1,5 +1,5 @@
 import { isRecord } from '@shared/records';
-import { quarantineDocument } from './quarantine';
+import { quarantineContents, quarantineDocument } from './quarantine';
 import { threadDocument } from './threadCodec';
 import type { LocalDocumentPort } from './threads';
 
@@ -97,10 +97,12 @@ export class LegacyDraftReader {
     }
     const name = draftDocument(threadId);
     if (outcome === 'superseded') {
-      const contents = this.documents.has(threadId)
-        ? undefined
-        : JSON.stringify({ version: 1, text });
-      if (!(await quarantineDocument(this.storage, name, contents))) {
+      // A draft loaded from its document is moved aside; an inline legacy draft has no document
+      // of its own, so only a copy of its text is written and nothing stored is removed.
+      const setAside = this.documents.has(threadId)
+        ? await quarantineDocument(this.storage, name)
+        : await quarantineContents(this.storage, name, JSON.stringify({ version: 1, text }));
+      if (!setAside) {
         throw new Error('An older local draft could not be set aside.');
       }
     } else if (this.documents.has(threadId)) {
@@ -160,7 +162,13 @@ export class LegacyDraftReader {
       }
       return 'loaded';
     } catch {
-      return (await quarantineDocument(this.storage, name, raw)) ? 'setAside' : 'leftInPlace';
+      if (await quarantineDocument(this.storage, name, raw)) {
+        return 'setAside';
+      }
+      // The damaged document is still in place and may be newer than any inline copy, so the
+      // inline copy is neither imported nor settled until the document can be set aside.
+      unreadable.add(threadId);
+      return 'leftInPlace';
     }
   }
 }

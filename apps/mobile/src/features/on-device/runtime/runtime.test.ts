@@ -1054,6 +1054,46 @@ describe('legacy inline drafts are kept until the composer confirms them', () =>
     expect(storedDrafts(documents)).toEqual({});
     await h.runtime.dispose();
   });
+
+  test('a damaged draft document that cannot be set aside is never deleted to settle an inline copy', async () => {
+    const { documents, id } = await legacyDocuments();
+    const damaged = '{"version":1,"text":';
+    documents.set(draftDocument(id), damaged);
+    const h = harness(documents);
+    const write = h.native.writeRuntimeDocument.getMockImplementation();
+    h.native.writeRuntimeDocument.mockImplementation(async (name: string, value: string) => {
+      if (name.startsWith('quarantine-') && value === damaged) {
+        throw new Error('Disk full');
+      }
+      await write?.(name, value);
+    });
+    await h.runtime.initialize();
+    // The damaged document may be newer than the inline copy, so neither is offered or settled.
+    expect(h.runtime.legacyDrafts().size).toBe(0);
+    await h.runtime.settleLegacyDrafts(new Map([[id, 'superseded']]));
+    expect(documents.get(draftDocument(id))).toBe(damaged);
+    expect(storedDrafts(documents)).toEqual({ [id]: 'legacy draft' });
+    await h.runtime.dispose();
+
+    // Once it can be set aside, its bytes are preserved and the inline copy is offered as before.
+    h.native.writeRuntimeDocument.mockImplementation(write);
+    const restored = harness(documents);
+    await restored.runtime.initialize();
+    expect(documents.has(draftDocument(id))).toBe(false);
+    expect([...documents].filter(([name]) => name.startsWith('quarantine-'))).toEqual(
+      expect.arrayContaining([[expect.stringContaining(id), damaged]]),
+    );
+    expect([...restored.runtime.legacyDrafts()]).toEqual([[id, 'legacy draft']]);
+    await restored.runtime.settleLegacyDrafts(new Map([[id, 'superseded']]));
+    expect(documents.get(draftDocument(id))).toBeUndefined();
+    expect([...documents].filter(([name]) => name.startsWith('quarantine-'))).toEqual(
+      expect.arrayContaining([
+        [expect.stringContaining(id), damaged],
+        [expect.stringContaining(id), JSON.stringify({ version: 1, text: 'legacy draft' })],
+      ]),
+    );
+    await restored.runtime.dispose();
+  });
 });
 
 /**
