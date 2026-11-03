@@ -1,5 +1,5 @@
 import type { LocalThread } from '../runtime/types';
-import { failure, LOCAL_RPC_ERROR, LocalRpcError } from './errors';
+import { failure, interruptedBeforeStart, LOCAL_RPC_ERROR, LocalRpcError } from './errors';
 import type { LocalAgentPort } from './port';
 
 /**
@@ -48,7 +48,13 @@ export function startLocalRetry(port: LocalAgentPort, thread: LocalThread): Prom
     };
     unsubscribe = port.subscribe(started);
     port.retryTurn(thread.id).then(
-      (latest) => finish(() => resolve(latest.activeTurnId ?? `retry-${thread.id}`)),
+      (latest) =>
+        finish(() =>
+          // A retry stopped while its model loaded returns the thread untouched: it never ran.
+          latest.updatedAt === thread.updatedAt && latest.status === thread.status
+            ? reject(interruptedBeforeStart())
+            : resolve(latest.activeTurnId ?? `retry-${thread.id}`),
+        ),
       (error: unknown) => finish(() => reject(failure(error))),
     );
     started();

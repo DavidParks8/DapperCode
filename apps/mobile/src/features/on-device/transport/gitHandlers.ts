@@ -4,7 +4,7 @@ import { httpsRemoteError } from '../../workspace/api/remoteUrl';
 import type { LocalGitStatus } from '../workspaces/types';
 import { LOCAL_RPC_ERROR, LocalRpcError } from './errors';
 import type { LocalAgentPort } from './port';
-import { readParam, type RpcParams } from './params';
+import { readParam, readPathParam, type RpcParams } from './params';
 
 const GIT_OK = { code: 0, stdout: '', stderr: '' };
 
@@ -16,6 +16,17 @@ function required(params: RpcParams, key: string, message: string): string {
     throw new LocalRpcError(LOCAL_RPC_ERROR.invalidParams, message, { error: 'on_device_failed' });
   }
   return value;
+}
+
+/** An exact file path; an empty path is rejected so it can never widen to an all-files operation. */
+function requiredPath(params: RpcParams): string {
+  const path = readPathParam(params, 'path');
+  if (!path) {
+    throw new LocalRpcError(LOCAL_RPC_ERROR.invalidParams, 'Choose a file.', {
+      error: 'on_device_failed',
+    });
+  }
+  return path;
 }
 
 function invalid(message: string): LocalRpcError {
@@ -108,7 +119,7 @@ export function createLocalGitHandlers(port: LocalAgentPort, workspace: ResolveW
     },
     'bridge/git/stage': async (params: RpcParams) => {
       const { id, cwd } = await workspace(params);
-      const path = readParam(params, 'path') ?? '';
+      const path = requiredPath(params);
       await port.git.stage(id, path);
       return { ...GIT_OK, staged: true, path, cwd };
     },
@@ -119,7 +130,7 @@ export function createLocalGitHandlers(port: LocalAgentPort, workspace: ResolveW
     },
     'bridge/git/unstage': async (params: RpcParams) => {
       const { id, cwd } = await workspace(params);
-      const path = readParam(params, 'path') ?? '';
+      const path = requiredPath(params);
       await port.git.unstage(id, path);
       return { ...GIT_OK, unstaged: true, path, cwd };
     },
@@ -166,7 +177,9 @@ export function createLocalGitHandlers(port: LocalAgentPort, workspace: ResolveW
     },
     [WORKSPACE_HOST_METHODS.gitDiscard]: async (params: RpcParams) => {
       const { id, cwd } = await workspace(params);
-      const path = readParam(params, 'path');
+      // Only an explicit null (or omitted) path discards everything; a string is one exact file.
+      const path =
+        params['path'] === null || params['path'] === undefined ? null : requiredPath(params);
       await port.git.discard(id, path, params['includeUntracked'] === true);
       return { discarded: true, cwd, path };
     },

@@ -310,7 +310,7 @@ describe('LocalBridgeServer', () => {
     });
     await tick();
     await server.request('turn/interrupt', { threadId });
-    await stopped;
+    await expect(stopped).rejects.toMatchObject({ data: { error: 'on_device_interrupted' } });
     const later = events().slice(before);
     expect(later.map((event) => event.type)).toEqual([EventType.CUSTOM, EventType.CUSTOM]);
     expect(later[1]).toMatchObject({ value: { title: 'Cancelling model load' } });
@@ -659,6 +659,33 @@ describe('LocalBridgeServer', () => {
       'on_device_workspace_required',
     );
     expect((await rpcError(server.request('bridge/git/commit', { cwd: DEMO }))).code).toBe(-32602);
+  });
+
+  it('passes Git file paths through exactly and only discards everything on an explicit null', async () => {
+    const { server, port } = setup();
+    const discard = 'workspace/git/discard';
+    await server.request('bridge/git/stage', { cwd: DEMO, path: 'notes.txt ' });
+    await server.request('bridge/git/unstage', { cwd: DEMO, path: ' ' });
+    await server.request(discard, { cwd: DEMO, path: 'notes.txt ', includeUntracked: true });
+    await server.request(discard, { cwd: DEMO, path: '  ', includeUntracked: true });
+    await server.request(discard, { cwd: DEMO, path: null, includeUntracked: true });
+    expect(port.calls.filter((call) => call.startsWith('git.'))).toEqual([
+      'git.stage:["ws-one","notes.txt "]',
+      'git.unstage:["ws-one"," "]',
+      'git.discard:["ws-one","notes.txt ",true]',
+      'git.discard:["ws-one","  ",true]',
+      'git.discard:["ws-one",null,true]',
+    ]);
+
+    // An empty or missing file path is invalid rather than widening to every file.
+    for (const request of [
+      server.request('bridge/git/stage', { cwd: DEMO, path: '' }),
+      server.request('bridge/git/unstage', { cwd: DEMO }),
+      server.request(discard, { cwd: DEMO, path: '', includeUntracked: true }),
+    ]) {
+      expect((await rpcError(request)).code).toBe(-32602);
+    }
+    expect(port.calls.filter((call) => call.startsWith('git.'))).toHaveLength(5);
   });
 
   it('stops publishing after it is stopped', async () => {

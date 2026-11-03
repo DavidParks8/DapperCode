@@ -334,6 +334,39 @@ describe('MainScreen on the local profile', () => {
     act(() => tree.unmount());
   });
 
+  it('offers Stop while a retry reloads its model, and stopping leaves the turn retryable', async () => {
+    const { tree, root, port } = await renderLocalMain();
+    await submit(root, 'Add a license');
+    const [thread] = port.threads();
+    await act(async () => {
+      port.settle(thread!.id, 'failed', 'The local context window is full.');
+      await flush();
+    });
+    await settle();
+
+    // The model was unloaded, so the retry has to load it before the turn can run.
+    port.holdModelLoad = true;
+    await press(labeled(root, 'Retry turn'));
+    await act(async () => {
+      port.setModel({ phase: 'loading', modelId: 'qwen3-1.7b-q4-k-m', progress: 20 });
+      await flush();
+    });
+    await settle();
+    expect(port.run()).toMatchObject({ phase: 'preparing', threadId: thread!.id });
+    expect(hasText(root, 'Loading Qwen3 1.7B')).toBe(true);
+    expect(labeled(root, 'Stop agent')).toBeTruthy();
+
+    await press(labeled(root, 'Stop agent'));
+    await settle();
+    expect(port.calls).toContain('stop');
+    expect(port.run().phase).toBe('idle');
+    expect(port.thread(thread!.id)).toMatchObject({ status: 'failed' });
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    expect(hasText(root, 'interrupted before the model finished loading')).toBe(false);
+    expect(labeled(root, 'Retry turn')).toBeTruthy();
+    act(() => tree.unmount());
+  });
+
   it('answers a local tool approval from the shared banner, including Deny', async () => {
     const { tree, root, port } = await renderLocalMain();
     await submit(root, 'Push my branch');

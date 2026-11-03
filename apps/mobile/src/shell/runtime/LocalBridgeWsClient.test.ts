@@ -7,6 +7,16 @@ import { LocalBridgeWsClient } from './LocalBridgeWsClient';
 
 const DEMO = `${LOCAL_WORKSPACE_ROOT}/Demo`;
 
+async function until(condition: () => boolean, description: string) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (condition()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(`Timed out waiting for ${description}`);
+}
+
 function setup() {
   const port = new FakeAgentPort();
   const ws = new LocalBridgeWsClient(new LocalBridgeServer(port));
@@ -74,6 +84,35 @@ describe('LocalBridgeWsClient with the unchanged HostBridgeApiClient', () => {
     );
     await expect(api.interruptLatestTurn(chat.id)).resolves.toMatch(/^turn-/u);
     await expect(completion).rejects.toThrow('Stopped');
+  });
+
+  it('finds and stops a retry or send that is still loading its model', async () => {
+    const { api, ws, port } = setup();
+    const chat = await api.createChatIdempotent({ cwd: DEMO }, 'create');
+    await api.sendChatMessageIdempotent(chat.id, { content: 'Long', cwd: DEMO }, 'send');
+    port.settle(chat.id, 'failed', 'The local context window is full.');
+
+    // The model was unloaded, so the retry waits on a load before the turn can start.
+    port.holdModelLoad = true;
+    const retried = ws.request('bridge/turn/retry', { threadId: chat.id });
+    await until(() => port.run().phase === 'preparing', 'the retry to load its model');
+    // Nothing is recorded yet, but Stop still finds the loading turn and cancels it.
+    const loadingTurnId = port.run().turnId;
+    expect(loadingTurnId).toBeTruthy();
+    await expect(api.interruptLatestTurn(chat.id)).resolves.toBe(loadingTurnId);
+    await expect(retried).rejects.toThrow('interrupted before the model finished loading');
+    expect(port.calls).toContain('stop');
+    expect(port.thread(chat.id)).toMatchObject({ status: 'failed' });
+    expect(port.run().phase).toBe('idle');
+
+    // A first send that is still loading is stoppable the same way and records nothing.
+    const sent = api.sendChatMessageIdempotent(chat.id, { content: 'Again', cwd: DEMO }, 'send-2');
+    await until(() => port.run().phase === 'preparing', 'the send to load its model');
+    await expect(api.interruptLatestTurn(chat.id)).resolves.toBeTruthy();
+    await expect(sent).rejects.toThrow('interrupted before the model finished loading');
+    expect(
+      port.thread(chat.id)?.messages.filter((message) => message.role === 'user'),
+    ).toHaveLength(1);
   });
 
   it('renames and deletes chats through the existing drawer API', async () => {

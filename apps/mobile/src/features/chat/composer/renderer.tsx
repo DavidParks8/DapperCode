@@ -123,7 +123,12 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     !attachmentsSupported || editingQueuedMessage || queueActionKind === 'editStart';
   const turnActive = isTurnLoading || isTurnLikelyRunning || stoppingTurn;
   const showStopButton = !isPendingChatId(selectedChat?.id) && turnActive;
-  const failedTurnRetry = useFailedTurnRetry({ selectedChat, visibleError, running: turnActive });
+  const failedTurnRetry = useFailedTurnRetry({
+    selectedChat,
+    visibleError,
+    running: turnActive,
+    lifecycle: context,
+  });
 
   const renderComposer = (overlay: boolean) => (
     <View

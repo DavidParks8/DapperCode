@@ -21,6 +21,7 @@ export type LocalRpcErrorReason =
   | 'on_device_busy'
   | 'on_device_offline'
   | 'on_device_not_repository'
+  | 'on_device_interrupted'
   | 'on_device_failed';
 
 export class LocalRpcError extends Error {
@@ -34,6 +35,18 @@ export class LocalRpcError extends Error {
     super(message);
     Object.setPrototypeOf(this, new.target.prototype);
   }
+}
+
+/**
+ * A send or retry stopped while its model was still loading. Nothing was recorded, so the shell
+ * treats it like any stopped turn and keeps the unsent draft.
+ */
+export function interruptedBeforeStart(): LocalRpcError {
+  return new LocalRpcError(
+    LOCAL_RPC_ERROR.serverError,
+    'The turn was interrupted before the model finished loading.',
+    { error: 'on_device_interrupted' },
+  );
 }
 
 const WORKSPACE_CODES = new Set<OnDeviceNativeErrorCode>([

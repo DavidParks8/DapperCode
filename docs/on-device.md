@@ -322,16 +322,16 @@ the local profile. `LocalBridgeWsClient` is connected from creation until dispos
 
 `LOCAL_IMPLEMENTED_METHODS` in `transport/server.ts` is authoritative:
 
-| Area         | Methods                                                                                                                                                           |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Session      | `bridge/capabilities/read`, `bridge/health/read`, `thread/approvalPolicy/set` (accepted, no approvals locally)                                                     |
-| Chats        | `thread/list`, `thread/loaded/list`, `bridge/thread/list/stream/start`/`cancel`, `thread/read`, `thread/start`, `bridge/thread/create`, `thread/name/update`, `thread/delete`, `thread/config/set` (model), `thread/resume` |
-| Turns        | `bridge/thread/queue/send`, `turn/start`, `turn/interrupt`, `bridge/turn/retry` (local only), `bridge/thread/queue/read`, `bridge/thread/schedules/read` (always empty) |
-| Models       | `model/list` (downloaded, runnable catalog models with load state in `description` and the new-chat model as `isDefault`)                                         |
-| Workspaces   | `bridge/workspaces/list`, `bridge/fs/list` (workspace roots only), `bridge/git/clone` (HTTPS, into a new workspace)                                               |
-| Attention    | `bridge/approvals/list`, `bridge/approvals/resolve` (the loop's pending tool approval, such as a push), `bridge/userInput/list` (always empty)                     |
-| Git          | `bridge/git/status`, `diff`, `history`, `branches`, `stage`, `stageAll`, `unstage`, `unstageAll`, `commit`, `switch`, `push`                                     |
-| Extensions   | `workspace/list`, `states`, `select`, `create`, `rename`, `delete`, `changeToken`, `clone/progress`, `clone/cancel`, `workspace/git/fetch`, `pull`, `init`, `discard`, `branch/create`, `workspace/files/list`, `read`, `write`, `create`, `rename`, `remove` |
+| Area       | Methods                                                                                                                                                                                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session    | `bridge/capabilities/read`, `bridge/health/read`, `thread/approvalPolicy/set` (accepted, no approvals locally)                                                                                                                                                |
+| Chats      | `thread/list`, `thread/loaded/list`, `bridge/thread/list/stream/start`/`cancel`, `thread/read`, `thread/start`, `bridge/thread/create`, `thread/name/update`, `thread/delete`, `thread/config/set` (model), `thread/resume`                                   |
+| Turns      | `bridge/thread/queue/send`, `turn/start`, `turn/interrupt`, `bridge/turn/retry` (local only), `bridge/thread/queue/read`, `bridge/thread/schedules/read` (always empty)                                                                                       |
+| Models     | `model/list` (downloaded, runnable catalog models with load state in `description` and the new-chat model as `isDefault`)                                                                                                                                     |
+| Workspaces | `bridge/workspaces/list`, `bridge/fs/list` (workspace roots only), `bridge/git/clone` (HTTPS, into a new workspace)                                                                                                                                           |
+| Attention  | `bridge/approvals/list`, `bridge/approvals/resolve` (the loop's pending tool approval, such as a push), `bridge/userInput/list` (always empty)                                                                                                                |
+| Git        | `bridge/git/status`, `diff`, `history`, `branches`, `stage`, `stageAll`, `unstage`, `unstageAll`, `commit`, `switch`, `push`                                                                                                                                  |
+| Extensions | `workspace/list`, `states`, `select`, `create`, `rename`, `delete`, `changeToken`, `clone/progress`, `clone/cancel`, `workspace/git/fetch`, `pull`, `init`, `discard`, `branch/create`, `workspace/files/list`, `read`, `write`, `create`, `rename`, `remove` |
 
 The transport forwards each native progress event as the host notification
 `workspace/clone/progressChanged` (params match `workspace/clone/progress`) while the server is
@@ -340,8 +340,11 @@ started.
 Every other method rejects with JSON-RPC `-32601` and `data.error = 'unsupported_on_device'`
 (surfaced as `RpcRequestError`). Other stable `data.error` reasons are `thread_not_found`,
 `on_device_model_required`, `on_device_workspace_required`, `on_device_busy`, `on_device_offline`,
-`on_device_not_repository`, and `on_device_failed`; typed native failures also carry
-`data.nativeCode`. A tool approval requested by the agent loop is sent as
+`on_device_not_repository`, `on_device_interrupted` (a send or retry stopped while its model was
+still loading; nothing was recorded), and `on_device_failed`; typed native failures also carry
+`data.nativeCode`. While a send or retry loads its model, `thread/read` lists it as an in-progress
+turn with no items, so the shell's Stop (`interruptLatestTurn`) can find and cancel the load. Git
+file paths are passed through exactly as sent; only an explicit `null` path discards every file. A tool approval requested by the agent loop is sent as
 `bridge/approval.requested`/`bridge/approval.resolved` with the bridge's `commandExecution` kind
 (the banner shows the tool's summary as the command), so the shared approval banner answers it,
 including Deny. Only one local chat runs at a time; there is no queue or steering.
@@ -452,7 +455,6 @@ The shared screens serve the local profile through the transport; nothing branch
   `workspace/changeToken`, so agent edits appear without re-entering; a dirty file that changes on
   disk is flagged and a stale save offers **Overwrite** or **Discard edits**. Files over 64 KiB open
   read-only with their total size.
-
 
 ### Extension points for the next tracks
 

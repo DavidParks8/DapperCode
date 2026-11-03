@@ -298,6 +298,8 @@ function preview(thread: LocalThread): string {
 export interface LocalThreadProjectionContext {
   workspaces: readonly LocalWorkspace[];
   models: readonly LocalModelDefinition[];
+  /** The active run, so a turn that is still loading its model can be found and stopped. */
+  run?: Pick<LocalRunSnapshot, 'phase' | 'threadId' | 'turnId'>;
 }
 
 export function localThreadPath(
@@ -379,6 +381,44 @@ function failedTurn(thread: LocalThread): Pick<RawThread, 'turns'> | Record<stri
   };
 }
 
+/**
+ * Only the live turn is listed: it lets `interruptLatestTurn` find the run and lets the client
+ * confirm an accepted message. History itself comes from the ACP snapshot. A send or retry that is
+ * still loading its model has recorded nothing yet, but it is listed too so Stop can cancel the load.
+ */
+function liveTurn(
+  thread: LocalThread,
+  run: LocalThreadProjectionContext['run'],
+): Pick<RawThread, 'turns'> | null {
+  if (thread.status === 'running' && thread.activeTurnId) {
+    const lastUser = [...thread.messages].reverse().find((message) => message.role === 'user');
+    return {
+      turns: [
+        {
+          id: thread.activeTurnId,
+          status: 'inProgress',
+          items: lastUser
+            ? [
+                {
+                  type: 'userMessage' as const,
+                  id: lastUser.id,
+                  content: [{ type: 'text', text: lastUser.content }],
+                },
+              ]
+            : [],
+        },
+      ],
+    };
+  }
+  // Only a run that has not started is listed this way: once it starts the thread is running, and
+  // while it settles (`persisting`) the thread already carries its final status.
+  const loading = run?.phase === 'preparing' || run?.phase === 'stopping';
+  if (loading && run?.threadId === thread.id && run.turnId) {
+    return { turns: [{ id: run.turnId, status: 'inProgress', items: [] }] };
+  }
+  return null;
+}
+
 /** Full ACP-style snapshot used by `thread/read` with history. */
 export function localThreadSnapshot(
   thread: LocalThread,
@@ -430,32 +470,12 @@ export function localThreadSnapshot(
       subagent: false,
     });
   }
+  // The ACP snapshot's active run only exists once the turn has started.
   const running = thread.status === 'running' && thread.activeTurnId !== null;
   const turnId = running ? thread.activeTurnId : null;
-  const lastUser = [...thread.messages].reverse().find((message) => message.role === 'user');
   return {
     ...localThreadSummary(thread, context),
-    // Only the live turn is listed: it lets `interruptLatestTurn` find the run and lets the client
-    // confirm an accepted message. History itself comes from the snapshot below.
-    ...(turnId
-      ? {
-          turns: [
-            {
-              id: turnId,
-              status: 'inProgress',
-              items: lastUser
-                ? [
-                    {
-                      type: 'userMessage' as const,
-                      id: lastUser.id,
-                      content: [{ type: 'text', text: lastUser.content }],
-                    },
-                  ]
-                : [],
-            },
-          ],
-        }
-      : failedTurn(thread)),
+    ...(liveTurn(thread, context.run) ?? failedTurn(thread)),
     acpSnapshot: {
       version: 2,
       timeline,

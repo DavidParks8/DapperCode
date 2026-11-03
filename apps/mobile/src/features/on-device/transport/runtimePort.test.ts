@@ -288,7 +288,8 @@ describe('the local transport over the real on-device runtime', () => {
     await tick();
 
     await server.request('turn/interrupt', { threadId });
-    await sent;
+    // The send never started, so it is rejected as interrupted and the shell keeps the draft.
+    await expect(sent).rejects.toMatchObject({ data: { error: 'on_device_interrupted' } });
     expect(activities()).toContain('Cancelling model load');
     expect(runtime.threads.get(threadId)).toMatchObject({ status: 'idle', messages: [] });
     expect(lifecycle(events())).toEqual([]);

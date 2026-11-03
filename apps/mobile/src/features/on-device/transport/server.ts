@@ -10,6 +10,7 @@ import { LocalApprovalRelay } from './approvals';
 import { createLocalGitHandlers } from './gitHandlers';
 import { localModelListEntries } from './modelOptions';
 import { LOCAL_TURN_RETRY_METHOD, startLocalRetry } from './retry';
+import { startLocalTurn } from './turnStart';
 import { createLocalWorkspaceHandlers, LOCAL_WORKSPACE_METHODS } from './workspaceHandlers';
 import { readParam, readRecord, type RpcParams } from './params';
 import type { LocalAgentPort } from './port';
@@ -224,7 +225,10 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
   }
 
   private snapshot(thread: LocalThread) {
-    return localThreadSnapshot(this.port.thread(thread.id) ?? thread, this.context());
+    return localThreadSnapshot(this.port.thread(thread.id) ?? thread, {
+      ...this.context(),
+      run: this.port.run(),
+    });
   }
 
   private availableModel(modelId: string | null): string | null {
@@ -334,50 +338,6 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
     if (model && model !== thread.modelId) {
       await this.port.updateThread(thread.id, { modelId: model });
     }
-  }
-
-  /** Resolves once the user message is part of the thread, then lets the run continue. */
-  private startTurn(thread: LocalThread, content: string, submissionId: string): Promise<string> {
-    if (!content.trim()) {
-      return Promise.reject(
-        new LocalRpcError(LOCAL_RPC_ERROR.invalidParams, 'Enter a message.', {
-          error: 'on_device_failed',
-        }),
-      );
-    }
-    const userMessageId = `user-${submissionId}`;
-    if (thread.messages.some((message) => message.id === userMessageId)) {
-      return Promise.resolve(
-        thread.activeTurnId ?? `submission-${thread.lastSubmissionId ?? submissionId}`,
-      );
-    }
-    const run = this.port.run();
-    if (run.phase !== 'idle' && run.threadId !== thread.id) {
-      return Promise.reject(
-        new LocalRpcError(
-          LOCAL_RPC_ERROR.serverError,
-          'Another chat is running on this iPhone. Stop it or wait for it to finish.',
-          { error: 'on_device_busy', threadId: run.threadId },
-        ),
-      );
-    }
-    return new Promise<string>((resolve, reject) => {
-      let accepted = false;
-      const accept = () => {
-        if (accepted) {
-          return;
-        }
-        accepted = true;
-        const latest = this.port.thread(thread.id);
-        resolve(latest?.activeTurnId ?? this.port.run().turnId ?? `submission-${submissionId}`);
-      };
-      this.port.send(thread.id, content, submissionId, accept).then(accept, (error: unknown) => {
-        // After acceptance a failure reaches the shell as a RUN_ERROR event instead.
-        if (!accepted) {
-          reject(failure(error));
-        }
-      });
-    });
   }
 
   private workspaceList(): WorkspaceListResponse {
@@ -531,7 +491,8 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
         const thread = this.requireThread(params);
         await this.applyTurnModel(thread, params);
         const submissionId = readParam(params, 'submissionId') ?? `turn-${Date.now().toString(36)}`;
-        const turnId = await this.startTurn(
+        const turnId = await startLocalTurn(
+          this.port,
           port.thread(thread.id) ?? thread,
           inputText(params),
           submissionId,
@@ -557,7 +518,8 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
         await this.applyTurnModel(thread, turnStart);
         const content =
           typeof params['content'] === 'string' ? params['content'] : inputText(turnStart);
-        const turnId = await this.startTurn(
+        const turnId = await startLocalTurn(
+          this.port,
           port.thread(thread.id) ?? thread,
           content,
           submissionId,
