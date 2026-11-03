@@ -312,6 +312,14 @@ export class OnDeviceRuntime {
     this.emitter.emit('workspaces');
   }
 
+  /** Applies a confirmed rename (a workspace) or delete (null) before the list is re-read. */
+  replaceWorkspace(id: string, next: LocalWorkspace | null): void {
+    this.workspaceValues = next
+      ? this.workspaceValues.map((entry) => (entry.id === id ? next : entry))
+      : this.workspaceValues.filter((entry) => entry.id !== id);
+    this.emitter.emit('workspaces');
+  }
+
   async cloneWorkspace(name: string, url: string): Promise<LocalWorkspace> {
     this.requireNetwork('clone repositories');
     const account = this.settings.get().account;

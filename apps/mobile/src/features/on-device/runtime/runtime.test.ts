@@ -504,6 +504,45 @@ test('deleting another workspace keeps the selection, and workspaces cannot be d
   await h.runtime.dispose();
 });
 
+test('a delete that happened is never reported as failed when re-reading the list fails', async () => {
+  const h = await ready();
+  h.native.listWorkspaces.mockRejectedValueOnce(new Error('Listing failed.'));
+  await expect(h.runtime.workspaceAdmin.delete('workspace-one')).resolves.toBeUndefined();
+  // Nothing can still resolve or fall back to the deleted workspace.
+  expect(h.runtime.workspaces()).toEqual([]);
+  expect(h.runtime.preferences().workspaceId).toBeNull();
+  await expect(h.runtime.createThread()).rejects.toThrow('local workspace');
+  await expect(h.runtime.selectWorkspace('workspace-one')).rejects.toThrow();
+  expect(h.runtime.issues()).toEqual([
+    expect.objectContaining({ message: expect.stringContaining('Listing failed.') }),
+  ]);
+  await h.runtime.dispose();
+});
+
+test('a rename that happened is listed under its new name when re-reading the list fails', async () => {
+  const h = await ready();
+  h.native.listWorkspaces.mockRejectedValueOnce(new Error('Listing failed.'));
+  await expect(h.runtime.workspaceAdmin.rename('workspace-one', 'Renamed')).resolves.toMatchObject({
+    id: 'workspace-one',
+    name: 'Renamed',
+  });
+  expect(h.runtime.workspaces()).toEqual([
+    expect.objectContaining({ id: 'workspace-one', name: 'Renamed' }),
+  ]);
+  await h.runtime.dispose();
+});
+
+test('a failed native delete is reported as failed and keeps the workspace', async () => {
+  const h = await ready();
+  h.native.deleteWorkspace.mockRejectedValueOnce(new Error('Deleting failed.'));
+  await expect(h.runtime.workspaceAdmin.delete('workspace-one')).rejects.toThrow(
+    'Deleting failed.',
+  );
+  expect(h.runtime.workspaces().map((entry) => entry.id)).toEqual(['workspace-one']);
+  expect(h.runtime.preferences().workspaceId).toBe('workspace-one');
+  await h.runtime.dispose();
+});
+
 test('renaming a workspace refreshes the listed name without changing the selection', async () => {
   const h = await ready();
   await expect(h.runtime.workspaceAdmin.rename('workspace-one', 'Renamed')).resolves.toMatchObject({
