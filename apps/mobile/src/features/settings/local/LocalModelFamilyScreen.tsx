@@ -36,7 +36,7 @@ export function LocalModelFamilyScreen() {
   const family = LOCAL_MODEL_FAMILIES.find((entry) => entry.id === familyId);
   if (!family) {
     return (
-      <SettingsSubpage title="Models" onBack={() => router.back()}>
+      <SettingsSubpage title="Models" onBack={() => router.back()} backTitle="Models">
         <SettingsGroup footer="Go back to choose another model family.">
           <SettingsRow label="This model family is no longer available" />
         </SettingsGroup>
@@ -54,6 +54,7 @@ export function LocalModelFamilyScreen() {
     <SettingsSubpage
       title={family.name}
       onBack={() => router.back()}
+      backTitle="Models"
       testID="settings-local-family-screen"
     >
       <SettingsSearchField

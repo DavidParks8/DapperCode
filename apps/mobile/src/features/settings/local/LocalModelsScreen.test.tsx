@@ -266,6 +266,16 @@ describe('Model family settings', () => {
     ).toBeTruthy();
   });
 
+  it('names the Models page, not Settings, as the back destination', () => {
+    openFamily(new FakeSettingsRuntime(), 'qwen3.5');
+    expect(screen.getByLabelText('Back to Models')).toBeTruthy();
+    expect(screen.queryByLabelText('Back to Settings')).toBeNull();
+    screen.unmount();
+
+    render(wrap(new FakeSettingsRuntime(), <LocalModelsScreen />));
+    expect(screen.getByLabelText('Back to Settings')).toBeTruthy();
+  });
+
   it('credits the resident model when another model only fits after it is released', () => {
     const runtime = new FakeSettingsRuntime();
     runtime.setDownload('qwen3-1.7b-q4-k-m', { phase: 'ready' });

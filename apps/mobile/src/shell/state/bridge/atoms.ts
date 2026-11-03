@@ -176,8 +176,9 @@ export const apiClientAtom = atom(
       bridgeUrl: bridgeUrl ?? undefined,
       authToken: local ? null : (get(bridgeTokenAtom) ?? env.hostBridgeToken),
       profileId: get(activeProfileIdAtom),
-      // Local models download and load while the app runs, so the list is always read fresh.
-      ...(local ? { modelListCacheTtlMs: 0 } : {}),
+      // Local models download and load while the app runs, so the list is always read fresh. The
+      // local runtime stores the whole conversation, so its snapshots replace cached transcripts.
+      ...(local ? { modelListCacheTtlMs: 0, authoritativeHistory: true } : {}),
     });
   },
   (get, set, client: HostBridgeApiClient | null) => {

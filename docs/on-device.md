@@ -193,7 +193,9 @@ and that prompt is passed straight to completion.
 - User turns and tool intent are journaled before execution. After an interrupted launch, uncertain
   tools are marked interrupted and are **never automatically replayed**. Inspect the workspace and,
   for push, the remote before retrying. Streamed text, tool results, and run settlement are
-  coalesced into one write shortly afterwards (and on backgrounding).
+  coalesced into one write shortly afterwards (and on backgrounding). The stored conversation is
+  authoritative: after a crash, the chat shows what was recovered, dropping any streamed output the
+  app displayed but had not yet stored, rather than waiting for missing history.
 - Conversations are stored append-first (`runtime/threads.ts`, `runtime/threadJournal.ts`) using
   only the native runtime-document store. `thread-<id>.json` is the base: the whole conversation
   plus `segment`, the last journal position it contains. Each save after that writes one small

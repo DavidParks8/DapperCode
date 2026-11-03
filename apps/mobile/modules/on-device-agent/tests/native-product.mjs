@@ -113,6 +113,13 @@ export default async function scenario(e2e) {
     e2e.writeFile(`logs/${name}.png`, Buffer.from(screenshot, 'base64'));
     e2e.writeFile(`logs/${name}.xml`, await source());
   };
+  // Wait for the pop to finish so a following tap cannot land on the outgoing page.
+  const back = async (leaving) => {
+    await tap(selectors.settingsBack);
+    await e2e.waitFor(`settings page closed: ${describe(leaving)}`, () => absent(leaving), {
+      timeoutMs: 15_000,
+    });
+  };
   const openDrawer = () => tap(selectors.openDrawer);
   const openChat = async (id) => {
     await openDrawer();
@@ -124,9 +131,48 @@ export default async function scenario(e2e) {
     await find(selectors.runTarget);
   };
   const runtimeRoot = () => path.join(container, 'Library/Application Support/OnDeviceAgent/state');
+  // Each conversation is a base document plus journal segments written after it (see
+  // runtime/threadJournal.ts); replay them as the runtime does at startup. A compaction can
+  // remove a segment between listing and reading it, so a vanished file restarts the read.
   const loadThreads = async () => {
-    const names = (await fs.readdir(runtimeRoot())).filter((name) => name.startsWith('thread-'));
-    return Promise.all(names.map((name) => readJSON(path.join(runtimeRoot(), name))));
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await readThreadJournals();
+      } catch (error) {
+        if (error?.code !== 'ENOENT' || attempt >= 4) {
+          throw error;
+        }
+      }
+    }
+  };
+  const readThreadJournals = async () => {
+    const names = await fs.readdir(runtimeRoot());
+    return Promise.all(
+      names
+        .filter((name) => name.startsWith('thread-'))
+        .map(async (name) => {
+          let thread = await readJSON(path.join(runtimeRoot(), name));
+          const segments = names
+            .map((entry) => entry.match(/^threadseg-([a-f0-9-]{36})-(\d{10,})\.json$/u))
+            .filter((match) => match?.[1] === thread.id && Number(match[2]) > thread.segment)
+            .sort((left, right) => Number(left[2]) - Number(right[2]));
+          for (const [segmentName] of segments) {
+            const delta = await readJSON(path.join(runtimeRoot(), segmentName));
+            const removed = new Set(delta.remove);
+            const messages = thread.messages.filter((message) => !removed.has(message.id));
+            for (const message of delta.messages) {
+              const position = messages.findIndex((entry) => entry.id === message.id);
+              messages.splice(
+                position < 0 ? messages.length : position,
+                position < 0 ? 0 : 1,
+                message,
+              );
+            }
+            thread = { ...thread, ...delta.set, messages };
+          }
+          return thread;
+        }),
+    );
   };
   // The shared composer persists drafts per profile, the same for desktop and local chats.
   const localDrafts = async () => {
@@ -270,8 +316,20 @@ export default async function scenario(e2e) {
           );
         },
       );
-      await e2e.check('a prepared model and workspace need no setup checklist', () =>
-        absent(selectors.setupGuide),
+      // A prepared model, workspace, and author leave only "Start your first chat"; the guide stays
+      // until the first local chat has a message.
+      await e2e.check(
+        'the setup guide marks prepared steps done until the first chat starts',
+        async () => {
+          const xml = await source();
+          return (
+            !(await absent(selectors.setupGuide)) &&
+            xml.includes('1. Download a model, Done') &&
+            xml.includes('2. Clone or create a workspace, Done') &&
+            xml.includes('3. Add a Git author, Done') &&
+            xml.includes('4. Start your first chat, Ready')
+          );
+        },
       );
       await capture('on-device-new-chat');
     });
@@ -308,7 +366,7 @@ export default async function scenario(e2e) {
         { timeoutMs: 30_000 },
       );
       await capture('on-device-quants');
-      await tap(selectors.settingsBack);
+      await back(selectors.familyPage);
       await tap(selectors.bonsaiFamily);
       await e2e.waitFor(
         'Bonsai fork-only packings are clearly unsupported',
@@ -316,7 +374,7 @@ export default async function scenario(e2e) {
         { timeoutMs: 30_000 },
       );
       await capture('on-device-bonsai-quants');
-      await tap(selectors.settingsBack);
+      await back(selectors.familyPage);
       await tap(selectors.gemmaFamily);
       await e2e.waitFor(
         'Gemma family exposes its actual quant choices',
@@ -327,15 +385,15 @@ export default async function scenario(e2e) {
         { timeoutMs: 30_000 },
       );
       await capture('on-device-gemma-quants');
-      await tap(selectors.settingsBack);
-      await tap(selectors.settingsBack);
+      await back(selectors.familyPage);
+      await back(selectors.modelLibrary);
       await tap(selectors.gitAccount);
       await find(selectors.gitAccountPage);
       await e2e.check('unconfigured GitHub sign-in is explicit', async () =>
         Boolean(await find(selectors.githubUnavailable)),
       );
       await capture('on-device-git-account');
-      await tap(selectors.settingsBack);
+      await back(selectors.gitAccountPage);
       await startNewChat();
     });
     await e2e.phase('model-sheet', async () => {
@@ -359,7 +417,7 @@ export default async function scenario(e2e) {
     await e2e.phase('offline-turn', async () => {
       await type(
         selectors.message,
-        'Use write_file to create offline.txt containing exactly OFFLINE_PRODUCT_OK. Then use git_stage for offline.txt and git_commit with message offline fixture. You must use those tools, not describe commands. Report the resulting commit.',
+        'Use write_file to create offline.txt containing exactly OFFLINE_PRODUCT_OK. Then use git_stage for offline.txt and git_commit with message offline fixture. You must use those tools, not describe commands. Do not push. Report the resulting commit.',
       );
       const sendButton = await find(selectors.send);
       const sendBounds = await api(`/element/${sendButton}/rect`, undefined, 'GET');
@@ -421,6 +479,9 @@ export default async function scenario(e2e) {
         { timeoutMs: 30_000 },
       );
       await capture('on-device-chat');
+      await e2e.check('the setup guide is gone once the first local chat has a message', () =>
+        absent(selectors.setupGuide),
+      );
       const network = await readJSON(path.join(container, 'Documents/product-network.json'));
       await e2e.expectEqual(
         'no network request or fallback was used for the offline turn',
@@ -445,6 +506,9 @@ export default async function scenario(e2e) {
           (await api(`/element/${input}/attribute/value`, undefined, 'GET')) ===
           'durable offline draft',
         { timeoutMs: 30_000 },
+      );
+      await e2e.check('the setup guide stays gone after a cold launch', () =>
+        absent(selectors.setupGuide),
       );
       const restored = (await loadThreads()).find((entry) => entry.id === thread.id);
       await e2e.expectEqual(
@@ -497,17 +561,31 @@ export default async function scenario(e2e) {
       );
       await tap(selectors.send);
       await find(selectors.stop);
+      // The cold launch unloaded the model; the turn is journaled only once it has loaded.
+      await e2e.waitFor(
+        'the local turn is journaled and running',
+        async () =>
+          (await loadThreads()).some(
+            (entry) => entry.id !== thread.id && entry.status === 'running',
+          ),
+        { timeoutMs: 120_000, intervalMs: 500 },
+      );
       await api('/execute/sync', { script: 'mobile: pressButton', args: [{ name: 'home' }] });
+      // Settling while backgrounded is best effort: llama.rn cannot interrupt prompt ingestion, and
+      // the simulator's CPU prefill outlasts the app's background time, so iOS may suspend the app
+      // first (startup recovery covers a later termination; see cold-recovery). The stop still
+      // settles the turn, at the latest once the app returns.
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      await api('/execute/sync', { script: 'mobile: activateApp', args: [{ bundleId }] });
       let stopped;
       await e2e.waitFor(
-        'background stops and durably settles the active local turn',
+        'backgrounding stops the active local turn and it settles durably as interrupted',
         async () => {
           stopped = (await loadThreads()).find((entry) => entry.id !== thread.id);
           return stopped?.status === 'interrupted' && stopped.activeTurnId === null;
         },
-        { timeoutMs: 45_000, intervalMs: 500 },
+        { timeoutMs: 180_000, intervalMs: 500 },
       );
-      await api('/execute/sync', { script: 'mobile: activateApp', args: [{ bundleId }] });
       await e2e.waitFor(
         'stop controls settle after foregrounding',
         async () => (await absent(selectors.stop)) && (await absent(selectors.stopping)),
@@ -533,7 +611,16 @@ export default async function scenario(e2e) {
       await find(selectors.bridgeUrl);
       await capture('on-device-add-bridge');
       await tap(selectors.cancelConnection);
-      await find(selectors.runTarget);
+      // Pairing is anchored on Settings (see profiles/actions.ts), so cancelling lands there.
+      await e2e.waitFor(
+        'cancelling pairing returns to Settings',
+        () => absent(selectors.bridgeUrl),
+        {
+          timeoutMs: 15_000,
+        },
+      );
+      await find(selectors.settingsModels);
+      await startNewChat();
       await e2e.check(
         'leaving and returning keeps the local profile, conversations, and workspace files',
         async () =>

@@ -13,14 +13,18 @@ export const nativeOnDeviceSelectors = {
   openDrawer: 'Open navigation drawer',
   newChat: 'New chat',
   settings: 'Open settings',
-  settingsBack: 'Back to Settings',
-  settingsModels: { predicate: 'label BEGINSWITH "Models, "' },
+  // The testID, not the label: it names the page Back returns to, and a testID is the iOS name.
+  settingsBack: 'settings-back-button',
+  // Scoped to buttons: the group footer "Models, workspaces, and conversations…" also matches.
+  settingsModels: { predicate: 'type == "XCUIElementTypeButton" AND label BEGINSWITH "Models, "' },
   modelLibrary: 'settings-local-models-screen',
   qwen35Family: 'settings-local-family-qwen3.5',
   bonsaiFamily: 'settings-local-family-bonsai-2',
   gemmaFamily: 'settings-local-family-gemma-4',
   familyPage: 'settings-local-family-screen',
-  gitAccount: { predicate: 'label BEGINSWITH "Git & GitHub, "' },
+  gitAccount: {
+    predicate: 'type == "XCUIElementTypeButton" AND label BEGINSWITH "Git & GitHub, "',
+  },
   gitAccountPage: 'settings-local-account-screen',
   githubUnavailable: { predicate: 'label == "GitHub sign-in, Unavailable"' },
   workspace: { predicate: 'label BEGINSWITH "Workspace, "' },

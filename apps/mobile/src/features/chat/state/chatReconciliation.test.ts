@@ -482,3 +482,66 @@ describe('resolveEquivalentChat local transcript reconciliation', () => {
     ]);
   });
 });
+
+describe('resolveEquivalentChat with an authoritative on-device history', () => {
+  const ask = { id: 'user-1', role: 'user' as const, content: 'Commit it', createdAt };
+  const tool = {
+    id: 'tool-commit',
+    role: 'system' as const,
+    content: 'Git commit',
+    createdAt: '2026-07-25T00:00:01.000Z',
+  };
+  const lostReply = {
+    id: 'reply-lost',
+    role: 'assistant' as const,
+    content: 'Committed abc123',
+    createdAt: '2026-07-25T00:00:02.000Z',
+  };
+  const cached = chat({ status: 'complete', messages: [ask, tool, lostReply] });
+
+  it('drops cached messages the runtime never stored instead of keeping them as missing history', () => {
+    const recovered = chat({
+      status: 'idle',
+      messages: [ask, { ...tool, content: 'Git commit (interrupted)' }],
+      historyAuthoritative: true,
+    });
+
+    const resolved = resolveEquivalentChat(cached, recovered);
+
+    expect(resolved.messages).toEqual(recovered.messages);
+    expect(resolved.status).toBe('idle');
+  });
+
+  it('still protects a bridge transcript from a snapshot that is missing the latest reply', () => {
+    const partial = chat({ status: 'idle', messages: [ask, tool] });
+
+    expect(resolveEquivalentChat(cached, partial).messages).toEqual(cached.messages);
+  });
+
+  it('keeps unconfirmed sends, client-only entries, and history against a summary-only read', () => {
+    const pending = {
+      id: 'local-user-2',
+      role: 'user' as const,
+      content: 'And push',
+      createdAt: '2026-07-25T00:00:03.000Z',
+    };
+    const note = {
+      id: 'local-system-1',
+      role: 'system' as const,
+      content: 'Model loaded',
+      createdAt: '2026-07-25T00:00:04.000Z',
+    };
+    const withLocal = chat({ messages: [ask, tool, lostReply, pending, note] });
+    const recovered = chat({ messages: [ask, tool], historyAuthoritative: true });
+
+    expect(resolveEquivalentChat(withLocal, recovered).messages.map(({ id }) => id)).toEqual([
+      'user-1',
+      'tool-commit',
+      'local-user-2',
+      'local-system-1',
+    ]);
+    expect(
+      resolveEquivalentChat(cached, chat({ messages: [], historyAuthoritative: true })).messages,
+    ).toEqual(cached.messages);
+  });
+});

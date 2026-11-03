@@ -188,6 +188,9 @@ export function AppSheet({
   return (
     <BottomSheetModal
       ref={sheetRef}
+      // gorhom makes the sheet one accessibility element by default, which hides every control in
+      // it from VoiceOver and XCUITest; the content view below carries the modal label instead.
+      accessible={false}
       enablePanDownToClose={dismissible}
       enableDynamicSizing={snapPoints === undefined}
       maxDynamicContentSize={maxDynamicContentSize}

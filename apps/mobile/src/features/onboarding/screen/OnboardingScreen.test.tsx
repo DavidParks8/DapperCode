@@ -246,6 +246,9 @@ describe('OnboardingScreen behavior', () => {
     });
     const root = result.tree.root as Queryable;
     expect(findByLabel(root, label)).toBeTruthy();
+    const copy = JSON.stringify((result.tree as unknown as { toJSON: () => unknown }).toJSON());
+    expect(copy).toContain('Opens a new chat on this bridge');
+    expect(copy).not.toContain('Start using DapperCode');
     await press(findByLabel(root, 'Cancel connection setup'));
     expect(result.onCancel).toHaveBeenCalled();
     await press(findByLabel(root, 'Show bridge token'));

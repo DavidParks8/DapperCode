@@ -191,6 +191,13 @@ export interface Chat extends ChatSummary {
   };
   /** Local read/recovery failure, independent of the agent's run status. */
   historyRecoveryError?: string | null;
+  /**
+   * Client-only: the host keeps the whole conversation on this device (On this iPhone), so its
+   * snapshot is the transcript. Messages a cached copy has beyond it were lost before they were
+   * stored (a crash between streaming and the coalesced write), not left unread, and are dropped
+   * instead of kept as missing history.
+   */
+  historyAuthoritative?: boolean;
   acpSnapshot?: RawAcpSnapshot;
   latestPlan?: ChatPlanSnapshot | null;
   latestTurnPlan?: ChatPlanSnapshot | null;
