@@ -9,6 +9,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { useEffect, useRef } from 'react';
 import { activityAtom } from '../state/composer';
 import type { RpcNotification } from '@bridge/types/types';
+import { WORKSPACE_HOST_NOTIFICATIONS } from '../../workspace/api/protocol';
 import { parseAgUiEventNotification, type AgUiEventEnvelope } from '@bridge/agui/agUi';
 import { EventType } from '@ag-ui/core';
 import type {
@@ -34,6 +35,7 @@ const THREAD_STATE_EVENT_METHODS = new Set([
   'thread/tokenUsage/updated',
   'thread/tokenTotals/updated',
   'item/started',
+  WORKSPACE_HOST_NOTIFICATIONS.threadCwdChanged,
 ]);
 
 const PLAN_AND_REASONING_EVENT_METHODS = new Set([

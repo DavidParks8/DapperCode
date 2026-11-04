@@ -363,7 +363,9 @@ export function OnboardingConnectSection({
           <View style={styles.primaryButtonContent}>
             <View style={styles.primaryButtonCopy}>
               <Text style={styles.primaryButtonText}>{continueLabel}</Text>
-              <Text style={styles.primaryButtonSubtext}>Start using DapperCode</Text>
+              <Text style={styles.primaryButtonSubtext}>
+                {mode === 'initial' ? 'Start using DapperCode' : 'Opens a new chat on this bridge'}
+              </Text>
             </View>
             <Ionicons
               {...decorativeAccessibilityProps}

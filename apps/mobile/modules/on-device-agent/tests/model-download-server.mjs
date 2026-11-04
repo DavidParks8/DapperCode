@@ -14,12 +14,13 @@ const server = https.createServer(
       response.end('Fixture unavailable.');
       return;
     }
-    if (request.url !== '/model.gguf') {
+    if (request.url !== '/model.gguf' && request.url !== '/model-2.gguf') {
       response.writeHead(404);
       response.end();
       return;
     }
     const range = request.headers.range?.match(/^bytes=(\d+)-$/);
+    console.log(`MODEL_REQUEST ${request.method} ${request.url} ${range ? 'range' : 'full'}`);
     let offset = range ? Number(range[1]) : 0;
     if (!Number.isSafeInteger(offset) || offset < 0 || offset >= data.length) {
       response.writeHead(416);
@@ -47,6 +48,7 @@ const server = https.createServer(
       offset = next;
       if (offset === data.length) {
         clearInterval(timer);
+        console.log(`MODEL_RESPONSE_COMPLETE ${request.url}`);
         response.end();
       }
     }, 20);

@@ -14,7 +14,7 @@ import {
   type ChatSnapshotCache,
 } from '@shell/session/chatSnapshotCache';
 import { apiClientAtom } from '@shell/state/bridge/atoms';
-import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
+import { activeProfileIdAtom } from '@shell/state/bridge/atoms';
 import {
   activeChatAtom,
   interruptedChatCreationAtom,
@@ -81,8 +81,8 @@ function linkedPendingChat(pendingChat: Chat, linked: InterruptedChatCreation): 
 }
 
 function isActiveProfile(get: Getter, profileId: string): boolean {
-  const activeProfileId = get(activeBridgeProfileAtom)?.id;
-  return activeProfileId === undefined || activeProfileId === profileId;
+  const activeProfileId = get(activeProfileIdAtom);
+  return activeProfileId === null || activeProfileId === profileId;
 }
 
 function isActivePendingState(get: Getter, profileId: string, pendingChatId: string): boolean {

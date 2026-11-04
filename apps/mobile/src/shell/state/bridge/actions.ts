@@ -123,3 +123,15 @@ export const switchBridgeProfileAtom = atom(
     }
   },
 );
+
+/** Closes the active profile without opening another, so startup lands on onboarding. */
+export const closeActiveProfileAtom = atom(null, async (_get, set): Promise<void> => {
+  set(bridgeProfileTransitioningAtom, true);
+  try {
+    await set(dispatchDurableAppStateAtom, { type: 'profiles/switch', profileId: null });
+    set(resetChatSessionStateAtom);
+    set(applyRestoredCacheAtom, null);
+  } finally {
+    set(bridgeProfileTransitioningAtom, false);
+  }
+});

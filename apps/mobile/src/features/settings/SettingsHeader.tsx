@@ -21,9 +21,18 @@ interface SettingsHeaderProps {
   title: string;
   collapsed: boolean;
   onMenuPress?: (() => void) | undefined;
+  /** Shows a back chevron instead of the menu button, for pages pushed onto Settings. */
+  onBackPress?: (() => void) | undefined;
+  backLabel?: string;
 }
 
-export function SettingsHeader({ title, collapsed, onMenuPress }: SettingsHeaderProps) {
+export function SettingsHeader({
+  title,
+  collapsed,
+  onMenuPress,
+  onBackPress,
+  backLabel = 'Back',
+}: SettingsHeaderProps) {
   const theme = useAppTheme();
   const navigationLabel = useNavigationToggleLabel();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -38,7 +47,17 @@ export function SettingsHeader({ title, collapsed, onMenuPress }: SettingsHeader
     <View style={styles.bar}>
       <View style={styles.barRow}>
         <View style={styles.barSide}>
-          {onMenuPress ? (
+          {onBackPress ? (
+            <Pressable
+              accessibilityLabel={backLabel}
+              accessibilityRole="button"
+              onPress={onBackPress}
+              style={styles.barButton}
+              testID="settings-back-button"
+            >
+              <Ionicons name="chevron-back" size={24} color={theme.colors.textPrimary} />
+            </Pressable>
+          ) : onMenuPress ? (
             <Pressable
               accessibilityLabel={navigationLabel}
               accessibilityRole="button"

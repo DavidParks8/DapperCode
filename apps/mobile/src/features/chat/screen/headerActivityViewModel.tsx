@@ -17,6 +17,7 @@ import {
   type RotatingWorkingPhrase,
 } from '../helpers/helpers';
 import { areChatStatusMapsEquivalent } from '../state/chatState';
+import { useRunAnnouncement } from './runAnnouncement';
 import {
   resolveDisplayedActivity,
   resolveVisibleActivity,
@@ -293,6 +294,13 @@ export function useMainScreenHeaderActivityViewModel(
     activeTurnId,
     setShowDelayedGenericRunningActivity,
   ]);
+
+  useRunAnnouncement({
+    chatId: selectedChat?.id ?? null,
+    activeTurnId,
+    activity,
+    resolvedActivity,
+  });
 
   const activityDetail = displayedActivity.detail;
   const showActivity = resolveShowActivity(

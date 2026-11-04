@@ -45,6 +45,11 @@ async function prepare() {
   result.write(JSON.stringify({ networkRequests }));
 }
 
+/**
+ * Installs verified weights, a workspace, and local preferences natively, then boots the production
+ * router with no saved profile, so the scenario enters On this iPhone from onboarding like a new
+ * user and drives the shared chat shell and Settings.
+ */
 function ProductFixture() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);

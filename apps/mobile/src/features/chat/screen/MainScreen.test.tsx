@@ -6,7 +6,15 @@ import * as ImagePicker from 'expo-image-picker';
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 jest.mock('expo-router/react-navigation', () => ({ usePreventRemove: jest.fn() }));
 import { router, useGlobalSearchParams, usePathname } from 'expo-router';
-import { AppState, FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import {
+  AccessibilityInfo,
+  AppState,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import type { HostBridgeApiClient } from '@bridge/client/client';
@@ -2897,6 +2905,36 @@ function MainRouteShell() {
       );
       await emitWs({ method: 'bridge/approval.resolved', params: { id: 'approval-1' } });
       expect(api.resolveApproval).not.toHaveBeenCalled();
+      act(() => tree.unmount());
+    });
+
+    it('announces only a watched turn finishing, not opening an already-settled chat', async () => {
+      const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+      announce.mockClear();
+      const api = createApi({ loadedChat: chat, cachedChat: chat });
+      const { tree } = await renderMain({
+        api,
+        pendingOpenChatId: chat.id,
+        pendingOpenChatSnapshot: chat,
+      });
+      const spoken = () => announce.mock.calls.map(([message]) => message);
+      expect(spoken()).not.toContain('Opening chat');
+      expect(spoken()).not.toContain('Turn completed');
+
+      const runEvent = (type: 'RUN_STARTED' | 'RUN_FINISHED') => ({
+        method: 'bridge/agui.event',
+        params: {
+          threadId: chat.id,
+          runId: 'run-watched',
+          sourceTurnId: 'turn-watched',
+          event: { type, threadId: chat.id, runId: 'run-watched' },
+        },
+      });
+      await emitWs(runEvent('RUN_STARTED'));
+      expect(spoken()).not.toContain('Working');
+      await emitWs(runEvent('RUN_FINISHED'));
+      expect(spoken().filter((message) => message === 'Turn completed')).toHaveLength(1);
+      announce.mockRestore();
       act(() => tree.unmount());
     });
 

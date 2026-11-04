@@ -490,6 +490,25 @@ describe('app-state persistence format', () => {
     expect(parsePersistedAppState(serializeAppState(hidden)).settings.sidebarHidden).toBe(true);
   });
 
+  it('shows the local setup guide for older state and remembers when it was hidden or finished', () => {
+    const persisted = JSON.parse(serializeAppState(createDefaultAppStateData())) as {
+      settings: Record<string, unknown>;
+    };
+    delete persisted.settings['localSetupDismissed'];
+    delete persisted.settings['localSetupCompleted'];
+    const older = parsePersistedAppState(JSON.stringify(persisted)).settings;
+    expect(older.localSetupDismissed).toBe(false);
+    expect(older.localSetupCompleted).toBe(false);
+
+    const finished = createDefaultAppStateData();
+    finished.settings.localSetupDismissed = true;
+    finished.settings.localSetupCompleted = true;
+    expect(parsePersistedAppState(serializeAppState(finished)).settings).toMatchObject({
+      localSetupDismissed: true,
+      localSetupCompleted: true,
+    });
+  });
+
   it('rejects unknown versions without falling back and overwriting them', () => {
     expect(() => parsePersistedAppState('{"version":999}')).toThrow(AppStatePersistenceError);
   });

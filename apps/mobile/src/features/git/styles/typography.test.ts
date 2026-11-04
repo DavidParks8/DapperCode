@@ -2,6 +2,7 @@ import { StyleSheet } from 'react-native';
 
 import { createAppTheme } from '@shared/theme';
 import { createGitScreenDiffReviewStyles } from './diffReview';
+import { createGitScreenHostStyles } from './hostActions';
 import { createGitScreenReviewFilesStyles } from './reviewFiles';
 
 /**
@@ -29,16 +30,22 @@ describe('git screen mono/metadata typography mapping', () => {
     }
   });
 
-  it('reviewFileCode, reviewFileStats, and historyHashBadgeText use metadata size/lineHeight with the mono font family', () => {
+  it('reviewFileStats and historyHashBadgeText use metadata size/lineHeight with the mono font family', () => {
     const styles = createGitScreenReviewFilesStyles(theme);
-    const fileCode = StyleSheet.flatten(styles.reviewFileCode);
     const fileStats = StyleSheet.flatten(styles.reviewFileStats);
     const hashBadge = StyleSheet.flatten(styles.historyHashBadgeText);
 
-    for (const style of [fileCode, fileStats, hashBadge]) {
+    for (const style of [fileStats, hashBadge]) {
       expect(style.fontSize).toBe(metadata.fontSize);
       expect(style.lineHeight).toBe(metadata.lineHeight);
       expect(style.fontFamily).toBe(mono.fontFamily);
     }
+  });
+
+  it('file change labels are words at metadata scale, not monospace status codes', () => {
+    const badge = StyleSheet.flatten(createGitScreenHostStyles(theme).changeBadgeText);
+    expect(badge.fontSize).toBe(metadata.fontSize);
+    expect(badge.lineHeight).toBe(metadata.lineHeight);
+    expect(badge.fontFamily).not.toBe(mono.fontFamily);
   });
 });

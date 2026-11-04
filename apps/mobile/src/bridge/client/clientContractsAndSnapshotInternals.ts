@@ -8,6 +8,10 @@ export interface ApiClientOptions {
   bridgeUrl?: string;
   authToken?: string | null;
   profileId?: string | null;
+  /** How long `model/list` results are reused; defaults to five minutes. */
+  modelListCacheTtlMs?: number;
+  /** Marks every read chat `historyAuthoritative`: the host stores the whole conversation. */
+  authoritativeHistory?: boolean;
 }
 
 export interface AppServerListResponse {

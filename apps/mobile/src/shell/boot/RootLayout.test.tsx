@@ -33,6 +33,9 @@ jest.mock('@shell/boot/useAppStoreReview', () => ({ useAppStoreReview: jest.fn()
 jest.mock('@shell/boot/usePushNotificationsLifecycle', () => ({
   usePushNotificationsLifecycle: jest.fn(),
 }));
+jest.mock('@shell/runtime/LocalRuntimeHost', () => ({
+  LocalRuntimeHost: () => 'local-runtime-host',
+}));
 
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -44,7 +47,8 @@ import { themeAtom } from '@shell/state/theme';
 import { RootLayout } from '@shell/boot/RootLayout';
 import { useAppBridgeLifecycle } from '@shell/boot/useAppBridgeLifecycle';
 import { usePushNotificationsLifecycle } from '@shell/boot/usePushNotificationsLifecycle';
-import { router } from 'expo-router';
+import { localProfileAvailableAtom } from '@shell/state/bridge/atoms';
+import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 
 function renderRoot(store = createTestStore()): ReactTestRenderer {
   let tree: ReactTestRenderer | undefined;
@@ -109,16 +113,42 @@ describe('RootLayout', () => {
     act(() => tree.unmount());
   });
 
-  it('keeps bridge and push effects unmounted on local routes, then restores them on a desktop route', () => {
+  it('runs profile lifecycles for every profile and always mounts the local runtime host', () => {
     const store = createTestStore();
     store.set(chatSnapshotCacheAtom, null);
-    act(() => router.replace('/on-device'));
     const tree = renderRoot(store);
-    expect(useAppBridgeLifecycle).not.toHaveBeenCalled();
-    expect(usePushNotificationsLifecycle).not.toHaveBeenCalled();
-    act(() => router.replace('/profiles/profile-1/chats/new'));
-    expect(useAppBridgeLifecycle).toHaveBeenCalledTimes(1);
-    expect(usePushNotificationsLifecycle).toHaveBeenCalledTimes(1);
+    expect(useAppBridgeLifecycle).toHaveBeenCalled();
+    expect(usePushNotificationsLifecycle).toHaveBeenCalled();
+    expect(jsonOf(tree)).toContain('local-runtime-host');
     act(() => tree.unmount());
   });
+
+  it.each([
+    { available: false, profiles: false, guards: [false, true] },
+    { available: true, profiles: false, guards: [true, true] },
+  ])(
+    'opens profile routes for the local profile only where it is supported ($available)',
+    ({ available, guards }) => {
+      const store = createTestStore();
+      store.set(chatSnapshotCacheAtom, null);
+      store.set(localProfileAvailableAtom, available);
+      const snapshot = store.get(appStateSnapshotAtom);
+      store.set(appStateSnapshotAtom, {
+        ...snapshot,
+        data: {
+          ...snapshot.data,
+          bridgeProfiles: { activeProfileId: LOCAL_PROFILE_ID, profiles: [] },
+        },
+      });
+      const tree = renderRoot(store);
+      const children = (mockRootStackProps?.['children'] ?? []) as {
+        props: { guard?: unknown };
+      }[];
+      // [profiles route guard, onboarding guard]
+      expect(
+        children.map((child) => child.props.guard).filter((guard) => guard !== undefined),
+      ).toEqual(guards);
+      act(() => tree.unmount());
+    },
+  );
 });

@@ -1,36 +1,28 @@
-import { useSetAtom } from 'jotai';
-import { useRouter } from 'expo-router';
-import { Platform } from 'react-native';
+import { useAtomValue } from 'jotai';
 
-import { dispatchDurableAppStateAtom } from '@shell/state/appState/actions';
 import { ChoiceAction } from '../../features/onboarding/ChoiceAction';
-import { useLocalOperation, LocalError } from '../../features/on-device/screens/ui';
+import { routes } from '@shell/navigation/routes';
+import { replaceRoot } from '@shell/navigation/routeNavigation';
+import { localProfileAvailableAtom } from '@shell/state/bridge/atoms';
+import { LOCAL_PROFILE_ID, LOCAL_PROFILE_NAME } from '@shell/state/localProfile';
 
+export const ON_DEVICE_ENTRY_META = 'Private, offline models with file and Git tools';
+
+/** Onboarding choice that opens the built-in local profile in the regular chat shell. */
 export function OnDeviceEntry() {
-  const router = useRouter();
-  const dispatch = useSetAtom(dispatchDurableAppStateAtom);
-  const operation = useLocalOperation();
-  if (Platform.OS !== 'ios') {
-    return null;
-  }
   return (
-    <>
-      <ChoiceAction
-        title="On this iPhone"
-        meta="Offline models with file and Git tools"
-        iconName="phone-portrait-outline"
-        loading={operation.busy}
-        onPress={() =>
-          operation.run(async () => {
-            await dispatch({
-              type: 'settings/update',
-              patch: { preferredExecutionTarget: 'on-device' },
-            });
-            router.replace('/on-device');
-          })
-        }
-      />
-      <LocalError message={operation.error} />
-    </>
+    <ChoiceAction
+      title={LOCAL_PROFILE_NAME}
+      meta={ON_DEVICE_ENTRY_META}
+      iconName="phone-portrait-outline"
+      accessibilityHint="Opens a new chat that runs on this iPhone. Setup downloads a model first."
+      testID="onboarding-choice-local"
+      onPress={() => replaceRoot(routes.newChat(LOCAL_PROFILE_ID))}
+    />
   );
+}
+
+/** The local onboarding choice, or nothing where this build cannot run the local agent. */
+export function useOnDeviceEntry() {
+  return useAtomValue(localProfileAvailableAtom) ? <OnDeviceEntry /> : undefined;
 }

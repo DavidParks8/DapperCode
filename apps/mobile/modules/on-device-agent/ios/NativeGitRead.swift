@@ -22,14 +22,18 @@ struct NativeGitStatus: Sendable {
   let branch: String
   let files: [NativeGitFile]
   let totalFiles: Int
+  let stagedFiles: Int
+  let remote: NativeGitRemoteInfo
 
   var payload: [String: Any] {
-    [
+    let base: [String: Any] = [
       "branch": branch, "files": files.map(\.payload), "clean": totalFiles == 0,
       "raw": files.map { "\($0.indexStatus)\($0.worktreeStatus) \($0.path)" }.joined(separator: "\n"),
       "truncated": totalFiles > files.count, "totalFiles": totalFiles,
       "omittedFiles": totalFiles - files.count, "maxFiles": 500, "maxBytes": 512 * 1024,
+      "stagedFiles": stagedFiles,
     ]
+    return base.merging(remote.payload) { current, _ in current }
   }
 }
 
@@ -76,12 +80,12 @@ extension NativeGit {
       var files: [NativeGitFile] = []
       var rawBytes = 0
       for index in 0..<min(count, 500) {
-        guard let entry = git_status_byindex(list, index) else { throw GitOperationError("Git returned an invalid status entry.") }
+        guard let entry = git_status_byindex(list, index) else { throw GitOperationError(.gitFailure, "Git returned an invalid status entry.") }
         let status = entry.pointee.status.rawValue
         let delta = entry.pointee.index_to_workdir ?? entry.pointee.head_to_index
         guard let delta, let raw = delta.pointee.new_file.path ?? delta.pointee.old_file.path,
           let path = String(validatingCString: raw) else {
-          throw GitOperationError("Git file names must be valid UTF-8.")
+          throw GitOperationError(.gitFailure, "Git file names must be valid UTF-8.")
         }
         let untracked = status & GIT_STATUS_WT_NEW.rawValue != 0
         let old = delta.pointee.old_file.path.flatMap { String(validatingCString: $0) }
@@ -96,13 +100,25 @@ extension NativeGit {
         rawBytes += bytes
         files.append(file)
       }
-      return NativeGitStatus(branch: try currentBranch(repository), files: files, totalFiles: count)
+      let stagedMask =
+        GIT_STATUS_INDEX_NEW.rawValue | GIT_STATUS_INDEX_MODIFIED.rawValue
+        | GIT_STATUS_INDEX_DELETED.rawValue | GIT_STATUS_INDEX_RENAMED.rawValue
+        | GIT_STATUS_INDEX_TYPECHANGE.rawValue
+      var staged = 0
+      for index in 0..<count {
+        if let entry = git_status_byindex(list, index), entry.pointee.status.rawValue & stagedMask != 0 {
+          staged += 1
+        }
+      }
+      return NativeGitStatus(
+        branch: try currentBranch(repository), files: files, totalFiles: count,
+        stagedFiles: staged, remote: try remoteInfo(repository))
     }
   }
 
   static func diff(repository: URL, maximumBytes: Int = 128 * 1024) throws -> NativeGitDiff {
     guard (1...(128 * 1024)).contains(maximumBytes) else {
-      throw GitOperationError("Git diff limits must be between 1 and 131072 bytes.")
+      throw GitOperationError(.invalidArgument, "Git diff limits must be between 1 and 131072 bytes.")
     }
     return try withRepository(repository) { repository in
       var tree: OpaquePointer?
@@ -169,7 +185,7 @@ extension NativeGit {
         guard let rawSubject = git_commit_summary(commit), let subject = String(validatingCString: rawSubject),
           let author = git_commit_author(commit), let rawName = author.pointee.name,
           let name = String(validatingCString: rawName) else {
-          throw GitOperationError("Git commit metadata must be valid UTF-8.")
+          throw GitOperationError(.gitFailure, "Git commit metadata must be valid UTF-8.")
         }
         commits.append(NativeGitCommit(
           hash: try objectID(&oid), subject: subject, authorName: name,
@@ -188,13 +204,13 @@ extension NativeGit {
     if result == GIT_ENOTFOUND.rawValue || result == GIT_EUNBORNBRANCH.rawValue {
       try requireSuccess(git_reference_lookup(&head, repository, "HEAD"), "Read initial branch")
       guard let target = git_reference_symbolic_target(head), let name = String(validatingCString: target) else {
-        throw GitOperationError("The initial Git branch is invalid.")
+        throw GitOperationError(.gitFailure, "The initial Git branch is invalid.")
       }
       return name.hasPrefix("refs/heads/") ? String(name.dropFirst(11)) : name
     }
     try requireSuccess(result, "Read branch")
     guard let raw = git_reference_shorthand(head), let name = String(validatingCString: raw) else {
-      throw GitOperationError("The Git branch name is invalid.")
+      throw GitOperationError(.gitFailure, "The Git branch name is invalid.")
     }
     return name
   }
@@ -233,13 +249,13 @@ private final class GitDiffCollector {
     if let text = String(data: data, encoding: .utf8) {
       return NativeGitDiff(diff: text, originalBytes: total, returnedBytes: data.count, maxBytes: limit)
     }
-    guard total > limit else { throw GitOperationError("The Git diff is not valid UTF-8 text.") }
+    guard total > limit else { throw GitOperationError(.gitFailure, "The Git diff is not valid UTF-8 text.") }
     for _ in 0..<3 where !data.isEmpty {
       data.removeLast()
       if let text = String(data: data, encoding: .utf8) {
         return NativeGitDiff(diff: text, originalBytes: total, returnedBytes: data.count, maxBytes: limit)
       }
     }
-    throw GitOperationError("The truncated Git diff is not valid UTF-8 text.")
+    throw GitOperationError(.gitFailure, "The truncated Git diff is not valid UTF-8 text.")
   }
 }

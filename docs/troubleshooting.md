@@ -7,8 +7,8 @@
   connections without loading local services.
 - **Memory admission refused:** unload the current model, close memory-heavy apps, refresh memory,
   or choose a smaller compatible catalog model. Simulator estimates do not certify phone support.
-- **Download paused or interrupted:** resume it in Model library. If verification was interrupted,
-  use **Verify download**. Hash/size failures remain unavailable until a valid artifact is verified.
+- **Download paused or interrupted:** resume it in Settings → On this iPhone → Models. If verification was interrupted,
+  tap **Verify** on that model. Hash/size failures remain unavailable until a valid artifact is verified.
 - **Context full:** start a new local conversation or request smaller file reads. History is not
   silently truncated.
 - **Stopped/interrupted tool:** inspect files and Git state before retrying; an edit, commit, or

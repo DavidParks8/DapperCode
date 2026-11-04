@@ -1,4 +1,9 @@
-import { emptyLocalPreferences, parseLocalPreferences } from './preferences';
+import {
+  emptyLocalPreferences,
+  parseLocalPreferences,
+  parseStoredLocalPreferences,
+  serializeLocalPreferences,
+} from './preferences';
 
 test('only absent preferences produce defaults; invalid stored data is never reset', () => {
   expect(parseLocalPreferences(null)).toEqual(emptyLocalPreferences());
@@ -8,17 +13,30 @@ test('only absent preferences produce defaults; invalid stored data is never res
     '{}',
     '{"version":2}',
     JSON.stringify({ ...emptyLocalPreferences(), drafts: { a: 3 } }),
+    JSON.stringify({ ...emptyLocalPreferences(), drafts: [] }),
   ]) {
     expect(() => parseLocalPreferences(raw)).toThrow();
   }
 });
 
-test('preferences round-trip drafts, workspace, model, opaque account reference, and offline author', () => {
+test('legacy inline drafts are read for migration but never written back into preferences', () => {
+  const legacy = { '00000000-0000-4000-8000-000000000001': 'unfinished draft' };
+  const stored = parseStoredLocalPreferences(
+    JSON.stringify({ ...emptyLocalPreferences(), drafts: legacy }),
+  );
+  expect(stored).toEqual({ preferences: emptyLocalPreferences(), legacyDrafts: legacy });
+  const written: unknown = JSON.parse(serializeLocalPreferences(stored.preferences));
+  expect(written).toEqual({ ...emptyLocalPreferences(), drafts: {} });
+  expect(parseStoredLocalPreferences(JSON.stringify(emptyLocalPreferences())).legacyDrafts).toEqual(
+    {},
+  );
+});
+
+test('preferences round-trip workspace, model, opaque account reference, and offline author', () => {
   const preferences = {
     ...emptyLocalPreferences(),
     workspaceId: 'local-workspace',
     modelId: 'qwen3-1.7b-q4-k-m',
-    drafts: { '00000000-0000-4000-8000-000000000001': 'unfinished draft' },
     author: { name: 'Offline Author', email: 'author@example.invalid' },
     account: {
       providerId: 'github',
@@ -28,7 +46,7 @@ test('preferences round-trip drafts, workspace, model, opaque account reference,
       credentialRef: 'opaque-ref',
     },
   };
-  expect(parseLocalPreferences(JSON.stringify(preferences))).toEqual(preferences);
+  expect(parseLocalPreferences(serializeLocalPreferences(preferences))).toEqual(preferences);
   expect(JSON.stringify(preferences)).not.toContain('access_token');
   expect(() =>
     parseLocalPreferences(

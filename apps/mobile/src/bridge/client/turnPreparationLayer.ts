@@ -148,7 +148,8 @@ export abstract class HostBridgeApiClientTurnPreparationLayer extends HostBridge
     const rawThread = toRawThread(rawThreadValue);
     this.rememberRawThreadTitle(rawThread);
     const mapped = mapChat(rawThread);
-    const latest = this.applyRememberedTitle(mapped);
+    const titled = this.applyRememberedTitle(mapped);
+    const latest = this.authoritativeHistory ? { ...titled, historyAuthoritative: true } : titled;
     const cached = this.peekChat(latest.id);
     const missingHistory = isChatHistoryIncomplete(cached, latest);
     const chat = {

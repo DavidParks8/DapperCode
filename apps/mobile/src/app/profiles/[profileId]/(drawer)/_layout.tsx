@@ -7,7 +7,7 @@ import { useShellLayout } from '@shell/layout/useShellLayout';
 import { DrawerContent } from '@shell/navigation/DrawerContent';
 import { useDrawerForegroundSync } from '@shell/navigation/useDrawerForegroundSync';
 import { sidebarHiddenAtom } from '@shell/state/appState/settings';
-import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
+import { activeProfileIdAtom, apiClientAtom, wsClientAtom } from '@shell/state/bridge/atoms';
 import { drawerCommandsAtom, OPEN_NAVIGATION_LABEL } from '@shell/state/drawer/atoms';
 import { useAppTheme } from '@shared/theme';
 
@@ -49,7 +49,10 @@ function RouterDrawerContent({
   sidebarMode,
 }: DrawerContentComponentProps & { sidebarMode: ShellLayout['sidebarMode'] }) {
   const drawerStatus = useDrawerStatus();
-  const activeProfileId = useAtomValue(activeBridgeProfileAtom)?.id;
+  const activeProfileId = useAtomValue(activeProfileIdAtom);
+  const api = useAtomValue(apiClientAtom);
+  const ws = useAtomValue(wsClientAtom);
+  const hasClients = Boolean(api && ws);
   const setDrawerCommands = useSetAtom(drawerCommandsAtom);
   const store = useStore();
   const docked = sidebarMode === 'docked';
@@ -78,6 +81,11 @@ function RouterDrawerContent({
     return () => setDrawerCommands(null);
   }, [docked, navigation, setDrawerCommands, sidebarMode, store]);
 
+  // The local profile's clients appear only once its runtime has started; bridge clients exist
+  // synchronously. The drawer needs both, so it waits instead of rendering without a client.
+  if (!hasClients) {
+    return null;
+  }
   return (
     <DrawerContent
       key={activeProfileId}

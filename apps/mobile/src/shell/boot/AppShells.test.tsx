@@ -20,7 +20,11 @@ jest.mock('@shell/state/bridge/actions', () => {
 import { router } from 'expo-router';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
+import { resetRouterMock } from '@shared/testing/expoRouterMock';
 import { routes } from '@shell/navigation/routes';
+import { createDefaultAppStateData } from '@shell/state/appState';
+import { localProfileAvailableAtom } from '@shell/state/bridge/atoms';
+import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 import { createBridgeTestStore, createTestStore, withAppStore } from '@shell/state/testing';
 import { ConnectionScreen } from '@shell/boot/AppShells';
 
@@ -96,6 +100,24 @@ describe('ConnectionScreen', () => {
     });
     expect(router.replace).toHaveBeenCalledWith(routes.newChat('profile-2'));
     act(() => tree.unmount());
+  });
+
+  it('lets a bridge being added from On this iPhone be cancelled', () => {
+    resetRouterMock();
+    const data = createDefaultAppStateData();
+    data.bridgeProfiles = { activeProfileId: LOCAL_PROFILE_ID, profiles: [] };
+    const store = createTestStore({ data });
+    store.set(localProfileAvailableAtom, true);
+    let tree: ReactTestRenderer | undefined;
+    act(() => {
+      tree = renderer.create(withAppStore(store, <ConnectionScreen mode="add" />));
+    });
+
+    const cancel = mockOnboardingProps?.['onCancel'] as (() => void) | undefined;
+    expect(cancel).toEqual(expect.any(Function));
+    act(() => cancel?.());
+    expect(router.replace).toHaveBeenCalledWith(routes.settings(LOCAL_PROFILE_ID));
+    act(() => tree?.unmount());
   });
 
   it('hands off to onSaved instead of the default root replace when the route owns its own completion navigation', async () => {

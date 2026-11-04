@@ -11,60 +11,70 @@ const EXPECTED_ACTIONS: Record<ChatToolKind, Record<ChatToolStatus, string>> = {
     in_progress: 'Reading',
     completed: 'Read',
     failed: 'Failed to read',
+    interrupted: 'Stopped reading',
   },
   edit: {
     pending: 'Waiting to edit',
     in_progress: 'Editing',
     completed: 'Edited',
     failed: 'Failed to edit',
+    interrupted: 'Stopped editing',
   },
   delete: {
     pending: 'Waiting to delete',
     in_progress: 'Deleting',
     completed: 'Deleted',
     failed: 'Failed to delete',
+    interrupted: 'Stopped deleting',
   },
   move: {
     pending: 'Waiting to move',
     in_progress: 'Moving',
     completed: 'Moved',
     failed: 'Failed to move',
+    interrupted: 'Stopped moving',
   },
   search: {
     pending: 'Waiting to search',
     in_progress: 'Searching',
     completed: 'Searched',
     failed: 'Failed to search',
+    interrupted: 'Stopped searching',
   },
   execute: {
     pending: 'Waiting to run',
     in_progress: 'Running',
     completed: 'Ran',
     failed: 'Failed to run',
+    interrupted: 'Stopped running',
   },
   think: {
     pending: 'Waiting to think',
     in_progress: 'Thinking',
     completed: 'Thought',
     failed: 'Failed to think',
+    interrupted: 'Stopped thinking',
   },
   fetch: {
     pending: 'Waiting to fetch',
     in_progress: 'Fetching',
     completed: 'Fetched',
     failed: 'Failed to fetch',
+    interrupted: 'Stopped fetching',
   },
   switch_mode: {
     pending: 'Waiting to switch mode',
     in_progress: 'Switching mode',
     completed: 'Switched mode',
     failed: 'Failed to switch mode',
+    interrupted: 'Stopped switching mode',
   },
   other: {
     pending: 'Waiting',
     in_progress: 'Running',
     completed: 'Ran',
     failed: 'Failed',
+    interrupted: 'Interrupted',
   },
 };
 
@@ -99,6 +109,17 @@ describe('tool invocation status language', () => {
         ).toBe(action);
       }
     }
+  });
+
+  it('keeps an interrupted call interrupted, never failed or completed, once the run settles', () => {
+    const header = resolveToolInvocationHeader(
+      { ...invocation('read', 'interrupted'), title: 'Read src/app.ts' },
+      false,
+    );
+    expect(header).toMatchObject({
+      status: 'interrupted',
+      label: 'Stopped reading src/app.ts',
+    });
   });
 
   describe('per-file patch progress', () => {

@@ -6,6 +6,8 @@ import type { AppStore } from '@shell/state/types';
 import type { ModelOption } from '@bridge/types/types';
 import { createDefaultAppStateData } from '@shell/state/appState';
 import { recentModelIdsByAgentAtom } from '@shell/state/appState/settings';
+import { localProfileAvailableAtom } from '@shell/state/bridge/atoms';
+import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 
 jest.mock('@shared/feedback', () => ({
   feedback: {
@@ -239,5 +241,23 @@ describe('useMainScreenPickerOptionBuilders selection haptics', () => {
     });
 
     expect(mockFeedback.selection).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('model picker defaults', () => {
+  it('offers the agent default to bridges but lists only real models for a device library', () => {
+    const bridge = render(createContext());
+    expect(bridge.modelPickerOptions.map((option) => option.key)).toContain('server-default');
+
+    const data = createDefaultAppStateData();
+    data.bridgeProfiles = { activeProfileId: LOCAL_PROFILE_ID, profiles: [] };
+    const store = createTestStore({ data });
+    store.set(localProfileAvailableAtom, true);
+    const local = renderWithStore(
+      createContext({ modelOptions: [{ ...model, isDefault: true }] }),
+      store,
+    ).resultRef.current!;
+    expect(local.modelPickerOptions.map((option) => option.key)).toEqual([model.id]);
+    expect(local.modelPickerOptions[0]?.badge).toBe('Default');
   });
 });

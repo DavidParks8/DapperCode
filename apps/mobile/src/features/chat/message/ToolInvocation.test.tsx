@@ -358,6 +358,43 @@ describe('ToolInvocationRow', () => {
     act(() => tree.unmount());
   });
 
+  it('renders an interrupted tool neutrally instead of as a failure', () => {
+    const value = requireTestValue(
+      buildToolInvocations([
+        {
+          id: 'tool-result:interrupted',
+          role: 'tool',
+          toolCallId: 'interrupted',
+          content: 'partial output',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          toolMeta: {
+            toolCallId: 'interrupted',
+            kind: 'execute',
+            status: 'interrupted',
+            title: 'npm test',
+            startedAtMs: 1_000,
+            completedAtMs: 2_000,
+          },
+        },
+      ])[0],
+      'interrupted invocation',
+    );
+    expect(value).toMatchObject({ status: 'interrupted', isError: false });
+    const tree = render(value, null, false);
+    const json = JSON.stringify(tree.toJSON());
+
+    expect(json).toContain('Stopped running npm test');
+    expect(json).not.toContain('Failed to run');
+    expect(tree.root.findAllByProps({ name: 'stop-circle-outline' })).toHaveLength(1);
+    expect(tree.root.findAllByProps({ name: 'close-circle' })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ name: 'alert-circle-outline' })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ color: theme.colors.statusError })).toHaveLength(0);
+    expect(json).toContain('"accessibilityValue":{"text":"interrupted"}');
+    expect(tree.root.findAllByProps({ testID: 'tool-header-shimmer' })).toHaveLength(0);
+
+    act(() => tree.unmount());
+  });
+
   it('marks a pending tool with a waiting affordance', () => {
     const tree = render(invocation({ id: 'tool-pending', status: 'pending', empty: true }));
 

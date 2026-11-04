@@ -15,6 +15,7 @@ import { useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
 import { useToolbarPlacement } from '@shell/layout/SceneToolbar';
 import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscriptView';
 import { ComposeView } from '../screen/Presentation';
+import { useNewChatReadiness } from '../screen/newChatReadiness';
 import { ChatOpeningView } from '../screen/Presentation';
 import type {
   MainScreenPanelCollapseCoordinatorContext,
@@ -117,6 +118,7 @@ function TranscriptOrComposerContent({
   const handleLoadEarlierPress = useCallback(() => {
     void handleLoadEarlier();
   }, [handleLoadEarlier]);
+  const newChatReadiness = useNewChatReadiness();
 
   if (selectedChat && !isOpeningChat) {
     return (
@@ -161,6 +163,7 @@ function TranscriptOrComposerContent({
       topInset={topInset}
       onSuggestion={(suggestion) => draftController.editDraft(suggestion)}
       onOpenWorkspacePicker={openWorkspaceModal}
+      readiness={newChatReadiness}
     />
   );
 }

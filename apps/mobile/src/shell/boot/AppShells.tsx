@@ -8,7 +8,7 @@ import { replaceRoot } from '@shell/navigation/routeNavigation';
 import { retryPersistenceAtom } from '@shell/state/appState/actions';
 import { appStatePersistenceErrorAtom } from '@shell/state/appState/atoms';
 import { saveBridgeProfileAtom } from '@shell/state/bridge/actions';
-import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
+import { activeBridgeProfileAtom, activeProfileIdAtom } from '@shell/state/bridge/atoms';
 import { OnboardingScreen } from '../../features/onboarding/screen/OnboardingScreen';
 import type { ReactNode } from 'react';
 import type { AppTheme } from '@shared/theme';
@@ -91,6 +91,8 @@ export function ConnectionScreen({
 }: ConnectionScreenProps) {
   const router = useRouter();
   const activeBridgeProfile = useAtomValue(activeBridgeProfileAtom);
+  // Bridges are also added while On this iPhone is active, which has no bridge profile.
+  const activeProfileId = useAtomValue(activeProfileIdAtom);
   const saveBridgeProfile = useSetAtom(saveBridgeProfileAtom);
   const shouldUseSavedBridgeCredentials = mode === 'edit' || mode === 'reconnect';
   const initialUrl = shouldUseSavedBridgeCredentials
@@ -125,12 +127,12 @@ export function ConnectionScreen({
         replaceRoot(routes.newChat(nextProfileId));
       }}
       onCancel={
-        mode !== 'initial' && activeBridgeProfile
+        mode !== 'initial' && activeProfileId
           ? () => {
               if (router.canGoBack()) {
                 router.back();
               } else {
-                router.replace(routes.settings(activeBridgeProfile.id));
+                router.replace(routes.settings(activeProfileId));
               }
             }
           : undefined

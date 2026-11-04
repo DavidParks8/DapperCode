@@ -140,3 +140,46 @@ describe('optimistic ACP config values', () => {
     expect(state.collaborationModeLabel).toBe('Plan');
   });
 });
+
+describe('the model label with nothing to choose from', () => {
+  function emptyCatalog(fallbackModelLabel?: string) {
+    return deriveModelCatalogState({ ...emptyCatalogParams(), fallbackModelLabel });
+  }
+
+  it('names the agent default for bridges and asks for a model on a device library', () => {
+    expect(emptyCatalog().activeModelLabel).toBe('Server default model');
+    expect(emptyCatalog('Choose a model').activeModelLabel).toBe('Choose a model');
+  });
+
+  it('labels a device library default model by name for a new chat', () => {
+    const state = deriveModelCatalogState({
+      ...emptyCatalogParams(),
+      modelOptions: [{ id: 'local-a', displayName: 'Qwen3 1.7B · Q4_K_M', isDefault: true }],
+      fallbackModelLabel: 'Choose a model',
+    });
+    expect(state.activeModelLabel).toBe('Qwen3 1.7B · Q4_K_M');
+    expect(state.effectiveModelId).toBe('local-a');
+  });
+});
+
+function emptyCatalogParams(): Parameters<typeof deriveModelCatalogState>[0] {
+  return {
+    selectedChatId: null,
+    selectionBelongsToCurrentChat: true,
+    modelConfig: null,
+    effortConfig: null,
+    modeConfig: null,
+    modelOptions: [],
+    preferredDefaultModelId: null,
+    preferredDefaultEffort: null,
+    chatModelPreferencesRef: { current: {} },
+    defaultServiceTier: null,
+    selectedServiceTier: null,
+    supportsFastMode: false,
+    selectedAcpModeId: null,
+    selectedCollaborationMode: 'default',
+    effortPickerModelId: null,
+    selectedModelId: null,
+    selectedEffort: null,
+  };
+}

@@ -13,12 +13,15 @@ import {
   renderAgUiCustomContent,
   updateAgUiLiveAssistantMessages,
 } from '@bridge/agui/agUi';
+import { toToolStatus } from '@bridge/toolMeta';
 import type { RpcNotification } from '@bridge/types/types';
 
 interface ContractManifest {
   fixtures: {
     agUiEvents: unknown[];
     toolRevisionEvents: unknown[];
+    toolMetaStatuses: string[];
+    interruptedToolMeta: unknown;
   };
 }
 
@@ -149,6 +152,40 @@ describe('AG-UI bridge notifications', () => {
     expect(toolResult?.content).toContain('terminal-2');
     expect(toolResult?.content).not.toContain('firstsecond');
     expect(toolResult?.content).not.toContain('terminal-1');
+  });
+
+  it('reads interrupted tools from a flag that keeps installed clients on failed', () => {
+    const manifest = JSON.parse(
+      readFileSync(
+        path.resolve(__dirname, '../../../../../contracts/bridge-rpc/v2/manifest.json'),
+        'utf8',
+      ),
+    ) as ContractManifest;
+
+    expect(manifest.fixtures.toolMetaStatuses).not.toContain('interrupted');
+    for (const status of manifest.fixtures.toolMetaStatuses) {
+      expect(toToolStatus(status)).toBe(status);
+    }
+
+    // The parser shipped before `interrupted` existed: unknown statuses fall back to `pending`,
+    // which would leave a cancelled call "Waiting to run" forever.
+    const installedParser = (value: unknown) =>
+      ['pending', 'in_progress', 'completed', 'failed'].find((status) => status === value) ??
+      'pending';
+    const fixture = manifest.fixtures.interruptedToolMeta as {
+      value: { status: unknown; interrupted: unknown };
+    };
+    expect(installedParser(fixture.value.status)).toBe('failed');
+    expect(fixture.value.interrupted).toBe(true);
+
+    const event = EventSchema.parse(manifest.fixtures.interruptedToolMeta);
+    const state = updateAgUiLiveAssistantMessages({}, { threadId: 'thread', runId: 'run', event });
+    expect(state['thread']?.toolMetaByCallId['tool-interrupted']).toMatchObject({
+      status: 'interrupted',
+      title: 'pnpm test',
+    });
+    expect(state['thread']?.messages).toHaveLength(1);
+    expect(state['thread']?.messages[0]?.toolMeta?.status).toBe('interrupted');
   });
 
   it('handles current AG-UI event types and rejects deprecated thinking events', () => {

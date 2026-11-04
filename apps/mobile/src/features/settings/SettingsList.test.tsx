@@ -125,4 +125,23 @@ describe('settings inset-grouped list', () => {
     expect(rowStyle['backgroundColor']).toBe(theme.colors.bgItem);
     act(() => tree.unmount());
   });
+
+  it('draws the checkmark only on the selected choice', () => {
+    const tree = render(
+      <SettingsGroup>
+        <SettingsRow label="Primary" accessory="check" selected onPress={jest.fn()} />
+        <SettingsRow label="Secondary" accessory="check" onPress={jest.fn()} />
+        <SettingsRow label="Tertiary" accessory="check" onPress={jest.fn()} />
+      </SettingsGroup>,
+    );
+    const rows = (tree.root as Queryable).findAll(
+      (node) =>
+        typeof node.type === 'string' && typeof node.props['accessibilityState'] === 'object',
+    );
+    const checks = rows.map(
+      (row) => row.findAll((node) => node.children.includes('checkmark')).length > 0,
+    );
+    expect(checks).toEqual([true, false, false]);
+    act(() => tree.unmount());
+  });
 });

@@ -20,9 +20,10 @@ import {
   formatSyncDisplay,
 } from '../screen/utils';
 import type { GitScreenDerivedState } from '../screen/types';
+import type { GitRemoteState, GitStatusWithRemote } from '../../workspace/api/protocol';
 
 interface UseGitScreenDerivedArgs {
-  status: GitStatusResponse | null;
+  status: GitStatusWithRemote | null;
   diff: GitDiffResponse | null;
   history: GitHistoryCommit[];
   branches: GitBranchSummary[];
@@ -39,6 +40,7 @@ interface UseGitScreenDerivedArgs {
 
 interface GitActionStateInputs {
   status: GitStatusResponse | null;
+  remote: GitRemoteState | null;
   history: GitHistoryCommit[];
   changedFiles: ReturnType<typeof parseChangedFiles>;
   changedFilesWithStats: GitScreenDerivedState['changedFilesWithStats'];
@@ -73,7 +75,79 @@ type GitActionState = Pick<
   | 'reviewHighlights'
   | 'pushButtonLabel'
   | 'branchSwitchDisabled'
+  | 'pushBlockedReason'
 >;
+
+/** Why pushing is impossible right now, from host-reported remote state. */
+export function gitPushBlockedReason(remote: GitRemoteState | null): string | null {
+  if (!remote) {
+    return null;
+  }
+  if (!remote.hasOrigin) {
+    return 'This repository has no origin remote, so there is nowhere to push.';
+  }
+  if (remote.unborn) {
+    return 'Make a first commit before pushing.';
+  }
+  if (remote.detached) {
+    return 'Switch to a branch to push.';
+  }
+  if (remote.network === 'offline') {
+    return "You're offline. Connect to the internet to push.";
+  }
+  return null;
+}
+
+/** Why fetching (and so pulling) is impossible right now. */
+export function gitFetchBlockedReason(remote: GitRemoteState | null): string | null {
+  if (!remote) {
+    return null;
+  }
+  if (!remote.hasOrigin) {
+    return 'Add an origin remote to fetch and pull.';
+  }
+  if (remote.network === 'offline') {
+    return "You're offline. Connect to the internet to fetch or pull.";
+  }
+  return null;
+}
+
+export function gitPullBlockedReason(remote: GitRemoteState | null): string | null {
+  const fetchReason = gitFetchBlockedReason(remote);
+  if (fetchReason || !remote) {
+    return fetchReason;
+  }
+  if (remote.detached) {
+    return 'Switch to a branch to pull.';
+  }
+  if (!remote.upstream) {
+    return 'This branch has no upstream yet. Push it to publish it first.';
+  }
+  return null;
+}
+
+/**
+ * Upstream tracking from host-reported remote state when present, otherwise from the porcelain
+ * `## branch...upstream [ahead n, behind m]` header the bridge sends in `raw`.
+ */
+export function deriveUpstreamState(status: GitStatusWithRemote | null) {
+  const remote = status?.remote ?? null;
+  const raw = status?.raw ?? '';
+  return {
+    remote,
+    aheadCount: remote?.ahead ?? parseAheadCount(raw),
+    behindCount: remote?.behind ?? parseBehindCount(raw),
+    hasUpstream: remote ? remote.upstream !== null : parseHasUpstream(raw),
+    upstreamBranch: remote ? remote.upstream : parseUpstreamBranch(raw),
+  };
+}
+
+function formatOrigin(origin: string | null): string | null {
+  if (!origin) {
+    return null;
+  }
+  return origin.replace(/^https?:\/\//u, '').replace(/\.git$/u, '');
+}
 
 function computeGitReviewTitle(
   status: GitStatusResponse | null,
@@ -127,6 +201,17 @@ function computeBranchSwitchDisabled(
   );
 }
 
+function computeUpstreamDisplay(
+  remote: GitRemoteState | null,
+  upstreamBranch: string | null,
+  canPublishBranch: boolean,
+): string | null {
+  if (remote && !remote.hasOrigin) {
+    return 'No remote';
+  }
+  return upstreamBranch ?? (canPublishBranch ? 'Not published' : null);
+}
+
 function computeGitActionState(inputs: GitActionStateInputs): GitActionState {
   const {
     status,
@@ -149,6 +234,8 @@ function computeGitActionState(inputs: GitActionStateInputs): GitActionState {
     branchDraft,
   } = inputs;
 
+  const { remote } = inputs;
+  const pushBlockedReason = gitPushBlockedReason(remote);
   const canPush = aheadCount > 0;
   const canPublishBranch = !hasUpstream && isPublishableBranch(status?.branch);
 
@@ -156,10 +243,12 @@ function computeGitActionState(inputs: GitActionStateInputs): GitActionState {
     latestCommit: history[0] ?? null,
     canPush,
     canPublishBranch,
+    // A blocked push stays visible (disabled, with its reason) so the user learns why.
     showPushAction: canPush || canPublishBranch,
     commitButtonDisabled: committing || !commitMessage.trim() || !hasStagedFiles,
-    pushButtonDisabled: pushing || committing || loading,
-    upstreamDisplay: upstreamBranch ?? (canPublishBranch ? 'Not published' : null),
+    pushButtonDisabled: pushing || committing || loading || Boolean(pushBlockedReason),
+    pushBlockedReason,
+    upstreamDisplay: computeUpstreamDisplay(remote, upstreamBranch, canPublishBranch),
     syncDisplay: formatSyncDisplay(aheadCount, behindCount),
     reviewTitle: computeGitReviewTitle(status, hasStagedFiles, hasChanges),
     reviewDetail: computeGitReviewDetail(
@@ -246,10 +335,10 @@ export function useGitScreenDerived(args: UseGitScreenDerivedArgs): GitScreenDer
     () => changedFiles.some((entry) => entry.unstaged),
     [changedFiles],
   );
-  const aheadCount = useMemo(() => parseAheadCount(status?.raw ?? ''), [status?.raw]);
-  const behindCount = useMemo(() => parseBehindCount(status?.raw ?? ''), [status?.raw]);
-  const hasUpstream = useMemo(() => parseHasUpstream(status?.raw ?? ''), [status?.raw]);
-  const upstreamBranch = useMemo(() => parseUpstreamBranch(status?.raw ?? ''), [status?.raw]);
+  const { remote, aheadCount, behindCount, hasUpstream, upstreamBranch } = useMemo(
+    () => deriveUpstreamState(status),
+    [status],
+  );
   const stagedCount = useMemo(
     () => changedFiles.filter((entry) => entry.staged).length,
     [changedFiles],
@@ -276,8 +365,10 @@ export function useGitScreenDerived(args: UseGitScreenDerivedArgs): GitScreenDer
     reviewHighlights,
     pushButtonLabel,
     branchSwitchDisabled,
+    pushBlockedReason,
   } = computeGitActionState({
     status,
+    remote,
     history,
     changedFiles,
     changedFilesWithStats,
@@ -335,6 +426,11 @@ export function useGitScreenDerived(args: UseGitScreenDerivedArgs): GitScreenDer
     reviewHighlights,
     pushButtonLabel,
     branchSwitchDisabled,
+    pushBlockedReason,
+    remote,
+    fetchBlockedReason: gitFetchBlockedReason(remote),
+    pullBlockedReason: gitPullBlockedReason(remote),
+    originDisplay: formatOrigin(remote?.origin ?? null),
     branchRows: branches,
     filesListMaxHeight,
     diffViewerMaxHeight,

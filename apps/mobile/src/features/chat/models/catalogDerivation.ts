@@ -323,13 +323,14 @@ function resolveDisplayLabels(params: {
   selectedAcpModeId: string | null;
   selectedCollaborationMode: CollaborationMode;
   pendingModeValue?: string;
+  fallbackModelLabel?: string;
 }) {
   return {
     activeModelLabel: params.activeModel
       ? formatModelOptionLabel(params.activeModel)
       : params.effectiveModelId
         ? params.effectiveModelId
-        : 'Server default model',
+        : (params.fallbackModelLabel ?? 'Server default model'),
     activeEffortLabel: params.effectiveEffort
       ? formatReasoningEffort(params.effectiveEffort)
       : 'Model default',
@@ -360,6 +361,8 @@ export function deriveModelCatalogState(params: {
   selectedModelId: string | null;
   selectedEffort: ReasoningEffort | null;
   pendingAcpConfig?: PendingAcpConfigByChat[string];
+  /** Shown when no model is chosen or advertised as a default. */
+  fallbackModelLabel?: string;
 }): DerivedModelCatalogState {
   const requestedSelections = resolveRequestedSelections({
     selectedChatId: params.selectedChatId,
@@ -400,6 +403,7 @@ export function deriveModelCatalogState(params: {
     selectedAcpModeId: params.selectedAcpModeId,
     selectedCollaborationMode: params.selectedCollaborationMode,
     pendingModeValue: params.pendingAcpConfig?.['mode']?.value,
+    fallbackModelLabel: params.fallbackModelLabel,
   });
   return {
     ...modelState,

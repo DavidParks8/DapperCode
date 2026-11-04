@@ -16,6 +16,7 @@ import {
   recentModelIdsByAgentAtom,
   rememberRecentModelIdAtom,
 } from '@shell/state/appState/settings';
+import { activeProfileFeaturesAtom } from '@shell/state/bridge/atoms';
 
 const EMPTY_RECENT_MODEL_IDS: string[] = [];
 
@@ -50,6 +51,8 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
   const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);
   const recentModelIdsByAgent = useAtomValue(recentModelIdsByAgentAtom);
   const rememberRecentModelId = useSetAtom(rememberRecentModelIdAtom);
+  // A device model library marks its default model directly; there is no agent-side default.
+  const offersAgentDefault = !useAtomValue(activeProfileFeaturesAtom).modelLibrary;
   const normalizedActiveAgentId = activeAgentId?.trim() ?? '';
   const recentModelIds = normalizedActiveAgentId
     ? (recentModelIdsByAgent[normalizedActiveAgentId] ?? EMPTY_RECENT_MODEL_IDS)
@@ -170,7 +173,7 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
 
     return [
       ...recentModels.map(toPickerOption),
-      ...(!selectedChatId || !modelConfig
+      ...(offersAgentDefault && (!selectedChatId || !modelConfig)
         ? [
             {
               key: 'server-default',
@@ -195,6 +198,7 @@ export function useMainScreenPickerOptionBuilders(context: MainScreenPickerOptio
     modelConfig,
     modelOptions,
     normalizedActiveAgentId,
+    offersAgentDefault,
     recentModelIds,
     rememberRecentModelId,
     selectModel,

@@ -1,8 +1,22 @@
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useEffect } from 'react';
 
+import { openWorkspaceFilesAtom } from '../files/navigation';
+import {
+  createManagedWorkspaceAtom,
+  deleteManagedWorkspaceAtom,
+  loadManagedWorkspacesAtom,
+  managedWorkspacesAtom,
+  managedWorkspaceStatesAtom,
+  managedWorkspacesErrorAtom,
+  managedWorkspacesLoadingAtom,
+  renameManagedWorkspaceAtom,
+  selectManagedWorkspaceAtom,
+} from '../state/managedWorkspaces';
+import { ManagedWorkspacePicker } from './ManagedView';
 import { WorkspacePicker } from './Picker';
 import { defaultStartCwdAtom } from '@shell/state/appState/settings';
+import { activeProfileFeaturesAtom } from '@shell/state/bridge/atoms';
 import {
   gitCheckoutParentPathAtom,
   resumeGitCheckoutAfterWorkspacePickerAtom,
@@ -59,7 +73,43 @@ export function WorkspacePickerScreen() {
     return () => setResumeGitCheckout(false);
   }, [revalidateResources, setResumeGitCheckout]);
 
+  const features = useAtomValue(activeProfileFeaturesAtom);
+  const managedWorkspaces = useAtomValue(managedWorkspacesAtom);
+  const managedLoading = useAtomValue(managedWorkspacesLoadingAtom);
+  const managedError = useAtomValue(managedWorkspacesErrorAtom);
+  const managedStates = useAtomValue(managedWorkspaceStatesAtom);
+  const loadManagedWorkspaces = useSetAtom(loadManagedWorkspacesAtom);
+  const selectManagedWorkspace = useSetAtom(selectManagedWorkspaceAtom);
+  useEffect(() => {
+    if (features.managedWorkspaces) {
+      void loadManagedWorkspaces();
+    }
+  }, [features.managedWorkspaces, loadManagedWorkspaces]);
+  const createWorkspace = useSetAtom(createManagedWorkspaceAtom);
+  const renameWorkspace = useSetAtom(renameManagedWorkspaceAtom);
+  const deleteWorkspace = useSetAtom(deleteManagedWorkspaceAtom);
+  const openFiles = useSetAtom(openWorkspaceFilesAtom);
   const isGitCheckoutDestination = purpose === 'git-checkout-destination';
+  const cloneAvailable = features.gitClone && !isGitCheckoutDestination;
+
+  if (features.managedWorkspaces) {
+    return (
+      <ManagedWorkspacePicker
+        selectedPath={normalizeWorkspacePath(defaultStartCwd)}
+        entries={managedWorkspaces ?? []}
+        states={managedStates}
+        loading={managedLoading && managedWorkspaces === null}
+        error={managedError}
+        onSelect={(path) => void selectManagedWorkspace(path)}
+        onClose={() => closePicker()}
+        onCreate={(name) => createWorkspace(name)}
+        onClone={() => openGitCheckout(bridgeRoot)}
+        onRename={(path, name) => renameWorkspace({ path, name })}
+        onDelete={(path) => deleteWorkspace(path)}
+        onBrowseFiles={features.workspaceFiles ? (cwd) => openFiles({ cwd }) : undefined}
+      />
+    );
+  }
 
   return (
     <WorkspacePicker
@@ -85,9 +135,9 @@ export function WorkspacePickerScreen() {
       onBrowsePath={(path) => void browsePath(path)}
       onSelectPath={(path) => selectWorkspace(path)}
       onToggleFavorite={(path) => toggleFavorite(path)}
-      actionLabel={isGitCheckoutDestination ? null : 'Clone Repo'}
-      actionDescription={isGitCheckoutDestination ? null : 'Into this workspace'}
-      onActionPress={isGitCheckoutDestination ? undefined : (path) => openGitCheckout(path)}
+      actionLabel={cloneAvailable ? 'Clone Repo' : null}
+      actionDescription={cloneAvailable ? 'Into this workspace' : null}
+      onActionPress={cloneAvailable ? (path) => openGitCheckout(path) : undefined}
       onClose={() => closePicker()}
     />
   );

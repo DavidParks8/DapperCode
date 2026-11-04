@@ -1,9 +1,11 @@
 import { LOCAL_MODEL_CATALOG, localModelDefinition } from './catalog';
 import {
   MODEL_MEMORY_RESERVE_BYTES,
+  modelContextTokens,
   modelMemoryAdmission,
   modelMemoryBytes,
   requireModelMemory,
+  residentModelBytes,
 } from './memory';
 
 const model = localModelDefinition('qwen3-1.7b-q4-k-m');
@@ -79,4 +81,43 @@ test('the offline catalog contains distinct immutable verified artifact identiti
     }
   }
   expect(() => localModelDefinition('../custom-model')).toThrow('not in the on-device catalog');
+});
+
+test('switching models credits memory the resident model releases before loading', () => {
+  const resident = { model: localModelDefinition('qwen3-0.6b-q4-0'), contextTokens: 8192 };
+  const tight = { ...memory, availableBytes: required - 1 };
+  expect(modelMemoryAdmission(model, tight).status).toBe('memory_pressure');
+  const switching = modelMemoryAdmission(model, tight, resident);
+  expect(switching).toMatchObject({
+    status: 'ready',
+    unloadsResident: true,
+    releasableBytes: residentModelBytes(resident),
+  });
+  expect(switching.message).toContain('unloads Qwen3 0.6B');
+  expect(modelMemoryAdmission(model, memory, resident)).toMatchObject({
+    status: 'ready',
+    unloadsResident: false,
+  });
+  expect(
+    modelMemoryAdmission(
+      model,
+      { ...memory, availableBytes: required - residentModelBytes(resident) - 1 },
+      resident,
+    ).status,
+  ).toBe('memory_pressure');
+});
+
+test('loaded context grows to the catalog maximum only when fresh headroom allows it', () => {
+  expect(model.maxContextTokens).toBeGreaterThan(model.contextTokens);
+  expect(modelContextTokens(model, memory)).toBe(model.contextTokens);
+  expect(
+    modelContextTokens(model, {
+      ...memory,
+      availableBytes: modelMemoryBytes(model, model.maxContextTokens),
+    }),
+  ).toBe(model.maxContextTokens);
+  for (const entry of LOCAL_MODEL_CATALOG) {
+    expect(entry.contextTokens).toBeGreaterThanOrEqual(4096);
+    expect(entry.maxContextTokens).toBeGreaterThanOrEqual(entry.contextTokens);
+  }
 });

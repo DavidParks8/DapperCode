@@ -2,9 +2,14 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { createContext, Fragment, useContext, useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
-import { bridgeProfilesAtom } from '@shell/state/appState/atoms';
 import { switchBridgeProfileAtom } from '@shell/state/bridge/actions';
-import { activeBridgeProfileAtom, bridgeProfileTransitioningAtom } from '@shell/state/bridge/atoms';
+import {
+  activeProfileIdAtom,
+  bridgeProfileTransitioningAtom,
+  shellProfilesAtom,
+  wsClientAtom,
+} from '@shell/state/bridge/atoms';
+import { isLocalProfileId } from '@shell/state/localProfile';
 import { useAppTheme } from '@shared/theme';
 import { RouteErrorScreen } from '@shell/navigation/RouteErrorScreen';
 import { dismissAllPresentedRoutes } from '@shell/navigation/routeNavigation';
@@ -26,8 +31,9 @@ export function ProfileRouteContent({ children }: { children: ReactNode }) {
 
 export function ProfileRouteBoundary({ profileId, children }: ProfileRouteBoundaryProps) {
   const theme = useAppTheme();
-  const profiles = useAtomValue(bridgeProfilesAtom);
-  const activeProfileId = useAtomValue(activeBridgeProfileAtom)?.id ?? null;
+  const profiles = useAtomValue(shellProfilesAtom);
+  const ws = useAtomValue(wsClientAtom);
+  const activeProfileId = useAtomValue(activeProfileIdAtom);
   const profileTransitioning = useAtomValue(bridgeProfileTransitioningAtom);
   const switchProfile = useSetAtom(switchBridgeProfileAtom);
   const [activationError, setActivationError] = useState<string | null>(null);
@@ -52,8 +58,14 @@ export function ProfileRouteBoundary({ profileId, children }: ProfileRouteBounda
     };
   }, [activeProfileId, profileExists, profileId, switchProfile]);
 
+  const local = isLocalProfileId(profileId);
   if (!profileExists) {
-    return (
+    return local ? (
+      <RouteErrorScreen
+        title="On this iPhone is unavailable"
+        message="Local models need the DapperCode iPhone app. Your desktop profiles are unchanged."
+      />
+    ) : (
       <RouteErrorScreen
         title="Bridge profile not found"
         message="This link points to a bridge profile that is no longer saved on this device."
@@ -71,7 +83,9 @@ export function ProfileRouteBoundary({ profileId, children }: ProfileRouteBounda
     );
   }
 
-  const activating = activeProfileId !== profileId || profileTransitioning;
+  // The local profile's transport only exists once its runtime host has started the runtime.
+  const activating =
+    activeProfileId !== profileId || profileTransitioning || (local && ws === null);
   return (
     <ProfileRouteReadyContext.Provider value={!activating}>
       <View style={styles.root}>
@@ -87,7 +101,7 @@ export function ProfileRouteBoundary({ profileId, children }: ProfileRouteBounda
           <View
             style={[styles.loading, { backgroundColor: theme.colors.bgMain }]}
             accessibilityRole="progressbar"
-            accessibilityLabel="Opening bridge profile"
+            accessibilityLabel={local ? 'Opening On this iPhone' : 'Opening bridge profile'}
           >
             <ActivityIndicator color={theme.colors.textPrimary} />
           </View>

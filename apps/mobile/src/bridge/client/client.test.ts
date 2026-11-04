@@ -3722,6 +3722,34 @@ describe('HostBridgeApiClient model options', () => {
     now.mockRestore();
   });
 
+  it('keeps descriptions and the default flag, and a zero ttl always reads the latest list', async () => {
+    const ws = createWsMock();
+    ws.request
+      .mockResolvedValueOnce({
+        data: [
+          {
+            id: 'local-a',
+            displayName: 'Local A',
+            description: ' Loaded · 16K context ',
+            isDefault: true,
+          },
+          { id: 'local-b', displayName: 'Local B', isDefault: 'yes' },
+        ],
+      })
+      .mockResolvedValueOnce({ data: [{ id: 'local-a', displayName: 'Local A' }] });
+    const client = new HostBridgeApiClient({
+      ws: ws as unknown as HostBridgeWsClient,
+      modelListCacheTtlMs: 0,
+    });
+
+    const first = await client.listModelOptions();
+    expect(first[0]).toMatchObject({ description: 'Loaded · 16K context', isDefault: true });
+    expect(first[1]?.isDefault).toBeUndefined();
+    expect(client.peekModelOptions()).toHaveLength(2);
+    expect(await client.listModelOptions()).toHaveLength(1);
+    expect(ws.request).toHaveBeenCalledTimes(2);
+  });
+
   it('does not cache a failed catalog request', async () => {
     const ws = createWsMock();
     ws.request

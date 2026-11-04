@@ -198,6 +198,28 @@ mod tests {
                 case["agentCapabilities"]["sessionDelete"]
             );
         }
+        use agent_client_protocol::schema::v1::ToolCallStatus;
+        // Tool-meta statuses are exactly ACP's: installed clients map anything else to `pending`.
+        let mut tool_statuses = [
+            ToolCallStatus::Pending,
+            ToolCallStatus::InProgress,
+            ToolCallStatus::Completed,
+            ToolCallStatus::Failed,
+        ]
+        .map(crate::agui::tool_status_wire)
+        .to_vec();
+        tool_statuses.sort();
+        assert_eq!(
+            manifest["fixtures"]["toolMetaStatuses"],
+            json!(tool_statuses)
+        );
+        let interrupted = &manifest["fixtures"]["interruptedToolMeta"];
+        assert_eq!(interrupted["name"], "dappercode.dev/tool-meta");
+        assert_eq!(interrupted["value"]["status"], "failed");
+        assert_eq!(
+            interrupted["value"][crate::agui::TOOL_META_INTERRUPTED_FIELD],
+            true
+        );
         assert_eq!(manifest["fixtures"]["runtimeActivity"]["canRetire"], false);
         assert_eq!(
             manifest["fixtures"]["brokerPairing"]["type"],

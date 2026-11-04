@@ -3,8 +3,7 @@ import { useEffect } from 'react';
 
 import { loadChatSnapshotCache } from '@shell/session/chatSnapshotCache';
 import { initializeAppStateAtom } from '@shell/state/appState/actions';
-import { bridgeProfileStoreAtom } from '@shell/state/appState/atoms';
-import { getActiveBridgeProfile } from '@shell/state/bridgeProfiles';
+import { activeProfileIdAtom } from '@shell/state/bridge/atoms';
 import { applyRestoredChatSnapshotAtom } from '@shell/state/chat/actions';
 import { chatSnapshotCacheAtom } from '@shell/state/chat/atoms';
 
@@ -18,8 +17,9 @@ export function useAppStateBootstrap(): void {
         if (cancelled) {
           return;
         }
-        const activeProfile = getActiveBridgeProfile(store.get(bridgeProfileStoreAtom));
-        const cache = activeProfile ? await loadChatSnapshotCache(activeProfile.id) : null;
+        // Any openable profile, including the platform-gated local profile, restores its chats.
+        const activeProfileId = store.get(activeProfileIdAtom);
+        const cache = activeProfileId ? await loadChatSnapshotCache(activeProfileId) : null;
         if (cancelled) {
           return;
         }

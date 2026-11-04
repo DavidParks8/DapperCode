@@ -20,7 +20,7 @@ import {
   rememberThreadSettingsAtom,
   showToolCallsAtom,
 } from '@shell/state/appState/settings';
-import { activeBridgeProfileAtom, bridgeTokenAtom, bridgeUrlAtom } from '@shell/state/bridge/atoms';
+import { activeProfileIdAtom, bridgeTokenAtom, bridgeUrlAtom } from '@shell/state/bridge/atoms';
 import { useBridgeApi, useBridgeWs } from '@shell/state/bridge/hooks';
 import {
   mainOpeningChatIdAtom,
@@ -118,7 +118,7 @@ export function useMainScreenBaseContext(): MainScreenBaseContext {
     ws,
     bridgeUrl: useAtomValue(bridgeUrlAtom) ?? '',
     bridgeToken: useAtomValue(bridgeTokenAtom),
-    bridgeProfileId: useAtomValue(activeBridgeProfileAtom)?.id ?? '',
+    bridgeProfileId: useAtomValue(activeProfileIdAtom) ?? '',
     onOpenDrawer,
     onOpenGit: useSetAtom(openChatGitAtom),
     onOpenLocalPreview: useSetAtom(openBrowserAtom),

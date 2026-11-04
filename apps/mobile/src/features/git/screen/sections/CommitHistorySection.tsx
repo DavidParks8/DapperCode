@@ -3,8 +3,9 @@ import { Pressable, Text, TextInput, View } from 'react-native';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import type { GitScreenController } from '../../controller/screenController';
-import { formatRelativeTime, formatStatusCode } from '../utils';
+import { formatRelativeTime } from '../utils';
 import type { GitSectionCommonProps } from '../sectionTypes';
+import { GitChangeBadge, GitDiscardAllButton } from './HostSections';
 
 function isBulkStageActionDisabled(controller: GitScreenController): boolean {
   return (
@@ -13,8 +14,10 @@ function isBulkStageActionDisabled(controller: GitScreenController): boolean {
     controller.pushing ||
     controller.stagingAll ||
     controller.unstagingAll ||
+    controller.discardingAll ||
     Boolean(controller.stagingPath) ||
-    Boolean(controller.unstagingPath)
+    Boolean(controller.unstagingPath) ||
+    Boolean(controller.discardingPath)
   );
 }
 
@@ -42,7 +45,7 @@ function GitReviewStatsRow({ controller, styles }: Omit<GitSectionCommonProps, '
   );
 }
 
-function GitReviewHighlights({ controller, styles }: Omit<GitSectionCommonProps, 'theme'>) {
+function GitReviewHighlights({ controller, styles, theme }: GitSectionCommonProps) {
   const { derived } = controller;
   if (derived.reviewHighlights.length === 0) {
     return null;
@@ -51,7 +54,7 @@ function GitReviewHighlights({ controller, styles }: Omit<GitSectionCommonProps,
     <View style={styles.reviewFiles}>
       {derived.reviewHighlights.map((entry) => (
         <View key={`${entry.code}:${entry.path}`} style={styles.reviewFileRow}>
-          <Text style={styles.reviewFileCode}>{formatStatusCode(entry.code)}</Text>
+          <GitChangeBadge entry={entry} styles={styles} theme={theme} />
           <Text style={styles.reviewFilePath} numberOfLines={1}>
             {entry.path}
           </Text>
@@ -108,6 +111,7 @@ function GitReviewBulkActionRow({ controller, styles }: Omit<GitSectionCommonPro
           </Text>
         </Pressable>
       ) : null}
+      <GitDiscardAllButton controller={controller} styles={styles} disabled={disabled} />
     </View>
   );
 }
@@ -131,7 +135,7 @@ function GitReviewCard({ controller, styles, theme }: GitSectionCommonProps) {
         </View>
       </View>
       <GitReviewStatsRow controller={controller} styles={styles} />
-      <GitReviewHighlights controller={controller} styles={styles} />
+      <GitReviewHighlights controller={controller} styles={styles} theme={theme} />
       <GitReviewBulkActionRow controller={controller} styles={styles} />
     </View>
   );
@@ -143,12 +147,16 @@ function GitCommitComposer({ controller, styles, theme }: GitSectionCommonProps)
     <>
       <Text style={styles.sectionLabel}>Commit message</Text>
       <TextInput
-        style={styles.input}
+        style={[styles.input, styles.commitInput]}
         value={controller.commitMessage}
         onChangeText={controller.setCommitMessage}
         keyboardAppearance={theme.keyboardAppearance}
         placeholder="Commit message..."
         placeholderTextColor={theme.colors.textMuted}
+        multiline
+        scrollEnabled
+        textAlignVertical="top"
+        accessibilityLabel="Commit message"
       />
 
       <Pressable
@@ -207,6 +215,11 @@ function GitPushActionButton({ controller, styles }: Omit<GitSectionCommonProps,
       </Text>
     </Pressable>
   );
+}
+
+function GitPushBlockedReason({ controller, styles }: Omit<GitSectionCommonProps, 'theme'>) {
+  const reason = controller.derived.pushBlockedReason;
+  return reason ? <Text style={styles.reasonText}>{reason}</Text> : null;
 }
 
 function GitCommitHistoryList({ controller, styles }: Omit<GitSectionCommonProps, 'theme'>) {
@@ -281,7 +294,10 @@ export function GitScreenCommitHistorySection({
       ) : null}
 
       {derived.showPushAction ? (
-        <GitPushActionButton controller={controller} styles={styles} />
+        <>
+          <GitPushActionButton controller={controller} styles={styles} />
+          <GitPushBlockedReason controller={controller} styles={styles} />
+        </>
       ) : null}
 
       <GitCommitHistoryList controller={controller} styles={styles} />

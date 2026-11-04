@@ -16,7 +16,7 @@ import {
 } from '../state/models';
 import { activityAtom } from '../state/composer';
 import { interruptedChatCreationAtom } from '@shell/state/chat/atoms';
-import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
+import { activeProfileIdAtom } from '@shell/state/bridge/atoms';
 import { interruptedCreationRetryId } from '@shell/session/interruptedChatCreation';
 import type { InterruptedChatCreation } from '@shell/session/interruptedChatCreation';
 import type { Chat } from '@bridge/types/types';
@@ -104,7 +104,7 @@ function interruptedRetryId(options: {
       options.content,
       options.pendingMentionPaths,
       options.pendingLocalImagePaths,
-      options.store.get(activeBridgeProfileAtom)?.id === options.bridgeProfileId,
+      options.store.get(activeProfileIdAtom) === options.bridgeProfileId,
       options.activeAgentId ?? options.preferredAgentId,
       options.preferredStartCwd,
     ),

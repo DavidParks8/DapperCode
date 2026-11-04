@@ -8,15 +8,38 @@ const LOCAL_TRANSCRIPT_MESSAGE_PREFIXES = [
 ] as const;
 
 export function reconcileChatTranscript(previous: Chat, next: Chat): Chat {
+  const known = withoutUnstoredMessages(previous, next);
   // Merge client-only entries first so later stale-transcript protection cannot discard them.
   const withLocalTranscript = preserveLocalTranscript(
-    previous,
-    preserveUnconfirmedUserMessages(previous, next),
+    known,
+    preserveUnconfirmedUserMessages(known, next),
   );
-  return preserveRecentUserTurnTranscript(previous, withLocalTranscript);
+  return preserveRecentUserTurnTranscript(known, withLocalTranscript);
+}
+
+/**
+ * An authoritative history (see `Chat.historyAuthoritative`) keeps only the cached messages it
+ * still has, plus client-only entries and unconfirmed sends. A summary-only read has no messages
+ * to judge by and keeps the cache.
+ */
+function withoutUnstoredMessages(previous: Chat, next: Chat): Chat {
+  if (!next.historyAuthoritative || previous.id !== next.id || next.messages.length === 0) {
+    return previous;
+  }
+  const stored = new Set(next.messages.map((message) => message.id));
+  const messages = previous.messages.filter(
+    (message) =>
+      stored.has(message.id) ||
+      isLocalTranscriptMessage(message) ||
+      isTransientUserMessage(message),
+  );
+  return messages.length === previous.messages.length ? previous : { ...previous, messages };
 }
 
 export function isChatHistoryIncomplete(previous: Chat | null, next: Chat): boolean {
+  if (next.historyAuthoritative) {
+    return false;
+  }
   if (next.acpSnapshot?.session.historyReconstruction) {
     return true;
   }
@@ -79,12 +102,16 @@ function preserveRecentUserTurnTranscript(previous: Chat, next: Chat): Chat {
     return mergeAgentMessageOnlySnapshot(previous, next);
   }
 
-  if (isChatHistoryIncomplete(previous, next)) {
+  // A summary-only fallback has no turns and must not erase already-hydrated history.
+  if (previous.messages.length > 0 && next.messages.length === 0) {
     return withPreviousTranscript(previous, next);
   }
 
-  // A summary-only bridge fallback has no turns and must not erase already-hydrated history.
-  if (previous.messages.length > 0 && next.messages.length === 0) {
+  if (next.historyAuthoritative) {
+    return next;
+  }
+
+  if (isChatHistoryIncomplete(previous, next)) {
     return withPreviousTranscript(previous, next);
   }
 

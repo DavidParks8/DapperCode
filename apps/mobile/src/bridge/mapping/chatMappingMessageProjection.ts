@@ -92,7 +92,7 @@ function buildSnapshotToolMessage(tool: SnapshotTool, createdAt: string): ChatMe
     toolMeta: {
       toolCallId: tool.id,
       kind: toToolKind(tool.kind),
-      status: toToolStatus(tool.status),
+      status: tool.interrupted ? 'interrupted' : toToolStatus(tool.status),
       title: tool.title || toToolKind(tool.kind),
       ...(tool.startedAtMs == null ? {} : { startedAtMs: tool.startedAtMs }),
       ...(tool.completedAtMs == null ? {} : { completedAtMs: tool.completedAtMs }),

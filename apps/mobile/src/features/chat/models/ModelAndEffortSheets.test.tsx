@@ -7,8 +7,15 @@ import { MIN_TOUCH_TARGET, SHEET_CORNER_CLEARANCE } from '@shared/ui/sheetLayout
 import { loadingModelsAtom } from '../state/models';
 import { effortModalVisibleAtom, modelModalVisibleAtom } from '../state/modals';
 import { AppThemeProvider, createAppTheme, spacing } from '@shared/theme';
+import { router } from 'expo-router';
+import { resetRouterMock } from '@shared/testing/expoRouterMock';
+import { createDefaultAppStateData } from '@shell/state/appState';
+import { localProfileAvailableAtom } from '@shell/state/bridge/atoms';
+import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
+import { createTestStore } from '@shell/state/testing';
 import { MainScreenModelAndEffortSheets } from './ModelAndEffortSheets';
 
+jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 jest.mock('@expo/vector-icons', () => {
   const mockReact = jest.requireActual('react');
   const { Text: MockText } = jest.requireActual('react-native');
@@ -41,11 +48,19 @@ function buildContext(closeModelModal: () => void, closeEffortModal: () => void)
   } as unknown as Parameters<typeof MainScreenModelAndEffortSheets>[0]['context'];
 }
 
+function localProfileStore() {
+  const data = createDefaultAppStateData();
+  data.bridgeProfiles = { activeProfileId: LOCAL_PROFILE_ID, profiles: [] };
+  const store = createTestStore({ data });
+  store.set(localProfileAvailableAtom, true);
+  return store;
+}
+
 function openModelSelector(
   insets: { top: number; left: number; right: number; bottom: number },
   closeModelModal = jest.fn(),
+  store: ReturnType<typeof createStore> = createStore(),
 ): { tree: ReactTestRenderer; root: Queryable; closeModelModal: jest.Mock } {
-  const store = createStore();
   store.set(modelModalVisibleAtom, true);
   store.set(effortModalVisibleAtom, false);
   store.set(loadingModelsAtom, false);
@@ -76,7 +91,49 @@ function findByTestId(root: Queryable, testID: string): Queryable {
   return match;
 }
 
+function texts(root: Queryable): string[] {
+  return root
+    .findAll((node) => typeof node.props['children'] === 'string')
+    .map((node) => node.props['children'] as string);
+}
+
 describe('MainScreenModelAndEffortSheets', () => {
+  it('describes bridge models as coming from the connected agent without a device model link', () => {
+    const { tree, root } = openModelSelector({ top: 47, left: 0, right: 0, bottom: 34 });
+    expect(texts(root).some((text) => text.includes('come from the connected agent'))).toBe(true);
+    expect(texts(root)).not.toContain('Download more models');
+    act(() => tree.unmount());
+  });
+
+  it('describes on-device models and links to model downloads in Settings', () => {
+    resetRouterMock();
+    const { tree, root, closeModelModal } = openModelSelector(
+      { top: 47, left: 0, right: 0, bottom: 34 },
+      jest.fn(),
+      localProfileStore(),
+    );
+    expect(texts(root)).toContain(
+      'Downloaded models run on this iPhone. The chosen model loads when you send and stays loaded between turns.',
+    );
+    expect(texts(root).some((text) => text.includes('connected agent'))).toBe(false);
+    const manage = root.findAll(
+      (node) =>
+        node.props['accessibilityRole'] === 'button' &&
+        typeof node.props['accessibilityLabel'] === 'string' &&
+        node.props['accessibilityLabel'].startsWith('Download more models'),
+    )[0];
+    if (!manage) {
+      throw new Error('Missing the model downloads link');
+    }
+    act(() => (manage.props['onPress'] as () => void)());
+    expect(closeModelModal).toHaveBeenCalledTimes(1);
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: '/profiles/[profileId]/settings/models',
+      params: { profileId: LOCAL_PROFILE_ID },
+    });
+    act(() => tree.unmount());
+  });
+
   it('places the model selector close button clear of the display corner', () => {
     const { tree, root, closeModelModal } = openModelSelector({
       top: 47,

@@ -19,6 +19,7 @@ import type {
   MainScreenSelectedRuntimeSelectorsResult,
 } from '../state/selectedRuntimeSelectors';
 import { effortPickerModelIdAtom } from '../state/modals';
+import { activeProfileFeaturesAtom } from '@shell/state/bridge/atoms';
 import { deriveModelCatalogState, shouldResetSelectedEffort } from './catalogDerivation';
 export type MainScreenModelCatalogStateContext = MainScreenSelectedRuntimeSelectorsContext &
   MainScreenSelectedRuntimeSelectorsResult;
@@ -55,6 +56,7 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
   const activity = useAtomValue(activityAtom);
   const setActivity = useSetAtom(activityAtom);
   const effortPickerModelId = useAtomValue(effortPickerModelIdAtom);
+  const { modelLibrary } = useAtomValue(activeProfileFeaturesAtom);
   const selectionChatIdRef = useRef(selectedChatId);
   const selectionBelongsToCurrentChat = selectionChatIdRef.current === selectedChatId;
   const preserveModelSelectionForChat = useCallback((chatId: string | null) => {
@@ -157,6 +159,8 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     selectedModelId,
     selectedEffort,
     pendingAcpConfig: selectedChatId ? pendingAcpConfigByChat[selectedChatId] : undefined,
+    // A device model library has no agent-side default to fall back to.
+    fallbackModelLabel: modelLibrary ? 'Choose a model' : undefined,
   });
   // Auto-transition complete/error → idle after 3s so the bar hides.
   useEffect(() => {

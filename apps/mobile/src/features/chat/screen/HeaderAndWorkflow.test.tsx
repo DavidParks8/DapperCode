@@ -83,6 +83,11 @@ function baseContext(overrides: Partial<Context> = {}): Context {
     activeEffortLabel: 'High',
     openCollaborationModeMenu: jest.fn(),
     collaborationModeLabel: 'Default mode',
+    collaborationModeOptions: [
+      { key: 'default', title: 'Default mode', onPress: jest.fn() },
+      { key: 'plan', title: 'Plan mode', onPress: jest.fn() },
+    ],
+    activeAgentSupports: null,
     showAgentThreadChip: true,
     openAgentThreadSelector: jest.fn().mockResolvedValue(undefined),
     agentThreadChipLabel: 'Agent threads, 2',
@@ -278,6 +283,38 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
 
     expect(mockHaptics.selectionAsync).toHaveBeenCalledTimes(1);
     expect(context.openCollaborationModeMenu).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+  });
+
+  it('hides the agent mode chip when the agent offers only one mode', () => {
+    const tree = render(
+      baseContext({
+        collaborationModeOptions: [{ key: 'default', title: 'Default mode', onPress: jest.fn() }],
+        activeAgentSupports: {
+          reviewStart: false,
+          goalSlash: false,
+          planMode: false,
+          agentList: false,
+          turnSteer: false,
+          threadFork: false,
+          threadDelete: true,
+          commandOutputDelta: false,
+          fastMode: false,
+          browserPreview: false,
+          genericUiSurface: false,
+        },
+      }),
+    );
+    const root = queryRoot(tree);
+
+    expect(
+      root.findAll(
+        (node) =>
+          typeof node.props['accessibilityLabel'] === 'string' &&
+          node.props['accessibilityLabel'].startsWith('Agent mode,'),
+      ),
+    ).toHaveLength(0);
+    expect(findPressableByLabelPrefix(root, 'Model,')).toBeTruthy();
     act(() => tree.unmount());
   });
 

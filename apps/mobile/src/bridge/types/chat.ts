@@ -71,7 +71,13 @@ export type ChatToolKind =
   | 'switch_mode'
   | 'other';
 
-export type ChatToolStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+/**
+ * ACP's tool statuses plus the client-side `interrupted`: a call still active when the user
+ * cancelled its run. The wire keeps ACP's `failed` and adds `interrupted: true` (installed clients
+ * map unknown statuses to `pending`); `parseToolMeta` folds the flag into this status. It is
+ * terminal but not a failure.
+ */
+export type ChatToolStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'interrupted';
 
 /**
  * The ACP facts a tool row needs that an AG-UI message cannot carry: the kind
@@ -185,6 +191,13 @@ export interface Chat extends ChatSummary {
   };
   /** Local read/recovery failure, independent of the agent's run status. */
   historyRecoveryError?: string | null;
+  /**
+   * Client-only: the host keeps the whole conversation on this device (On this iPhone), so its
+   * snapshot is the transcript. Messages a cached copy has beyond it were lost before they were
+   * stored (a crash between streaming and the coalesced write), not left unread, and are dropped
+   * instead of kept as missing history.
+   */
+  historyAuthoritative?: boolean;
   acpSnapshot?: RawAcpSnapshot;
   latestPlan?: ChatPlanSnapshot | null;
   latestTurnPlan?: ChatPlanSnapshot | null;

@@ -49,6 +49,7 @@ export function mergeModelOptions(
     return {
       ...catalogEntry,
       ...model,
+      description: model.description ?? catalogEntry?.description,
       contextWindow: catalogEntry?.contextWindow ?? model.contextWindow,
       reasoningEffort: model.reasoningEffort ?? catalogEntry?.reasoningEffort,
     };

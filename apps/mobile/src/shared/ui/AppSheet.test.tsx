@@ -300,6 +300,31 @@ describe('AppSheet', () => {
     act(() => tree?.unmount());
   });
 
+  it('keeps the controls inside the sheet reachable by VoiceOver', () => {
+    for (const scrollable of [true, false]) {
+      const tree = renderSheet(
+        wrap(
+          <AppSheet
+            visible
+            onClose={jest.fn()}
+            accessibilityLabel="Choose a model"
+            scrollable={scrollable}
+          >
+            <Text>Model list</Text>
+          </AppSheet>,
+        ),
+      );
+      // @gorhom/bottom-sheet defaults `accessible` to true, which collapses the whole sheet into
+      // a single element on iOS.
+      expect(findModal(tree).props['accessible']).toBe(false);
+      const content = (tree.root as unknown as Queryable).findAll(
+        (node) => node.props['accessibilityViewIsModal'] === true,
+      )[0];
+      expect(content?.props['accessibilityLabel']).toBe('Choose a model');
+      act(() => tree.unmount());
+    }
+  });
+
   it('gives the drag handle a full touch target so drags never fall through to the content', () => {
     const tree = renderSheet(
       wrap(

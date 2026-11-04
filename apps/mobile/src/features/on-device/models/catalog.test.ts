@@ -35,3 +35,12 @@ test('unsupported ternary packings fail explicitly instead of reaching native in
   }
   expect(() => requireLocalModelRuntime(localModelDefinition('bonsai-2-2b-q2-0'))).not.toThrow();
 });
+
+test('catalog licenses use one SPDX casing and family copy never refers to another page', () => {
+  for (const model of LOCAL_MODEL_CATALOG) {
+    expect(model.license).toBe('Apache-2.0');
+  }
+  for (const family of LOCAL_MODEL_FAMILIES) {
+    expect(family.description).not.toMatch(/next page/i);
+  }
+});

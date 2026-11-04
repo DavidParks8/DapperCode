@@ -1,9 +1,16 @@
 import type { CompletionParams, FormattedChatResult, TokenData } from 'llama.rn';
 import { localModelDefinition } from './catalog';
-import type { LocalContextLoader, LocalModelContext, LocalModelReply } from './engine';
-import { modelFileSystemPath } from './engine';
+import { CONTEXT_SAFETY_TOKENS, OMITTED_TURNS_NOTE, outputReserveTokens } from './contextWindow';
+import type {
+  LocalContextLoader,
+  LocalModelContext,
+  LocalModelMessage,
+  LocalModelReply,
+} from './engine';
+import { modelFileSystemPath, nativeContextParams } from './engine';
 import { MODEL_MEMORY_RESERVE_BYTES, modelMemoryBytes } from './memory';
 import {
+  LocalContextFull,
   LocalModelInterrupted,
   LocalModelSession,
   type LocalModelSessionSnapshot,
@@ -39,6 +46,30 @@ test('verified model URIs are decoded once for the native llama filesystem API',
   expect(() => modelFileSystemPath('file://other-host/model.gguf')).toThrow('local file');
 });
 
+test('native context tuning uses the admitted context, one sequence, and hybrid prompt reuse', () => {
+  const file = { id: small.id, uri: 'file:///m.gguf', sha256: small.sha256, bytes: small.bytes };
+  const device = {
+    physicalBytes: 8 * 1024 ** 3,
+    availableBytes: 4 * 1024 ** 3,
+    isSimulator: false,
+  };
+  expect(nativeContextParams(small, file, { contextTokens: 8192, memory: device })).toMatchObject({
+    n_ctx: 8192,
+    n_parallel: 1,
+    n_threads: 4,
+    n_batch: 512,
+    n_gpu_layers: 99,
+    state_cache_budget_mb: 0,
+  });
+  const hybrid = localModelDefinition('qwen35-0.8b-q4-0');
+  expect(
+    nativeContextParams(hybrid, file, {
+      contextTokens: 4096,
+      memory: { ...device, isSimulator: true },
+    }),
+  ).toMatchObject({ n_ctx: 4096, n_threads: 6, n_gpu_layers: 0, state_cache_budget_mb: 128 });
+});
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -51,8 +82,13 @@ function deferred<T>() {
 
 function context() {
   return {
-    getFormattedChat: jest.fn(async () => formatted),
-    tokenize: jest.fn(async () => ({ tokens: [1, 2, 3] })),
+    getFormattedChat: jest.fn<
+      Promise<FormattedChatResult>,
+      Parameters<LocalModelContext['getFormattedChat']>
+    >(async () => formatted),
+    tokenize: jest.fn<Promise<{ tokens: number[] }>, [string]>(async () => ({
+      tokens: [1, 2, 3],
+    })),
     completion: jest.fn<
       Promise<LocalModelReply>,
       [CompletionParams, ((value: TokenData) => void)?]
@@ -195,7 +231,7 @@ test('disposal during loading waits for and releases the unpublished native cont
   expect(h.session.snapshot()).toMatchObject({ phase: 'empty', modelId: null, progress: 0 });
   h.loader.mock.calls[0]![3](99);
   expect(h.session.snapshot()).toMatchObject({ phase: 'empty', progress: 0 });
-  await expect(h.session.load(small.id)).rejects.toThrow('unavailable');
+  await expect(h.session.load(small.id)).rejects.toThrow('shutting down');
 });
 
 test('native stream snapshots are not duplicated or replaced with raw tool syntax', async () => {
@@ -235,17 +271,434 @@ test('execution checks only new headroom and does not count already-loaded weigh
   expect(h.initial.completion).toHaveBeenCalledTimes(1);
 });
 
-test('prompt budgets refuse truncation at the exact context threshold', async () => {
+test('prompt budgets keep the reserved generation room at the exact context threshold', async () => {
   const h = harness();
   await h.session.load(small.id);
-  const limit = small.contextTokens - 512 - 32;
+  const contextTokens = h.session.snapshot().contextTokens ?? 0;
+  expect(contextTokens).toBe(small.maxContextTokens);
+  const limit = contextTokens - outputReserveTokens(contextTokens) - CONTEXT_SAFETY_TOKENS;
   h.initial.tokenize.mockResolvedValue({ tokens: Array.from({ length: limit }, () => 1) });
   await h.session.generate(messages, [], jest.fn());
   h.initial.tokenize.mockResolvedValue({ tokens: Array.from({ length: limit + 1 }, () => 1) });
-  await expect(h.session.generate(messages, [], jest.fn())).rejects.toThrow(
-    'context window is full',
+  await expect(h.session.generate(messages, [], jest.fn())).rejects.toBeInstanceOf(
+    LocalContextFull,
   );
   expect(h.initial.completion).toHaveBeenCalledTimes(1);
+  // A turn that does not fit is a conversation failure, not a broken model.
+  expect(h.session.snapshot()).toMatchObject({ phase: 'ready', error: null });
+});
+
+test('generation may use all remaining context instead of a fixed 512-token output cap', async () => {
+  const h = harness();
+  await h.session.load(small.id);
+  h.initial.tokenize.mockResolvedValue({ tokens: Array.from({ length: 1000 }, () => 1) });
+  await h.session.generate(messages, [], jest.fn());
+  const params = h.initial.completion.mock.calls[0]![0];
+  expect(params.n_predict).toBe(small.maxContextTokens - 1000 - CONTEXT_SAFETY_TOKENS);
+  expect(params.n_predict).toBeGreaterThan(4096);
+});
+
+test('each round renders the chat template once and completes from that formatted prompt', async () => {
+  const h = harness();
+  await h.session.load(small.id);
+  h.initial.getFormattedChat.mockResolvedValue({
+    ...formatted,
+    chat_format: 7,
+    grammar: 'root ::= "x"',
+    grammar_lazy: true,
+    grammar_triggers: [{ type: 1, value: '<tool_call>', token: 0 }],
+    preserved_tokens: ['<tool_call>'],
+    additional_stops: ['<|im_end|>'],
+    generation_prompt: '<|im_start|>assistant\n',
+    chat_parser: 'parser',
+  } as FormattedChatResult);
+  await h.session.generate(messages, [{ type: 'function' }], jest.fn());
+  expect(h.initial.getFormattedChat).toHaveBeenCalledTimes(1);
+  const params = h.initial.completion.mock.calls[0]![0];
+  expect(params).toMatchObject({
+    prompt: 'formatted prompt',
+    chat_format: 7,
+    grammar: 'root ::= "x"',
+    grammar_lazy: true,
+    preserved_tokens: ['<tool_call>'],
+    stop: ['<|im_end|>'],
+    generation_prompt: '<|im_start|>assistant\n',
+    chat_parser: 'parser',
+    enable_thinking: false,
+  });
+  expect(params.messages).toBeUndefined();
+  expect(params.tools).toBeUndefined();
+});
+
+test('a full context compacts earlier tool output and turns instead of ending the conversation', async () => {
+  const h = harness();
+  // Admit only the minimum context so the conversation genuinely overflows it.
+  h.native.getMemoryInfo.mockReturnValue({
+    physicalBytes: 32 * 1024 ** 3,
+    availableBytes: modelMemoryBytes(small),
+    isSimulator: true,
+  });
+  await h.session.load(small.id);
+  expect(h.session.snapshot().contextTokens).toBe(small.contextTokens);
+  h.initial.getFormattedChat.mockImplementation(async (chat) => ({
+    ...formatted,
+    prompt: JSON.stringify(chat),
+  }));
+  h.initial.tokenize.mockImplementation(async (text: string) => ({
+    tokens: Array.from({ length: Math.ceil(text.length / 4) }, () => 1),
+  }));
+  const history: LocalModelMessage[] = [{ role: 'system', content: 'system prompt' }];
+  for (let turn = 0; turn < 8; turn += 1) {
+    history.push(
+      { role: 'user', content: `Old question ${turn}` },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          {
+            type: 'function',
+            id: `call-${turn}`,
+            function: { name: 'read_file', arguments: JSON.stringify({ path: `f${turn}.ts` }) },
+          },
+        ],
+      },
+      {
+        role: 'tool',
+        name: 'read_file',
+        tool_call_id: `call-${turn}`,
+        content: JSON.stringify({
+          path: `f${turn}.ts`,
+          revision: 'a'.repeat(64),
+          content: 'x'.repeat(4000),
+        }),
+      },
+      { role: 'assistant', content: `Answer ${turn}` },
+    );
+  }
+  history.push({ role: 'user', content: 'The current question must survive compaction.' });
+  const original = JSON.stringify(history);
+  await expect(h.session.generate(history, [], jest.fn())).resolves.toMatchObject({
+    content: 'Hello',
+  });
+  const prompt = h.initial.completion.mock.calls[0]![0].prompt ?? '';
+  expect(prompt).toContain('The current question must survive compaction.');
+  expect(prompt).not.toContain('x'.repeat(4000));
+  expect(Math.ceil(prompt.length / 4)).toBeLessThanOrEqual(
+    small.contextTokens - outputReserveTokens(small.contextTokens) - CONTEXT_SAFETY_TOKENS,
+  );
+  expect(JSON.stringify(history)).toBe(original);
+  expect(h.session.snapshot().phase).toBe('ready');
+});
+
+const compactionRevision = 'c'.repeat(64);
+const historyResult = (index: number) =>
+  JSON.stringify({ path: `h${index}.ts`, revision: compactionRevision, content: 'z'.repeat(2000) });
+const firstCurrentResult = JSON.stringify({
+  path: 'c1.ts',
+  revision: compactionRevision,
+  content: 'p'.repeat(2000),
+});
+const lastCurrentResult = JSON.stringify({
+  path: 'c2.ts',
+  revision: compactionRevision,
+  content: 'q'.repeat(2000),
+});
+const compactionSystem: LocalModelMessage = { role: 'system', content: 'system prompt' };
+
+function historyTurn(index: number): LocalModelMessage[] {
+  return [
+    { role: 'user', content: `Old question ${index}` },
+    {
+      role: 'assistant',
+      content: '',
+      reasoning_content: 'thinking',
+      tool_calls: [
+        {
+          type: 'function',
+          id: `h-${index}`,
+          function: {
+            name: 'write_file',
+            arguments: JSON.stringify({ path: `h${index}.ts`, content: 'y'.repeat(1000) }),
+          },
+        },
+      ],
+    },
+    { role: 'tool', name: 'write_file', tool_call_id: `h-${index}`, content: historyResult(index) },
+    { role: 'assistant', content: `Answer ${index}` },
+  ];
+}
+
+function elidedHistoryTurn(index: number): LocalModelMessage[] {
+  return [
+    { role: 'user', content: `Old question ${index}` },
+    {
+      role: 'assistant',
+      content: '',
+      tool_calls: [
+        {
+          type: 'function',
+          id: `h-${index}`,
+          function: {
+            name: 'write_file',
+            arguments: `{"path":"h${index}.ts","content":"[1000 characters elided]"}`,
+          },
+        },
+      ],
+    },
+    {
+      role: 'tool',
+      name: 'write_file',
+      tool_call_id: `h-${index}`,
+      content: `{"elided":true,"path":"h${index}.ts","revision":"${compactionRevision}"}`,
+    },
+    { role: 'assistant', content: `Answer ${index}` },
+  ];
+}
+
+function currentCall(id: string, path: string): LocalModelMessage {
+  return {
+    role: 'assistant',
+    content: '',
+    tool_calls: [
+      { type: 'function', id, function: { name: 'read_file', arguments: `{"path":"${path}"}` } },
+    ],
+  };
+}
+
+const currentTurn: LocalModelMessage[] = [
+  { role: 'user', content: 'Current question' },
+  currentCall('c-1', 'c1.ts'),
+  { role: 'tool', name: 'read_file', tool_call_id: 'c-1', content: firstCurrentResult },
+  currentCall('c-2', 'c2.ts'),
+  { role: 'tool', name: 'read_file', tool_call_id: 'c-2', content: lastCurrentResult },
+];
+const elidedFirstCurrentResult: LocalModelMessage = {
+  role: 'tool',
+  name: 'read_file',
+  tool_call_id: 'c-1',
+  content: `{"elided":true,"path":"c1.ts","revision":"${compactionRevision}"}`,
+};
+const compactionConversation = [
+  compactionSystem,
+  ...historyTurn(0),
+  ...historyTurn(1),
+  ...historyTurn(2),
+  ...currentTurn,
+];
+const omittedSystem: LocalModelMessage = {
+  role: 'system',
+  content: `system prompt\n\n${OMITTED_TURNS_NOTE}`,
+};
+
+/**
+ * Renders each candidate as its JSON and counts tokens with `tokensFor`, so a test chooses
+ * exactly which compaction candidate fits.
+ */
+async function compactionHarness(tokensFor: (prompt: string, limit: number) => number) {
+  const h = harness();
+  await h.session.load(small.id);
+  const contextTokens = h.session.snapshot().contextTokens ?? 0;
+  const limit = contextTokens - outputReserveTokens(contextTokens) - CONTEXT_SAFETY_TOKENS;
+  h.initial.getFormattedChat.mockImplementation(async (chat) => ({
+    ...formatted,
+    prompt: JSON.stringify(chat),
+  }));
+  h.initial.tokenize.mockImplementation(async (text: string) => ({
+    tokens: Array.from({ length: tokensFor(text, limit) }, () => 1),
+  }));
+  const parse = jest.spyOn(JSON, 'parse');
+  const parsed = (content: string) => parse.mock.calls.some(([text]) => text === content);
+  const chosen = () => {
+    parse.mockRestore();
+    return JSON.parse(h.initial.completion.mock.calls[0]![0].prompt ?? '') as unknown;
+  };
+  return { ...h, contextTokens, parse, parsed, chosen };
+}
+
+test('a prompt that fits as-is does no elision work on earlier or current tool output', async () => {
+  const h = await compactionHarness(() => 1);
+  try {
+    await h.session.generate(compactionConversation, [], jest.fn());
+    expect(h.initial.getFormattedChat).toHaveBeenCalledTimes(1);
+    expect(h.parsed(historyResult(0))).toBe(false);
+    expect(h.parsed(historyResult(2))).toBe(false);
+    expect(h.parsed(firstCurrentResult)).toBe(false);
+    expect(h.parsed(lastCurrentResult)).toBe(false);
+    expect(h.chosen()).toEqual(compactionConversation);
+  } finally {
+    h.parse.mockRestore();
+  }
+});
+
+test('compaction picks the elided full history when that is the first candidate to fit', async () => {
+  const h = await compactionHarness((prompt, limit) =>
+    prompt.includes('z'.repeat(2000)) ? limit + 1 : 1,
+  );
+  try {
+    await h.session.generate(compactionConversation, [], jest.fn());
+    expect(h.initial.getFormattedChat).toHaveBeenCalledTimes(2);
+    // Current-turn compaction candidates are never built once a history candidate fits.
+    expect(h.parsed(firstCurrentResult)).toBe(false);
+    expect(h.chosen()).toEqual([
+      compactionSystem,
+      ...elidedHistoryTurn(0),
+      ...elidedHistoryTurn(1),
+      ...elidedHistoryTurn(2),
+      ...currentTurn,
+    ]);
+  } finally {
+    h.parse.mockRestore();
+  }
+});
+
+test('compaction drops the oldest turns in doubling steps until the prompt fits', async () => {
+  const h = await compactionHarness((prompt, limit) =>
+    prompt.includes('Old question 0') || prompt.includes('Old question 1') ? limit + 1 : 1,
+  );
+  try {
+    await h.session.generate(compactionConversation, [], jest.fn());
+    // original, elided history, drop 1, drop 2.
+    expect(h.initial.getFormattedChat).toHaveBeenCalledTimes(4);
+    expect(h.chosen()).toEqual([omittedSystem, ...elidedHistoryTurn(2), ...currentTurn]);
+  } finally {
+    h.parse.mockRestore();
+  }
+});
+
+test('current-turn compaction keeps the latest tool round and elides older ones first', async () => {
+  const h = await compactionHarness((prompt, limit) =>
+    prompt.includes('p'.repeat(2000)) ? limit + 1 : 1,
+  );
+  try {
+    await h.session.generate(compactionConversation, [], jest.fn());
+    // original, elided history, drop 1, drop 2, drop all, current keeping the last round.
+    expect(h.initial.getFormattedChat).toHaveBeenCalledTimes(6);
+    expect(h.chosen()).toEqual([
+      omittedSystem,
+      currentTurn[0],
+      currentTurn[1],
+      elidedFirstCurrentResult,
+      currentTurn[3],
+      currentTurn[4],
+    ]);
+  } finally {
+    h.parse.mockRestore();
+  }
+});
+
+test('the last-resort candidate elides every current-turn tool round', async () => {
+  const h = await compactionHarness((prompt, limit) =>
+    prompt.includes('p'.repeat(2000)) || prompt.includes('q'.repeat(2000)) ? limit + 1 : 1,
+  );
+  try {
+    await h.session.generate(compactionConversation, [], jest.fn());
+    expect(h.initial.getFormattedChat).toHaveBeenCalledTimes(7);
+    expect(h.chosen()).toEqual([
+      omittedSystem,
+      currentTurn[0],
+      currentTurn[1],
+      elidedFirstCurrentResult,
+      currentTurn[3],
+      {
+        role: 'tool',
+        name: 'read_file',
+        tool_call_id: 'c-2',
+        content: `{"elided":true,"path":"c2.ts","revision":"${compactionRevision}"}`,
+      },
+    ]);
+  } finally {
+    h.parse.mockRestore();
+  }
+});
+
+test('a history candidate without doubled headroom wins before current output is elided', async () => {
+  // Every history candidate fits but leaves less than twice the reserved generation room.
+  const h = await compactionHarness((prompt, limit) =>
+    prompt.includes('z'.repeat(2000)) ? limit + 1 : limit,
+  );
+  try {
+    await h.session.generate(compactionConversation, [], jest.fn());
+    // original plus the four history candidates; the current-turn candidates are never built.
+    expect(h.initial.getFormattedChat).toHaveBeenCalledTimes(5);
+    expect(h.parsed(firstCurrentResult)).toBe(false);
+    expect(h.parsed(lastCurrentResult)).toBe(false);
+    expect(h.chosen()).toEqual([
+      compactionSystem,
+      ...elidedHistoryTurn(0),
+      ...elidedHistoryTurn(1),
+      ...elidedHistoryTurn(2),
+      ...currentTurn,
+    ]);
+  } finally {
+    h.parse.mockRestore();
+  }
+});
+
+test('a conversation that fits no candidate still fails as a full context', async () => {
+  const h = await compactionHarness((_prompt, limit) => limit + 1);
+  try {
+    await expect(h.session.generate(compactionConversation, [], jest.fn())).rejects.toBeInstanceOf(
+      LocalContextFull,
+    );
+    expect(h.initial.getFormattedChat).toHaveBeenCalledTimes(7);
+    expect(h.initial.completion).not.toHaveBeenCalled();
+    expect(h.session.snapshot()).toMatchObject({ phase: 'ready', error: null });
+  } finally {
+    h.parse.mockRestore();
+  }
+});
+
+test('a native completion failure leaves the healthy resident model ready without a reload', async () => {
+  const h = harness();
+  await h.session.load(small.id);
+  h.initial.completion.mockRejectedValueOnce(new Error('Decode failed'));
+  await expect(h.session.generate(messages, [], jest.fn())).rejects.toThrow('Decode failed');
+  expect(h.session.snapshot()).toMatchObject({ phase: 'ready', modelId: small.id, error: null });
+  await expect(h.session.generate(messages, [], jest.fn())).resolves.toMatchObject({
+    content: 'Hello',
+  });
+  expect(h.loader).toHaveBeenCalledTimes(1);
+});
+
+test('stop during a native load returns promptly and releases the context when it arrives', async () => {
+  const h = harness();
+  const pending = deferred<LocalModelContext>();
+  const started = deferred<void>();
+  h.loader.mockImplementation(() => {
+    started.resolve();
+    return pending.promise;
+  });
+  const loading = h.session.load(small.id);
+  const interrupted = loading.catch((error: unknown) => error);
+  await started.promise;
+  expect(h.session.snapshot()).toMatchObject({ phase: 'loading', modelId: small.id });
+  await h.session.stop();
+  expect(h.session.snapshot().phase).toBe('stopping');
+  // A new load queues behind the cancelled native load instead of failing as "changing models".
+  const second = context();
+  h.loader.mockImplementationOnce(async () => second);
+  const next = h.session.load(medium.id);
+  pending.resolve(h.initial);
+  expect(await interrupted).toBeInstanceOf(LocalModelInterrupted);
+  expect(h.initial.release).toHaveBeenCalledTimes(1);
+  await next;
+  expect(h.session.snapshot()).toMatchObject({ phase: 'ready', modelId: medium.id });
+  expect(h.loader).toHaveBeenCalledTimes(2);
+});
+
+test('loads use the largest catalog context that fresh headroom admits and expose the resident model', async () => {
+  const h = harness();
+  h.native.getMemoryInfo.mockReturnValue({
+    physicalBytes: 32 * 1024 ** 3,
+    availableBytes: modelMemoryBytes(medium, medium.maxContextTokens) - 1,
+    isSimulator: false,
+  });
+  await h.session.load(medium.id);
+  expect(h.loader.mock.calls[0]![2]).toMatchObject({ contextTokens: medium.contextTokens });
+  expect(h.session.resident()).toEqual({ model: medium, contextTokens: medium.contextTokens });
+  await h.session.unload();
+  expect(h.session.resident()).toBeNull();
+  expect(h.session.snapshot().contextTokens).toBeNull();
 });
 
 test('unsupported native tool templates release their context and cannot become ready', async () => {
@@ -266,4 +719,26 @@ test('an unverified artifact is refused before allocating any native model', asy
   });
   await expect(h.session.load(small.id)).rejects.toThrow('Download and verify');
   expect(h.loader).not.toHaveBeenCalled();
+});
+
+test('a newer load request supersedes an in-flight one instead of failing as busy', async () => {
+  const h = harness();
+  const pending = deferred<LocalModelContext>();
+  const started = deferred<void>();
+  h.loader.mockImplementationOnce(() => {
+    started.resolve();
+    return pending.promise;
+  });
+  const first = h.session.load(small.id);
+  expect(h.session.load(small.id)).toBe(first);
+  const superseded = first.catch((error: unknown) => error);
+  await started.promise;
+  const second = context();
+  h.loader.mockImplementationOnce(async () => second);
+  const latest = h.session.load(medium.id);
+  pending.resolve(h.initial);
+  expect(await superseded).toBeInstanceOf(LocalModelInterrupted);
+  await latest;
+  expect(h.initial.release).toHaveBeenCalledTimes(1);
+  expect(h.session.snapshot()).toMatchObject({ phase: 'ready', modelId: medium.id });
 });

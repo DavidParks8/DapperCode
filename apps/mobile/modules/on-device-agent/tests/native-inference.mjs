@@ -113,6 +113,7 @@ export default async function scenario(e2e) {
         }
         return true;
       });
+      e2e.emit({ event: 'metrics', modelId, metrics: result.metrics ?? {} });
       await e2e.expectSubset('native execution checks', result.checks, {
         nativeMemory: true,
         nativeMemoryAdmission: true,

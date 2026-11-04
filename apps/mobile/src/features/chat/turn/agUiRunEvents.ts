@@ -17,6 +17,7 @@ import {
   parseAgUiEventNotification,
   updateAgUiLiveAssistantMessages,
 } from '@bridge/agui/agUi';
+import { parseRunActivity, RUN_ACTIVITY_EVENT_NAME } from '@bridge/runActivity';
 import type { ChatMessage, RpcNotification } from '@bridge/types/types';
 import { type ActivityState, RUN_WATCHDOG_MS } from '../helpers/helpers';
 import type { MainScreenWsEventRouterContext } from './wsEventRouter';
@@ -90,6 +91,10 @@ export function processAgUiRunEvents(
         }
         return;
       }
+      if (isRunActivityCustomEvent(agUiEnvelope)) {
+        applyRunActivity(agUiEnvelope);
+        return;
+      }
       if (!isSubagentCustomEvent(agUiEnvelope)) {
         return;
       }
@@ -145,6 +150,29 @@ export function processAgUiRunEvents(
       envelope.event.type === EventType.CUSTOM &&
       envelope.event.name === 'dappercode.dev/tokenTotals'
     );
+  }
+
+  function isRunActivityCustomEvent(
+    envelope: AgUiEventEnvelope,
+  ): envelope is AgUiEventEnvelope & { event: CustomEvent } {
+    return (
+      envelope.event.type === EventType.CUSTOM && envelope.event.name === RUN_ACTIVITY_EVENT_NAME
+    );
+  }
+
+  /** A named run phase (model loading, a specific tool) replaces the generic working status. */
+  function applyRunActivity(envelope: AgUiEventEnvelope & { event: CustomEvent }) {
+    const activity = parseRunActivity(envelope.event.value);
+    if (!activity) {
+      return;
+    }
+    const next: ActivityState = { tone: 'running', ...activity, announce: true };
+    if (envelope.threadId === currentId) {
+      setActivity(next);
+      bumpRunWatchdog();
+      return;
+    }
+    cacheThreadActivity(envelope.threadId, next);
   }
 
   function handleRunTerminalState(envelope: AgUiEventEnvelope, failed: boolean) {

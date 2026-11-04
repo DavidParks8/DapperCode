@@ -484,7 +484,7 @@ describe('GitScreen behavior', () => {
     const rawTree = await renderGit(rawApi);
     const rawRoot = rawTree.root as Queryable;
     expect(hasText(rawRoot, 'Publish branch')).toBe(true);
-    expect(hasText(rawRoot, 'No patch output for current changes yet')).toBe(true);
+    expect(hasText(rawRoot, 'No line changes to show.')).toBe(true);
     await press(rawRoot, 'Change branch');
     expect(hasText(rawRoot, 'No branches found.')).toBe(true);
     await press(rawRoot, 'Close');

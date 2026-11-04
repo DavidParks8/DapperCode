@@ -59,10 +59,10 @@ extension NativeGit {
         try requireSuccess(next, "Read branch")
         defer { git_reference_free(reference) }
         guard branches.count < 500 else {
-          throw GitOperationError("This repository has more than 500 branches. Use the desktop for its full branch list.")
+          throw GitOperationError(.gitFailure, "This repository has more than 500 branches. Use the desktop for its full branch list.")
         }
         guard let raw = git_reference_shorthand(reference), let name = String(validatingCString: raw) else {
-          throw GitOperationError("Git branch names must be UTF-8.")
+          throw GitOperationError(.gitFailure, "Git branch names must be UTF-8.")
         }
         branches.append(NativeGitBranch(
           name: name, remote: type == GIT_BRANCH_REMOTE, current: git_branch_is_head(reference) == 1
@@ -74,10 +74,10 @@ extension NativeGit {
 
   static func switchBranch(repository: URL, branch: String) throws {
     guard !branch.isEmpty, !branch.contains("\0"), branch.utf8.count <= 1024 else {
-      throw GitOperationError("Enter a valid Git branch name.")
+      throw GitOperationError(.gitBranchInvalid, "Enter a valid Git branch name.")
     }
     guard try isClean(repository: repository) else {
-      throw GitOperationError("Commit or remove workspace changes before switching branches.")
+      throw GitOperationError(.gitDirtyWorktree, "Commit or remove workspace changes before switching branches.")
     }
     try withRepository(repository) { repository in
       var reference: OpaquePointer?
@@ -90,7 +90,7 @@ extension NativeGit {
       defer { git_reference_free(reference) }
       guard let reference, let target = git_reference_target(reference),
         let name = git_reference_name(reference) else {
-        throw GitOperationError("The selected branch has no commit.")
+        throw GitOperationError(.gitBranchNotFound, "The selected branch has no commit.")
       }
       var commit: OpaquePointer?
       try requireSuccess(git_commit_lookup(&commit, repository, target), "Read branch commit")
@@ -114,7 +114,7 @@ extension NativeGit {
     }
     try requireSuccess(found, "Read indexed HEAD path")
     guard let entry, let oid = git_tree_entry_id(entry) else {
-      throw GitOperationError("The original Git index entry is unavailable.")
+      throw GitOperationError(.gitFailure, "The original Git index entry is unavailable.")
     }
     var restored = git_index_entry()
     restored.id = oid.pointee
@@ -127,10 +127,14 @@ extension NativeGit {
 
   private static func trackingBranch(_ repository: OpaquePointer, remoteName: String) throws -> OpaquePointer {
     var remote: OpaquePointer?
-    try requireSuccess(git_branch_lookup(&remote, repository, remoteName, GIT_BRANCH_REMOTE), "Read remote branch")
+    let lookup = git_branch_lookup(&remote, repository, remoteName, GIT_BRANCH_REMOTE)
+    if lookup == GIT_ENOTFOUND.rawValue {
+      throw GitOperationError(.gitBranchNotFound, "Choose an existing local or remote branch.")
+    }
+    try requireSuccess(lookup, "Read remote branch")
     defer { git_reference_free(remote) }
     guard let target = git_reference_target(remote), let slash = remoteName.firstIndex(of: "/") else {
-      throw GitOperationError("Choose an existing local or remote branch.")
+      throw GitOperationError(.gitBranchNotFound, "Choose an existing local or remote branch.")
     }
     let localName = String(remoteName[remoteName.index(after: slash)...])
     var commit: OpaquePointer?
@@ -138,7 +142,7 @@ extension NativeGit {
     defer { git_commit_free(commit) }
     var created: OpaquePointer?
     try requireSuccess(git_branch_create(&created, repository, localName, commit, 0), "Create tracking branch")
-    guard let created else { throw GitOperationError("Git did not return the tracking branch.") }
+    guard let created else { throw GitOperationError(.gitFailure, "Git did not return the tracking branch.") }
     do {
       try requireSuccess(git_branch_set_upstream(created, remoteName), "Set tracking branch")
     } catch let error as GitOperationError {

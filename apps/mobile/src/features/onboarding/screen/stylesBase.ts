@@ -300,4 +300,9 @@ export const createOnboardingBaseStyles = (theme: AppTheme, tokens: OnboardingSt
     introFooter: {
       gap: theme.spacing.sm,
     },
+    introChoicesTitle: {
+      ...theme.typography.subheadline,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+    },
   });

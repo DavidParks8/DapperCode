@@ -32,6 +32,10 @@ import { selectedChatIdAtom } from '@shell/state/chat/atoms';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { windowTraitsAtom } from '@shell/state/layout/atoms';
 import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
+import { appStateSnapshotAtom } from '@shell/state/appState/atoms';
+import { localProfileAvailableAtom } from '@shell/state/bridge/atoms';
+import { localAgentPresenceAtom } from '@shell/state/local/atoms';
+import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 import type { AppStore } from '@shell/state/types';
 import type { WorkspaceChatLimit } from '@shell/state/appSettings';
 import {
@@ -2291,6 +2295,36 @@ describe('DrawerContent session deletion', () => {
     act(() => tree.unmount());
   });
 
+  it('offers delete as a VoiceOver action on the single session row', async () => {
+    const harness = createHarness({
+      chats: [createChat({ id: 'a', title: 'Chat a' }), createChat({ id: 'b', title: 'Chat b' })],
+    });
+    answerConfirm('confirm');
+    const tree = await renderDrawer(harness);
+    const row = (tree.root as Queryable).findAll(
+      (node) =>
+        node.props['testID'] === 'drawer-chat-row-a' &&
+        Boolean(node.props['onAccessibilityAction']),
+    )[0];
+    expect(row?.props['accessibilityActions']).toEqual([
+      { name: 'delete', label: 'Delete Chat a' },
+    ]);
+
+    await act(async () => {
+      (row?.props['onAccessibilityAction'] as (event: unknown) => void)({
+        nativeEvent: { actionName: 'delete' },
+      });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(harness.api.deleteChat).toHaveBeenCalledWith('a');
+    expect(hasText(tree.root as Queryable, 'Chat a')).toBe(false);
+    act(() => tree.unmount());
+  });
+
   it('keeps the session when the confirmation is dismissed', async () => {
     const harness = createHarness({ chats: [createChat({ id: 'a', title: 'Chat a' })] });
     answerConfirm('cancel');
@@ -2904,6 +2938,42 @@ describe('DrawerContent bulk selection', () => {
     expect(findOptionalByLabel(root, 'Close session list')).toBeDefined();
     expect(findOptionalByLabel(root, 'Bridge connected. Edit connection')).toBeDefined();
     expect(findOptionalByLabel(root, 'Select all sessions')).toBeUndefined();
+    act(() => tree.unmount());
+  });
+
+  it('shows the local profile footer without bridge connection or browser actions', async () => {
+    const harness = createHarness({ chats: [createChat()] });
+    const store = createDrawerStore(harness.api, harness.ws);
+    store.set(localProfileAvailableAtom, true);
+    const snapshot = store.get(appStateSnapshotAtom);
+    store.set(appStateSnapshotAtom, {
+      ...snapshot,
+      data: {
+        ...snapshot.data,
+        bridgeProfiles: { ...snapshot.data.bridgeProfiles, activeProfileId: LOCAL_PROFILE_ID },
+      },
+    });
+    const tree = await renderDrawer(harness, { store });
+    const root = tree.root as Queryable;
+
+    expect(findOptionalByLabel(root, 'On this iPhone, 1 sessions. Open settings')).toBeDefined();
+    expect(findOptionalByLabel(root, 'Bridge connected. Edit connection')).toBeUndefined();
+    expect(findOptionalByLabel(root, 'Open preview browser')).toBeUndefined();
+
+    // The footer reports the local agent's own state instead of a session count.
+    await act(async () => {
+      store.set(localAgentPresenceAtom, {
+        status: { label: 'Loading Qwen3 1.7B Q4_K_M · 42%', kind: 'busy' },
+        readiness: null,
+        defaultWorkspacePath: null,
+      });
+      await Promise.resolve();
+    });
+    expect(
+      findOptionalByLabel(root, 'On this iPhone, Loading Qwen3 1.7B Q4_K_M · 42%. Open settings'),
+    ).toBeDefined();
+    expect(hasText(root, 'Loading Qwen3 1.7B Q4_K_M · 42%')).toBe(true);
+    expect(hasText(root, '1 sessions')).toBe(false);
     act(() => tree.unmount());
   });
 

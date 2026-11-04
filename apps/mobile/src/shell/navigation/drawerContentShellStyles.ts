@@ -196,6 +196,12 @@ export function createDrawerContentShellStyles(theme: AppTheme) {
     connectionDotDisconnected: {
       backgroundColor: theme.colors.warning,
     },
+    connectionDotBusy: {
+      backgroundColor: theme.colors.statusRunning,
+    },
+    connectionDotError: {
+      backgroundColor: theme.colors.statusError,
+    },
     connectionCopy: {
       minWidth: 0,
       flex: 1,

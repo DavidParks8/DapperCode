@@ -9,7 +9,8 @@ import type {
   WorkspaceSummary,
 } from '@bridge/types/types';
 import type { WorkspacePickerPurpose } from '../../chat/helpers/helpers';
-import { activeBridgeProfileAtom, apiClientAtom } from '@shell/state/bridge/atoms';
+import { activeProfileAtom, activeProfileIdAtom, apiClientAtom } from '@shell/state/bridge/atoms';
+import { profileIdentityKey } from '@shell/state/localProfile';
 import { derivedScreenAtom, screenAtom } from '../../chat/state/registry';
 
 export const relatedAgentThreadsAtom = screenAtom<ChatSummary[]>(() => []);
@@ -76,7 +77,7 @@ export const workspaceFavoritesByProfileAtom = screenAtom<
 >(() => ({}));
 
 function activeProfileId(get: Getter): string | null {
-  return get(activeBridgeProfileAtom)?.id ?? null;
+  return get(activeProfileIdAtom);
 }
 
 export interface WorkspaceBridgeIdentity {
@@ -93,14 +94,10 @@ export interface WorkspaceBridgeIdentity {
  */
 export const activeWorkspaceIdentityAtom = derivedScreenAtom(
   (get): WorkspaceBridgeIdentity | null => {
-    const profile = get(activeBridgeProfileAtom);
+    const profile = get(activeProfileAtom);
     const client = get(apiClientAtom);
     return profile && client
-      ? {
-          profileId: profile.id,
-          identityKey: `${profile.id}\u0000${profile.updatedAt}\u0000${profile.bridgeUrl}`,
-          client,
-        }
+      ? { profileId: profile.id, identityKey: profileIdentityKey(profile), client }
       : null;
   },
 );

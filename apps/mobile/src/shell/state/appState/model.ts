@@ -4,7 +4,6 @@ import type {
   ApprovalMode,
   CollaborationMode,
 } from '@bridge/types/types';
-import type { ExecutionTarget } from '@shell/runtime/targets';
 import {
   APP_SETTINGS_VERSION,
   DEFAULT_WORKSPACE_CHAT_LIMIT,
@@ -12,6 +11,7 @@ import {
   type RecentModelIdsByAgent,
   type WorkspaceChatLimit,
 } from '@shell/state/appSettings';
+import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 import {
   createEmptyBridgeProfileStore,
   parseBridgeProfileStore,
@@ -48,8 +48,13 @@ export interface PushSettingsState {
 }
 
 export interface AppSettingsState {
-  preferredExecutionTarget: ExecutionTarget;
   defaultStartCwd: string | null;
+  /** New-chat workspace for the built-in local profile, kept apart from bridge paths. */
+  localDefaultStartCwd: string | null;
+  /** The user hid the On this iPhone first-run checklist. */
+  localSetupDismissed: boolean;
+  /** A local chat has had a message, so first-run setup is over even if every chat is deleted. */
+  localSetupCompleted: boolean;
   preferredAgentId: AgentId | null;
   agentSettings: AgentDefaultSettingsMap;
   approvalMode: ApprovalMode;
@@ -109,7 +114,8 @@ export type AppStateAction =
       collaborationMode: CollaborationMode;
     }
   | { type: 'profiles/save'; draft: BridgeProfileDraft }
-  | { type: 'profiles/switch'; profileId: string }
+  /** `null` closes the active profile, for example when leaving the local profile with no bridge. */
+  | { type: 'profiles/switch'; profileId: string | null }
   | { type: 'push/update'; patch: Partial<Pick<PushSettingsState, 'optedOut' | 'events'>> }
   | { type: 'push/ensure-registration'; profileId: string; registrationId: string }
   | {
@@ -122,8 +128,10 @@ export type AppStateAction =
 
 export function createDefaultAppSettings(): AppSettingsState {
   return {
-    preferredExecutionTarget: 'bridge',
     defaultStartCwd: null,
+    localDefaultStartCwd: null,
+    localSetupDismissed: false,
+    localSetupCompleted: false,
     preferredAgentId: null,
     agentSettings: {},
     approvalMode: 'all',
@@ -285,9 +293,10 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
     }),
   );
   return {
-    preferredExecutionTarget:
-      record['preferredExecutionTarget'] === 'on-device' ? 'on-device' : 'bridge',
     defaultStartCwd: parsed.defaultStartCwd,
+    localDefaultStartCwd: normalizeNullableString(record['localDefaultStartCwd']),
+    localSetupDismissed: record['localSetupDismissed'] === true,
+    localSetupCompleted: record['localSetupCompleted'] === true,
     preferredAgentId: parsed.preferredAgentId,
     agentSettings: parsed.agentSettings,
     approvalMode: parsed.approvalMode,
@@ -302,6 +311,23 @@ export function normalizeAppSettings(value: unknown): AppSettingsState {
     ),
     recentModelIdsByAgent: parsed.recentModelIdsByAgent,
   };
+}
+
+/**
+ * Earlier builds switched the whole app between bridge and on-device with a global
+ * `settings.preferredExecutionTarget`. That mode is now the built-in local profile, so a saved
+ * `'on-device'` target becomes the active profile. Platform support is checked when the active
+ * profile is read, so Android and web fall back to a bridge profile or onboarding.
+ */
+export function migrateLegacyExecutionTarget(
+  rawSettings: unknown,
+  profiles: BridgeProfileStore,
+): BridgeProfileStore {
+  const record =
+    rawSettings && typeof rawSettings === 'object' ? (rawSettings as Record<string, unknown>) : {};
+  return record['preferredExecutionTarget'] === 'on-device'
+    ? { ...profiles, activeProfileId: LOCAL_PROFILE_ID }
+    : profiles;
 }
 
 export function normalizeNullableString(value: unknown): string | null {

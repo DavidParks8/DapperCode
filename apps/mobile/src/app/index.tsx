@@ -3,18 +3,15 @@ import { Redirect } from 'expo-router';
 
 import { routes } from '@shell/navigation/routes';
 import { bridgeProfilesAtom } from '@shell/state/appState/atoms';
-import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
+import { activeProfileIdAtom } from '@shell/state/bridge/atoms';
 import { chatSnapshotCacheAtom } from '@shell/state/chat/atoms';
-import { preferredExecutionTargetAtom } from '@shell/state/appState/settings';
-import { preferredTargetRoute } from '@shell/runtime/targets';
 import {
   isPendingChatId,
   readInterruptedChatCreation,
 } from '@shell/session/interruptedChatCreation';
 
 export default function IndexRoute() {
-  const preferredTarget = useAtomValue(preferredExecutionTargetAtom);
-  const profileId = useAtomValue(activeBridgeProfileAtom)?.id ?? null;
+  const profileId = useAtomValue(activeProfileIdAtom);
   const fallbackProfileId = useAtomValue(bridgeProfilesAtom)[0]?.id ?? null;
   const cache = useAtomValue(chatSnapshotCacheAtom);
   const selectedChatId = cache?.selectedChatId ?? 'new';
@@ -23,13 +20,15 @@ export default function IndexRoute() {
   const interrupted = readInterruptedChatCreation(selectedSnapshot);
   const routeChatId =
     interrupted?.createdChatId ?? (isPendingChatId(selectedChatId) ? 'new' : selectedChatId);
+  // An active profile that cannot open here (the local profile on Android or web) resolves to null.
   const resolvedProfileId = profileId ?? fallbackProfileId;
   return (
     <Redirect
-      href={preferredTargetRoute(
-        preferredTarget,
-        resolvedProfileId ? routes.chat(resolvedProfileId, routeChatId) : routes.onboarding,
-      )}
+      href={
+        resolvedProfileId
+          ? routes.chat(resolvedProfileId, profileId ? routeChatId : 'new')
+          : routes.onboarding
+      }
     />
   );
 }
