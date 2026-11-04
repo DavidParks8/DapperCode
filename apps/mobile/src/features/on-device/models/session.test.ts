@@ -1,6 +1,6 @@
 import type { CompletionParams, FormattedChatResult, TokenData } from 'llama.rn';
 import { localModelDefinition } from './catalog';
-import { CONTEXT_SAFETY_TOKENS, outputReserveTokens } from './contextWindow';
+import { CONTEXT_SAFETY_TOKENS, OMITTED_TURNS_NOTE, outputReserveTokens } from './contextWindow';
 import type {
   LocalContextLoader,
   LocalModelContext,
@@ -388,6 +388,264 @@ test('a full context compacts earlier tool output and turns instead of ending th
   );
   expect(JSON.stringify(history)).toBe(original);
   expect(h.session.snapshot().phase).toBe('ready');
+});
+
+const compactionRevision = 'c'.repeat(64);
+const historyResult = (index: number) =>
+  JSON.stringify({ path: `h${index}.ts`, revision: compactionRevision, content: 'z'.repeat(2000) });
+const firstCurrentResult = JSON.stringify({
+  path: 'c1.ts',
+  revision: compactionRevision,
+  content: 'p'.repeat(2000),
+});
+const lastCurrentResult = JSON.stringify({
+  path: 'c2.ts',
+  revision: compactionRevision,
+  content: 'q'.repeat(2000),
+});
+const compactionSystem: LocalModelMessage = { role: 'system', content: 'system prompt' };
+
+function historyTurn(index: number): LocalModelMessage[] {
+  return [
+    { role: 'user', content: `Old question ${index}` },
+    {
+      role: 'assistant',
+      content: '',
+      reasoning_content: 'thinking',
+      tool_calls: [
+        {
+          type: 'function',
+          id: `h-${index}`,
+          function: {
+            name: 'write_file',
+            arguments: JSON.stringify({ path: `h${index}.ts`, content: 'y'.repeat(1000) }),
+          },
+        },
+      ],
+    },
+    { role: 'tool', name: 'write_file', tool_call_id: `h-${index}`, content: historyResult(index) },
+    { role: 'assistant', content: `Answer ${index}` },
+  ];
+}
+
+function elidedHistoryTurn(index: number): LocalModelMessage[] {
+  return [
+    { role: 'user', content: `Old question ${index}` },
+    {
+      role: 'assistant',
+      content: '',
+      tool_calls: [
+        {
+          type: 'function',
+          id: `h-${index}`,
+          function: {
+            name: 'write_file',
+            arguments: `{"path":"h${index}.ts","content":"[1000 characters elided]"}`,
+          },
+        },
+      ],
+    },
+    {
+      role: 'tool',
+      name: 'write_file',
+      tool_call_id: `h-${index}`,
+      content: `{"elided":true,"path":"h${index}.ts","revision":"${compactionRevision}"}`,
+    },
+    { role: 'assistant', content: `Answer ${index}` },
+  ];
+}
+
+function currentCall(id: string, path: string): LocalModelMessage {
+  return {
+    role: 'assistant',
+    content: '',
+    tool_calls: [
+      { type: 'function', id, function: { name: 'read_file', arguments: `{"path":"${path}"}` } },
+    ],
+  };
+}
+
+const currentTurn: LocalModelMessage[] = [
+  { role: 'user', content: 'Current question' },
+  currentCall('c-1', 'c1.ts'),
+  { role: 'tool', name: 'read_file', tool_call_id: 'c-1', content: firstCurrentResult },
+  currentCall('c-2', 'c2.ts'),
+  { role: 'tool', name: 'read_file', tool_call_id: 'c-2', content: lastCurrentResult },
+];
+const elidedFirstCurrentResult: LocalModelMessage = {
+  role: 'tool',
+  name: 'read_file',
+  tool_call_id: 'c-1',
+  content: `{"elided":true,"path":"c1.ts","revision":"${compactionRevision}"}`,
+};
+const compactionConversation = [
+  compactionSystem,
+  ...historyTurn(0),
+  ...historyTurn(1),
+  ...historyTurn(2),
+  ...currentTurn,
+];
+const omittedSystem: LocalModelMessage = {
+  role: 'system',
+  content: `system prompt\n\n${OMITTED_TURNS_NOTE}`,
+};
+
+/**
+ * Renders each candidate as its JSON and counts tokens with `tokensFor`, so a test chooses
+ * exactly which compaction candidate fits.
+ */
+async function compactionHarness(tokensFor: (prompt: string, limit: number) => number) {
+  const h = harness();
+  await h.session.load(small.id);
+  const contextTokens = h.session.snapshot().contextTokens ?? 0;
+  const limit = contextTokens - outputReserveTokens(contextTokens) - CONTEXT_SAFETY_TOKENS;
+  h.initial.getFormattedChat.mockImplementation(async (chat) => ({
+    ...formatted,
+    prompt: JSON.stringify(chat),
+  }));
+  h.initial.tokenize.mockImplementation(async (text: string) => ({
+    tokens: Array.from({ length: tokensFor(text, limit) }, () => 1),
+  }));
+  const parse = jest.spyOn(JSON, 'parse');
+  const parsed = (content: string) => parse.mock.calls.some(([text]) => text === content);
+  const chosen = () => {
+    parse.mockRestore();
+    return JSON.parse(h.initial.completion.mock.calls[0]![0].prompt ?? '') as unknown;
+  };
+  return { ...h, contextTokens, parse, parsed, chosen };
+}
+
+test('a prompt that fits as-is does no elision work on earlier or current tool output', async () => {
+  const h = await compactionHarness(() => 1);
+  try {
+    await h.session.generate(compactionConversation, [], jest.fn());
+    expect(h.initial.getFormattedChat).toHaveBeenCalledTimes(1);
+    expect(h.parsed(historyResult(0))).toBe(false);
+    expect(h.parsed(historyResult(2))).toBe(false);
+    expect(h.parsed(firstCurrentResult)).toBe(false);
+    expect(h.parsed(lastCurrentResult)).toBe(false);
+    expect(h.chosen()).toEqual(compactionConversation);
+  } finally {
+    h.parse.mockRestore();
+  }
+});
+
+test('compaction picks the elided full history when that is the first candidate to fit', async () => {
+  const h = await compactionHarness((prompt, limit) =>
+    prompt.includes('z'.repeat(2000)) ? limit + 1 : 1,
+  );
+  try {
+    await h.session.generate(compactionConversation, [], jest.fn());
+    expect(h.initial.getFormattedChat).toHaveBeenCalledTimes(2);
+    // Current-turn compaction candidates are never built once a history candidate fits.
+    expect(h.parsed(firstCurrentResult)).toBe(false);
+    expect(h.chosen()).toEqual([
+      compactionSystem,
+      ...elidedHistoryTurn(0),
+      ...elidedHistoryTurn(1),
+      ...elidedHistoryTurn(2),
+      ...currentTurn,
+    ]);
+  } finally {
+    h.parse.mockRestore();
+  }
+});
+
+test('compaction drops the oldest turns in doubling steps until the prompt fits', async () => {
+  const h = await compactionHarness((prompt, limit) =>
+    prompt.includes('Old question 0') || prompt.includes('Old question 1') ? limit + 1 : 1,
+  );
+  try {
+    await h.session.generate(compactionConversation, [], jest.fn());
+    // original, elided history, drop 1, drop 2.
+    expect(h.initial.getFormattedChat).toHaveBeenCalledTimes(4);
+    expect(h.chosen()).toEqual([omittedSystem, ...elidedHistoryTurn(2), ...currentTurn]);
+  } finally {
+    h.parse.mockRestore();
+  }
+});
+
+test('current-turn compaction keeps the latest tool round and elides older ones first', async () => {
+  const h = await compactionHarness((prompt, limit) =>
+    prompt.includes('p'.repeat(2000)) ? limit + 1 : 1,
+  );
+  try {
+    await h.session.generate(compactionConversation, [], jest.fn());
+    // original, elided history, drop 1, drop 2, drop all, current keeping the last round.
+    expect(h.initial.getFormattedChat).toHaveBeenCalledTimes(6);
+    expect(h.chosen()).toEqual([
+      omittedSystem,
+      currentTurn[0],
+      currentTurn[1],
+      elidedFirstCurrentResult,
+      currentTurn[3],
+      currentTurn[4],
+    ]);
+  } finally {
+    h.parse.mockRestore();
+  }
+});
+
+test('the last-resort candidate elides every current-turn tool round', async () => {
+  const h = await compactionHarness((prompt, limit) =>
+    prompt.includes('p'.repeat(2000)) || prompt.includes('q'.repeat(2000)) ? limit + 1 : 1,
+  );
+  try {
+    await h.session.generate(compactionConversation, [], jest.fn());
+    expect(h.initial.getFormattedChat).toHaveBeenCalledTimes(7);
+    expect(h.chosen()).toEqual([
+      omittedSystem,
+      currentTurn[0],
+      currentTurn[1],
+      elidedFirstCurrentResult,
+      currentTurn[3],
+      {
+        role: 'tool',
+        name: 'read_file',
+        tool_call_id: 'c-2',
+        content: `{"elided":true,"path":"c2.ts","revision":"${compactionRevision}"}`,
+      },
+    ]);
+  } finally {
+    h.parse.mockRestore();
+  }
+});
+
+test('a history candidate without doubled headroom wins before current output is elided', async () => {
+  // Every history candidate fits but leaves less than twice the reserved generation room.
+  const h = await compactionHarness((prompt, limit) =>
+    prompt.includes('z'.repeat(2000)) ? limit + 1 : limit,
+  );
+  try {
+    await h.session.generate(compactionConversation, [], jest.fn());
+    // original plus the four history candidates; the current-turn candidates are never built.
+    expect(h.initial.getFormattedChat).toHaveBeenCalledTimes(5);
+    expect(h.parsed(firstCurrentResult)).toBe(false);
+    expect(h.parsed(lastCurrentResult)).toBe(false);
+    expect(h.chosen()).toEqual([
+      compactionSystem,
+      ...elidedHistoryTurn(0),
+      ...elidedHistoryTurn(1),
+      ...elidedHistoryTurn(2),
+      ...currentTurn,
+    ]);
+  } finally {
+    h.parse.mockRestore();
+  }
+});
+
+test('a conversation that fits no candidate still fails as a full context', async () => {
+  const h = await compactionHarness((_prompt, limit) => limit + 1);
+  try {
+    await expect(h.session.generate(compactionConversation, [], jest.fn())).rejects.toBeInstanceOf(
+      LocalContextFull,
+    );
+    expect(h.initial.getFormattedChat).toHaveBeenCalledTimes(7);
+    expect(h.initial.completion).not.toHaveBeenCalled();
+    expect(h.session.snapshot()).toMatchObject({ phase: 'ready', error: null });
+  } finally {
+    h.parse.mockRestore();
+  }
 });
 
 test('a native completion failure leaves the healthy resident model ready without a reload', async () => {

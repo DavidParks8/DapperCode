@@ -56,12 +56,25 @@ export interface PromptCandidate {
  * stored conversation history is never modified.
  */
 export function promptCandidates(messages: readonly LocalModelMessage[]): PromptCandidate[] {
+  return [...iteratePromptCandidates(messages)];
+}
+
+/**
+ * The same sequence as {@link promptCandidates}, built lazily: elided and shrunken variants are
+ * only constructed once every earlier candidate has been rejected, so a prompt that fits as-is
+ * costs no elision work. `stopBeforeCurrent` is checked after the history candidates; returning
+ * true ends the sequence without building any `current` candidate.
+ */
+export function* iteratePromptCandidates(
+  messages: readonly LocalModelMessage[],
+  stopBeforeCurrent: () => boolean = () => false,
+): Generator<PromptCandidate, void, undefined> {
+  yield { messages: [...messages], scope: 'original' };
   const system = messages[0]?.role === 'system' ? messages[0] : null;
   const body = system ? messages.slice(1) : [...messages];
   const turns = splitTurns(body);
   const current = turns.pop() ?? [];
   const history = turns;
-  const candidates: PromptCandidate[] = [{ messages: [...messages], scope: 'original' }];
   const compose = (keptHistory: LocalModelMessage[][], turn: LocalModelMessage[]) => {
     const omitted = keptHistory.length < history.length;
     const head: LocalModelMessage[] = system
@@ -73,10 +86,10 @@ export function promptCandidates(messages: readonly LocalModelMessage[]): Prompt
   };
   if (history.length > 0) {
     const elided = history.map((turn) => turn.map((message) => elideMessage(message)));
-    candidates.push({ messages: compose(elided, current), scope: 'history' });
+    yield { messages: compose(elided, current), scope: 'history' };
     for (let dropped = 1; ; dropped *= 2) {
       const count = Math.min(dropped, elided.length);
-      candidates.push({ messages: compose(elided.slice(count), current), scope: 'history' });
+      yield { messages: compose(elided.slice(count), current), scope: 'history' };
       if (count === elided.length) {
         break;
       }
@@ -84,22 +97,21 @@ export function promptCandidates(messages: readonly LocalModelMessage[]): Prompt
   }
   const lastAssistant = lastIndex(current, 'assistant');
   const lastTool = lastIndex(current, 'tool');
-  if (lastAssistant > 0 || lastTool > 0) {
-    const older = current.map((message, index) =>
-      index === 0 || index === lastTool || index === lastAssistant
-        ? message
-        : elideMessage(message),
-    );
-    candidates.push({ messages: compose([], older), scope: 'current' });
-    candidates.push({
+  if ((lastAssistant > 0 || lastTool > 0) && !stopBeforeCurrent()) {
+    const elidedCurrent: LocalModelMessage[] = [];
+    const elideCurrent = (message: LocalModelMessage, index: number) =>
+      index === 0 ? message : (elidedCurrent[index] ??= elideMessage(message));
+    yield {
       messages: compose(
         [],
-        current.map((message, index) => (index === 0 ? message : elideMessage(message))),
+        current.map((message, index) =>
+          index === lastTool || index === lastAssistant ? message : elideCurrent(message, index),
+        ),
       ),
       scope: 'current',
-    });
+    };
+    yield { messages: compose([], current.map(elideCurrent)), scope: 'current' };
   }
-  return candidates;
 }
 
 function lastIndex(
