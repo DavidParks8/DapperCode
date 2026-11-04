@@ -527,8 +527,21 @@ export default async function scenario(e2e) {
       uncertain.messages = uncertain.messages.slice(0, commitIndex + 1);
       uncertain.messages[commitIndex].tool.status = 'running';
       uncertain.messages[commitIndex].content = '';
+      // Settling a run is journaled as a segment after the base, so the injected crash state must
+      // be the conversation's latest journal position: a base that contains every segment, with
+      // the segments removed, as a compaction of the crashed state would leave it.
+      const segments = (await fs.readdir(runtimeRoot())).filter((name) =>
+        name.startsWith(`threadseg-${thread.id}-`),
+      );
+      uncertain.segment = Math.max(
+        thread.segment,
+        ...segments.map((name) => Number(name.slice(`threadseg-${thread.id}-`.length, -5))),
+      );
       const injected = e2e.writeFile('data/interrupted-thread.json', JSON.stringify(uncertain));
       await e2e.run('cp', [injected, path.join(runtimeRoot(), `thread-${thread.id}.json`)]);
+      for (const name of segments) {
+        await fs.rm(path.join(runtimeRoot(), name));
+      }
       await api('/execute/sync', { script: 'mobile: activateApp', args: [{ bundleId }] });
       await openChat(thread.id);
       await e2e.waitFor(
