@@ -4,7 +4,7 @@ import { RUN_ACTIVITY_EVENT_NAME, type RunActivity } from '@bridge/runActivity';
 import { TOOL_META_EVENT_NAME } from '@bridge/toolMeta';
 import { WORKSPACE_HOST_NOTIFICATIONS } from '../../workspace/api/protocol';
 import type { LocalRunSnapshot } from '../runtime/agentLoop';
-import type { LocalMessage, LocalThread } from '../runtime/types';
+import type { LocalMessage, LocalThread, LocalToolCall } from '../runtime/types';
 import type { LocalAgentPort } from './port';
 import {
   describeLocalToolMessage,
@@ -12,6 +12,7 @@ import {
   localRunId,
   localThreadPath,
   localThreadSummary,
+  localToolCalls,
   localWorkspacePaths,
   localToolStatus,
   type LocalThreadProjectionContext,
@@ -175,11 +176,17 @@ export class LocalEventProjector {
       return;
     }
     const before = new Map((previous?.messages ?? []).map((message) => [message.id, message]));
+    let calls: ReadonlyMap<string, LocalToolCall> | undefined;
+    const toolCalls = () => (calls ??= localToolCalls(thread));
     for (const message of thread.messages) {
+      const prior = before.get(message.id);
       if (message.role === 'assistant') {
-        this.diffAssistant(thread.id, before.get(message.id), message, run, out);
+        // Runtime messages are replaced, never mutated, so an identical one has nothing new.
+        if (prior !== message) {
+          this.diffAssistant(thread.id, prior, message, run, out);
+        }
       } else if (message.role === 'tool') {
-        this.diffTool(thread, before.get(message.id), message, run, out);
+        this.diffTool(thread, prior, message, run, out, toolCalls);
       }
     }
     if (thread.status !== 'running') {
@@ -333,16 +340,20 @@ export class LocalEventProjector {
     message: LocalMessage,
     run: RunTrack,
     out: LocalNotification[],
+    toolCalls: () => ReadonlyMap<string, LocalToolCall>,
   ): void {
     const tool = message.tool;
     if (!tool) {
       return;
     }
-    const described = describeLocalToolMessage(thread, message);
-    if (!previous) {
-      this.startTool(thread, tool.callId, described.title, run, out);
-    }
+    // Only a new tool or a status change is described; unchanged history (including an identical
+    // message) skips the lookup and the parse of its possibly whole-file arguments. An unchanged
+    // settled tool still reaches the end check below, which a newly tracked run reports once.
     if (previous?.tool?.status !== tool.status) {
+      const described = describeLocalToolMessage(thread, message, toolCalls());
+      if (!previous) {
+        this.startTool(thread, tool.callId, described.title, run, out, toolCalls());
+      }
       this.emit(out, thread.id, run, {
         type: EventType.CUSTOM,
         name: TOOL_META_EVENT_NAME,
@@ -375,6 +386,7 @@ export class LocalEventProjector {
     title: string,
     run: RunTrack,
     out: LocalNotification[],
+    calls: ReadonlyMap<string, LocalToolCall>,
   ): void {
     this.closeOpenMessages(thread.id, run, out);
     this.emit(out, thread.id, run, {
@@ -382,9 +394,7 @@ export class LocalEventProjector {
       toolCallId,
       toolCallName: title,
     });
-    const args = thread.messages
-      .flatMap((entry) => entry.toolCalls ?? [])
-      .find((call) => call.id === toolCallId)?.function.arguments;
+    const args = calls.get(toolCallId)?.function.arguments;
     if (args) {
       this.emit(out, thread.id, run, { type: EventType.TOOL_CALL_ARGS, toolCallId, delta: args });
     }

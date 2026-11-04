@@ -406,6 +406,51 @@ describe('LocalBridgeServer', () => {
     });
   });
 
+  it('streams after many tools without re-parsing their arguments on each flush', async () => {
+    const { server, port, events } = setup();
+    const threadId = await createChat(server);
+    await server.request('bridge/thread/queue/send', { threadId, content: 'Write files' });
+    const marker = '/*whole-file*/';
+    for (let index = 1; index <= 10; index += 1) {
+      port.streamAssistant(threadId, `assistant-${String(index)}`, '');
+      port.startTool(
+        threadId,
+        `assistant-${String(index)}`,
+        `call-${String(index)}`,
+        'write_file',
+        JSON.stringify({ path: `f${String(index)}.ts`, content: `${marker}${'x'.repeat(5000)}` }),
+      );
+      port.finishTool(threadId, `call-${String(index)}`, '{"ok":true}', 'completed');
+    }
+    const parse = jest.spyOn(JSON, 'parse');
+    try {
+      const before = events().length;
+      for (const text of ['All', 'All files', 'All files written.']) {
+        port.streamAssistant(threadId, 'answer', text);
+      }
+      expect(
+        events()
+          .slice(before)
+          .map((event) => event.type),
+      ).toEqual([
+        EventType.TEXT_MESSAGE_START,
+        EventType.TEXT_MESSAGE_CONTENT,
+        // The run's activity changes from the last tool to generating.
+        EventType.CUSTOM,
+        EventType.TEXT_MESSAGE_CONTENT,
+        EventType.TEXT_MESSAGE_CONTENT,
+      ]);
+      const parsed = parse.mock.calls.filter(
+        ([text]) => typeof text === 'string' && text.includes(marker),
+      );
+      expect(parsed).toHaveLength(0);
+    } finally {
+      parse.mockRestore();
+    }
+    port.settle(threadId, 'complete');
+    expect(events().at(-1)?.type).toBe(EventType.RUN_FINISHED);
+  });
+
   it('stops the active turn and reports it as an interrupted run', async () => {
     const { server, port, events } = setup();
     const threadId = await createChat(server);

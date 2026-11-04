@@ -11,7 +11,7 @@ import { findLocalModelDefinition, localModelDefinition, localModelName } from '
 import type { LocalModelSessionSnapshot } from '../models/session';
 import type { LocalModelDefinition } from '../models/types';
 import type { LocalRunSnapshot } from '../runtime/agentLoop';
-import type { LocalMessage, LocalThread } from '../runtime/types';
+import type { LocalMessage, LocalThread, LocalToolCall } from '../runtime/types';
 import type { LocalWorkspace } from '../workspaces/types';
 
 /** Agent identity the local transport reports for every local chat. */
@@ -230,25 +230,56 @@ export function localToolStatus(status: NonNullable<LocalMessage['tool']>['statu
   }
 }
 
-function toolArguments(thread: LocalThread, callId: string): string | null {
+/**
+ * Each tool call of a thread by id (the first one wins, as a scan would find it). Build it once per
+ * projection so describing every tool stays linear in the thread instead of tools × messages.
+ */
+export function localToolCalls(thread: LocalThread): Map<string, LocalToolCall> {
+  const calls = new Map<string, LocalToolCall>();
   for (const message of thread.messages) {
-    const call = message.toolCalls?.find((entry) => entry.id === callId);
-    if (call) {
-      return call.function.arguments;
+    for (const call of message.toolCalls ?? []) {
+      if (!calls.has(call.id)) {
+        calls.set(call.id, call);
+      }
     }
   }
-  return null;
+  return calls;
+}
+
+type LocalToolDescription = ReturnType<typeof describeLocalTool>;
+
+/**
+ * Descriptions per call object. Runtime threads replace messages instead of mutating them, so a
+ * call keeps its arguments for life, and its (possibly whole-file) arguments are parsed once.
+ */
+const described = new WeakMap<LocalToolCall, { name: string; value: LocalToolDescription }>();
+
+function describeLocalToolCall(
+  name: string,
+  call: LocalToolCall | undefined,
+): LocalToolDescription {
+  if (!call) {
+    return describeLocalTool(name, null);
+  }
+  const cached = described.get(call);
+  if (cached?.name === name) {
+    return cached.value;
+  }
+  const value = describeLocalTool(name, call.function.arguments);
+  described.set(call, { name, value });
+  return value;
 }
 
 export function describeLocalToolMessage(
   thread: LocalThread,
   message: LocalMessage,
-): { kind: ChatToolKind; title: string; activity: string } {
+  calls?: ReadonlyMap<string, LocalToolCall>,
+): LocalToolDescription {
   const tool = message.tool;
   if (!tool) {
     return { kind: 'other', title: 'Tool', activity: 'Running a tool' };
   }
-  return describeLocalTool(tool.name, toolArguments(thread, tool.callId));
+  return describeLocalToolCall(tool.name, (calls ?? localToolCalls(thread)).get(tool.callId));
 }
 
 /**
@@ -470,6 +501,7 @@ export function localThreadSnapshot(
     });
     messages.push({ id, role, parts: [{ type: 'text', text }], truncated: false, usage: null });
   };
+  const calls = localToolCalls(thread);
   for (const message of thread.messages) {
     if (message.role === 'user') {
       pushMessage(message.id, 'user', message.content);
@@ -488,7 +520,7 @@ export function localThreadSnapshot(
     if (!tool) {
       continue;
     }
-    const described = describeLocalToolMessage(thread, message);
+    const described = describeLocalToolMessage(thread, message, calls);
     timeline.push({ sequence: timeline.length, kind: 'tool', canonicalId: tool.callId });
     tools.push({
       id: tool.callId,
