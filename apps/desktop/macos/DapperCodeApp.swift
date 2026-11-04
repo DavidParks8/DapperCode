@@ -4,7 +4,7 @@ import CoreImage.CIFilterBuiltins
 import ServiceManagement
 import SwiftUI
 
-private struct OperatorEnvelope<Value: Decodable>: Decodable {
+private struct OperatorEnvelope<Value: Decodable & Sendable>: Decodable, Sendable {
     let ok: Bool
     let result: Value
 }
@@ -14,7 +14,7 @@ private struct OperatorFailure: Decodable {
     let error: String
 }
 
-struct BridgeSnapshot: Decodable, Identifiable {
+struct BridgeSnapshot: Decodable, Identifiable, Sendable {
     let state: String
     let headline: String
     let detail: String
@@ -106,7 +106,7 @@ struct BridgeSnapshot: Decodable, Identifiable {
     )
 }
 
-private struct SetupResult: Decodable {
+private struct SetupResult: Decodable, Sendable {
     let workspace: String
     let profileId: String
     let bridgeUrl: String
@@ -372,9 +372,9 @@ final class BridgeModel: ObservableObject {
         brokerRetryTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self else { return }
-            self.brokerRetryTask = nil
-            await self.refresh()
-            await self.ensureBrokerRunning()
+            brokerRetryTask = nil
+            await refresh()
+            await ensureBrokerRunning()
         }
     }
 
@@ -431,7 +431,7 @@ final class BridgeModel: ObservableObject {
     private func discoverDefaultAgent() async {
         guard agentExecutable.isEmpty else { return }
         do {
-            struct Discovery: Decodable { let agentId: String; let executable: String }
+            struct Discovery: Decodable, Sendable { let agentId: String; let executable: String }
             let result = try await invoke(["discover-agent", "--agent-id", agentId], as: Discovery.self)
             agentExecutable = result.executable
         } catch {
@@ -439,11 +439,11 @@ final class BridgeModel: ObservableObject {
         }
     }
 
-    private func invoke<Value: Decodable>(_ command: String, as type: Value.Type) async throws -> Value {
+    private func invoke<Value: Decodable & Sendable>(_ command: String, as type: Value.Type) async throws -> Value {
         try await invoke([command], as: type)
     }
 
-    private func invoke<Value: Decodable>(
+    private func invoke<Value: Decodable & Sendable>(
         _ arguments: [String],
         as type: Value.Type,
         includeWorkspace: Bool = true

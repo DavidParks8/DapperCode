@@ -95,6 +95,7 @@ export default async function scenario(e2e) {
           sdk.stdout.trim(),
           '-target',
           'arm64-apple-ios16.4-simulator',
+          '-warnings-as-errors',
           path.join(sources, 'ATSTestApp.swift'),
           '-o',
           executable,

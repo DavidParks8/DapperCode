@@ -3,6 +3,9 @@ excluded:
   - apps/mobile/modules/**/tests
 
 only_rules:
+  - direct_return
+  - empty_string
+  - empty_xctest_method
   - block_based_kvo
   - capture_variable
   - discarded_notification_center_observer
@@ -13,8 +16,22 @@ only_rules:
   - force_unwrapping
   - implicitly_unwrapped_optional
   - first_where
+  - nsobject_prefer_isequal
   - overridden_super_call
+  - prohibited_super_call
+  - private_unit_test
+  - redundant_final
   - redundant_nil_coalescing
   - implicit_optional_initialization
+  - redundant_self
+  - redundant_sendable
+  - redundant_type_annotation
+  - redundant_void_return
+  - test_case_accessibility
+  - unavailable_function
+  - unneeded_override
+  - unowned_variable_capture
+  - unused_declaration
   - weak_delegate
+  - xct_specific_matcher
   - yoda_condition

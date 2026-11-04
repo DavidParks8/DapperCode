@@ -12,8 +12,8 @@ public final class WebSocketBackgroundAppDelegateSubscriber: ExpoAppDelegateSubs
     let session = UUID()
     backgroundSession = session
     let end = { [weak self] in
-      guard let self, self.backgroundSession == session else { return }
-      self.endBackgroundTask(application)
+      guard let self, backgroundSession == session else { return }
+      endBackgroundTask(application)
     }
     taskIdentifier = application.beginBackgroundTask(
       withName: "WebSocket disconnect grace",

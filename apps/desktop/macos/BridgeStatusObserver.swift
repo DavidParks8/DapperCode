@@ -103,8 +103,8 @@ final class BridgeStatusObserver {
             target,
             { [weak self] health in
                 guard let self else { return }
-                self.failureCounts[target.profileId] = 0
-                self.onHealth(target.profileId, health)
+                failureCounts[target.profileId] = 0
+                onHealth(target.profileId, health)
             },
             { [weak self] in
                 self?.connectionDidClose(target)
@@ -130,8 +130,8 @@ final class BridgeStatusObserver {
         retryTasks[target.profileId] = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled, let self else { return }
-            self.retryTasks.removeValue(forKey: target.profileId)
-            self.connect(target)
+            retryTasks.removeValue(forKey: target.profileId)
+            connect(target)
         }
     }
 }
@@ -248,9 +248,9 @@ private final class URLSessionBridgeStatusConnection: BridgeStatusConnection {
                     try? await Task.sleep(for: Self.heartbeatInterval)
                     guard !Task.isCancelled, let self, let socket else { return }
                     do {
-                        try await self.requestHealth(on: socket)
+                        try await requestHealth(on: socket)
                     } catch {
-                        self.reportDisconnect()
+                        reportDisconnect()
                         return
                     }
                 }
@@ -278,8 +278,8 @@ private final class URLSessionBridgeStatusConnection: BridgeStatusConnection {
         responseTimeouts[id]?.cancel()
         responseTimeouts[id] = Task { [weak self] in
             try? await Task.sleep(for: Self.responseTimeout)
-            guard !Task.isCancelled, let self, self.responseTimeouts[id] != nil else { return }
-            self.reportDisconnect()
+            guard !Task.isCancelled, let self, responseTimeouts[id] != nil else { return }
+            reportDisconnect()
         }
     }
 
@@ -321,11 +321,11 @@ private final class URLSessionBridgeStatusConnection: BridgeStatusConnection {
                 try? await Task.sleep(for: .seconds(delay))
             }
             guard !Task.isCancelled, let self, let socket else { return }
-            self.eventRefresh = nil
+            eventRefresh = nil
             do {
-                try await self.requestHealth(on: socket)
+                try await requestHealth(on: socket)
             } catch {
-                self.reportDisconnect()
+                reportDisconnect()
             }
         }
     }
