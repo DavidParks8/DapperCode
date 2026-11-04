@@ -12,9 +12,7 @@ const rootDir = path.resolve(import.meta.dirname, '..');
 try {
   execFileSync('swiftlint', ['--version'], { cwd: rootDir, stdio: 'ignore' });
 } catch {
-  throw new Error(
-    'SwiftLint is required on macOS. Install it with "brew install swiftlint".',
-  );
+  throw new Error('SwiftLint is required on macOS. Install it with "brew install swiftlint".');
 }
 
 execFileSync(
