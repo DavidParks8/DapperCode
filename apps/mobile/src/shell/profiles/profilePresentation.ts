@@ -15,7 +15,7 @@ export interface ProfilePresentationContext {
   active: boolean;
   bridgeConnected: boolean;
   /** Setup progress of the open local runtime, or null when it is not running. */
-  localSetup: LocalSetupState | null;
+  localSetup: Pick<LocalSetupState, 'summary'> | null;
 }
 
 /** The host and port a bridge URL points at, without scheme, credentials, or path. */

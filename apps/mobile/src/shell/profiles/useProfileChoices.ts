@@ -28,7 +28,8 @@ export function useProfileChoices(): ProfileChoices {
   const active = useAtomValue(activeProfileAtom);
   const bridgeConnected = useAtomValue(bridgeConnectedAtom);
   const localAvailable = useAtomValue(localProfileAvailableAtom);
-  const localSetup = useLocalSetup();
+  // Profiles only present the local setup summary, so other setup changes keep the choices.
+  const localSummary = useLocalSetup()?.summary ?? null;
   const openProfile = useSetAtom(openProfileAtom);
   const addBridge = useSetAtom(addBridgeProfileAtom);
 
@@ -37,7 +38,7 @@ export function useProfileChoices(): ProfileChoices {
       describeProfile(profile, {
         active: profile.id === active?.id,
         bridgeConnected,
-        localSetup,
+        localSetup: localSummary === null ? null : { summary: localSummary },
       });
     return {
       active,
@@ -70,5 +71,5 @@ export function useProfileChoices(): ProfileChoices {
         },
       ],
     };
-  }, [active, addBridge, bridgeConnected, localAvailable, localSetup, openProfile, profiles]);
+  }, [active, addBridge, bridgeConnected, localAvailable, localSummary, openProfile, profiles]);
 }

@@ -1,6 +1,6 @@
 import type { Href } from 'expo-router';
 import { useAtom, useAtomValue } from 'jotai';
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 
 import {
   findLocalModelDefinition,
@@ -12,7 +12,7 @@ import {
   type LocalConversationReadiness,
 } from '../../features/on-device/runtime/status';
 import type { OnDeviceRuntimeSlice } from '../../features/on-device/runtime/types';
-import { localSetupCompletedAtom } from '@shell/state/appState/settings';
+import { localSetupCompletedAtom, localSetupDismissedAtom } from '@shell/state/appState/settings';
 import { localRuntimeAtom } from '@shell/state/local/atoms';
 
 /**
@@ -46,7 +46,7 @@ export interface LocalSetupState {
 
 type LocalSetupRuntime = Pick<
   OnDeviceRuntime,
-  'preferences' | 'workspaces' | 'downloads' | 'threads'
+  'preferences' | 'workspaces' | 'downloads' | 'threads' | 'version'
 >;
 
 const IN_PROGRESS_PHASES = new Set(['queued', 'preparing', 'downloading', 'verifying', 'loading']);
@@ -76,12 +76,45 @@ function effectiveModelId(runtime: LocalSetupRuntime, selected: string | null): 
   return runnable.find((model) => IN_PROGRESS_PHASES.has(phase(model.id)))?.id ?? selected;
 }
 
-/** Whether any local conversation has a message. */
-export function localChatStarted(runtime: Pick<OnDeviceRuntime, 'threads'>): boolean {
-  return runtime.threads.list().some((thread) => thread.messages.length > 0);
+const THREAD_SLICES: readonly OnDeviceRuntimeSlice[] = ['threads'];
+
+/** The last scan of each thread repository: its `threads` revision and whether a chat started. */
+const chatScans = new WeakMap<object, { version: number; started: boolean }>();
+
+type ChatRuntime = Pick<OnDeviceRuntime, 'threads' | 'version'>;
+
+/**
+ * Whether any local conversation has a message. A started chat is monotonic for a runtime (setup
+ * completion is then recorded for good), so once true this never scans threads again; until then
+ * it scans at most once per `threads` revision, shared by every caller.
+ */
+export function localChatStarted(runtime: ChatRuntime): boolean {
+  const known = chatScans.get(runtime.threads);
+  if (known?.started) {
+    return true;
+  }
+  const version = runtime.version(THREAD_SLICES);
+  if (known?.version === version) {
+    return false;
+  }
+  const started = runtime.threads.list().some((thread) => thread.messages.length > 0);
+  chatScans.set(runtime.threads, { version, started });
+  return started;
 }
 
-export function localSetupState(runtime: LocalSetupRuntime): LocalSetupState {
+/** Whether a chat is already known to have started, without scanning threads. */
+function knownChatStarted(runtime: ChatRuntime): boolean {
+  return chatScans.get(runtime.threads)?.started === true;
+}
+
+/**
+ * `chatStarted` overrides the thread scan when the caller already knows the answer, such as after
+ * setup was completed or dismissed.
+ */
+export function localSetupState(
+  runtime: LocalSetupRuntime,
+  chatStarted = localChatStarted(runtime),
+): LocalSetupState {
   const { modelId: selected, workspaceId, author } = runtime.preferences();
   const workspaces = runtime.workspaces();
   const modelId = effectiveModelId(runtime, selected);
@@ -115,29 +148,49 @@ export function localSetupState(runtime: LocalSetupRuntime): LocalSetupState {
     model,
     workspace,
     author: author ? 'done' : 'recommended',
-    chatStarted: localChatStarted(runtime),
+    chatStarted,
     summary,
   };
 }
 
-const SETUP_SLICES: readonly OnDeviceRuntimeSlice[] = [
-  'preferences',
-  'downloads',
-  'workspaces',
-  'threads',
-];
+const SETUP_SLICES: readonly OnDeviceRuntimeSlice[] = ['preferences', 'downloads', 'workspaces'];
+const SETUP_AND_CHAT_SLICES: readonly OnDeviceRuntimeSlice[] = [...SETUP_SLICES, 'threads'];
 const noop = () => undefined;
 
-/** Setup progress of the open local runtime; `null` while the local profile is closed. */
+/**
+ * Setup progress of the open local runtime; `null` while the local profile is closed. The result
+ * keeps its identity until a field changes, so download ticks and token streams that leave setup
+ * unchanged never re-render consumers. Threads are only watched until the first chat starts or
+ * setup is completed or dismissed.
+ */
 export function useLocalSetup(): LocalSetupState | null {
   const runtime = useAtomValue(localRuntimeAtom);
+  const completed = useAtomValue(localSetupCompletedAtom);
+  const dismissed = useAtomValue(localSetupDismissedAtom);
+  const settled = completed || dismissed;
+  const watchChat = runtime !== null && !settled && !knownChatStarted(runtime);
   const subscribe = useCallback(
-    (listener: () => void) => (runtime ? runtime.subscribe(listener, SETUP_SLICES) : noop),
-    [runtime],
+    (listener: () => void) =>
+      runtime
+        ? runtime.subscribe(listener, watchChat ? SETUP_AND_CHAT_SLICES : SETUP_SLICES)
+        : noop,
+    [runtime, watchChat],
   );
-  const version = useCallback(() => (runtime ? runtime.version(SETUP_SLICES) : -1), [runtime]);
-  useSyncExternalStore(subscribe, version, version);
-  return runtime ? localSetupState(runtime) : null;
+  // A primitive snapshot: `useSyncExternalStore` re-renders only when it differs (`Object.is`).
+  const key = useCallback(
+    () =>
+      runtime
+        ? JSON.stringify(
+            localSetupState(runtime, settled ? completed || knownChatStarted(runtime) : undefined),
+          )
+        : null,
+    [completed, runtime, settled],
+  );
+  const snapshot = useSyncExternalStore(subscribe, key, key);
+  return useMemo(
+    () => (snapshot === null ? null : (JSON.parse(snapshot) as LocalSetupState)),
+    [snapshot],
+  );
 }
 
 /**
@@ -145,7 +198,7 @@ export function useLocalSetup(): LocalSetupState | null {
  * unrestorable chats leave the thread list, so first-run setup must not be derived from it alone.
  */
 export function useRecordLocalSetupCompletion(
-  runtime: Pick<OnDeviceRuntime, 'threads' | 'subscribe'>,
+  runtime: Pick<OnDeviceRuntime, 'threads' | 'subscribe' | 'version'>,
 ): void {
   const [completed, setCompleted] = useAtom(localSetupCompletedAtom);
   useEffect(() => {
