@@ -929,7 +929,6 @@ describe('persistence volume', () => {
     jest.useFakeTimers();
     try {
       const h = await ready();
-      const name = `thread-${h.thread.id}.json`;
       const threadWrites = () =>
         h.native.writeRuntimeDocument.mock.calls.filter(([document]) =>
           document.includes(h.thread.id),
@@ -945,11 +944,13 @@ describe('persistence volume', () => {
       });
       await jest.advanceTimersByTimeAsync(THREAD_PROGRESS_SAVE_DELAY_MS);
       expect(threadWrites()).toHaveLength(2);
-      // Settlement compacts the journal into a new base and removes the segment.
-      expect(threadWrites()[1]?.[0]).toBe(name);
-      expect([...h.documents.keys()].filter((key) => key.startsWith('threadseg-'))).toEqual([]);
-      expect(JSON.parse(h.documents.get(name) ?? '{}')).toMatchObject({
-        segment: 1,
+      // Settlement is coalesced into one more journal segment; the base is not rewritten.
+      expect(threadWrites()[1]?.[0]).toBe(`threadseg-${h.thread.id}-0000000002.json`);
+      expect(JSON.parse(threadWrites()[1]?.[1] ?? '{}')).toMatchObject({
+        set: { status: 'complete', activeTurnId: null },
+        messages: [{ role: 'assistant', content: 'Finished' }],
+      });
+      expect(storedLocalThread(h.documents, h.thread.id)).toMatchObject({
         status: 'complete',
         messages: [{ role: 'user' }, { role: 'assistant', content: 'Finished' }],
       });

@@ -202,10 +202,13 @@ and that prompt is passed straight to completion.
   `threadseg-<id>-<position>.json` segment holding only what changed (conversation fields, updated
   or new messages, removed message ids), so a tool turn writes a few hundred bytes per journal step
   regardless of conversation length. A segment is durable before the step it journals continues.
-  The journal is compacted into a new base when a run settles, when a change would exceed a 512 KiB
-  segment, or when the journal reaches 64 segments or the base's size (at least 256 KiB); every
-  document stays far below the native 8 MiB limit. The base is written first and the segments it
-  contains are removed afterwards, so a crash at any point replays to the same conversation.
+  Run settlement is an ordinary segment too. The journal is compacted into a new base only when a
+  change would exceed a 512 KiB segment, or when the journal reaches 64 segments or the base's size
+  (at least 256 KiB), so settling a turn no longer rewrites the whole conversation; every document
+  stays far below the native 8 MiB limit. Change detection compares message objects (which are
+  never changed in place) by identity, so a save serializes only the messages it writes. The base
+  is written first and the segments it contains are removed afterwards, so a crash at any point
+  replays to the same conversation.
 - At startup, the contiguous segments after the base are replayed; segments the base already
   contains (an interrupted compaction) are discarded. A damaged, unreadable, or out-of-order segment
   ends the replay: it and every later segment are set aside with their bytes preserved, the

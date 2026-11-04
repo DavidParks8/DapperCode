@@ -9,10 +9,13 @@ import {
 } from './threadCodec';
 import {
   applyLocalThreadDelta,
+  countJournalEntries,
   durableLocalThread,
   encodeLocalThreadBase,
   encodeLocalThreadSegment,
+  journalEntries,
   localThreadDelta,
+  messageJournalEntries,
   parseLocalThreadSegment,
   parseThreadSegmentName,
   THREAD_COMPACT_MIN_BYTES,
@@ -23,6 +26,7 @@ import {
   threadSegmentPrefix,
   utf8Bytes,
   type DurableLocalThread,
+  type JournalEntries,
   type LocalThreadDelta,
 } from './threadJournal';
 import type { LocalThread } from './types';
@@ -46,7 +50,8 @@ export interface LocalThreadRecovery {
 
 interface PersistedThread {
   durable: DurableLocalThread;
-  journal: ReadonlySet<string>;
+  /** How many durable messages contribute each journal entry; updated as segments are written. */
+  journal: JournalEntries;
   running: boolean;
   /** The last journal position that is durable, in the base or a segment. */
   sequence: number;
@@ -63,19 +68,6 @@ interface PersistedThread {
 
 /** Delay for coalescing progress writes that are not needed by the run journal. */
 export const THREAD_PROGRESS_SAVE_DELAY_MS = 250;
-
-function journalEntries(thread: LocalThread): Set<string> {
-  const entries = new Set<string>();
-  for (const message of thread.messages) {
-    if (message.role !== 'assistant') {
-      entries.add(`message:${message.id}`);
-    }
-    for (const call of message.toolCalls ?? []) {
-      entries.add(`call:${call.id}`);
-    }
-  }
-  return entries;
-}
 
 type SegmentName = { name: string; sequence: number };
 
@@ -120,6 +112,8 @@ export class LocalThreadRepository {
   private readonly progress = new Map<string, ReturnType<typeof setTimeout>>();
   /** Conversations whose next write must be a new base, after startup set journal damage aside. */
   private readonly rebase = new Set<string>();
+  /** `list()` order, kept until the collection changes. */
+  private sorted: readonly LocalThread[] | null = null;
   private writes: Promise<void> = Promise.resolve();
   private initialized: Promise<void> | null = null;
   private recoveryValue: LocalThreadRecovery = { setAside: 0, leftInPlace: 0, ids: new Set() };
@@ -142,8 +136,17 @@ export class LocalThreadRepository {
     return this.recoveryValue;
   }
 
-  list(): LocalThread[] {
-    return [...this.threads.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  /**
+   * Most recently updated first; ties keep insertion order. The same frozen array is returned until
+   * the collection changes.
+   */
+  list(): readonly LocalThread[] {
+    this.sorted ??= Object.freeze(
+      [...this.threads.values()].sort((a, b) =>
+        a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0,
+      ),
+    );
+    return this.sorted;
   }
 
   find(id: string): LocalThread | null {
@@ -183,6 +186,7 @@ export class LocalThreadRepository {
       messages: [],
     };
     this.threads.set(thread.id, thread);
+    this.sorted = null;
     this.changed('content');
     await this.save(thread.id);
     return thread;
@@ -194,6 +198,7 @@ export class LocalThreadRepository {
       throw new Error('A local conversation update cannot change its identity.');
     }
     this.threads.set(id, next);
+    this.sorted = null;
     this.changed('content');
     return next;
   }
@@ -252,6 +257,7 @@ export class LocalThreadRepository {
       .catch((): string[] => []);
     await Promise.allSettled(segments.map((name) => this.storage.removeRuntimeDocument(name)));
     this.threads.delete(id);
+    this.sorted = null;
     this.failures.delete(id);
     this.persisted.delete(id);
     this.rebase.delete(id);
@@ -275,9 +281,16 @@ export class LocalThreadRepository {
     if (thread.status === 'running' && !previous.running) {
       return true;
     }
-    for (const entry of journalEntries(thread)) {
-      if (!previous.journal.has(entry)) {
-        return true;
+    const durable = previous.durable.messages;
+    for (const message of thread.messages) {
+      // Messages are never changed in place: a durable object's entries are already journaled.
+      if (durable.get(message.id) === message) {
+        continue;
+      }
+      for (const entry of messageJournalEntries(message)) {
+        if (!previous.journal.has(entry)) {
+          return true;
+        }
       }
     }
     return false;
@@ -341,8 +354,8 @@ export class LocalThreadRepository {
   }
 
   /**
-   * Appends what changed since the last durable state as the next journal segment. A run that
-   * settles, a change too large for a segment, or a journal that outgrew its base is compacted
+   * Appends what changed since the last durable state as the next journal segment, including run
+   * settlement. A change too large for a segment, or a journal that outgrew its base, is compacted
    * into a new base instead.
    */
   private async persist(id: string, thread: LocalThread): Promise<void> {
@@ -354,7 +367,7 @@ export class LocalThreadRepository {
       if (delta === null) {
         return;
       }
-      if (delta !== 'rebase' && !(previous.running && !running)) {
+      if (delta !== 'rebase') {
         const sequence = previous.sequence + 1;
         const contents = encodeLocalThreadSegment(id, sequence, delta);
         const bytes = utf8Bytes(contents);
@@ -364,10 +377,18 @@ export class LocalThreadRepository {
           previous.segmentBytes + bytes <= Math.max(previous.baseBytes, THREAD_COMPACT_MIN_BYTES)
         ) {
           await this.storage.writeRuntimeDocument(threadSegmentDocument(id, sequence), contents);
+          const journal = previous.journal;
+          for (const removed of delta.remove) {
+            countJournalEntries(journal, previous.durable.messages.get(removed), -1);
+          }
+          for (const message of delta.messages) {
+            countJournalEntries(journal, previous.durable.messages.get(message.id), -1);
+            countJournalEntries(journal, message, 1);
+          }
           this.persisted.set(id, {
             ...previous,
             durable,
-            journal: journalEntries(thread),
+            journal,
             running,
             sequence,
             segments: [...previous.segments, sequence],
@@ -471,6 +492,7 @@ export class LocalThreadRepository {
     for (const [id, thread] of loaded) {
       this.threads.set(id, thread);
     }
+    this.sorted = null;
     this.recoveryValue = {
       setAside: setAside.size,
       leftInPlace: leftInPlace.size,
