@@ -10,6 +10,7 @@ jest.mock('../../features/on-device/runtime/OnDeviceProvider', () => {
     threads: [] as { messages: unknown[] }[],
     preferredWorkspaceId: null as string | null,
   };
+  const revision = { value: 0 };
   const runtime = {
     id: 'runtime',
     preferences: () => ({
@@ -47,8 +48,10 @@ jest.mock('../../features/on-device/runtime/OnDeviceProvider', () => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    version: () => revision.value,
     change: (update: Partial<typeof state>) => {
       Object.assign(state, update);
+      revision.value += 1;
       for (const listener of [...listeners]) {
         listener();
       }

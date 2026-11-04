@@ -1,4 +1,8 @@
 import type { OnDeviceRuntime } from '../../features/on-device/runtime/runtime';
+import {
+  ON_DEVICE_RUNTIME_SLICES,
+  type OnDeviceRuntimeSlice,
+} from '../../features/on-device/runtime/types';
 
 export interface FakeSetupRuntimeState {
   modelId: string | null;
@@ -26,14 +30,29 @@ const NO_ISSUES: readonly never[] = [];
 
 export function createFakeSetupRuntime(initial: FakeSetupRuntimeState) {
   let state = initial;
-  let version = 0;
-  const listeners = new Set<() => void>();
+  const versions = new Map<OnDeviceRuntimeSlice, number>();
+  const listeners = new Set<{ listener: () => void; slices: readonly OnDeviceRuntimeSlice[] }>();
+  const notify = (changed: readonly OnDeviceRuntimeSlice[]) => {
+    for (const slice of changed) {
+      versions.set(slice, (versions.get(slice) ?? 0) + 1);
+    }
+    [...listeners].forEach(({ listener, slices }) => {
+      if (changed.some((slice) => slices.includes(slice))) {
+        listener();
+      }
+    });
+  };
   const runtime = {
-    subscribe: (listener: () => void) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
+    subscribe: (
+      listener: () => void,
+      slices: readonly OnDeviceRuntimeSlice[] = ON_DEVICE_RUNTIME_SLICES,
+    ) => {
+      const entry = { listener, slices };
+      listeners.add(entry);
+      return () => listeners.delete(entry);
     },
-    version: () => version,
+    version: (slices: readonly OnDeviceRuntimeSlice[] = ON_DEVICE_RUNTIME_SLICES) =>
+      slices.reduce((total, slice) => total + (versions.get(slice) ?? 0), 0),
     preferences: () => ({
       modelId: state.modelId,
       workspaceId: state.workspaceId,
@@ -60,10 +79,14 @@ export function createFakeSetupRuntime(initial: FakeSetupRuntimeState) {
   };
   return {
     runtime: runtime as unknown as OnDeviceRuntime,
+    /** Changes state and notifies every slice. */
     update(next: Partial<FakeSetupRuntimeState>) {
       state = { ...state, ...next };
-      version += 1;
-      listeners.forEach((listener) => listener());
+      notify(ON_DEVICE_RUNTIME_SLICES);
+    },
+    /** Notifies only `slices` without changing what setup reads, like a progress tick. */
+    emit(...slices: OnDeviceRuntimeSlice[]) {
+      notify(slices);
     },
   };
 }

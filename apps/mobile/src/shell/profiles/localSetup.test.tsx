@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Text } from 'react-native';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
+import { localSetupCompletedAtom } from '@shell/state/appState/settings';
 import { localRuntimeAtom } from '@shell/state/local/atoms';
 import { createTestStore } from '@shell/state/testing';
 import { localSetupState, useLocalSetup } from './localSetup';
@@ -138,5 +139,118 @@ describe('local setup progress', () => {
     act(() => store.set(localRuntimeAtom, null));
     expect(seen.at(-1)).toBeNull();
     act(() => tree?.unmount());
+  });
+
+  describe('while the runtime streams and downloads', () => {
+    function renderProbe(store: ReturnType<typeof createTestStore>) {
+      const seen: ReturnType<typeof useLocalSetup>[] = [];
+      function Probe() {
+        const setup = useLocalSetup();
+        seen.push(setup);
+        return <Text>{setup?.summary ?? 'closed'}</Text>;
+      }
+      let tree: ReactTestRenderer | undefined;
+      act(() => {
+        tree = renderer.create(
+          <Provider store={store}>
+            <Probe />
+          </Provider>,
+        );
+      });
+      return { seen, unmount: () => act(() => tree?.unmount()) };
+    }
+
+    const watchedSlices = (subscribe: jest.SpyInstance) =>
+      (subscribe.mock.calls.at(-1) as [unknown, readonly string[]])[1];
+
+    it('keeps one setup object until a visible field changes, then stops watching chats', () => {
+      const store = createTestStore();
+      const fake = createFakeSetupRuntime({
+        modelId: MODEL,
+        workspaceId: null,
+        workspaces: [],
+        downloadPhase: 'downloading',
+        threadMessages: [0],
+      });
+      const list = jest.spyOn(fake.runtime.threads, 'list');
+      const subscribe = jest.spyOn(fake.runtime, 'subscribe');
+      store.set(localRuntimeAtom, fake.runtime);
+      const { seen, unmount } = renderProbe(store);
+      const first = seen.at(-1);
+      const renders = seen.length;
+      expect(first).toMatchObject({ model: 'in-progress', chatStarted: false });
+      expect(watchedSlices(subscribe)).toContain('threads');
+
+      // Download progress ticks never scan chats and, with nothing visible changing, never render.
+      const scans = list.mock.calls.length;
+      act(() => {
+        for (let tick = 0; tick < 40; tick += 1) {
+          fake.emit('downloads');
+        }
+      });
+      expect(list).toHaveBeenCalledTimes(scans);
+      act(() => {
+        for (let tick = 0; tick < 40; tick += 1) {
+          fake.emit('threads');
+        }
+      });
+      expect(seen).toHaveLength(renders);
+      expect(seen.at(-1)).toBe(first);
+
+      act(() => fake.update({ downloadPhase: 'ready' }));
+      const downloaded = seen.at(-1);
+      expect(downloaded).not.toBe(first);
+      expect(downloaded).toMatchObject({ model: 'done', summary: 'Needs a workspace' });
+
+      act(() => fake.update({ workspaceId: 'w1', workspaces: [workspace] }));
+      expect(seen.at(-1)).toMatchObject({
+        workspace: 'done',
+        summary: 'Ready',
+        chatStarted: false,
+      });
+
+      act(() => fake.update({ threadMessages: [0, 1] }));
+      const started = seen.at(-1);
+      expect(started).toMatchObject({ summary: 'Ready', chatStarted: true });
+      expect(watchedSlices(subscribe)).not.toContain('threads');
+
+      // Once the first chat started, token streams neither scan chats nor render.
+      const startedRenders = seen.length;
+      const startedScans = list.mock.calls.length;
+      act(() => {
+        for (let tick = 0; tick < 40; tick += 1) {
+          fake.emit('threads');
+          fake.emit('downloads');
+        }
+      });
+      expect(list).toHaveBeenCalledTimes(startedScans);
+      expect(seen).toHaveLength(startedRenders);
+      expect(seen.at(-1)).toBe(started);
+      unmount();
+    });
+
+    it('never watches or scans chats once setup is completed', () => {
+      const store = createTestStore();
+      store.set(localSetupCompletedAtom, true);
+      const fake = createFakeSetupRuntime({
+        modelId: MODEL,
+        workspaceId: null,
+        workspaces: [],
+        downloadPhase: 'downloading',
+      });
+      const list = jest.spyOn(fake.runtime.threads, 'list');
+      const subscribe = jest.spyOn(fake.runtime, 'subscribe');
+      store.set(localRuntimeAtom, fake.runtime);
+      const { seen, unmount } = renderProbe(store);
+      expect(seen.at(-1)).toMatchObject({ summary: 'Downloading model', chatStarted: true });
+      expect(watchedSlices(subscribe)).not.toContain('threads');
+
+      act(() =>
+        fake.update({ downloadPhase: 'ready', workspaceId: 'w1', workspaces: [workspace] }),
+      );
+      expect(seen.at(-1)).toMatchObject({ summary: 'Ready', chatStarted: true });
+      expect(list).not.toHaveBeenCalled();
+      unmount();
+    });
   });
 });

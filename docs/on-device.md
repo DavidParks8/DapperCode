@@ -504,7 +504,11 @@ The shared screens serve the local profile through the transport; nothing branch
   first chat in the new chat until that first message exists or the user hides it. The runtime
   host records the first message once as `localSetupCompleted` (`useRecordLocalSetupCompletion`),
   so deleting every chat later does not bring the guide back; hiding it sets
-  `localSetupDismissed`. Both are device-wide app settings. Only model and workspace feed readiness, so a missing
+  `localSetupDismissed`. Both are device-wide app settings. `useLocalSetup` keeps one result
+  object until a visible field changes, so download progress ticks and token streams do not
+  re-render the drawer, profile sheet, or Settings; it stops watching threads once the first chat
+  has started or setup is completed or dismissed, and scans threads at most once per `threads`
+  revision before that. Only model and workspace feed readiness, so a missing
   author never blocks a chat. The workspace step opens the chat's workspace picker
   (`openWorkspaceModalAtom`); the model and author steps open Settings → Models and Settings →
   Git & GitHub through `LOCAL_SETUP_DESTINATIONS` (`shell/profiles/localSetup.ts`). Missing
