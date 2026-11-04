@@ -1,4 +1,5 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![forbid(unsafe_code)]
 
 use std::path::{Path, PathBuf};
 
@@ -67,7 +68,7 @@ fn main() {
             "ok": false,
             "error": format!("{error:#}"),
         });
-        eprintln!("{}", serde_json::to_string(&response).unwrap());
+        eprintln!("{response}");
         std::process::exit(1);
     }
 }

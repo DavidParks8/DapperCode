@@ -452,12 +452,13 @@ impl ScheduledPromptService {
         entry.last_error = None;
         self.commit(cancelling).await?;
         #[cfg(test)]
-        if let Some(notify) = self
+        let persisted = self
             .cancellation_persisted
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .clone()
-        {
+            .clone();
+        #[cfg(test)]
+        if let Some(notify) = persisted {
             notify.notify_one();
         }
 
@@ -553,8 +554,9 @@ impl ScheduledPromptService {
             return Ok(());
         };
         entry.retry_attempt = entry.retry_attempt.saturating_add(1);
-        entry.next_attempt_at =
-            Utc::now() + chrono::Duration::from_std(self.retry_delay(entry.retry_attempt)).unwrap();
+        entry.next_attempt_at = Utc::now()
+            + chrono::Duration::from_std(self.retry_delay(entry.retry_attempt))
+                .expect("scheduler retry delays are bounded to 30 seconds");
         entry.last_error = Some(truncate_error(error));
         self.commit(next).await
     }
@@ -751,7 +753,7 @@ impl ScheduledPromptService {
                         stored.retry_attempt = stored.retry_attempt.saturating_add(1);
                         stored.next_attempt_at = Utc::now()
                             + chrono::Duration::from_std(self.retry_delay(stored.retry_attempt))
-                                .unwrap();
+                                .expect("scheduler retry delays are bounded to 30 seconds");
                         stored.last_error = Some(truncate_error(error));
                     }
                     if let Err(error) = self.commit(next).await {
@@ -822,7 +824,7 @@ impl ScheduledPromptService {
                                 + chrono::Duration::from_std(
                                     self.retry_delay(stored.retry_attempt),
                                 )
-                                .unwrap();
+                                .expect("scheduler retry delays are bounded to 30 seconds");
                             stored.last_error = None;
                         }
                         if let Err(error) = self.commit(next).await {
@@ -870,7 +872,7 @@ impl ScheduledPromptService {
                                 + chrono::Duration::from_std(
                                     self.retry_delay(stored.retry_attempt),
                                 )
-                                .unwrap();
+                                .expect("scheduler retry delays are bounded to 30 seconds");
                             stored.last_error = Some(truncate_error(error));
                         }
                         if let Err(error) = self.commit(next).await {
@@ -924,7 +926,7 @@ impl ScheduledPromptService {
             stored.status = StoredScheduledPromptStatus::Retrying;
             stored.next_attempt_at = Utc::now()
                 + chrono::Duration::from_std(self.retry_delay(stored.retry_attempt.max(1)))
-                    .unwrap();
+                    .expect("scheduler retry delays are bounded to 30 seconds");
             stored.last_error = Some(truncate_error(error.clone()));
             affected_threads.push(thread_id.clone());
         }
@@ -2358,6 +2360,97 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(1), completed)
             .await
             .expect("restarted scheduler inspects empty state");
+        assert!(calls.try_recv().is_err());
+        restarted.shutdown().await;
+        let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
+    async fn completed_receipt_reconciliation_settles_schedule_after_persist_failure() {
+        let directory = test_directory("completed-receipt-reconciliation");
+        let scheduler_path = directory.join("scheduled-prompts.json");
+        let receipt_path = directory.join("queue-idempotency.json");
+        let thread_id = test_thread("completed-receipt");
+        let schedule_id = Uuid::new_v4().to_string();
+        let submission = submission_id(&schedule_id);
+        let (dispatcher, mut calls) = make_dispatcher(false, Vec::new());
+        let queue = make_queue(dispatcher, Some(receipt_path.clone()));
+        queue.submission_results.lock().await.insert(
+            submission.clone(),
+            crate::BridgeQueueSubmissionReceipt {
+                submission_id: submission.clone(),
+                thread_id: thread_id.clone(),
+                disposition: BridgeThreadQueueDisposition::Sent,
+                turn_id: Some("completed-turn".to_string()),
+            },
+        );
+        queue
+            .submission_order
+            .lock()
+            .await
+            .push_back(submission.clone());
+        queue
+            .fail_next_submission_persist
+            .store(true, Ordering::Release);
+        let (outbox, mut notifications) = client_outbox(8);
+        queue
+            .hub
+            .add_client_with_metadata(outbox, ClientConnectionMetadata::default())
+            .await;
+        let state = state_with_entry(
+            schedule_id.clone(),
+            fixture_entry(
+                schedule_id.clone(),
+                thread_id.clone(),
+                Utc::now() - chrono::Duration::minutes(1),
+            ),
+        );
+        let scheduler = ScheduledPromptService::build_with_state(
+            Some(scheduler_path.clone()),
+            Arc::downgrade(&queue),
+            queue.hub.clone(),
+            state,
+            Duration::from_millis(50),
+            Duration::from_millis(200),
+        );
+        assert_eq!(
+            scheduler.list(&thread_id).await[0].status,
+            ScheduledPromptStatus::Scheduled
+        );
+
+        tokio::time::timeout(Duration::from_secs(1), scheduler.process_ready())
+            .await
+            .expect("reconciliation must settle the completed schedule");
+        assert!(scheduler.list(&thread_id).await.is_empty());
+        assert!(
+            next_schedule_notification(&mut notifications).await["params"]["schedules"]
+                .as_array()
+                .is_some_and(Vec::is_empty)
+        );
+        assert!(
+            calls.try_recv().is_err(),
+            "completed work must not be sent again"
+        );
+        assert!(!queue.fail_next_submission_persist.load(Ordering::Acquire));
+        assert!(BridgeQueueService::load_submission_store(&receipt_path)
+            .await
+            .expect("reconciled receipt reloads")
+            .results
+            .contains_key(&submission));
+        assert!(load_state(&scheduler_path)
+            .await
+            .unwrap()
+            .prompts
+            .is_empty());
+
+        let restarted = ScheduledPromptService::start(
+            scheduler_path,
+            Arc::downgrade(&queue),
+            queue.hub.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(restarted.list(&thread_id).await.is_empty());
         assert!(calls.try_recv().is_err());
         restarted.shutdown().await;
         let _ = std::fs::remove_dir_all(directory);

@@ -138,6 +138,7 @@ impl PlatformStrategy for WindowsStrategy {
         }
         ensure_process_has_current_user(process.0, pid)?;
 
+        // SAFETY: process owns a live handle with SYNCHRONIZE access.
         let state = unsafe { WaitForSingleObject(process.0, 0) };
         if state == WAIT_OBJECT_0 {
             return Ok(true);
@@ -151,13 +152,16 @@ impl PlatformStrategy for WindowsStrategy {
             ProcessStopRequest::Graceful => {
                 // CTRL+BREAK is the only targeted graceful stop Windows exposes for a console
                 // process group. Detached/no-console processes use the forced fallback.
+                // SAFETY: GenerateConsoleCtrlEvent accepts integer event and process-group IDs.
                 Ok(unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) } != 0)
             }
             ProcessStopRequest::Force => {
+                // SAFETY: process owns a live handle opened with PROCESS_TERMINATE access.
                 if unsafe { TerminateProcess(process.0, 1) } == 0 {
                     return Err(io::Error::last_os_error())
                         .with_context(|| format!("failed to terminate bridge process {pid}"));
                 }
+                // SAFETY: process owns a live handle with SYNCHRONIZE access.
                 let state = unsafe { WaitForSingleObject(process.0, FORCE_STOP_TIMEOUT_MS) };
                 if state != WAIT_OBJECT_0 {
                     if state == WAIT_TIMEOUT {
@@ -225,12 +229,14 @@ fn file_handle(file: &File) -> HANDLE {
 
 fn private_path_state(file: &File) -> Result<PrivatePathState> {
     let mut information = FILE_ATTRIBUTE_TAG_INFO::default();
+    // SAFETY: file owns a live handle and information is writable for the supplied size.
     if unsafe {
         GetFileInformationByHandleEx(
             file_handle(file),
             FileAttributeTagInfo,
             ptr::addr_of_mut!(information).cast(),
-            mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+            u32::try_from(mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>())
+                .expect("Windows file attribute structure fits in u32"),
         )
     } == 0
     {
@@ -238,11 +244,15 @@ fn private_path_state(file: &File) -> Result<PrivatePathState> {
     }
     let attributes = information.FileAttributes;
     let is_directory = attributes & FILE_ATTRIBUTE_DIRECTORY != 0;
+    let is_file = if !is_directory && attributes & FILE_ATTRIBUTE_DEVICE == 0 {
+        // SAFETY: file keeps its handle valid while GetFileType inspects it.
+        (unsafe { GetFileType(file_handle(file)) }) == FILE_TYPE_DISK
+    } else {
+        false
+    };
     Ok(PrivatePathState {
         is_directory,
-        is_file: !is_directory
-            && attributes & FILE_ATTRIBUTE_DEVICE == 0
-            && unsafe { GetFileType(file_handle(file)) } == FILE_TYPE_DISK,
+        is_file,
         is_reparse_point: attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0,
     })
 }
@@ -274,14 +284,17 @@ struct SidBuffer {
 
 impl SidBuffer {
     fn copy_from(sid: PSID) -> Result<Self> {
+        // SAFETY: the caller passes the SID pointer returned inside a live Windows token buffer.
         if sid.is_null() || unsafe { IsValidSid(sid) } == 0 {
             bail!("Windows returned an invalid user SID");
         }
+        // SAFETY: IsValidSid accepted the live SID pointer.
         let byte_len = unsafe { GetLengthSid(sid) } as usize;
         if byte_len == 0 {
             bail!("Windows returned an empty user SID");
         }
         let mut words = vec![0_usize; byte_len.div_ceil(mem::size_of::<usize>())];
+        // SAFETY: the valid SID contains byte_len bytes and words has at least that capacity.
         unsafe {
             ptr::copy_nonoverlapping(sid.cast::<u8>(), words.as_mut_ptr().cast::<u8>(), byte_len);
         }
@@ -293,13 +306,15 @@ impl SidBuffer {
     }
 
     fn byte_len(&self) -> usize {
+        // SAFETY: SidBuffer is constructed only from Windows-validated SIDs.
         unsafe { GetLengthSid(self.as_ptr()) as usize }
     }
 }
 
 fn open_process_token(process: HANDLE) -> Result<WindowsHandle> {
     let mut token: HANDLE = ptr::null_mut();
-    if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
+    // SAFETY: callers supply a live process handle and token is writable output storage.
+    if unsafe { OpenProcessToken(process, TOKEN_QUERY, &raw mut token) } == 0 {
         return Err(io::Error::last_os_error()).context("failed to open process token");
     }
     Ok(WindowsHandle(token))
@@ -307,21 +322,25 @@ fn open_process_token(process: HANDLE) -> Result<WindowsHandle> {
 
 fn token_user_buffer(token: HANDLE) -> Result<Vec<usize>> {
     let mut required = 0_u32;
+    // SAFETY: the live token handle and writable required length are valid; null probes the size.
     unsafe {
-        GetTokenInformation(token, TokenUser, ptr::null_mut(), 0, &mut required);
+        GetTokenInformation(token, TokenUser, ptr::null_mut(), 0, &raw mut required);
     }
-    if required < mem::size_of::<TOKEN_USER>() as u32 {
+    if usize::try_from(required).expect("Windows token size fits in usize")
+        < mem::size_of::<TOKEN_USER>()
+    {
         return Err(io::Error::last_os_error()).context("failed to size process user token");
     }
     let words = (required as usize).div_ceil(mem::size_of::<usize>());
     let mut buffer = vec![0_usize; words];
+    // SAFETY: buffer is pointer-aligned and contains at least required writable bytes.
     if unsafe {
         GetTokenInformation(
             token,
             TokenUser,
             buffer.as_mut_ptr().cast(),
-            (buffer.len() * mem::size_of::<usize>()) as u32,
-            &mut required,
+            required,
+            &raw mut required,
         )
     } == 0
     {
@@ -333,11 +352,13 @@ fn token_user_buffer(token: HANDLE) -> Result<Vec<usize>> {
 fn process_user_sid(process: HANDLE) -> Result<SidBuffer> {
     let token = open_process_token(process)?;
     let user_buffer = token_user_buffer(token.0)?;
+    // SAFETY: successful TokenUser output contains an aligned, initialized TOKEN_USER.
     let user = unsafe { &*user_buffer.as_ptr().cast::<TOKEN_USER>() };
     SidBuffer::copy_from(user.User.Sid)
 }
 
 fn current_user_sid() -> Result<SidBuffer> {
+    // SAFETY: GetCurrentProcess returns a valid pseudo-handle for this process.
     process_user_sid(unsafe { GetCurrentProcess() }).context("failed to read current user SID")
 }
 
@@ -345,12 +366,13 @@ fn well_known_sid(kind: WELL_KNOWN_SID_TYPE) -> Result<SidBuffer> {
     let byte_len = SECURITY_MAX_SID_SIZE as usize;
     let mut words = vec![0_usize; byte_len.div_ceil(mem::size_of::<usize>())];
     let mut written = SECURITY_MAX_SID_SIZE;
+    // SAFETY: words has at least written writable bytes and the domain SID is optional.
     if unsafe {
         CreateWellKnownSid(
             kind,
             ptr::null_mut(),
             words.as_mut_ptr().cast(),
-            &mut written,
+            &raw mut written,
         )
     } == 0
     {
@@ -358,6 +380,7 @@ fn well_known_sid(kind: WELL_KNOWN_SID_TYPE) -> Result<SidBuffer> {
     }
     words.truncate((written as usize).div_ceil(mem::size_of::<usize>()));
     let sid = SidBuffer { words };
+    // SAFETY: CreateWellKnownSid initialized a SID in the live buffer.
     if unsafe { IsValidSid(sid.as_ptr()) } == 0 {
         bail!("Windows returned an invalid well-known SID");
     }
@@ -385,10 +408,10 @@ fn private_acl(kind: PrivatePathKind, user: &SidBuffer, system: &SidBuffer) -> R
             PrivateAccessPrincipal::CurrentUser => user,
             PrivateAccessPrincipal::LocalSystem => system,
         };
-        if trustees
-            .iter()
-            .all(|existing: &&SidBuffer| unsafe { EqualSid(existing.as_ptr(), sid.as_ptr()) } == 0)
-        {
+        if trustees.iter().all(|existing: &&SidBuffer| {
+            // SAFETY: both SID buffers were validated and stay alive for the comparison.
+            (unsafe { EqualSid(existing.as_ptr(), sid.as_ptr()) }) == 0
+        }) {
             trustees.push(sid);
         }
     }
@@ -405,6 +428,7 @@ fn private_acl(kind: PrivatePathKind, user: &SidBuffer, system: &SidBuffer) -> R
         words: vec![0_u32; acl_bytes.div_ceil(mem::size_of::<u32>())],
     };
     let acl_ptr = acl.words.as_mut_ptr().cast::<ACL>();
+    // SAFETY: acl is aligned and contains at least acl_len writable bytes.
     if unsafe { InitializeAcl(acl_ptr, acl_len, ACL_REVISION) } == 0 {
         return Err(io::Error::last_os_error()).context("failed to initialize private ACL");
     }
@@ -413,6 +437,7 @@ fn private_acl(kind: PrivatePathKind, user: &SidBuffer, system: &SidBuffer) -> R
         PrivatePathKind::File => 0,
     };
     for sid in trustees {
+        // SAFETY: acl_ptr refers to the initialized ACL and sid is a live, validated SID.
         if unsafe {
             AddAccessAllowedAceEx(acl_ptr, ACL_REVISION, flags, FILE_ALL_ACCESS, sid.as_ptr())
         } == 0
@@ -432,6 +457,7 @@ fn apply_private_acl(path: &Path, file: &File, kind: PrivatePathKind) -> Result<
 }
 
 fn set_protected_dacl(path: &Path, file: &File, acl: &AclBuffer) -> Result<()> {
+    // SAFETY: file owns a live handle and acl contains the initialized DACL for the call.
     let result = unsafe {
         SetSecurityInfo(
             file_handle(file),
@@ -444,7 +470,7 @@ fn set_protected_dacl(path: &Path, file: &File, acl: &AclBuffer) -> Result<()> {
         )
     };
     if result != NO_ERROR {
-        return Err(io::Error::from_raw_os_error(result as i32))
+        return Err(io::Error::from_raw_os_error(result.cast_signed()))
             .with_context(|| format!("failed to apply private ACL to {}", path.display()));
     }
     Ok(())
@@ -507,13 +533,14 @@ fn discover_local_ipv4() -> Result<Option<Ipv4Addr>, SetupPreflightError> {
         let word_count = (byte_count as usize).div_ceil(mem::size_of::<usize>());
         let mut storage = vec![0usize; word_count];
         let adapters = storage.as_mut_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>();
+        // SAFETY: storage is pointer-aligned and contains at least byte_count writable bytes.
         let result = unsafe {
             GetAdaptersAddresses(
                 AF_INET.into(),
                 ADAPTER_QUERY_FLAGS,
                 ptr::null(),
                 adapters,
-                &mut byte_count,
+                &raw mut byte_count,
             )
         };
         if result == ERROR_BUFFER_OVERFLOW {
@@ -527,6 +554,7 @@ fn discover_local_ipv4() -> Result<Option<Ipv4Addr>, SetupPreflightError> {
                 "GetAdaptersAddresses failed with Windows error {result}"
             )));
         }
+        // SAFETY: Windows initialized the linked adapter records within the live storage buffer.
         return Ok(select_local_ipv4(unsafe {
             collect_adapter_candidates(adapters)
         }));
@@ -540,7 +568,9 @@ unsafe fn collect_adapter_candidates(
     mut adapter: *mut IP_ADAPTER_ADDRESSES_LH,
 ) -> Vec<LocalIpv4Candidate> {
     let mut candidates = Vec::new();
+    // SAFETY: the caller keeps the Windows adapter buffer alive through traversal.
     while let Some(current) = unsafe { adapter.as_ref() } {
+        // SAFETY: Windows initializes the Flags member for returned adapter records.
         let flags = unsafe { current.Anonymous2.Flags };
         if current.OperStatus == IfOperStatusUp
             && current.IfType != IF_TYPE_SOFTWARE_LOOPBACK
@@ -550,10 +580,13 @@ unsafe fn collect_adapter_candidates(
             && (current.TransmitLinkSpeed > 0 || current.ReceiveLinkSpeed > 0)
             && !current.FirstGatewayAddress.is_null()
         {
+            // SAFETY: Windows initializes the IfIndex member for returned adapter records.
             let interface_index = unsafe { current.Anonymous1.Anonymous.IfIndex };
             let mut unicast = current.FirstUnicastAddress;
+            // SAFETY: Windows links unicast records into the same live adapter buffer.
             while let Some(address) = unsafe { unicast.as_ref() } {
                 if address.DadState == IpDadStatePreferred {
+                    // SAFETY: Windows supplies each socket address in the live adapter buffer.
                     if let Some(address) = unsafe { ipv4_from_socket_address(address.Address) } {
                         candidates.push(LocalIpv4Candidate {
                             address,
@@ -573,20 +606,21 @@ unsafe fn collect_adapter_candidates(
 unsafe fn ipv4_from_socket_address(
     socket_address: windows_sys::Win32::Networking::WinSock::SOCKET_ADDRESS,
 ) -> Option<Ipv4Addr> {
-    if socket_address.lpSockaddr.is_null()
-        || socket_address.iSockaddrLength < mem::size_of::<SOCKADDR_IN>() as i32
-        || unsafe { (*socket_address.lpSockaddr).sa_family } != AF_INET
-    {
+    let length = usize::try_from(socket_address.iSockaddrLength).ok()?;
+    if socket_address.lpSockaddr.is_null() || length < mem::size_of::<SOCKADDR_IN>() {
         return None;
     }
-    let address = unsafe { &*socket_address.lpSockaddr.cast::<SOCKADDR_IN>() };
-    let octets = unsafe {
-        ptr::read_unaligned(
-            ptr::addr_of!(address.sin_addr)
-                .cast::<u8>()
-                .cast::<[u8; 4]>(),
-        )
-    };
+    // SAFETY: the caller guarantees the non-null address buffer is live and initialized.
+    if unsafe { (*socket_address.lpSockaddr).sa_family } != AF_INET {
+        return None;
+    }
+    let octets = socket_address
+        .lpSockaddr
+        .cast::<u8>()
+        .wrapping_add(mem::offset_of!(SOCKADDR_IN, sin_addr))
+        .cast::<[u8; 4]>();
+    // SAFETY: the checked buffer length includes the IPv4 address, read with byte alignment.
+    let octets = unsafe { octets.read() };
     Some(Ipv4Addr::from(octets))
 }
 
@@ -594,6 +628,7 @@ struct WindowsHandle(HANDLE);
 
 impl Drop for WindowsHandle {
     fn drop(&mut self) {
+        // SAFETY: this wrapper owns the non-null handle returned by a successful Windows call.
         unsafe {
             CloseHandle(self.0);
         }
@@ -601,6 +636,7 @@ impl Drop for WindowsHandle {
 }
 
 fn open_process(pid: u32, access: u32) -> Result<WindowsHandle> {
+    // SAFETY: OpenProcess takes only integer parameters and returns an owned handle.
     let handle = unsafe { OpenProcess(access, 0, pid) };
     if handle.is_null() {
         return Err(io::Error::last_os_error())
@@ -614,7 +650,17 @@ fn process_creation_time(process: HANDLE) -> Result<u64> {
     let mut exit = FILETIME::default();
     let mut kernel = FILETIME::default();
     let mut user = FILETIME::default();
-    if unsafe { GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user) } == 0 {
+    // SAFETY: process is a live handle and all four outputs point to writable FILETIMEs.
+    if unsafe {
+        GetProcessTimes(
+            process,
+            &raw mut creation,
+            &raw mut exit,
+            &raw mut kernel,
+            &raw mut user,
+        )
+    } == 0
+    {
         return Err(io::Error::last_os_error()).context("failed to read process creation time");
     }
     Ok((u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime))
@@ -624,6 +670,7 @@ fn ensure_process_has_current_user(process: HANDLE, pid: u32) -> Result<()> {
     let target = process_user_sid(process)
         .with_context(|| format!("failed to verify the user for bridge process {pid}"))?;
     let current = current_user_sid()?;
+    // SAFETY: both SID buffers were validated and remain live for the comparison.
     if unsafe { EqualSid(target.as_ptr(), current.as_ptr()) } == 0 {
         bail!(
             "refusing to stop bridge process {pid} because it belongs to a different Windows user"
@@ -652,6 +699,7 @@ mod tests {
 
     impl Drop for LocalSecurityDescriptor {
         fn drop(&mut self) {
+            // SAFETY: GetSecurityInfo allocated this descriptor and this wrapper frees it once.
             unsafe {
                 LocalFree(self.0);
             }
@@ -689,6 +737,7 @@ mod tests {
             bail!("Windows returned an ACL entry outside the ACL buffer");
         }
 
+        // SAFETY: the header range was checked within the live ACL; unaligned reads are allowed.
         let header = unsafe { raw_ace.cast::<ACE_HEADER>().as_ptr().read_unaligned() };
         let ace_bytes = usize::from(header.AceSize);
         let ace_end = ace_start
@@ -701,6 +750,7 @@ mod tests {
             bail!("Windows returned an unsupported ACL entry type");
         }
 
+        // SAFETY: the full ACE range was checked within the live ACL; alignment is not assumed.
         let ace = unsafe {
             raw_ace
                 .cast::<ACCESS_ALLOWED_ACE>()
@@ -716,17 +766,17 @@ mod tests {
             .checked_sub(sid_offset)
             .context("Windows returned an ACL entry without a SID")?;
         let mut words = vec![0_usize; sid_bytes.div_ceil(mem::size_of::<usize>())];
+        let source = raw_ace.as_ptr().wrapping_add(sid_offset);
+        // SAFETY: the caller checked the ACE range and words has at least sid_bytes of capacity.
         unsafe {
-            ptr::copy_nonoverlapping(
-                raw_ace.as_ptr().add(sid_offset),
-                words.as_mut_ptr().cast::<u8>(),
-                sid_bytes,
-            );
+            ptr::copy_nonoverlapping(source, words.as_mut_ptr().cast::<u8>(), sid_bytes);
         }
         let mut sid = SidBuffer { words };
+        // SAFETY: the SID bytes were copied from the ACL returned and validated by Windows.
         if unsafe { IsValidSid(sid.as_ptr()) } == 0 {
             bail!("Windows returned an invalid ACL entry SID");
         }
+        // SAFETY: IsValidSid accepted the SID in the live buffer.
         let byte_len = unsafe { GetLengthSid(sid.as_ptr()) } as usize;
         if byte_len == 0 || byte_len > sid_bytes {
             bail!("Windows returned an ACL entry SID outside the entry");
@@ -754,6 +804,7 @@ mod tests {
         let file = open_test_path(path, kind)?;
         let mut dacl = ptr::null_mut();
         let mut descriptor: PSECURITY_DESCRIPTOR = ptr::null_mut();
+        // SAFETY: file owns a live handle and both requested output pointers are writable.
         let result = unsafe {
             GetSecurityInfo(
                 file_handle(&file),
@@ -761,13 +812,13 @@ mod tests {
                 DACL_SECURITY_INFORMATION,
                 ptr::null_mut(),
                 ptr::null_mut(),
-                &mut dacl,
+                &raw mut dacl,
                 ptr::null_mut(),
-                &mut descriptor,
+                &raw mut descriptor,
             )
         };
         if result != NO_ERROR {
-            return Err(io::Error::from_raw_os_error(result as i32))
+            return Err(io::Error::from_raw_os_error(result.cast_signed()))
                 .context("failed to inspect test ACL");
         }
         if descriptor.is_null() || dacl.is_null() {
@@ -777,16 +828,21 @@ mod tests {
 
         let mut control = 0_u16;
         let mut revision = 0_u32;
-        if unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) } == 0 {
+        // SAFETY: _descriptor keeps the returned descriptor alive and both outputs are writable.
+        if unsafe { GetSecurityDescriptorControl(descriptor, &raw mut control, &raw mut revision) }
+            == 0
+        {
             return Err(io::Error::last_os_error())
                 .context("failed to inspect test security descriptor control");
         }
         let mut size = ACL_SIZE_INFORMATION::default();
+        // SAFETY: the live descriptor owns dacl and size has the advertised writable layout.
         if unsafe {
             GetAclInformation(
                 dacl,
                 ptr::addr_of_mut!(size).cast(),
-                mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                u32::try_from(mem::size_of::<ACL_SIZE_INFORMATION>())
+                    .expect("Windows ACL information structure fits in u32"),
                 AclSizeInformation,
             )
         } == 0
@@ -797,7 +853,8 @@ mod tests {
         let mut aces = Vec::with_capacity(size.AceCount as usize);
         for index in 0..size.AceCount {
             let mut raw_ace = ptr::null_mut();
-            if unsafe { GetAce(dacl, index, &mut raw_ace) } == 0 {
+            // SAFETY: dacl remains live and raw_ace is writable output storage.
+            if unsafe { GetAce(dacl, index, &raw mut raw_ace) } == 0 {
                 return Err(io::Error::last_os_error()).context("failed to inspect test ACL entry");
             }
             let (raw_ace, ace) = checked_access_allowed_ace(dacl, size.AclBytesInUse, raw_ace)?;
@@ -826,6 +883,7 @@ mod tests {
         let acl = inspect_acl(path, kind).unwrap();
         assert!(!acl.protected);
         assert!(acl.aces.iter().any(|ace| {
+            // SAFETY: both SID buffers are validated and remain live for the comparison.
             (unsafe { EqualSid(ace.sid.as_ptr(), world.as_ptr()) }) != 0
                 && u32::from(ace.flags) & INHERITED_ACE != 0
         }));
@@ -836,6 +894,7 @@ mod tests {
         let system = local_system_sid().unwrap();
         let acl = inspect_acl(path, kind).unwrap();
         assert!(acl.protected, "{} DACL must be protected", path.display());
+        // SAFETY: both SID buffers are validated and remain live for the comparison.
         let expected_len = if unsafe { EqualSid(user.as_ptr(), system.as_ptr()) } != 0 {
             1
         } else {
@@ -852,7 +911,9 @@ mod tests {
             assert_eq!(ace.ace_type, ACCESS_ALLOWED_ACE_TYPE);
             assert_eq!(ace.mask, FILE_ALL_ACCESS);
             assert_eq!(u32::from(ace.flags), expected_flags);
+            // SAFETY: both SID buffers are validated and remain live for the comparison.
             let is_user = unsafe { EqualSid(ace.sid.as_ptr(), user.as_ptr()) } != 0;
+            // SAFETY: both SID buffers are validated and remain live for the comparison.
             let is_system = unsafe { EqualSid(ace.sid.as_ptr(), system.as_ptr()) } != 0;
             assert!(
                 is_user || is_system,
@@ -874,25 +935,68 @@ mod tests {
     }
 
     #[test]
+    fn reads_ipv4_from_sockaddr_with_weaker_alignment() {
+        let mut storage = [0_u32; 8];
+        // SAFETY: advancing one u16 stays within the live eight-u32 test buffer.
+        let base = unsafe { storage.as_mut_ptr().cast::<u16>().add(1) };
+        assert_eq!(base as usize % mem::align_of::<SOCKADDR_IN>(), 2);
+        // SAFETY: the remaining test buffer is larger than SOCKADDR_IN and byte-aligned.
+        let bytes = unsafe {
+            std::slice::from_raw_parts_mut(base.cast::<u8>(), mem::size_of::<SOCKADDR_IN>())
+        };
+        bytes[..2].copy_from_slice(&AF_INET.to_ne_bytes());
+        let offset = mem::offset_of!(SOCKADDR_IN, sin_addr);
+        bytes[offset..offset + 4].copy_from_slice(&[192, 168, 1, 25]);
+        let socket_address = windows_sys::Win32::Networking::WinSock::SOCKET_ADDRESS {
+            lpSockaddr: base.cast(),
+            iSockaddrLength: i32::try_from(mem::size_of::<SOCKADDR_IN>())
+                .expect("Windows socket address structure fits in i32"),
+        };
+
+        // SAFETY: socket_address points to the initialized test buffer of the stated length.
+        let parsed = unsafe { ipv4_from_socket_address(socket_address) };
+        assert_eq!(parsed, Some(Ipv4Addr::new(192, 168, 1, 25)));
+        for length in [-1, 0, socket_address.iSockaddrLength - 1] {
+            let invalid = windows_sys::Win32::Networking::WinSock::SOCKET_ADDRESS {
+                iSockaddrLength: length,
+                ..socket_address
+            };
+            // SAFETY: invalid points into the live test buffer; its shorter length is intentional.
+            assert_eq!(unsafe { ipv4_from_socket_address(invalid) }, None);
+        }
+        let null = windows_sys::Win32::Networking::WinSock::SOCKET_ADDRESS {
+            lpSockaddr: ptr::null_mut(),
+            ..socket_address
+        };
+        // SAFETY: a null pointer is explicitly accepted and rejected before dereferencing.
+        assert_eq!(unsafe { ipv4_from_socket_address(null) }, None);
+    }
+
+    #[test]
     fn rejects_invalid_acl_entry_pointers_before_reading_them() {
         let mut words = [0_u32; 8];
         let dacl = words.as_mut_ptr().cast::<ACL>();
-        let acl_bytes = mem::size_of_val(&words) as u32;
+        let acl_bytes = u32::try_from(mem::size_of_val(&words)).expect("test buffer fits in u32");
 
         assert!(checked_access_allowed_ace(dacl, acl_bytes, ptr::null_mut()).is_err());
 
+        // SAFETY: end is the permitted one-past pointer to the live test buffer.
         let end = unsafe { words.as_mut_ptr().cast::<u8>().add(acl_bytes as usize) };
         assert!(checked_access_allowed_ace(dacl, acl_bytes, end.cast()).is_err());
 
+        // SAFETY: the ACL header size is smaller than the live test buffer.
         let ace = unsafe { words.as_mut_ptr().cast::<u8>().add(mem::size_of::<ACL>()) };
+        // SAFETY: the remaining buffer fits an ACE_HEADER; unaligned writes are allowed.
         unsafe {
             ace.cast::<ACE_HEADER>().write_unaligned(ACE_HEADER {
                 AceType: ACCESS_ALLOWED_ACE_TYPE,
                 AceFlags: 0,
-                AceSize: mem::size_of::<ACCESS_ALLOWED_ACE>() as u16,
+                AceSize: u16::try_from(mem::size_of::<ACCESS_ALLOWED_ACE>())
+                    .expect("test ACE size fits in u16"),
             });
         }
-        let truncated_bytes = (mem::size_of::<ACL>() + mem::size_of::<ACE_HEADER>()) as u32;
+        let truncated_bytes = u32::try_from(mem::size_of::<ACL>() + mem::size_of::<ACE_HEADER>())
+            .expect("test ACL size fits in u32");
         assert!(checked_access_allowed_ace(dacl, truncated_bytes, ace.cast()).is_err());
     }
 

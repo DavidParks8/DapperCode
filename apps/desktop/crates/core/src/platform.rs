@@ -87,7 +87,11 @@ pub enum SetupPreflightError {
     TailscaleDisconnected,
     LanHostRequired,
     InvalidLanHost(String),
-    #[allow(dead_code)]
+    #[expect(
+        clippy::allow_attributes,
+        reason = "The variant is used only on unsupported platforms"
+    )]
+    #[allow(dead_code, reason = "Used by unsupported-platform implementations")]
     UnsupportedPlatform(&'static str),
     ProbeFailed(String),
 }
@@ -115,11 +119,13 @@ impl std::fmt::Display for SetupPreflightError {
 impl std::error::Error for SetupPreflightError {}
 
 #[cfg(test)]
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PlatformKind {
+    #[cfg(target_os = "macos")]
     MacOs,
+    #[cfg(target_os = "windows")]
     Windows,
+    #[cfg(all(unix, not(target_os = "macos")))]
     Unix,
 }
 
@@ -237,12 +243,14 @@ pub async fn wait_for_shutdown_signal() {
     current().wait_for_shutdown_signal().await;
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub(crate) fn valid_non_loopback_ipv4(value: &str) -> bool {
     value
         .parse::<std::net::Ipv4Addr>()
         .is_ok_and(|address| !address.is_loopback() && !address.is_unspecified())
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub(crate) fn resolve_manual_lan_host(
     manual_lan_host: Option<&str>,
 ) -> Option<Result<String, SetupPreflightError>> {
@@ -282,7 +290,11 @@ pub(crate) fn ensure_private_path_kind(
 
 #[cfg(unix)]
 pub(crate) fn home_dir() -> Result<PathBuf> {
-    match std::env::var_os("HOME") {
+    #[cfg(not(test))]
+    let home = std::env::var_os("HOME");
+    #[cfg(test)]
+    let home = crate::test_env::var_os("HOME");
+    match home {
         Some(value) if !value.is_empty() => Ok(PathBuf::from(value)),
         _ => anyhow::bail!("HOME is not set; cannot locate the DapperCode data directory"),
     }

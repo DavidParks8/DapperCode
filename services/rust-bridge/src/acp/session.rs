@@ -787,7 +787,9 @@ impl AcpSession {
                 }
             };
             #[cfg(test)]
-            if let Some(barrier) = self.notification_delivery_barrier.lock().await.take() {
+            let delivery_barrier = self.notification_delivery_barrier.lock().await.take();
+            #[cfg(test)]
+            if let Some(barrier) = delivery_barrier {
                 barrier.reached.notify_one();
                 barrier.release.notified().await;
             }
@@ -1288,7 +1290,9 @@ impl SessionRegistry {
             drop(state);
 
             #[cfg(test)]
-            if let Some(barrier) = self.eviction_barrier.lock().await.take() {
+            let eviction_barrier = self.eviction_barrier.lock().await.take();
+            #[cfg(test)]
+            if let Some(barrier) = eviction_barrier {
                 barrier.reached.notify_one();
                 barrier.release.notified().await;
             }
@@ -1356,7 +1360,9 @@ impl SessionRegistry {
         drop(state);
 
         #[cfg(test)]
-        if let Some(barrier) = self.registration_barrier.lock().await.take() {
+        let registration_barrier = self.registration_barrier.lock().await.take();
+        #[cfg(test)]
+        if let Some(barrier) = registration_barrier {
             barrier.reached.notify_one();
             barrier.release.notified().await;
         }

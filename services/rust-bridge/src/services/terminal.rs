@@ -79,6 +79,8 @@ pub(crate) fn pinned_git_config_keys() -> HashSet<String> {
 pub(crate) struct TerminalService {
     path_policy: Arc<PathPolicy>,
     concurrency_limiter: Arc<Semaphore>,
+    #[cfg(test)]
+    test_home: Option<PathBuf>,
 }
 
 impl TerminalService {
@@ -86,7 +88,15 @@ impl TerminalService {
         Self {
             path_policy,
             concurrency_limiter: Arc::new(Semaphore::new(MAX_CONCURRENT_GIT_COMMANDS)),
+            #[cfg(test)]
+            test_home: None,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_home(mut self, home: PathBuf) -> Self {
+        self.test_home = Some(home);
+        self
     }
 
     pub(crate) async fn execute_git(
@@ -122,6 +132,10 @@ impl TerminalService {
             if let Some(value) = std::env::var_os(name) {
                 command.env(name, value);
             }
+        }
+        #[cfg(test)]
+        if let Some(home) = &self.test_home {
+            command.env("HOME", home);
         }
 
         let mut child = command

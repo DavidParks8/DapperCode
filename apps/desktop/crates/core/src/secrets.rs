@@ -8,6 +8,11 @@ use anyhow::{bail, Context, Result};
 use getrandom::fill as fill_random;
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+use crate::test_env::var as secrets_env;
+#[cfg(not(test))]
+use std::env::var as secrets_env;
+
 use crate::{
     platform::{self, CredentialLayout},
     store::{atomic_private_write, remove_file_if_exists, AppPaths, FileLease},
@@ -45,10 +50,20 @@ impl SecretBackend {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct BridgeSecret {
     pub token: String,
     pub backend: SecretBackend,
+}
+
+impl std::fmt::Debug for BridgeSecret {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BridgeSecret")
+            .field("token", &"[REDACTED]")
+            .field("backend", &self.backend)
+            .finish()
+    }
 }
 
 #[cfg(test)]
@@ -150,7 +165,7 @@ impl std::fmt::Debug for SecretStore {
 
 impl SecretStore {
     pub fn discover() -> Self {
-        let prefer_file = std::env::var("DAPPERCODE_SECRETS_BACKEND")
+        let prefer_file = secrets_env("DAPPERCODE_SECRETS_BACKEND")
             .map(|value| value.trim().eq_ignore_ascii_case("file"))
             .unwrap_or(false);
         Self {
@@ -200,12 +215,12 @@ impl SecretStore {
     }
 
     fn load_vault(&self, paths: &AppPaths) -> Result<Option<VaultState>> {
-        if let Some(cached) = self
+        let cached = self
             .vault_cache
             .lock()
             .expect("bridge credential vault cache poisoned")
-            .clone()
-        {
+            .clone();
+        if let Some(cached) = cached {
             return Ok(Some(cached));
         }
         self.load_vault_fresh(paths)
@@ -574,6 +589,19 @@ pub(crate) fn generate_token() -> String {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bridge_secret_debug_redacts_the_token() {
+        let secret = BridgeSecret {
+            token: "sensitive-test-token".to_string(),
+            backend: SecretBackend::File,
+        };
+        for output in [format!("{secret:?}"), format!("{secret:#?}")] {
+            assert!(!output.contains(&secret.token));
+            assert!(output.contains("[REDACTED]"));
+            assert!(output.contains("File"));
+        }
+    }
     use crate::platform::windows_credentials::{
         validate_windows_token, windows_profile_entry_account, MAX_WINDOWS_CREDENTIAL_UTF16_UNITS,
         WINDOWS_LAYOUT_ENTRY_ACCOUNT, WINDOWS_LAYOUT_MARKER, WINDOWS_TOKEN_ENTRY_PREFIX,
@@ -732,11 +760,13 @@ mod tests {
     fn uses_one_keychain_vault_for_every_workspace() {
         static GETS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         static SETS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        #[expect(clippy::panic_in_result_fn, reason = "Test callback asserts its input")]
         fn get(account: &str) -> Result<Option<String>> {
             assert_eq!(account, VAULT_ENTRY_ACCOUNT);
             GETS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(None)
         }
+        #[expect(clippy::panic_in_result_fn, reason = "Test callback asserts its input")]
         fn set(account: &str, contents: &str) -> Result<()> {
             assert_eq!(account, VAULT_ENTRY_ACCOUNT);
             assert_eq!(
@@ -1520,6 +1550,7 @@ mod tests {
 
     #[test]
     fn existing_keychain_vault_never_downgrades_after_write_failure() {
+        #[expect(clippy::panic_in_result_fn, reason = "Test callback asserts its input")]
         fn get(account: &str) -> Result<Option<String>> {
             assert_eq!(account, VAULT_ENTRY_ACCOUNT);
             let mut vault = SecretVault::default();
@@ -1594,22 +1625,18 @@ mod tests {
 
     #[test]
     fn chooses_the_backend_from_the_environment() {
-        struct Guard;
-        impl Drop for Guard {
-            fn drop(&mut self) {
-                std::env::remove_var("DAPPERCODE_SECRETS_BACKEND");
-            }
+        {
+            let _guard = crate::test_env::set("DAPPERCODE_SECRETS_BACKEND", " FILE ");
+            assert!(SecretStore::discover().prefer_file);
         }
-        let _guard = Guard;
-
-        std::env::set_var("DAPPERCODE_SECRETS_BACKEND", " FILE ");
-        assert!(SecretStore::discover().prefer_file);
-
-        std::env::set_var("DAPPERCODE_SECRETS_BACKEND", "keychain");
-        assert!(!SecretStore::discover().prefer_file);
-
-        std::env::remove_var("DAPPERCODE_SECRETS_BACKEND");
-        assert!(!SecretStore::discover().prefer_file);
+        {
+            let _guard = crate::test_env::set("DAPPERCODE_SECRETS_BACKEND", "keychain");
+            assert!(!SecretStore::discover().prefer_file);
+        }
+        {
+            let _guard = crate::test_env::unset("DAPPERCODE_SECRETS_BACKEND");
+            assert!(!SecretStore::discover().prefer_file);
+        }
     }
 
     #[test]

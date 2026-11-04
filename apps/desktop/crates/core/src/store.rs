@@ -38,7 +38,11 @@ pub(crate) trait ConfigSideEffects {
 
 impl AppPaths {
     pub fn discover() -> Result<Self> {
-        let base = match std::env::var_os("DAPPERCODE_DATA_DIR") {
+        #[cfg(not(test))]
+        let data_dir = std::env::var_os("DAPPERCODE_DATA_DIR");
+        #[cfg(test)]
+        let data_dir = crate::test_env::var_os("DAPPERCODE_DATA_DIR");
+        let base = match data_dir {
             Some(value) if !value.is_empty() => PathBuf::from(value),
             _ => platform::data_dir()?,
         };
@@ -1093,31 +1097,24 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn locates_the_home_directory_or_explains_why_it_cannot() {
-        struct Guard(Option<std::ffi::OsString>);
-        impl Drop for Guard {
-            fn drop(&mut self) {
-                match self.0.take() {
-                    Some(value) => std::env::set_var("HOME", value),
-                    None => std::env::remove_var("HOME"),
-                }
-            }
+        {
+            let _guard = crate::test_env::set("HOME", "/tmp/dappercode-home");
+            assert_eq!(
+                platform::home_dir().unwrap(),
+                PathBuf::from("/tmp/dappercode-home")
+            );
         }
-        let _guard = Guard(std::env::var_os("HOME"));
-
-        std::env::set_var("HOME", "/tmp/dappercode-home");
-        assert_eq!(
-            platform::home_dir().unwrap(),
-            PathBuf::from("/tmp/dappercode-home")
-        );
-
-        std::env::set_var("HOME", "");
-        assert!(platform::home_dir()
-            .unwrap_err()
-            .to_string()
-            .contains("HOME is not set"));
-
-        std::env::remove_var("HOME");
-        assert!(platform::home_dir().is_err());
+        {
+            let _guard = crate::test_env::set("HOME", "");
+            assert!(platform::home_dir()
+                .unwrap_err()
+                .to_string()
+                .contains("HOME is not set"));
+        }
+        {
+            let _guard = crate::test_env::unset("HOME");
+            assert!(platform::home_dir().is_err());
+        }
     }
 
     #[test]
@@ -1132,33 +1129,29 @@ mod tests {
 
     #[test]
     fn honours_the_data_directory_override_and_rejects_relative_paths() {
-        struct Guard;
-        impl Drop for Guard {
-            fn drop(&mut self) {
-                std::env::remove_var("DAPPERCODE_DATA_DIR");
-            }
-        }
-        let _guard = Guard;
         let temp = tempdir().unwrap();
 
-        std::env::set_var("DAPPERCODE_DATA_DIR", temp.path());
-        let paths = AppPaths::discover().unwrap();
-        assert_eq!(paths.config_path(), temp.path().join("config.json"));
-        assert_eq!(
-            paths.config_lock_path(),
-            temp.path().join("runtime").join("config.lock")
-        );
-
-        std::env::set_var("DAPPERCODE_DATA_DIR", "relative/path");
-        assert!(AppPaths::discover()
-            .unwrap_err()
-            .to_string()
-            .contains("must be an absolute path"));
-
-        // An empty override falls through to the platform default. That default is only inspected,
-        // never created, so the test does not touch the real user data directory.
-        std::env::set_var("DAPPERCODE_DATA_DIR", "");
-        assert!(platform::data_dir().unwrap().is_absolute());
+        {
+            let _guard = crate::test_env::set("DAPPERCODE_DATA_DIR", temp.path());
+            let paths = AppPaths::discover().unwrap();
+            assert_eq!(paths.config_path(), temp.path().join("config.json"));
+            assert_eq!(
+                paths.config_lock_path(),
+                temp.path().join("runtime").join("config.lock")
+            );
+        }
+        {
+            let _guard = crate::test_env::set("DAPPERCODE_DATA_DIR", "relative/path");
+            assert!(AppPaths::discover()
+                .unwrap_err()
+                .to_string()
+                .contains("must be an absolute path"));
+        }
+        {
+            // Only inspect the platform default; do not create the real user data directory.
+            let _guard = crate::test_env::set("DAPPERCODE_DATA_DIR", "");
+            assert!(platform::data_dir().unwrap().is_absolute());
+        }
     }
 
     #[test]

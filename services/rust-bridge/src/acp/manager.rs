@@ -49,7 +49,7 @@ use super::snapshot::{ForkBoundaryKind, ForkBoundaryMessage, SessionSnapshot, Sn
 const MAX_AGENTS: usize = 128;
 const MAX_SESSIONS: usize = 2_048;
 const MAX_AGENT_RELATION_CHILDREN: usize = 128;
-const MAX_PAGE_SIZE: usize = 100;
+pub(crate) const MAX_PAGE_SIZE: usize = 100;
 const MAX_SESSION_LIST_PAGES: usize = 32;
 const MAX_ERROR_BYTES: usize = 2_048;
 const SESSION_INDEX_VERSION: u64 = 2;
@@ -607,7 +607,7 @@ impl DurableAgentMessageJournal {
                 observed_at_ms: existing
                     .as_ref()
                     .map(|entry| entry.observed_at_ms)
-                    .unwrap_or_else(|| Utc::now().timestamp_millis().max(0) as u64),
+                    .unwrap_or_else(|| Utc::now().timestamp_millis().max(0).unsigned_abs()),
                 after_timeline_id: existing
                     .and_then(|entry| entry.after_timeline_id)
                     .or(after_timeline_id),
@@ -3557,7 +3557,9 @@ impl AgentManager {
             identities.sort_by_key(AgentSessionId::encode);
             identities.dedup();
             #[cfg(test)]
-            if let Some(barrier) = self.policy_snapshot_barrier.lock().await.take() {
+            let snapshot_barrier = self.policy_snapshot_barrier.lock().await.take();
+            #[cfg(test)]
+            if let Some(barrier) = snapshot_barrier {
                 barrier.reached.notify_one();
                 barrier.release.notified().await;
             }
@@ -3691,7 +3693,6 @@ impl AgentManager {
         Ok(harness_capabilities(runtime).live_agent_message)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn deliver_live_agent_message(
         &self,
         thread_id: &str,
@@ -5395,7 +5396,8 @@ fn decode_cursor(cursor: Option<&str>) -> Result<usize, AgentManagerError> {
         .strip_prefix("v1.")
         .and_then(|value| URL_SAFE_NO_PAD.decode(value).ok())
         .filter(|value| value.len() == std::mem::size_of::<u64>())
-        .map(|value| u64::from_be_bytes(value.try_into().expect("cursor length checked")) as usize)
+        .map(|value| u64::from_be_bytes(value.try_into().expect("cursor length checked")))
+        .and_then(|value| usize::try_from(value).ok())
         .filter(|value| *value <= MAX_SESSIONS)
         .ok_or(AgentManagerError::InvalidCursor)
 }
@@ -6665,6 +6667,13 @@ mod tests {
         assert!(decode_cursor(Some("v0.invalid")).is_err());
         assert!(decode_cursor(Some("v1.invalid")).is_err());
         assert!(decode_cursor(Some(&encode_cursor(MAX_SESSIONS + 1))).is_err());
+        let overflow = format!("v1.{}", URL_SAFE_NO_PAD.encode(u64::MAX.to_be_bytes()));
+        assert!(decode_cursor(Some(&overflow)).is_err());
+        let wraps_on_32_bit = format!(
+            "v1.{}",
+            URL_SAFE_NO_PAD.encode((u64::from(u32::MAX) + 1).to_be_bytes())
+        );
+        assert!(decode_cursor(Some(&wraps_on_32_bit)).is_err());
         assert_eq!(
             redact_error(&AcpRuntimeError::Connection("secret".to_string())),
             "ACP agent startup failed (details redacted)"

@@ -1,4 +1,5 @@
 #![cfg_attr(all(test, coverage_nightly), feature(coverage_attribute))]
+#![forbid(unsafe_code)]
 
 //! Secure workspace and attachment path resolution over opaque native handles.
 

@@ -103,13 +103,16 @@ pub(super) fn secure_private_file(path: &Path, file: &File) -> Result<()> {
 pub(super) fn detach_process(command: &mut Command) {
     use std::os::unix::process::CommandExt;
 
+    let detach = || {
+        // SAFETY: setsid takes no arguments and does not access Rust memory.
+        if unsafe { libc::setsid() } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    };
+    // SAFETY: the post-fork closure only calls setsid and reads errno on failure.
     unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(())
-        });
+        command.pre_exec(detach);
     }
 }
 
@@ -122,7 +125,9 @@ pub(super) async fn stop_child(
     graceful_timeout: Duration,
 ) -> Result<()> {
     let pid = child.id().context("worker process id is unavailable")?;
-    let result = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    let pid = libc::pid_t::try_from(pid).context("worker process id is out of range")?;
+    // SAFETY: kill takes integer arguments and does not access Rust memory.
+    let result = unsafe { libc::kill(pid, libc::SIGTERM) };
     if result != 0 {
         return Err(io::Error::last_os_error()).context("failed to stop worker");
     }

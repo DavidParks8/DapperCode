@@ -1200,12 +1200,12 @@ fn authenticated_credential_from_headers(
 }
 
 fn remove_legacy_session(state: &AgentMessagingRouterState, session_id: &str) {
-    if let Some(session) = state
+    let session = state
         .legacy_sessions
         .lock()
         .unwrap_or_else(|error| error.into_inner())
-        .remove(session_id)
-    {
+        .remove(session_id);
+    if let Some(session) = session {
         session.cancellation.cancel();
     }
     state.credentials.unbind_legacy_session(session_id);

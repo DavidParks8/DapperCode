@@ -381,6 +381,7 @@ where
 
 fn open_absolute_directory(path: &Path) -> io::Result<File> {
     let path = nul_terminated(path.as_os_str())?;
+    // SAFETY: path is NUL-terminated and the optional security/template pointers are null.
     let handle = unsafe {
         CreateFileW(
             path.as_ptr(),
@@ -395,6 +396,7 @@ fn open_absolute_directory(path: &Path) -> io::Result<File> {
     if handle == INVALID_HANDLE_VALUE {
         return Err(io::Error::last_os_error());
     }
+    // SAFETY: CreateFileW returned a new valid handle whose ownership is transferred to File.
     let file = unsafe { File::from_raw_handle(handle as RawHandle) };
     inspect_handle(&file, ExpectedKind::Directory)?;
     Ok(file)
@@ -544,6 +546,7 @@ fn rename_file(
         ));
     }
 
+    // SAFETY: source keeps its file handle open for the duration of the call.
     if unsafe { FlushFileBuffers(raw_handle(&source)) } == 0 {
         return Err(io::Error::last_os_error());
     }
@@ -563,6 +566,7 @@ fn rename_file(
 fn final_path(directory: &File) -> io::Result<PathBuf> {
     let mut buffer = vec![0u16; 512];
     loop {
+        // SAFETY: directory owns a live handle and buffer holds the advertised number of units.
         let length = unsafe {
             GetFinalPathNameByHandleW(
                 raw_handle(directory),
@@ -603,7 +607,10 @@ fn open_mutable_file(parent: &File, name: &OsStr) -> io::Result<File> {
     Ok(file)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Mirrors the Windows file creation parameters"
+)]
 fn nt_create_relative(
     parent: &File,
     name: &OsStr,
@@ -635,7 +642,7 @@ fn nt_create_relative(
         Length: u32::try_from(size_of::<OBJECT_ATTRIBUTES>())
             .expect("OBJECT_ATTRIBUTES fits in a u32"),
         RootDirectory: raw_handle(parent),
-        ObjectName: &unicode_name,
+        ObjectName: &raw const unicode_name,
         Attributes: OBJ_CASE_INSENSITIVE | OBJ_DONT_REPARSE,
         SecurityDescriptor: security
             .map_or(null(), PrivateSecurityDescriptor::as_security_descriptor),
@@ -643,12 +650,14 @@ fn nt_create_relative(
     };
     let mut io_status = IO_STATUS_BLOCK::default();
     let mut handle: HANDLE = INVALID_HANDLE_VALUE;
+    // SAFETY: the parent handle, name, optional descriptor, and output buffers remain live;
+    // their lengths and layouts match the corresponding Windows structures.
     let status = unsafe {
         NtCreateFile(
-            &mut handle,
+            &raw mut handle,
             desired_access,
-            &object_attributes,
-            &mut io_status,
+            &raw const object_attributes,
+            &raw mut io_status,
             null(),
             attributes,
             sharing,
@@ -666,6 +675,7 @@ fn nt_create_relative(
             "NtCreateFile succeeded without returning a handle",
         ));
     }
+    // SAFETY: NtCreateFile returned a new valid handle whose ownership is transferred to File.
     let file = unsafe { File::from_raw_handle(handle as RawHandle) };
     Ok((file, io_status.Information))
 }
@@ -673,11 +683,12 @@ fn nt_create_relative(
 fn inspect_handle(file: &File, expected: ExpectedKind) -> io::Result<HandleInfo> {
     let information = inspect_handle_information(file)?;
     let mut tag = FILE_ATTRIBUTE_TAG_INFO::default();
+    // SAFETY: file owns a live handle and tag is writable storage of the advertised size.
     if unsafe {
         GetFileInformationByHandleEx(
             raw_handle(file),
             FileAttributeTagInfo,
-            (&mut tag as *mut FILE_ATTRIBUTE_TAG_INFO).cast::<c_void>(),
+            (&raw mut tag).cast::<c_void>(),
             u32::try_from(size_of::<FILE_ATTRIBUTE_TAG_INFO>())
                 .expect("FILE_ATTRIBUTE_TAG_INFO fits in a u32"),
         )
@@ -722,7 +733,8 @@ fn inspect_handle(file: &File, expected: ExpectedKind) -> io::Result<HandleInfo>
 
 fn inspect_handle_information(file: &File) -> io::Result<BY_HANDLE_FILE_INFORMATION> {
     let mut information = BY_HANDLE_FILE_INFORMATION::default();
-    if unsafe { GetFileInformationByHandle(raw_handle(file), &mut information) } == 0 {
+    // SAFETY: file owns a live handle and information is writable for the call.
+    if unsafe { GetFileInformationByHandle(raw_handle(file), &raw mut information) } == 0 {
         return Err(io::Error::last_os_error());
     }
     Ok(information)
@@ -754,23 +766,31 @@ fn rename_file_handle(
                 "rename information is too large",
             )
         })?;
-    let word_count = information_size.saturating_add(size_of::<usize>() - 1) / size_of::<usize>();
+    let word_count = information_size.div_ceil(size_of::<usize>());
     let mut storage = vec![0usize; word_count];
     let information = storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    let flags = if replace_existing {
+        FILE_RENAME_REPLACE_IF_EXISTS
+    } else {
+        0
+    };
+    // SAFETY: the C-layout union is the first field and storage is aligned for its u32 flags.
+    unsafe { information.cast::<u32>().write(flags) };
+    // SAFETY: the checked, aligned storage contains the complete FILE_RENAME_INFO header.
+    let root = unsafe { std::ptr::addr_of_mut!((*information).RootDirectory) };
+    // SAFETY: root points to the writable handle field; target_parent remains live for the call.
+    unsafe { root.write(raw_handle(target_parent)) };
+    // SAFETY: the checked, aligned storage contains the complete FILE_RENAME_INFO header.
+    let length = unsafe { std::ptr::addr_of_mut!((*information).FileNameLength) };
+    // SAFETY: length points to the writable u32 length field.
+    unsafe { length.write(name_bytes) };
+    // SAFETY: storage includes the filename field and all name units.
+    let destination = unsafe { std::ptr::addr_of_mut!((*information).FileName) }.cast::<u16>();
+    // SAFETY: the checked buffer includes the name units, and the allocations do not overlap.
     unsafe {
-        (*information).Anonymous.Flags = if replace_existing {
-            FILE_RENAME_REPLACE_IF_EXISTS
-        } else {
-            0
-        };
-        (*information).RootDirectory = raw_handle(target_parent);
-        (*information).FileNameLength = name_bytes;
-        std::ptr::copy_nonoverlapping(
-            name.as_ptr(),
-            std::ptr::addr_of_mut!((*information).FileName).cast::<u16>(),
-            name.len(),
-        );
+        std::ptr::copy_nonoverlapping(name.as_ptr(), destination, name.len());
     }
+    // SAFETY: source and target_parent remain open and information occupies information_size bytes.
     if unsafe {
         SetFileInformationByHandle(
             raw_handle(source),
@@ -789,11 +809,12 @@ fn rename_file_handle(
 
 fn mark_delete(file: &File) -> io::Result<()> {
     let information = FILE_DISPOSITION_INFO { DeleteFile: true };
+    // SAFETY: file owns a live handle and information has the supplied layout and size.
     if unsafe {
         SetFileInformationByHandle(
             raw_handle(file),
             FileDispositionInfo,
-            (&information as *const FILE_DISPOSITION_INFO).cast::<c_void>(),
+            (&raw const information).cast::<c_void>(),
             u32::try_from(size_of::<FILE_DISPOSITION_INFO>())
                 .expect("FILE_DISPOSITION_INFO fits in a u32"),
         )
@@ -805,6 +826,7 @@ fn mark_delete(file: &File) -> io::Result<()> {
 }
 
 fn flush_directory(directory: &File) -> io::Result<()> {
+    // SAFETY: directory keeps its handle open for the duration of the call.
     if unsafe { FlushFileBuffers(raw_handle(directory)) } == 0 {
         return Err(io::Error::last_os_error());
     }
@@ -867,6 +889,7 @@ fn raw_handle(file: &File) -> HANDLE {
 }
 
 fn ntstatus_error(status: i32) -> io::Error {
+    // SAFETY: RtlNtStatusToDosError accepts any status value and does not dereference pointers.
     let error = unsafe { RtlNtStatusToDosError(status) };
     io::Error::from_raw_os_error(i32::try_from(error).unwrap_or(i32::MAX))
 }
@@ -889,11 +912,12 @@ impl PrivateSecurityDescriptor {
     fn new() -> io::Result<Self> {
         let descriptor = nul_terminated(OsStr::new(PRIVATE_DACL))?;
         let mut pointer: PSECURITY_DESCRIPTOR = null_mut();
+        // SAFETY: descriptor is NUL-terminated and pointer is writable output storage.
         if unsafe {
             ConvertStringSecurityDescriptorToSecurityDescriptorW(
                 descriptor.as_ptr(),
                 SDDL_REVISION_1,
-                &mut pointer,
+                &raw mut pointer,
                 null_mut(),
             )
         } == 0
@@ -916,8 +940,14 @@ impl PrivateSecurityDescriptor {
         let mut present = 0;
         let mut defaulted = 0;
         let mut dacl: *mut ACL = null_mut();
+        // SAFETY: self owns the descriptor and all output pointers are writable and live.
         if unsafe {
-            GetSecurityDescriptorDacl(self.pointer, &mut present, &mut dacl, &mut defaulted)
+            GetSecurityDescriptorDacl(
+                self.pointer,
+                &raw mut present,
+                &raw mut dacl,
+                &raw mut defaulted,
+            )
         } == 0
         {
             return Err(io::Error::last_os_error());
@@ -925,6 +955,7 @@ impl PrivateSecurityDescriptor {
         if present == 0 || dacl.is_null() {
             return Err(io::Error::other("private security descriptor has no DACL"));
         }
+        // SAFETY: file owns its handle and dacl remains borrowed from the live descriptor.
         let error = unsafe {
             SetSecurityInfo(
                 raw_handle(file),
@@ -947,6 +978,7 @@ impl PrivateSecurityDescriptor {
 
 impl Drop for PrivateSecurityDescriptor {
     fn drop(&mut self) {
+        // SAFETY: pointer was allocated by Windows' descriptor conversion and is freed once.
         unsafe {
             let _ = LocalFree(self.pointer);
         }

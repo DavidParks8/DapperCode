@@ -128,12 +128,12 @@ pub(super) async fn handle_socket(
                 match message {
                     Message::Text(text) => {
                         if is_ordered_push_control(&text) {
-                            handle_client_message(
+                            Box::pin(handle_client_message(
                                 client_id,
                                 text.to_string(),
                                 &state,
                                 None,
-                            )
+                            ))
                             .await;
                             continue;
                         }
@@ -170,7 +170,7 @@ pub(super) async fn handle_socket(
                         };
                         let state = Arc::clone(&state);
                         tokio::spawn(async move {
-                            handle_client_message(
+                            Box::pin(handle_client_message(
                                 client_id,
                                 text.to_string(),
                                 &state,
@@ -178,7 +178,7 @@ pub(super) async fn handle_socket(
                                     _client: client_permit,
                                     _global: global_permit,
                                 }),
-                            )
+                            ))
                             .await;
                         });
                     }
@@ -283,7 +283,7 @@ pub(super) async fn handle_client_message(
                 "bridge/push/observed" | "bridge/push/presence"
             ) {
                 let trace = state.metrics.start_request(&method, "bridge");
-                match handle_bridge_method(&method, params, state, client_id).await {
+                match Box::pin(handle_bridge_method(&method, params, state, client_id)).await {
                     Ok(_) => state.metrics.finish_request(&trace, "ok"),
                     Err(error) => {
                         state.metrics.finish_request(&trace, "bridge_error");
@@ -306,7 +306,7 @@ pub(super) async fn handle_client_message(
 
     if method.starts_with("bridge/") {
         let trace = state.metrics.start_request(&method, "bridge");
-        match handle_bridge_method(&method, params, state, client_id).await {
+        match Box::pin(handle_bridge_method(&method, params, state, client_id)).await {
             Ok(result) => {
                 state.metrics.finish_request(&trace, "ok");
                 state
@@ -761,6 +761,10 @@ pub(super) async fn handle_bridge_method(
                 )
             };
             if let Some(cached) = cached {
+                #[expect(
+                    clippy::suspicious_operation_groupings,
+                    reason = "The stored source ID corresponds to the request thread ID"
+                )]
                 if cached.source_thread_id != request.thread_id
                     || cached.message_id != request.message_id
                 {
@@ -773,6 +777,10 @@ pub(super) async fn handle_bridge_method(
                     .map_err(|error| BridgeError::server(&error.to_string()));
             }
             if let Some(pending) = pending {
+                #[expect(
+                    clippy::suspicious_operation_groupings,
+                    reason = "The stored source ID corresponds to the request thread ID"
+                )]
                 if pending.source_thread_id != request.thread_id
                     || pending.message_id != request.message_id
                 {
@@ -1267,6 +1275,10 @@ pub(super) async fn handle_bridge_method(
                 return Ok(result);
             }
             if let Some(pending) = pending {
+                #[expect(
+                    clippy::suspicious_operation_groupings,
+                    reason = "The stored request ID corresponds to the request ID field"
+                )]
                 if pending.request_id != request.id || pending.decision != request.decision {
                     return Err(BridgeError::invalid_params(
                         "resolutionId is already bound to another approval decision",

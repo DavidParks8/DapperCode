@@ -649,7 +649,9 @@ impl InteractionRegistry {
         drop(state);
         drop(publication_guard);
         #[cfg(test)]
-        if let Some(barrier) = self.permission_publication_barrier.lock().await.take() {
+        let publication_barrier = self.permission_publication_barrier.lock().await.take();
+        #[cfg(test)]
+        if let Some(barrier) = publication_barrier {
             barrier.reached.notify_one();
             barrier.release.notified().await;
         }
@@ -1885,9 +1887,9 @@ fn validate_value(
 ) -> Result<(), InteractionError> {
     match (property, value) {
         (ElicitationPropertySchema::String(schema), ElicitationContentValue::String(value)) => {
-            let length = value.chars().count() as u32;
-            if schema.min_length.is_some_and(|min| length < min)
-                || schema.max_length.is_some_and(|max| length > max)
+            let length = u64::try_from(value.chars().count()).expect("string length fits in u64");
+            if schema.min_length.is_some_and(|min| length < u64::from(min))
+                || schema.max_length.is_some_and(|max| length > u64::from(max))
                 || schema
                     .enum_values
                     .as_ref()

@@ -721,7 +721,9 @@ mod canonical_mailbox_tests {
             let mut clients = hub.client_infos.write().await;
             let client = clients.get_mut(&client_id).unwrap();
             client.foreground = true;
-            client.foreground_updated_at = Instant::now() - MOBILE_FOREGROUND_LEASE_TIMEOUT;
+            client.foreground_updated_at = Instant::now()
+                .checked_sub(MOBILE_FOREGROUND_LEASE_TIMEOUT)
+                .expect("test clock must accommodate the foreground lease");
         }
         assert!(!hub.has_foreground_mobile_client().await);
     }

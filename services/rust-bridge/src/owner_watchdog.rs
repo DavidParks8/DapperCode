@@ -23,7 +23,12 @@ const OWNER_POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// Returns `Ok(None)` when unset, so the development flow (`pnpm run bridge`) keeps running without
 /// an owner.
 pub(crate) fn owner_pid_from_env() -> Result<Option<u32>, String> {
-    let Ok(raw) = std::env::var("BRIDGE_OWNER_PID") else {
+    let raw = std::env::var("BRIDGE_OWNER_PID").ok();
+    parse_owner_pid(raw.as_deref())
+}
+
+fn parse_owner_pid(raw: Option<&str>) -> Result<Option<u32>, String> {
+    let Some(raw) = raw else {
         return Ok(None);
     };
     let trimmed = raw.trim();
@@ -68,26 +73,6 @@ mod tests {
     const SHORT_LIVED_CHILD: &str = "__watchdog_short_lived_child";
     const LONG_LIVED_CHILD: &str = "__watchdog_long_lived_child";
 
-    struct EnvGuard;
-
-    impl EnvGuard {
-        fn set(value: &str) -> Self {
-            std::env::set_var("BRIDGE_OWNER_PID", value);
-            Self
-        }
-
-        fn clear() -> Self {
-            std::env::remove_var("BRIDGE_OWNER_PID");
-            Self
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            std::env::remove_var("BRIDGE_OWNER_PID");
-        }
-    }
-
     fn spawn_fixture(marker: &str) -> std::process::Child {
         std::process::Command::new(std::env::current_exe().expect("test executable"))
             .arg(marker)
@@ -107,26 +92,20 @@ mod tests {
 
     #[test]
     fn reads_a_valid_owner_pid() {
-        let _guard = EnvGuard::set("4321");
-        assert_eq!(owner_pid_from_env().unwrap(), Some(4321));
+        assert_eq!(parse_owner_pid(Some("4321")).unwrap(), Some(4321));
     }
 
     #[test]
     fn treats_an_unset_or_blank_owner_pid_as_absent() {
-        let _guard = EnvGuard::clear();
-        assert_eq!(owner_pid_from_env().unwrap(), None);
-        let _blank = EnvGuard::set("   ");
-        assert_eq!(owner_pid_from_env().unwrap(), None);
+        assert_eq!(parse_owner_pid(None).unwrap(), None);
+        assert_eq!(parse_owner_pid(Some("   ")).unwrap(), None);
     }
 
     #[test]
     fn rejects_a_malformed_owner_pid() {
-        let _guard = EnvGuard::set("0");
-        assert!(owner_pid_from_env().is_err());
-        let _text = EnvGuard::set("not-a-pid");
-        assert!(owner_pid_from_env().is_err());
-        let _negative = EnvGuard::set("-4");
-        assert!(owner_pid_from_env().is_err());
+        assert!(parse_owner_pid(Some("0")).is_err());
+        assert!(parse_owner_pid(Some("not-a-pid")).is_err());
+        assert!(parse_owner_pid(Some("-4")).is_err());
     }
 
     #[test]

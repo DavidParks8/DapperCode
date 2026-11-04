@@ -8,6 +8,8 @@ mod platform;
 mod secrets;
 mod setup;
 mod store;
+#[cfg(test)]
+mod test_env;
 
 pub use broker_supervisor::{BridgeSnapshot, BridgeState, BrokerLifecycleAction, BrokerSupervisor};
 pub use config::{

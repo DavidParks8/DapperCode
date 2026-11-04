@@ -1,4 +1,5 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![forbid(unsafe_code)]
 // LLVM 21 crashes while exporting this Axum crate's coverage instantiation groups. Broker tests
 // still run in coverage jobs; only the broken compiler mapping is disabled.
 #![cfg_attr(coverage_nightly, coverage(off))]
@@ -250,7 +251,7 @@ struct BrokerState {
     http: Client,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BrokerQuery {
     token: Option<String>,
@@ -994,7 +995,7 @@ fn service_unavailable(message: &str) -> Response {
         .into_response()
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct WorkerTarget {
     http_base: String,
     websocket_base: String,

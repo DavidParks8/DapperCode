@@ -130,7 +130,7 @@ pub(super) async fn local_image_handler(
     };
 
     let mut file = fs::File::from_std(file);
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    let mut bytes = Vec::new();
     if let Err(error) = (&mut file)
         .take(LOCAL_IMAGE_MAX_BYTES + 1)
         .read_to_end(&mut bytes)

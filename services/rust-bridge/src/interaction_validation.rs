@@ -7,10 +7,8 @@ pub(super) fn parse_internal_id(value: Option<&Value>) -> Option<u64> {
         return Some(number);
     }
 
-    if let Some(number) = value.as_i64() {
-        if number >= 0 {
-            return Some(number as u64);
-        }
+    if let Some(number) = value.as_i64().and_then(|number| u64::try_from(number).ok()) {
+        return Some(number);
     }
 
     if let Some(raw) = value.as_str() {
