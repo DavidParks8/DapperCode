@@ -1,4 +1,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+// Integration tests make coverage runs build this binary without ever running it; its code is
+// measured through the unit-test build instead.
+#![cfg_attr(all(coverage_nightly, not(test)), coverage(off))]
 #![forbid(unsafe_code)]
 
 use std::path::{Path, PathBuf};
