@@ -1,0 +1,20 @@
+excluded:
+  - apps/desktop/macos/tests
+  - apps/mobile/modules/**/tests
+
+only_rules:
+  - block_based_kvo
+  - capture_variable
+  - discarded_notification_center_observer
+  - empty_count
+  - fatal_error_message
+  - force_cast
+  - force_try
+  - force_unwrapping
+  - implicitly_unwrapped_optional
+  - first_where
+  - overridden_super_call
+  - redundant_nil_coalescing
+  - implicit_optional_initialization
+  - weak_delegate
+  - yoda_condition
