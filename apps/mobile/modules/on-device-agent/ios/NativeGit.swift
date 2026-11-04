@@ -101,7 +101,7 @@ enum NativeGit {
       var parentID = git_oid()
       let parentResult = git_reference_name_to_id(&parentID, repository, "HEAD")
       var parent: OpaquePointer?
-      if parentResult != GIT_ENOTFOUND.rawValue && parentResult != GIT_EUNBORNBRANCH.rawValue {
+      if parentResult != GIT_ENOTFOUND.rawValue, parentResult != GIT_EUNBORNBRANCH.rawValue {
         try requireSuccess(parentResult, "Read HEAD")
         try requireSuccess(git_commit_lookup(&parent, repository, &parentID), "Read parent commit")
       }
@@ -228,21 +228,23 @@ enum NativeGit {
       }
       let context = Unmanaged<GitCredentialPayload>.fromOpaque(payload).takeUnretainedValue()
       guard GitNetworkOperation.shared.progress() == 0 else { return GIT_EUSER.rawValue }
-      guard let credential = context.credential else { return GIT_PASSTHROUGH.rawValue }
-      guard credential.host == url.host, credential.port == (url.port ?? 443),
+      guard let storedCredential = context.credential else { return GIT_PASSTHROUGH.rawValue }
+      guard storedCredential.host == url.host, storedCredential.port == (url.port ?? 443),
         url.user == nil, url.password == nil
       else {
         return GIT_EUSER.rawValue
       }
       guard allowed & GIT_CREDENTIAL_USERPASS_PLAINTEXT.rawValue != 0 else {
         if allowed & GIT_CREDENTIAL_USERNAME.rawValue != 0 {
-          return git_credential_username_new(output, credential.username)
+          return git_credential_username_new(output, storedCredential.username)
         }
         return GIT_PASSTHROUGH.rawValue
       }
       guard !context.suppliedPassword else { return GIT_EAUTH.rawValue }
       context.suppliedPassword = true
-      return git_credential_userpass_plaintext_new(output, credential.username, credential.token)
+      return git_credential_userpass_plaintext_new(
+        output, storedCredential.username, storedCredential.token
+      )
     }
     return try action(callbacks)
   }
@@ -293,7 +295,7 @@ enum NativeGit {
 
   static func requireSuccess(_ code: Int32, _ operation: String) throws {
     guard code >= 0 else {
-      let message = git_error_last().flatMap { $0.pointee.message }.flatMap {
+      let message = git_error_last().flatMap(\.pointee.message).flatMap {
         String(validatingCString: $0)
       }
       throw GitOperationError(
@@ -305,10 +307,12 @@ enum NativeGit {
 private final class GitCredentialPayload {
   let credential: StoredGitCredential?
   var suppliedPassword = false
+
   init(_ credential: StoredGitCredential?) { self.credential = credential }
 }
 
 struct GitOperationError: LocalizedError {
   let errorDescription: String?
+
   init(_ message: String) { errorDescription = message }
 }

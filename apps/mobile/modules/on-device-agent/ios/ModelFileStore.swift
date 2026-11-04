@@ -27,6 +27,7 @@ struct NativeModelPaths: Sendable {
 
 struct ModelFileError: LocalizedError {
   let errorDescription: String?
+
   init(_ message: String) { errorDescription = message }
 }
 

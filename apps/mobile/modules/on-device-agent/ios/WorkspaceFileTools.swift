@@ -120,7 +120,7 @@ extension WorkspaceStore {
       throw WorkspaceError("The read offset must fall on a UTF-8 character boundary.")
     }
     var end = min(data.count, offset + limit)
-    while end > offset && end < data.count && data[end] & 0xC0 == 0x80 {
+    while end > offset, end < data.count, data[end] & 0xC0 == 0x80 {
       end -= 1
     }
     guard end > offset || offset == data.count,
@@ -322,9 +322,9 @@ extension WorkspaceStore {
 
   private static func clippedLine(_ line: String) -> String {
     var bytes = Array(line.utf8.prefix(512))
-    while String(bytes: bytes, encoding: .utf8) == nil && !bytes.isEmpty {
+    while String(bytes: bytes, encoding: .utf8) == nil, !bytes.isEmpty {
       bytes.removeLast()
     }
-    return String(decoding: bytes, as: UTF8.self)
+    return String(bytes: bytes, encoding: .utf8) ?? ""
   }
 }

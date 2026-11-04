@@ -45,7 +45,7 @@ struct BridgeSnapshot: Decodable, Identifiable, Sendable {
     }
 
     func applying(_ health: BridgeObservedHealth) -> Self {
-        let readyAgents = health.agents.filter { $0.lifecycle == "ready" }.count
+        let readyAgentCount = health.agents.filter { $0.lifecycle == "ready" }.count
         let projectedState: String
         let projectedHeadline: String
         switch health.status {
@@ -71,7 +71,7 @@ struct BridgeSnapshot: Decodable, Identifiable, Sendable {
             bridgeUrl: bridgeUrl,
             uptimeSec: health.uptimeSec,
             connectedClients: health.connectedClients,
-            readyAgents: readyAgents,
+            readyAgents: readyAgentCount,
             totalAgents: health.runningWorkers,
             recentErrorCount: health.operational.recentErrors.count,
             managedProcess: managedProcess,
@@ -128,7 +128,7 @@ enum NetworkMode: String, CaseIterable, Identifiable {
 }
 
 private final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationWillTerminate(_ notification: Notification) {
+    func applicationWillTerminate(_: Notification) {
         ApplicationTermination.begin()
     }
 }
@@ -445,24 +445,24 @@ final class BridgeModel: ObservableObject {
 
     private func invoke<Value: Decodable & Sendable>(
         _ arguments: [String],
-        as type: Value.Type,
+        as _: Value.Type,
         includeWorkspace: Bool = true
     ) async throws -> Value {
-        let workspace = workspace
+        let workspacePath = workspace
         // Bridges exit on their own when this process does, even after a force quit.
         let ownerArguments = Self.ownsBridgeLifetime(arguments)
             ? ["--owner-pid", String(ProcessInfo.processInfo.processIdentifier)]
             : []
-        let workspaceArguments = includeWorkspace ? ["--workspace", workspace] : []
-        let operatorURL = operatorURL
+        let workspaceArguments = includeWorkspace ? ["--workspace", workspacePath] : []
+        let resolvedOperatorURL = operatorURL
         return try await Task.detached(priority: .userInitiated) {
-            guard let operatorURL,
-                  FileManager.default.isExecutableFile(atPath: operatorURL.path) else {
+            guard let resolvedOperatorURL,
+                  FileManager.default.isExecutableFile(atPath: resolvedOperatorURL.path) else {
                 throw OperatorError.unavailable
             }
 
             let process = Process()
-            process.executableURL = operatorURL
+            process.executableURL = resolvedOperatorURL
             process.arguments = arguments + ownerArguments + workspaceArguments
             let stdout = Pipe()
             let stderr = Pipe()
@@ -482,7 +482,9 @@ final class BridgeModel: ObservableObject {
                 if let failure = try? decoder.decode(OperatorFailure.self, from: errorOutput) {
                     throw OperatorError.failed(failure.error)
                 }
-                throw OperatorError.failed(String(decoding: errorOutput, as: UTF8.self))
+                throw OperatorError.failed(
+                    String(data: errorOutput, encoding: .utf8) ?? "Operator returned an invalid error response"
+                )
             }
             guard let envelope = try? decoder.decode(OperatorEnvelope<Value>.self, from: output), envelope.ok else {
                 throw OperatorError.invalidResponse

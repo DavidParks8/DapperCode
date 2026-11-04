@@ -14,6 +14,7 @@ enum WorkspacePathKind: String, Sendable {
 
 struct WorkspaceError: LocalizedError {
   let errorDescription: String?
+
   init(_ message: String) { errorDescription = message }
 }
 
@@ -101,7 +102,7 @@ actor WorkspaceStore {
       if entry == .file, let info = try fileStatus(current), info.st_nlink > 1 {
         throw WorkspaceError("Hard-linked files cannot be accessed by workspace tools.")
       }
-      if index < components.count - 1 && entry != .directory {
+      if index < components.count - 1, entry != .directory {
         throw WorkspaceError("A parent in the workspace path is not a directory: \(path)")
       }
     }

@@ -108,7 +108,7 @@ extension NativeGit {
       var tree: OpaquePointer?
       var head: OpaquePointer?
       let result = git_revparse_single(&head, repository, "HEAD^{tree}")
-      if result != GIT_ENOTFOUND.rawValue && result != GIT_EUNBORNBRANCH.rawValue {
+      if result != GIT_ENOTFOUND.rawValue, result != GIT_EUNBORNBRANCH.rawValue {
         try requireSuccess(result, "Read HEAD tree")
         tree = head
       }
@@ -131,13 +131,13 @@ extension NativeGit {
         collector.takeUnretainedValue().append(Data("\(label)\n".utf8))
         try requireSuccess(git_diff_print(diff, GIT_DIFF_FORMAT_PATCH, { _, _, line, payload in
           guard let line, let payload else { return GIT_EUSER.rawValue }
-          let collector = Unmanaged<GitDiffCollector>.fromOpaque(payload).takeUnretainedValue()
+          let diffCollector = Unmanaged<GitDiffCollector>.fromOpaque(payload).takeUnretainedValue()
           let origin = line.pointee.origin
           if origin == 43 || origin == 45 || origin == 32 {
-            collector.append(Data([UInt8(bitPattern: origin)]))
+            diffCollector.append(Data([UInt8(bitPattern: origin)]))
           }
           if let content = line.pointee.content {
-            collector.append(content, count: line.pointee.content_len)
+            diffCollector.append(content, count: line.pointee.content_len)
           }
           return 0
         }, collector.toOpaque()), "Format diff")

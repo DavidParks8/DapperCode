@@ -78,7 +78,7 @@ final class BridgeStatusObserver {
         desired = next
 
         for target in targets {
-            if entries[target.profileId] == nil && retryTasks[target.profileId] == nil {
+            if entries[target.profileId] == nil, retryTasks[target.profileId] == nil {
                 connect(target)
             }
         }
@@ -216,11 +216,11 @@ private final class URLSessionBridgeStatusConnection: BridgeStatusConnection {
 
     func start() {
         guard socket == nil, !isCancelled else { return }
-        let socket = URLSession.shared.webSocketTask(with: request)
-        self.socket = socket
-        socket.resume()
+        let webSocket = URLSession.shared.webSocketTask(with: request)
+        socket = webSocket
+        webSocket.resume()
         worker = Task { [weak self] in
-            await self?.run(socket)
+            await self?.run(webSocket)
         }
     }
 
