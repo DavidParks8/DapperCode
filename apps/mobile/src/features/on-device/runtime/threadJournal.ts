@@ -44,15 +44,69 @@ export interface LocalThreadDelta {
   messages: LocalMessage[];
 }
 
-/** The serialized form of the last durable state, used to compute the next segment. */
+/**
+ * The last durable state, used to compute the next segment. It references the conversation's own
+ * (immutable) message objects instead of copying them, so it costs no serialization and no memory
+ * beyond the id index.
+ */
 export interface DurableLocalThread {
-  header: Record<LocalThreadHeaderKey, string>;
+  header: LocalThreadHeader;
   ids: string[];
-  messages: Map<string, string>;
+  messages: Map<string, LocalMessage>;
 }
 
+/** The UTF-8 length of `value`, as `TextEncoder` encodes it, without allocating the bytes. */
 export function utf8Bytes(value: string): number {
-  return new TextEncoder().encode(value).length;
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x80) {
+      bytes += 1;
+    } else if (code < 0x800) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        // A lone surrogate is encoded as U+FFFD.
+        bytes += 3;
+      }
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
+
+/**
+ * Whether two values serialize to the same JSON, without serializing them. Properties whose value
+ * is undefined are skipped and key order matters, exactly as in `JSON.stringify`, so this matches
+ * comparing the serialized strings for conversation data (strings, null, booleans, finite numbers,
+ * arrays, and plain objects).
+ */
+export function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) {
+    return false;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    return a.every((item, index) => sameJson(item, b[index]));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left).filter((key) => left[key] !== undefined);
+  const other = Object.keys(right).filter((key) => right[key] !== undefined);
+  return (
+    keys.length === other.length &&
+    keys.every((key, index) => key === other[index] && sameJson(left[key], right[key]))
+  );
 }
 
 export function threadSegmentPrefix(id: string): string {
@@ -82,21 +136,22 @@ export function parseThreadSegmentName(name: string): { id: string; sequence: nu
 }
 
 export function durableLocalThread(thread: LocalThread): DurableLocalThread {
-  const header = {} as Record<LocalThreadHeaderKey, string>;
+  const header = {} as Record<LocalThreadHeaderKey, unknown>;
   for (const key of LOCAL_THREAD_HEADER_KEYS) {
-    header[key] = JSON.stringify(thread[key]);
+    header[key] = thread[key];
   }
   return {
-    header,
+    header: header as LocalThreadHeader,
     ids: thread.messages.map((message) => message.id),
-    messages: new Map(thread.messages.map((message) => [message.id, JSON.stringify(message)])),
+    messages: new Map(thread.messages.map((message) => [message.id, message])),
   };
 }
 
 /**
  * Describes how `next` differs from the durable state: null when nothing changed, or 'rebase' when
  * the change is not an in-place update/removal/append (for example reordered or duplicate ids)
- * and needs a new base.
+ * and needs a new base. Messages are never changed in place, so an unchanged object is skipped by
+ * identity; only a replaced object is compared by content.
  */
 export function localThreadDelta(
   previous: DurableLocalThread,
@@ -112,7 +167,7 @@ export function localThreadDelta(
   const set: Partial<LocalThreadHeader> = {};
   let changed = false;
   for (const key of LOCAL_THREAD_HEADER_KEYS) {
-    if (previous.header[key] !== durable.header[key]) {
+    if (!sameJson(previous.header[key], durable.header[key])) {
       Object.assign(set, { [key]: next[key] });
       changed = true;
     }
@@ -125,7 +180,7 @@ export function localThreadDelta(
       if (kept[index] !== message.id) {
         return 'rebase';
       }
-      if (previous.messages.get(message.id) === durable.messages.get(message.id)) {
+      if (sameJson(previous.messages.get(message.id), durable.messages.get(message.id))) {
         continue;
       }
     }
@@ -200,4 +255,38 @@ export function applyLocalThreadDelta(thread: LocalThread, delta: LocalThreadDel
     }
   }
   return { ...thread, ...delta.set, messages };
+}
+
+/** Journal entries (user turns, tool results, tool-call intent) with their durable counts. */
+export type JournalEntries = Map<string, number>;
+
+export function messageJournalEntries(message: LocalMessage): string[] {
+  const entries = message.role === 'assistant' ? [] : [`message:${message.id}`];
+  for (const call of message.toolCalls ?? []) {
+    entries.push(`call:${call.id}`);
+  }
+  return entries;
+}
+
+export function countJournalEntries(
+  journal: JournalEntries,
+  message: LocalMessage | undefined,
+  step: 1 | -1,
+): void {
+  for (const entry of message ? messageJournalEntries(message) : []) {
+    const count = (journal.get(entry) ?? 0) + step;
+    if (count > 0) {
+      journal.set(entry, count);
+    } else {
+      journal.delete(entry);
+    }
+  }
+}
+
+export function journalEntries(thread: LocalThread): JournalEntries {
+  const journal: JournalEntries = new Map();
+  for (const message of thread.messages) {
+    countJournalEntries(journal, message, 1);
+  }
+  return journal;
 }

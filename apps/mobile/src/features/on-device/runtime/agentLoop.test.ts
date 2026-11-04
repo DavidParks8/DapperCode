@@ -280,17 +280,18 @@ test('a tool turn appends journal segments whose size does not grow with the con
   const small = await turn(1);
   const large = await turn(300);
   expect(large.historyBytes).toBeGreaterThan(300 * 1024);
-  // User turn, tool-call intent, and tool invocation each append one segment before execution.
-  expect(large.segments).toHaveLength(3);
+  // User turn, tool-call intent, and tool invocation each append one segment before execution;
+  // the tool result, final answer, and settlement are coalesced into one more.
+  expect(large.segments).toHaveLength(4);
   const total = (writes: { bytes: number }[]) =>
     writes.reduce((sum, write) => sum + write.bytes, 0);
   const journaled = total(large.segments);
   // Only timestamps that happen to change within the same millisecond may differ.
   expect(Math.abs(journaled - total(small.segments))).toBeLessThan(128);
   expect(journaled).toBeLessThan(4 * 1024);
-  // Previously each of those journal saves rewrote the whole conversation; now only the settled
-  // run is compacted, once.
-  expect(large.bases).toHaveLength(1);
+  // Previously each of those saves rewrote the whole conversation, and later settlement compacted
+  // it once per run; now the base is never rewritten during a turn.
+  expect(large.bases).toHaveLength(0);
   expect(journaled * 50).toBeLessThan(large.historyBytes);
 });
 

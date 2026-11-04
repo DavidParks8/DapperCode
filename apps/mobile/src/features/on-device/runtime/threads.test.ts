@@ -251,12 +251,14 @@ test('a crash after journaling tool intent replays the segments, interrupts the 
   expect(recovered.messages.find((message) => message.id === 'tool-1')?.tool?.status).toBe(
     'interrupted',
   );
-  // Recovery is compacted into a new base that records the replayed segments.
-  expect(names(crashed, 'threadseg-')).toEqual([]);
-  expect(JSON.parse(crashed.get(threadDocument(ID)) ?? '{}')).toMatchObject({
-    segment: 3,
-    status: 'interrupted',
+  // Recovery is journaled as the next segment after the replayed ones; the base is untouched.
+  expect(first.port.writeRuntimeDocument.mock.calls.map(([name]) => name)).toEqual([
+    threadSegmentDocument(ID, 4),
+  ]);
+  expect(JSON.parse(crashed.get(threadSegmentDocument(ID, 4)) ?? '{}')).toMatchObject({
+    set: { status: 'interrupted', activeTurnId: null },
   });
+  expect(storedLocalThread(crashed, ID)).toEqual(recovered);
 
   const second = await open(crashed);
   expect(second.threads.get(ID)).toEqual(recovered);
@@ -268,12 +270,25 @@ test('a crash between compaction and segment removal discards the already-applie
   await live.threads.create('workspace', 'model');
   await journalToolIntent(live.threads, ID);
   live.port.removeRuntimeDocument.mockRejectedValue(new Error('Crashed before removal'));
-  live.threads.change(ID, (thread) => ({
-    ...recoverLocalThread(thread),
-    status: 'complete',
-    activeTurnId: null,
-    lastError: null,
-  }));
+  // A final answer too large for a segment compacts the journal into a new base.
+  live.threads.change(ID, (thread) => {
+    const settled = recoverLocalThread(thread);
+    return {
+      ...settled,
+      status: 'complete',
+      activeTurnId: null,
+      lastError: null,
+      messages: [
+        ...settled.messages,
+        {
+          id: 'assistant-2',
+          role: 'assistant',
+          content: 'x'.repeat(THREAD_SEGMENT_MAX_BYTES),
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    };
+  });
   await live.threads.save(ID);
   await live.threads.flush();
   expect(JSON.parse(live.documents.get(threadDocument(ID)) ?? '{}')).toMatchObject({
@@ -453,4 +468,282 @@ test('a failed segment write is retried at the same position with every pending 
   expect(live.threads.persistenceError()).toBeNull();
   expect(names(live.documents, 'threadseg-')).toEqual([threadSegmentDocument(ID, 1)]);
   expect((await open(new Map(live.documents))).threads.get(ID)).toEqual(live.threads.get(ID));
+});
+
+function historyMessages(count: number): LocalMessage[] {
+  return Array.from({ length: count }, (_, index) =>
+    userMessage(`history-${String(index).padStart(4, '0')}`, 'x'.repeat(1024)),
+  );
+}
+
+test('a save after changing one message serializes only that message', async () => {
+  const live = await open();
+  await live.threads.create('workspace', 'model');
+  const history = historyMessages(200);
+  await append(live.threads, ID, ...history);
+  const changed = userMessage('history-0100', 'edited');
+  const stringify = jest.spyOn(JSON, 'stringify');
+  try {
+    live.threads.change(ID, (thread) => ({
+      ...thread,
+      messages: thread.messages.map((message) => (message.id === changed.id ? changed : message)),
+    }));
+    await live.threads.save(ID);
+    const unchanged = new Set<unknown>(history.filter((message) => message.id !== changed.id));
+    expect(stringify.mock.calls.some(([value]) => unchanged.has(value))).toBe(false);
+    const serialized = stringify.mock.results.reduce(
+      (sum, result) => sum + (typeof result.value === 'string' ? result.value.length : 0),
+      0,
+    );
+    expect(serialized).toBeLessThan(1024);
+  } finally {
+    stringify.mockRestore();
+  }
+  expect(names(live.documents, 'threadseg-')).toEqual([
+    threadSegmentDocument(ID, 1),
+    threadSegmentDocument(ID, 2),
+  ]);
+  expect(JSON.parse(live.documents.get(threadSegmentDocument(ID, 2)) ?? '{}')).toEqual({
+    version: 1,
+    thread: ID,
+    sequence: 2,
+    set: {},
+    remove: [],
+    messages: [changed],
+  });
+  expect((await open(new Map(live.documents))).threads.get(ID)).toEqual(live.threads.get(ID));
+});
+
+test('a progress save during a run only inspects the messages that changed', async () => {
+  const live = await open();
+  await live.threads.create('workspace', 'model');
+  await journalToolIntent(live.threads, ID);
+  let reads = 0;
+  const history = historyMessages(50).map((message) => {
+    const calls: LocalMessage['toolCalls'] = [];
+    return Object.defineProperty({ ...message }, 'toolCalls', {
+      enumerable: true,
+      get: () => {
+        reads += 1;
+        return calls;
+      },
+    });
+  });
+  await append(live.threads, ID, ...history, toolCallMessage('assistant-2', 'call-2'));
+  live.port.writeRuntimeDocument.mockClear();
+  reads = 0;
+  // Streaming into the last assistant message is progress: it is coalesced, not journaled.
+  live.threads.change(ID, (thread) => ({
+    ...thread,
+    messages: thread.messages.map((message) =>
+      message.id === 'assistant-2' ? { ...message, content: 'streamed' } : message,
+    ),
+  }));
+  await live.threads.save(ID);
+  expect(live.port.writeRuntimeDocument).not.toHaveBeenCalled();
+  expect(reads).toBe(0);
+
+  // A new tool call is still journal intent and is written before the save resolves.
+  live.threads.change(ID, (thread) => ({
+    ...thread,
+    messages: thread.messages.map((message) =>
+      message.id === 'assistant-2' ? toolCallMessage('assistant-2', 'call-3') : message,
+    ),
+  }));
+  await live.threads.save(ID);
+  expect(live.port.writeRuntimeDocument.mock.calls.map(([name]) => name)).toEqual([
+    threadSegmentDocument(ID, 5),
+  ]);
+  expect(reads).toBe(0);
+});
+
+test('settling a run appends a segment, and a crash replays to the settled conversation', async () => {
+  const live = await open();
+  await live.threads.create('workspace', 'model');
+  const base = live.documents.get(threadDocument(ID));
+  await journalToolIntent(live.threads, ID);
+  live.port.writeRuntimeDocument.mockClear();
+  live.threads.change(ID, (thread) => ({
+    ...thread,
+    status: 'complete',
+    activeTurnId: null,
+    lastError: null,
+    updatedAt: '2026-01-02T00:00:00.000Z',
+    messages: [
+      ...thread.messages.map((message) =>
+        message.id === 'tool-1' && message.tool
+          ? {
+              ...message,
+              content: '{"ok":true}',
+              tool: { ...message.tool, status: 'completed' as const },
+            }
+          : message,
+      ),
+      {
+        id: 'assistant-2',
+        role: 'assistant',
+        content: 'Done',
+        createdAt: '2026-01-02T00:00:00.000Z',
+      },
+    ],
+  }));
+  await live.threads.save(ID);
+  await live.threads.flush();
+  expect(live.port.writeRuntimeDocument.mock.calls.map(([name]) => name)).toEqual([
+    threadSegmentDocument(ID, 4),
+  ]);
+  expect(live.port.removeRuntimeDocument).not.toHaveBeenCalled();
+  expect(live.documents.get(threadDocument(ID))).toBe(base);
+  const settled = live.threads.get(ID);
+  expect(JSON.parse(live.documents.get(threadSegmentDocument(ID, 4)) ?? '{}')).toEqual({
+    version: 1,
+    thread: ID,
+    sequence: 4,
+    set: { updatedAt: '2026-01-02T00:00:00.000Z', status: 'complete', activeTurnId: null },
+    remove: [],
+    messages: settled.messages.slice(-2),
+  });
+
+  // A crash after settlement replays base + running segments + settlement, with nothing to recover.
+  const crashed = await open(new Map(live.documents));
+  expect(crashed.threads.get(ID)).toEqual(settled);
+  expect(crashed.threads.recovery()).toMatchObject({ setAside: 0, leftInPlace: 0 });
+  expect(crashed.port.writeRuntimeDocument).not.toHaveBeenCalled();
+
+  // An interrupted second run on top of the settled journal is still recovered.
+  await journalToolIntentAgain(crashed.threads);
+  const interrupted = await open(new Map(crashed.documents));
+  const recovered = interrupted.threads.get(ID);
+  expect(recovered).toEqual(recoverLocalThread(crashed.threads.get(ID)));
+  expect(recovered.status).toBe('interrupted');
+  expect(recovered.messages.slice(0, settled.messages.length)).toEqual(settled.messages);
+  expect(recovered.messages.find((message) => message.id === 'tool-2')?.tool?.status).toBe(
+    'interrupted',
+  );
+  expect(storedLocalThread(interrupted.documents, ID)).toEqual(recovered);
+});
+
+async function journalToolIntentAgain(threads: LocalThreadRepository) {
+  threads.change(ID, (thread) => ({ ...thread, status: 'running', activeTurnId: 'turn-2' }));
+  await append(threads, ID, userMessage('user-2', 'Change it again'));
+  await append(threads, ID, toolCallMessage('assistant-3', 'call-2'));
+  await append(threads, ID, pendingTool('tool-2', 'call-2'));
+}
+
+test('settling a run compacts only when the journal reaches its limits', async () => {
+  const live = await open();
+  await live.threads.create('workspace', 'model');
+  live.threads.change(ID, (thread) => ({ ...thread, status: 'running', activeTurnId: 'turn-1' }));
+  await live.threads.save(ID);
+  for (let index = 1; index < THREAD_COMPACT_SEGMENTS; index += 1) {
+    await append(live.threads, ID, userMessage(`user-${index}`));
+  }
+  expect(names(live.documents, 'threadseg-')).toHaveLength(THREAD_COMPACT_SEGMENTS);
+  live.port.writeRuntimeDocument.mockClear();
+  live.threads.change(ID, (thread) => ({ ...thread, status: 'complete', activeTurnId: null }));
+  await live.threads.save(ID);
+  await live.threads.flush();
+  expect(live.port.writeRuntimeDocument.mock.calls.map(([name]) => name)).toEqual([
+    threadDocument(ID),
+  ]);
+  expect(names(live.documents, 'threadseg-')).toEqual([]);
+  expect((await open(new Map(live.documents))).threads.get(ID)).toEqual(live.threads.get(ID));
+});
+
+test('a base and segments written by earlier builds still load, and new segments keep the format', async () => {
+  const documents = new Map([
+    [
+      threadDocument(ID),
+      `{"version":1,"id":"${ID}","title":"Stored","workspaceId":"workspace","modelId":"model","createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z","status":"idle","activeTurnId":null,"lastSubmissionId":null,"lastError":null,"messages":[{"id":"user-1","role":"user","content":"Hello","createdAt":"2026-01-01T00:00:00.000Z"}],"segment":2}`,
+    ],
+    [
+      threadSegmentDocument(ID, 3),
+      `{"version":1,"thread":"${ID}","sequence":3,"set":{"updatedAt":"2026-01-01T00:00:01.000Z","status":"running","activeTurnId":"turn-1"},"remove":[],"messages":[{"id":"assistant-1","role":"assistant","content":"","createdAt":"2026-01-01T00:00:01.000Z","toolCalls":[{"id":"call-1","type":"function","function":{"name":"read_file","arguments":"{}"}}]}]}`,
+    ],
+    [
+      threadSegmentDocument(ID, 4),
+      `{"version":1,"thread":"${ID}","sequence":4,"set":{"status":"complete","activeTurnId":null},"remove":[],"messages":[{"id":"assistant-1","role":"assistant","content":"Hi","createdAt":"2026-01-01T00:00:01.000Z","reasoning":"","toolCalls":[]}]}`,
+    ],
+  ]);
+  const { port, threads } = await open(documents);
+  expect(port.writeRuntimeDocument).not.toHaveBeenCalled();
+  expect(threads.get(ID)).toEqual({
+    version: 1,
+    id: ID,
+    title: 'Stored',
+    workspaceId: 'workspace',
+    modelId: 'model',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:01.000Z',
+    status: 'complete',
+    activeTurnId: null,
+    lastSubmissionId: null,
+    lastError: null,
+    messages: [
+      { id: 'user-1', role: 'user', content: 'Hello', createdAt: '2026-01-01T00:00:00.000Z' },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: 'Hi',
+        createdAt: '2026-01-01T00:00:01.000Z',
+        reasoning: '',
+        toolCalls: [],
+      },
+    ],
+  });
+  threads.change(ID, (thread) => ({ ...thread, title: 'Renamed' }));
+  await threads.save(ID);
+  expect(documents.get(threadSegmentDocument(ID, 5))).toBe(
+    `{"version":1,"thread":"${ID}","sequence":5,"set":{"title":"Renamed"},"remove":[],"messages":[]}`,
+  );
+});
+
+test('list() orders by most recent update with stable ties and is not re-sorted while unchanged', async () => {
+  const { threads } = await open();
+  const created = [];
+  for (let index = 0; index < 4; index += 1) {
+    created.push((await threads.create('workspace', 'model')).id);
+  }
+  const stamp = [
+    '2026-01-02T00:00:00.000Z',
+    '2026-01-03T00:00:00.000Z',
+    '2026-01-02T00:00:00.000Z',
+    '2026-01-01T00:00:00.000Z',
+  ];
+  created.forEach((id, index) => {
+    threads.change(id, (thread) => ({ ...thread, updatedAt: stamp[index] ?? '' }));
+  });
+  const first = threads.list();
+  // Ties keep insertion order, exactly as the stable localeCompare sort did.
+  expect(first.map((thread) => thread.id)).toEqual([
+    created[1],
+    created[0],
+    created[2],
+    created[3],
+  ]);
+  expect(first).toEqual([...first].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+  const sort = jest.spyOn(Array.prototype, 'sort');
+  try {
+    expect(threads.list()).toBe(first);
+    expect(threads.list()).toBe(first);
+    expect(sort).not.toHaveBeenCalled();
+  } finally {
+    sort.mockRestore();
+  }
+  expect(Object.isFrozen(first)).toBe(true);
+
+  threads.change(created[3] ?? '', (thread) => ({
+    ...thread,
+    updatedAt: '2026-01-04T00:00:00.000Z',
+  }));
+  const second = threads.list();
+  expect(second).not.toBe(first);
+  expect(second.map((thread) => thread.id)).toEqual([
+    created[3],
+    created[1],
+    created[0],
+    created[2],
+  ]);
+  await threads.remove(created[1] ?? '');
+  expect(threads.list().map((thread) => thread.id)).toEqual([created[3], created[0], created[2]]);
 });
