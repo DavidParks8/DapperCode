@@ -1,6 +1,7 @@
 import {
   elideToolResult,
   generationTokenBudget,
+  iteratePromptCandidates,
   OMITTED_TURNS_NOTE,
   promptCandidates,
   promptFits,
@@ -76,6 +77,29 @@ test('candidates shrink history first and never drop the current user message', 
   expect(JSON.stringify(lastResort)).not.toContain('z'.repeat(2000));
   expect(JSON.stringify(lastResort)).not.toContain('y'.repeat(1000));
   expect(lastResort).toHaveLength(current.length + 1);
+});
+
+test('lazy candidates elide nothing until the original prompt is rejected', () => {
+  const current: LocalModelMessage[] = [
+    { role: 'user', content: 'current question' },
+    ...turn(9).slice(1, 3),
+  ];
+  const messages = [system, ...turn(0), ...turn(1), ...current];
+  const parse = jest.spyOn(JSON, 'parse');
+  try {
+    const lazy = iteratePromptCandidates(messages);
+    expect(lazy.next().value).toEqual({ messages, scope: 'original' });
+    expect(parse).not.toHaveBeenCalled();
+    expect(lazy.next().value?.scope).toBe('history');
+    expect(parse).toHaveBeenCalled();
+  } finally {
+    parse.mockRestore();
+  }
+  expect([...iteratePromptCandidates(messages)]).toEqual(promptCandidates(messages));
+  // A caller that already has a fitting history candidate never builds current-turn ones.
+  expect(
+    [...iteratePromptCandidates(messages, () => true)].map((candidate) => candidate.scope),
+  ).toEqual(['original', 'history', 'history', 'history']);
 });
 
 test('a lone question has no compaction candidates beyond the original prompt', () => {

@@ -6,7 +6,7 @@ import type {
 } from 'llama.rn';
 import type { OnDeviceNativeServices } from '../native/services.types';
 import { localModelDefinition, requireLocalModelRuntime } from './catalog';
-import { generationTokenBudget, promptCandidates, promptFits } from './contextWindow';
+import { generationTokenBudget, iteratePromptCandidates, promptFits } from './contextWindow';
 import type {
   LocalContextLoader,
   LocalModelContext,
@@ -378,12 +378,10 @@ export class LocalModelSession {
   ): Promise<PreparedPrompt> {
     const { context, contextTokens } = generation.model;
     let fallback: PreparedPrompt | null = null;
-    for (const candidate of promptCandidates(messages)) {
+    // A history candidate that fits is preferred to eliding the current turn's own output.
+    for (const candidate of iteratePromptCandidates(messages, () => fallback !== null)) {
       if (generation.interrupted) {
         throw new LocalModelInterrupted();
-      }
-      if (candidate.scope === 'current' && fallback) {
-        return fallback;
       }
       const formatted = await context.getFormattedChat(candidate.messages, null, {
         tools,
