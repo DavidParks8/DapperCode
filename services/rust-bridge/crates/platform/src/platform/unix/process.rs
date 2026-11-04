@@ -7,7 +7,14 @@ use crate::platform::{poll_while_owner_is_alive, PlatformFuture};
 const OWNER_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 pub(super) fn unix_process_is_alive(pid: u32) -> bool {
-    if unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    if pid == 0 {
+        return false;
+    }
+    // SAFETY: signal zero only probes the checked PID and does not access Rust memory.
+    if unsafe { libc::kill(pid, 0) } == 0 {
         return true;
     }
     std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
@@ -43,8 +50,13 @@ pub(super) fn kill_unix_git_process_group(child: &Child) {
     let Some(pid) = child.id() else {
         return;
     };
-    let pid = pid as libc::pid_t;
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        eprintln!("warning: Git process id {pid} is out of range");
+        return;
+    };
+    // SAFETY: getpgid only reads the integer process identifier.
     if unsafe { libc::getpgid(pid) } == pid {
+        // SAFETY: the checked child PID is its process-group ID; kill takes no pointers.
         unsafe {
             libc::kill(-pid, libc::SIGKILL);
         }
@@ -88,10 +100,12 @@ fn classify_kevent(received: libc::c_int, error_kind: std::io::ErrorKind) -> Wat
 fn block_on_owner_exit(owner_pid: u32) -> bool {
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
+    // SAFETY: kqueue takes no arguments and returns a new descriptor or an error.
     let queue = unsafe { libc::kqueue() };
     if queue < 0 {
         return false;
     }
+    // SAFETY: kqueue returned a valid newly owned descriptor, transferred exactly once.
     let queue = unsafe { OwnedFd::from_raw_fd(queue) };
     let queue_fd = queue.as_raw_fd();
 
@@ -103,6 +117,7 @@ fn block_on_owner_exit(owner_pid: u32) -> bool {
         data: 0,
         udata: std::ptr::null_mut(),
     };
+    // SAFETY: queue_fd stays open, change is initialized, and no output buffer is requested.
     let registered = unsafe {
         libc::kevent(
             queue_fd,
@@ -118,6 +133,7 @@ fn block_on_owner_exit(owner_pid: u32) -> bool {
     }
 
     loop {
+        // SAFETY: queue_fd stays open and change provides writable storage for one event.
         let received = unsafe {
             libc::kevent(
                 queue_fd,
@@ -133,6 +149,18 @@ fn block_on_owner_exit(owner_pid: u32) -> bool {
             WatchStep::Unavailable => return false,
             WatchStep::Retry => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod unix_tests {
+    use super::unix_process_is_alive;
+
+    #[test]
+    fn process_probe_rejects_invalid_process_ids() {
+        assert!(!unix_process_is_alive(u32::MAX));
+        assert!(!unix_process_is_alive(i32::MAX as u32 + 1));
+        assert!(!unix_process_is_alive(0));
     }
 }
 

@@ -923,7 +923,7 @@ pub(super) struct BridgeQueueService {
     pub(super) retirement_retry_barrier: std::sync::Mutex<Option<(Arc<Notify>, Arc<Notify>)>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct RpcQuery {
     pub(super) token: Option<String>,
@@ -932,7 +932,7 @@ pub(super) struct RpcQuery {
     pub(super) client_foreground: Option<bool>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub(super) struct LocalImageQuery {
     pub(super) path: String,
     pub(super) token: Option<String>,

@@ -384,7 +384,7 @@ fn is_sha256_digest(value: &str) -> bool {
 fn executable_sha256(path: &Path) -> Result<String, RuntimeManifestError> {
     let mut file = File::open(path).map_err(|_| RuntimeManifestError::InvalidExecutable)?;
     let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
+    let mut buffer = vec![0_u8; 64 * 1024];
     loop {
         let bytes = file
             .read(&mut buffer)

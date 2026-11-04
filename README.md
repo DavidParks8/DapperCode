@@ -145,6 +145,24 @@ pnpm run desktop:build:macos
 pnpm run desktop:build:windows
 ```
 
+Both Rust workspaces inherit the same compiler and Clippy policy from their workspace manifests.
+The lint gate checks every target and feature, treats warnings as errors, and adds focused safety,
+correctness, and error-handling rules beyond Clippy's defaults. CI runs both workspaces on Linux,
+macOS, and Windows, including release-only desktop code. Any lint suppression must explain why it
+is needed.
+Unsafe-free crates forbid unsafe code; platform FFI requires documented safety invariants and
+separate unsafe operations. Potentially truncating, wrapping, and sign-losing numeric casts are
+denied, as are calls that become unsafe in Rust 2024. Dylint is not required for the current checks.
+Compiler warnings are errors even during `cargo check`, and core unsoundness rules cannot be
+suppressed. Production `unwrap()` and `panic!`, temporary lock guards in match/if-let scrutinees,
+oversized futures and stack allocations, lossy casts, and unsafe pointer conversions fail linting.
+Arrays and awaited futures are capped at 16 KiB; the conservative stack-frame estimate is capped
+at 500 KiB.
+The shared `clippy.toml` permits assertion-style unwraps and panics only in tests. Compile-fail
+fixtures verify both the rejected production patterns and the permitted test patterns.
+The workspaces remain on Rust 2021; audit tail-expression drop-order changes before migrating the
+edition.
+
 On macOS, `pnpm run swift:lint` enables all available SwiftLint rules for the desktop shell
 and native iOS modules. Install the tool once with `brew install swiftlint`. Rules that
 conflict with the repository's formatting conventions or Foundation/UIKit bridging are

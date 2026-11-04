@@ -5,6 +5,24 @@ use dappercode_bridge_core::protocol_constants::DEFAULT_ATTACHMENTS_DIR_NAME;
 use dappercode_bridge_path_policy::PathPolicy;
 use reqwest::Url;
 
+#[cfg(not(test))]
+use std::env::var as config_env;
+
+#[cfg(test)]
+thread_local! {
+    static TEST_ENV: std::cell::RefCell<std::collections::HashMap<String, Option<std::ffi::OsString>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+#[cfg(test)]
+fn config_env(name: &str) -> Result<String, env::VarError> {
+    match TEST_ENV.with(|vars| vars.borrow().get(name).cloned()) {
+        Some(Some(value)) => value.into_string().map_err(env::VarError::NotUnicode),
+        Some(None) => Err(env::VarError::NotPresent),
+        None => env::var(name),
+    }
+}
+
 pub(crate) const DEFAULT_WS_MAX_FRAME_BYTES: usize = 32 * 1024 * 1024;
 pub(crate) const DEFAULT_WS_MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 pub(crate) const DEFAULT_WS_PER_CLIENT_IN_FLIGHT: usize = 16;
@@ -47,14 +65,14 @@ pub(crate) struct WebSocketResourceLimits {
 
 impl BridgeConfig {
     pub(crate) fn from_env() -> Result<Self, String> {
-        let host = env::var("BRIDGE_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-        let port = env::var("BRIDGE_PORT")
+        let host = config_env("BRIDGE_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let port = config_env("BRIDGE_PORT")
             .ok()
             .and_then(|v| v.parse::<u16>().ok())
             .unwrap_or(8787);
         let preview_host =
-            env::var("BRIDGE_PREVIEW_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-        let preview_port = env::var("BRIDGE_PREVIEW_PORT")
+            config_env("BRIDGE_PREVIEW_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let preview_port = config_env("BRIDGE_PREVIEW_PORT")
             .ok()
             .and_then(|v| v.parse::<u16>().ok())
             .unwrap_or_else(|| port.checked_add(1).unwrap_or(8788));
@@ -65,7 +83,7 @@ impl BridgeConfig {
         let connect_url = parse_connect_url_env("BRIDGE_CONNECT_URL")?;
         let preview_connect_url = parse_connect_url_env("BRIDGE_PREVIEW_CONNECT_URL")?;
 
-        let configured_workdir = env::var("BRIDGE_WORKDIR")
+        let configured_workdir = config_env("BRIDGE_WORKDIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         let workdir = resolve_bridge_workdir(configured_workdir)?;
@@ -78,14 +96,14 @@ impl BridgeConfig {
             workdir.join(DEFAULT_ATTACHMENTS_DIR_NAME),
         )?;
 
-        let acp_manifest_path = env::var("ACP_AGENT_MANIFEST")
+        let acp_manifest_path = config_env("ACP_AGENT_MANIFEST")
             .map(PathBuf::from)
             .unwrap_or_else(|_| workdir.join(".dappercode/agents.json"));
         let acp_approved_executable_roots =
             parse_path_list_env("ACP_AGENT_ROOTS", &[workdir.join(".dappercode/agents")])?;
         let acp_initialize_timeout =
             Duration::from_millis(parse_positive_u64_env("ACP_INITIALIZE_TIMEOUT_MS", 15_000)?);
-        let auth_token = env::var("BRIDGE_AUTH_TOKEN")
+        let auth_token = config_env("BRIDGE_AUTH_TOKEN")
             .ok()
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty());
@@ -271,7 +289,7 @@ pub(crate) fn resolve_bridge_workdir(raw_workdir: PathBuf) -> Result<PathBuf, St
 /// The value must be absolute so that a bridge started from any working directory reaches the same
 /// state, and so a relative path can never resolve into an unexpected part of the repository.
 fn parse_absolute_dir_env(name: &str, default: PathBuf) -> Result<PathBuf, String> {
-    let configured = match env::var(name) {
+    let configured = match config_env(name) {
         Ok(raw) if !raw.trim().is_empty() => PathBuf::from(raw.trim()),
         _ => default,
     };
@@ -297,7 +315,7 @@ fn parse_absolute_dir_env(name: &str, default: PathBuf) -> Result<PathBuf, Strin
 }
 
 fn parse_unresolved_absolute_dir_env(name: &str, default: PathBuf) -> Result<PathBuf, String> {
-    let configured = match env::var(name) {
+    let configured = match config_env(name) {
         Ok(raw) if !raw.trim().is_empty() => PathBuf::from(raw.trim()),
         _ => default,
     };
@@ -311,13 +329,13 @@ fn parse_unresolved_absolute_dir_env(name: &str, default: PathBuf) -> Result<Pat
 }
 
 pub(crate) fn parse_bool_env(name: &str) -> bool {
-    env::var(name)
+    config_env(name)
         .map(|v| v.trim().eq_ignore_ascii_case("true"))
         .unwrap_or(false)
 }
 
 pub(crate) fn parse_bool_env_with_default(name: &str, default: bool) -> bool {
-    env::var(name)
+    config_env(name)
         .map(|raw| {
             let value = raw.trim();
             if value.eq_ignore_ascii_case("true") {
@@ -332,7 +350,7 @@ pub(crate) fn parse_bool_env_with_default(name: &str, default: bool) -> bool {
 }
 
 pub(crate) fn parse_positive_usize_env(name: &str, default: usize) -> Result<usize, String> {
-    let Some(raw) = env::var(name).ok() else {
+    let Some(raw) = config_env(name).ok() else {
         return Ok(default);
     };
     let value = raw
@@ -346,7 +364,7 @@ pub(crate) fn parse_positive_usize_env(name: &str, default: usize) -> Result<usi
 }
 
 fn parse_positive_u64_env(name: &str, default: u64) -> Result<u64, String> {
-    let Some(raw) = env::var(name).ok() else {
+    let Some(raw) = config_env(name).ok() else {
         return Ok(default);
     };
     raw.trim()
@@ -357,7 +375,7 @@ fn parse_positive_u64_env(name: &str, default: u64) -> Result<u64, String> {
 }
 
 fn parse_path_list_env(name: &str, defaults: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
-    let paths = env::var(name)
+    let paths = config_env(name)
         .ok()
         .map(|raw| {
             env::split_paths(&raw)
@@ -400,7 +418,7 @@ pub(crate) fn normalize_connect_url(raw: &str) -> Option<String> {
 }
 
 fn parse_connect_url_env(name: &str) -> Result<Option<String>, String> {
-    let Some(raw) = env::var(name)
+    let Some(raw) = config_env(name)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -414,7 +432,7 @@ fn parse_connect_url_env(name: &str) -> Result<Option<String>, String> {
 }
 
 fn parse_origin_csv_env(name: &str) -> Result<HashSet<String>, String> {
-    let Some(raw) = env::var(name).ok() else {
+    let Some(raw) = config_env(name).ok() else {
         return Ok(HashSet::new());
     };
 
@@ -514,16 +532,15 @@ mod tests {
         }
     }
 
-    /// Restores process-wide environment values even when a test unwinds.
     struct DirEnvGuard {
         name: String,
-        previous: Option<std::ffi::OsString>,
+        previous: Option<Option<std::ffi::OsString>>,
     }
 
     impl DirEnvGuard {
         fn set(name: impl Into<String>, value: impl AsRef<std::ffi::OsStr>) -> Self {
             let guard = Self::unset(name);
-            unsafe { env::set_var(&guard.name, value) };
+            set_test_var(&guard.name, value);
             guard
         }
 
@@ -533,19 +550,59 @@ mod tests {
 
         fn unset(name: impl Into<String>) -> Self {
             let name = name.into();
-            let previous = env::var_os(&name);
-            unsafe { env::remove_var(&name) };
+            let previous = TEST_ENV.with(|vars| vars.borrow_mut().insert(name.clone(), None));
             Self { name, previous }
         }
     }
 
     impl Drop for DirEnvGuard {
         fn drop(&mut self) {
-            match self.previous.take() {
-                Some(value) => unsafe { env::set_var(&self.name, value) },
-                None => unsafe { env::remove_var(&self.name) },
-            }
+            TEST_ENV.with(|vars| match self.previous.take() {
+                Some(value) => {
+                    vars.borrow_mut().insert(self.name.clone(), value);
+                }
+                None => {
+                    vars.borrow_mut().remove(&self.name);
+                }
+            });
         }
+    }
+
+    fn set_test_var(name: impl AsRef<str>, value: impl AsRef<std::ffi::OsStr>) {
+        TEST_ENV.with(|vars| {
+            vars.borrow_mut().insert(
+                name.as_ref().to_string(),
+                Some(value.as_ref().to_os_string()),
+            );
+        });
+    }
+
+    fn remove_test_var(name: impl AsRef<str>) {
+        TEST_ENV.with(|vars| {
+            vars.borrow_mut().insert(name.as_ref().to_string(), None);
+        });
+    }
+
+    #[test]
+    fn test_environment_overrides_are_thread_local_and_restore_nested_values() {
+        let name = format!("DAPPERCODE_TEST_ISOLATION_{}", uuid::Uuid::new_v4());
+        let original = env::var(&name).ok();
+        let outer = DirEnvGuard::set(&name, "outer");
+        assert_eq!(config_env(&name).as_deref(), Ok("outer"));
+        assert_eq!(env::var(&name).ok(), original);
+
+        {
+            let _inner = DirEnvGuard::set(&name, "inner");
+            assert_eq!(config_env(&name).as_deref(), Ok("inner"));
+            let other_name = name.clone();
+            let observed = std::thread::spawn(move || config_env(&other_name).ok())
+                .join()
+                .expect("environment observer thread");
+            assert_eq!(observed, original);
+        }
+        assert_eq!(config_env(&name).as_deref(), Ok("outer"));
+        drop(outer);
+        assert_eq!(config_env(&name).ok(), original);
     }
 
     #[test]
@@ -820,12 +877,12 @@ mod tests {
             parse_unresolved_absolute_dir_env(&directory_name, fallback.clone()).unwrap(),
             fallback
         );
-        unsafe { env::set_var(&directory_name, "   ") };
+        set_test_var(&directory_name, "   ");
         assert_eq!(
             parse_unresolved_absolute_dir_env(&directory_name, fallback.clone()).unwrap(),
             fallback
         );
-        unsafe { env::set_var(&directory_name, "relative/path") };
+        set_test_var(&directory_name, "relative/path");
         assert!(parse_unresolved_absolute_dir_env(&directory_name, fallback.clone()).is_err());
 
         let defaults = [fallback.clone()];
@@ -833,21 +890,17 @@ mod tests {
             parse_path_list_env(&path_list_name, &defaults).unwrap(),
             defaults
         );
-        unsafe { env::set_var(&path_list_name, "") };
+        set_test_var(&path_list_name, "");
         assert!(parse_path_list_env(&path_list_name, &defaults).is_err());
-        unsafe {
-            env::set_var(
-                &path_list_name,
-                env::join_paths([fallback.as_path(), std::path::Path::new("relative")]).unwrap(),
-            )
-        };
+        set_test_var(
+            &path_list_name,
+            env::join_paths([fallback.as_path(), std::path::Path::new("relative")]).unwrap(),
+        );
         assert!(parse_path_list_env(&path_list_name, &defaults).is_err());
-        unsafe {
-            env::set_var(
-                &path_list_name,
-                env::join_paths([fallback.as_path(), env::temp_dir().as_path()]).unwrap(),
-            )
-        };
+        set_test_var(
+            &path_list_name,
+            env::join_paths([fallback.as_path(), env::temp_dir().as_path()]).unwrap(),
+        );
         assert_eq!(
             parse_path_list_env(&path_list_name, &defaults)
                 .unwrap()
@@ -861,11 +914,11 @@ mod tests {
         let name = format!("DAPPERCODE_TEST_U64_{}", uuid::Uuid::new_v4());
         let _env = DirEnvGuard::unset(name.clone());
         assert_eq!(parse_positive_u64_env(&name, 11).unwrap(), 11);
-        unsafe { env::set_var(&name, " 17 ") };
+        set_test_var(&name, " 17 ");
         assert_eq!(parse_positive_u64_env(&name, 11).unwrap(), 17);
-        unsafe { env::set_var(&name, "0") };
+        set_test_var(&name, "0");
         assert!(parse_positive_u64_env(&name, 11).is_err());
-        unsafe { env::set_var(&name, "invalid") };
+        set_test_var(&name, "invalid");
         assert!(parse_positive_u64_env(&name, 11).is_err());
     }
 
@@ -917,42 +970,42 @@ mod tests {
         .collect::<Vec<_>>();
 
         assert!(!parse_bool_env(&bool_name));
-        unsafe { env::set_var(&bool_name, " TRUE ") };
+        set_test_var(&bool_name, " TRUE ");
         assert!(parse_bool_env(&bool_name));
-        unsafe { env::set_var(&bool_name, "false") };
+        set_test_var(&bool_name, "false");
         assert!(!parse_bool_env(&bool_name));
 
         assert!(parse_bool_env_with_default(&default_bool_name, true));
-        unsafe { env::set_var(&default_bool_name, "true") };
+        set_test_var(&default_bool_name, "true");
         assert!(parse_bool_env_with_default(&default_bool_name, false));
-        unsafe { env::set_var(&default_bool_name, "false") };
+        set_test_var(&default_bool_name, "false");
         assert!(!parse_bool_env_with_default(&default_bool_name, true));
-        unsafe { env::set_var(&default_bool_name, "invalid") };
+        set_test_var(&default_bool_name, "invalid");
         assert!(parse_bool_env_with_default(&default_bool_name, true));
 
         assert_eq!(parse_positive_usize_env(&usize_name, 7).unwrap(), 7);
-        unsafe { env::set_var(&usize_name, "9") };
+        set_test_var(&usize_name, "9");
         assert_eq!(parse_positive_usize_env(&usize_name, 7).unwrap(), 9);
-        unsafe { env::set_var(&usize_name, "0") };
+        set_test_var(&usize_name, "0");
         assert!(parse_positive_usize_env(&usize_name, 7).is_err());
-        unsafe { env::set_var(&usize_name, "invalid") };
+        set_test_var(&usize_name, "invalid");
         assert!(parse_positive_usize_env(&usize_name, 7).is_err());
 
         assert_eq!(parse_connect_url_env(&url_name).unwrap(), None);
-        unsafe { env::set_var(&url_name, "  ") };
+        set_test_var(&url_name, "  ");
         assert_eq!(parse_connect_url_env(&url_name).unwrap(), None);
-        unsafe { env::set_var(&url_name, "https://example.com/path/") };
+        set_test_var(&url_name, "https://example.com/path/");
         assert_eq!(
             parse_connect_url_env(&url_name).unwrap(),
             Some("https://example.com/path".into())
         );
-        unsafe { env::set_var(&url_name, "ftp://example.com") };
+        set_test_var(&url_name, "ftp://example.com");
         assert!(parse_connect_url_env(&url_name).is_err());
 
         assert!(parse_origin_csv_env(&origin_name).unwrap().is_empty());
-        unsafe { env::set_var(&origin_name, "https://one.example, https://two.example") };
+        set_test_var(&origin_name, "https://one.example, https://two.example");
         assert_eq!(parse_origin_csv_env(&origin_name).unwrap().len(), 2);
-        unsafe { env::set_var(&origin_name, "https://example.com/path") };
+        set_test_var(&origin_name, "https://example.com/path");
         assert!(parse_origin_csv_env(&origin_name).is_err());
     }
 
@@ -1010,7 +1063,7 @@ mod tests {
             ("BRIDGE_WS_GLOBAL_IN_FLIGHT", "4"),
         ];
         for (name, value) in values {
-            unsafe { env::set_var(name, value) };
+            set_test_var(name, value);
         }
 
         let config = BridgeConfig::from_env().unwrap();
@@ -1028,34 +1081,26 @@ mod tests {
         assert!(!config.allow_outside_root_cwd);
         assert_eq!(config.ws_limits.global_in_flight, 4);
 
-        unsafe { env::set_var("BRIDGE_PREVIEW_PORT", "9000") };
+        set_test_var("BRIDGE_PREVIEW_PORT", "9000");
         assert!(BridgeConfig::from_env().is_err());
-        unsafe {
-            env::set_var("BRIDGE_DISABLE_BROWSER_PREVIEW", "true");
-            env::set_var("BRIDGE_PORT", "0");
-            env::set_var("BRIDGE_PREVIEW_PORT", "0");
-        }
+        set_test_var("BRIDGE_DISABLE_BROWSER_PREVIEW", "true");
+        set_test_var("BRIDGE_PORT", "0");
+        set_test_var("BRIDGE_PREVIEW_PORT", "0");
         let ephemeral = BridgeConfig::from_env().unwrap();
         assert_eq!((ephemeral.port, ephemeral.preview_port), (0, 0));
         assert!(!ephemeral.preview_enabled);
-        unsafe {
-            env::set_var("BRIDGE_DISABLE_BROWSER_PREVIEW", "false");
-            env::set_var("BRIDGE_PORT", "9000");
-            env::set_var("BRIDGE_PREVIEW_PORT", "9001");
-        }
+        set_test_var("BRIDGE_DISABLE_BROWSER_PREVIEW", "false");
+        set_test_var("BRIDGE_PORT", "9000");
+        set_test_var("BRIDGE_PREVIEW_PORT", "9001");
         assert!(BridgeConfig::from_env().is_ok());
 
-        unsafe {
-            env::remove_var("BRIDGE_AUTH_TOKEN");
-            env::set_var("BRIDGE_ALLOW_INSECURE_NO_AUTH", "false");
-        }
+        remove_test_var("BRIDGE_AUTH_TOKEN");
+        set_test_var("BRIDGE_ALLOW_INSECURE_NO_AUTH", "false");
         assert!(BridgeConfig::from_env().is_err());
-        unsafe {
-            env::set_var("BRIDGE_ALLOW_INSECURE_NO_AUTH", "true");
-            env::set_var("BRIDGE_HOST", "0.0.0.0");
-        }
+        set_test_var("BRIDGE_ALLOW_INSECURE_NO_AUTH", "true");
+        set_test_var("BRIDGE_HOST", "0.0.0.0");
         assert!(BridgeConfig::from_env().is_err());
-        unsafe { env::set_var("BRIDGE_HOST", "127.0.0.1") };
+        set_test_var("BRIDGE_HOST", "127.0.0.1");
         assert!(!BridgeConfig::from_env().unwrap().auth_enabled);
 
         assert_eq!(normalize_connect_url("https://user:pass@example.com"), None);

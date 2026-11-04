@@ -1315,34 +1315,18 @@ mod tests {
             let terminal = Arc::new(super::TerminalService::new(policy.clone()));
             super::GitService::new(terminal, policy).with_environment_probe(Arc::new(|_| false))
         }
+
+        fn service_with_home(&self, home: &Path) -> super::GitService {
+            let policy = Arc::new(PathPolicy::new(self.0.clone(), false).expect("create policy"));
+            let terminal =
+                Arc::new(super::TerminalService::new(policy.clone()).with_test_home(home.into()));
+            super::GitService::new(terminal, policy).with_environment_probe(Arc::new(|_| false))
+        }
     }
 
     impl Drop for TestDir {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    /// Points `HOME` at a fixture directory so tests can install an operator global gitconfig.
-    ///
-    /// `TerminalService` forwards `HOME` to every `git` child, so this is the only way an ambient
-    /// global config can reach a bridge-run command.
-    struct HomeEnvGuard(Option<std::ffi::OsString>);
-
-    impl HomeEnvGuard {
-        fn set(home: &Path) -> Self {
-            let previous = std::env::var_os("HOME");
-            std::env::set_var("HOME", home);
-            Self(previous)
-        }
-    }
-
-    impl Drop for HomeEnvGuard {
-        fn drop(&mut self) {
-            match self.0.take() {
-                Some(previous) => std::env::set_var("HOME", previous),
-                None => std::env::remove_var("HOME"),
-            }
         }
     }
 
@@ -1383,8 +1367,7 @@ mod tests {
         fs::write(repo.0.join("tracked.txt"), "two\n").expect("update tracked file");
         fs::write(repo.0.join("untracked.txt"), "new\n").expect("write untracked file");
 
-        let _home = HomeEnvGuard::set(&home.0);
-        let service = repo.service();
+        let service = repo.service_with_home(&home.0);
 
         let status = service.get_status(None).await.expect("status succeeds");
         assert_eq!(status.branch, "main");
@@ -2517,8 +2500,7 @@ mod tests {
         )
         .expect("write global config");
         {
-            let _home = HomeEnvGuard::set(&home.0);
-            let global_service = global_repo.service();
+            let global_service = global_repo.service_with_home(&home.0);
             global_service
                 .get_status(None)
                 .await

@@ -19,7 +19,7 @@ pub(crate) const BROWSER_PREVIEW_SESSION_TTL: Duration = Duration::from_secs(60 
 const BROWSER_PREVIEW_MAX_SESSIONS: usize = 12;
 const BROWSER_PREVIEW_DISCOVERY_HTTP_TIMEOUT: Duration = Duration::from_millis(500);
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BrowserPreviewSessionResponse {
     session_id: String,
@@ -30,6 +30,22 @@ pub(crate) struct BrowserPreviewSessionResponse {
     created_at: String,
     last_accessed_at: String,
     expires_at: String,
+}
+
+impl std::fmt::Debug for BrowserPreviewSessionResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BrowserPreviewSessionResponse")
+            .field("session_id", &"[REDACTED]")
+            .field("target_url", &"[REDACTED]")
+            .field("preview_port", &self.preview_port)
+            .field("preview_base_url", &self.preview_base_url)
+            .field("bootstrap_path", &"[REDACTED]")
+            .field("created_at", &self.created_at)
+            .field("last_accessed_at", &self.last_accessed_at)
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -47,7 +63,7 @@ pub(crate) struct BrowserPreviewDiscoveryResponse {
     suggestions: Vec<BrowserPreviewDiscoverySuggestion>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct BrowserPreviewSessionEntry {
     id: String,
     owner_client_id: u64,
@@ -58,7 +74,7 @@ struct BrowserPreviewSessionEntry {
     expires_at: SystemTime,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct BrowserPreviewResolvedSession {
     pub(crate) session_id: String,
     pub(crate) target_url: Url,
@@ -393,6 +409,26 @@ mod tests {
         let service = BrowserPreviewService::new(8787, 8788, None, None);
         service.set_available(true);
         service
+    }
+
+    #[test]
+    fn session_debug_redacts_credentials_and_target_urls() {
+        let session = BrowserPreviewSessionResponse {
+            session_id: "session-secret".to_string(),
+            target_url: "http://example.test/?api_key=target-secret".to_string(),
+            preview_port: 8788,
+            preview_base_url: None,
+            bootstrap_path: "/?st=bootstrap-secret".to_string(),
+            created_at: "created".to_string(),
+            last_accessed_at: "accessed".to_string(),
+            expires_at: "expires".to_string(),
+        };
+        for output in [format!("{session:?}"), format!("{session:#?}")] {
+            assert!(!output.contains("session-secret"));
+            assert!(!output.contains("target-secret"));
+            assert!(!output.contains("bootstrap-secret"));
+            assert!(output.contains("[REDACTED]"));
+        }
     }
 
     #[tokio::test]

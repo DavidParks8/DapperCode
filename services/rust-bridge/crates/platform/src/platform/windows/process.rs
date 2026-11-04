@@ -2,7 +2,11 @@ use std::{
     collections::HashMap,
     ffi::OsString,
     io,
-    os::windows::{ffi::OsStringExt, process::CommandExt},
+    os::windows::{
+        ffi::OsStringExt,
+        io::{AsRawHandle, FromRawHandle, OwnedHandle},
+        process::CommandExt,
+    },
     path::PathBuf,
     process::{Command as StdCommand, Stdio},
     sync::{Mutex, OnceLock},
@@ -11,7 +15,7 @@ use std::{
 
 use tokio::process::{Child, Command};
 use windows_sys::Win32::{
-    Foundation::{CloseHandle, FILETIME, HANDLE, WAIT_TIMEOUT},
+    Foundation::{FILETIME, WAIT_TIMEOUT},
     System::{
         SystemInformation::GetSystemDirectoryW,
         Threading::{
@@ -115,7 +119,10 @@ fn terminate_windows_process_tree(pid: u32) -> io::Result<()> {
 fn windows_system_directory() -> io::Result<PathBuf> {
     let mut buffer = vec![0_u16; 260];
     loop {
-        let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) };
+        let capacity = u32::try_from(buffer.len())
+            .map_err(|_| io::Error::other("Windows system directory path is too long"))?;
+        // SAFETY: buffer has capacity initialized UTF-16 units and remains live for the call.
+        let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), capacity) };
         if length == 0 {
             return Err(io::Error::last_os_error());
         }
@@ -151,21 +158,25 @@ pub(super) fn windows_process_creation_time_for_pid(pid: u32) -> io::Result<u64>
     ProcessHandle::open(pid, PROCESS_QUERY_LIMITED_INFORMATION)?.creation_time()
 }
 
-struct ProcessHandle(HANDLE);
-
-unsafe impl Send for ProcessHandle {}
+struct ProcessHandle(OwnedHandle);
 
 impl ProcessHandle {
     fn open(pid: u32, access: u32) -> io::Result<Self> {
+        // SAFETY: OpenProcess takes only integer parameters and returns an owned handle.
         let handle = unsafe { OpenProcess(access, 0, pid) };
         if handle.is_null() {
             return Err(io::Error::last_os_error());
         }
-        Ok(Self(handle))
+        // SAFETY: OpenProcess returned a new, non-null handle owned by this process.
+        Ok(Self(unsafe { OwnedHandle::from_raw_handle(handle) }))
     }
 
     fn is_alive(&self) -> bool {
-        zero_timeout_wait_means_alive(unsafe { WaitForSingleObject(self.0, 0) }, WAIT_TIMEOUT)
+        // SAFETY: OwnedHandle keeps the process handle valid throughout this zero-timeout wait.
+        zero_timeout_wait_means_alive(
+            unsafe { WaitForSingleObject(self.0.as_raw_handle(), 0) },
+            WAIT_TIMEOUT,
+        )
     }
 
     fn creation_time(&self) -> io::Result<u64> {
@@ -173,19 +184,20 @@ impl ProcessHandle {
         let mut exit = FILETIME::default();
         let mut kernel = FILETIME::default();
         let mut user = FILETIME::default();
-        if unsafe { GetProcessTimes(self.0, &mut creation, &mut exit, &mut kernel, &mut user) } == 0
+        // SAFETY: the owned process handle is live and all output pointers refer to FILETIMEs.
+        if unsafe {
+            GetProcessTimes(
+                self.0.as_raw_handle(),
+                &raw mut creation,
+                &raw mut exit,
+                &raw mut kernel,
+                &raw mut user,
+            )
+        } == 0
         {
             return Err(io::Error::last_os_error());
         }
         Ok((u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime))
-    }
-}
-
-impl Drop for ProcessHandle {
-    fn drop(&mut self) {
-        unsafe {
-            CloseHandle(self.0);
-        }
     }
 }
 

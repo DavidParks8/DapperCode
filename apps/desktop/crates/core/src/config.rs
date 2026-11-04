@@ -7,6 +7,11 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 
+#[cfg(all(test, debug_assertions))]
+use crate::test_env::var_os as discovery_env;
+#[cfg(all(not(test), debug_assertions))]
+use std::env::var_os as discovery_env;
+
 use crate::{
     platform,
     secrets::SecretBackend,
@@ -35,7 +40,7 @@ impl RuntimePaths {
 
         #[cfg(debug_assertions)]
         {
-            if let Some(package_root) = std::env::var_os("DAPPERCODE_PACKAGE_ROOT") {
+            if let Some(package_root) = discovery_env("DAPPERCODE_PACKAGE_ROOT") {
                 candidates.push(PathBuf::from(package_root));
             }
             if let Some(package_root) = find_package_root(Path::new(env!("CARGO_MANIFEST_DIR"))) {
@@ -86,7 +91,7 @@ impl RuntimePaths {
             self.package_root
                 .join("services/rust-bridge/Cargo.toml")
                 .is_file(),
-            std::env::var_os("CARGO_TARGET_DIR"),
+            discovery_env("CARGO_TARGET_DIR"),
         ) {
             candidates.push(PathBuf::from(target_dir).join("release").join(binary_name));
         }
@@ -146,7 +151,7 @@ fn runtime_target_for(os: &str, arch: &str) -> Option<&'static str> {
 ///
 /// The auth token never touches disk outside the keychain (or its private fallback file), so there
 /// is no `.env.secure` to leak into a repository.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct BridgeRuntimeConfig {
     pub values: BTreeMap<String, String>,
     pub host: String,
@@ -154,6 +159,20 @@ pub struct BridgeRuntimeConfig {
     pub connect_url: String,
     pub auth_token: String,
     pub secret_backend: SecretBackend,
+}
+
+impl std::fmt::Debug for BridgeRuntimeConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BridgeRuntimeConfig")
+            .field("values", &"[REDACTED]")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("connect_url", &self.connect_url)
+            .field("auth_token", &"[REDACTED]")
+            .field("secret_backend", &self.secret_backend)
+            .finish()
+    }
 }
 
 impl BridgeRuntimeConfig {
@@ -459,6 +478,33 @@ mod tests {
     }
 
     #[test]
+    fn runtime_config_debug_redacts_credentials_and_environment_values() {
+        let config = BridgeRuntimeConfig {
+            values: BTreeMap::from([
+                (
+                    "BRIDGE_AUTH_TOKEN".to_string(),
+                    "token-for-test".to_string(),
+                ),
+                (
+                    "OTHER_SETTING".to_string(),
+                    "environment-secret".to_string(),
+                ),
+            ]),
+            host: "127.0.0.1".to_string(),
+            port: 8787,
+            connect_url: "http://127.0.0.1:8787".to_string(),
+            auth_token: "token-for-test".to_string(),
+            secret_backend: SecretBackend::File,
+        };
+        for output in [format!("{config:?}"), format!("{config:#?}")] {
+            assert!(!output.contains("token-for-test"));
+            assert!(!output.contains("environment-secret"));
+            assert!(output.contains("[REDACTED]"));
+            assert!(output.contains("127.0.0.1"));
+        }
+    }
+
+    #[test]
     fn builds_a_child_environment_without_writing_the_token_to_disk() {
         let workspace = tempdir().unwrap();
         let data = tempdir().unwrap();
@@ -738,31 +784,11 @@ mod tests {
 
     #[test]
     fn discovers_runtime_resources_from_an_explicit_package_root() {
-        struct Guard {
-            package_root: Option<std::ffi::OsString>,
-            cargo_target_dir: Option<std::ffi::OsString>,
-        }
-        impl Drop for Guard {
-            fn drop(&mut self) {
-                match &self.package_root {
-                    Some(value) => std::env::set_var("DAPPERCODE_PACKAGE_ROOT", value),
-                    None => std::env::remove_var("DAPPERCODE_PACKAGE_ROOT"),
-                }
-                match &self.cargo_target_dir {
-                    Some(value) => std::env::set_var("CARGO_TARGET_DIR", value),
-                    None => std::env::remove_var("CARGO_TARGET_DIR"),
-                }
-            }
-        }
-        let _guard = Guard {
-            package_root: std::env::var_os("DAPPERCODE_PACKAGE_ROOT"),
-            cargo_target_dir: std::env::var_os("CARGO_TARGET_DIR"),
-        };
         let temp = tempdir().unwrap();
 
         // A candidate that holds neither a bundled binary nor a bridge source tree is skipped, and
         // discovery falls through to the repository checkout this test runs from.
-        std::env::set_var("DAPPERCODE_PACKAGE_ROOT", temp.path());
+        let _package_root = crate::test_env::set("DAPPERCODE_PACKAGE_ROOT", temp.path());
         let runtime = RuntimePaths::discover().unwrap();
         assert_ne!(runtime.package_root, temp.path());
 
@@ -779,7 +805,7 @@ mod tests {
         assert!(runtime_target().is_some(), "this platform should be mapped");
 
         let managed_target = temp.path().join("managed-target");
-        std::env::set_var("CARGO_TARGET_DIR", &managed_target);
+        let _target_dir = crate::test_env::set("CARGO_TARGET_DIR", &managed_target);
         let candidates = runtime.bridge_binary_candidates();
         assert!(candidates
             .iter()
@@ -789,7 +815,7 @@ mod tests {
                     .is_some_and(|parent| parent.ends_with("release"))));
 
         // A package root that cannot be canonicalized is skipped rather than failing discovery.
-        std::env::set_var("DAPPERCODE_PACKAGE_ROOT", temp.path().join("missing"));
+        let _missing = crate::test_env::set("DAPPERCODE_PACKAGE_ROOT", temp.path().join("missing"));
         assert!(RuntimePaths::discover().is_ok());
     }
 

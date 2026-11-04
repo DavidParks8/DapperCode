@@ -17,12 +17,19 @@ use tokio_util::sync::CancellationToken;
 use crate::acp::interactions::{ApprovalPolicy, ElicitationFieldKind};
 use crate::acp::manager::{
     AgentLifecycle, AgentManager, AgentOperationFailure, HarnessChildSession,
-    LocalAgentManifestSet, ManagedSession, RetirementPlanReconciliation,
+    LocalAgentManifestSet, ManagedSession, RetirementPlanReconciliation, MAX_PAGE_SIZE,
 };
 use crate::acp::runtime::RequestCancellation;
+use crate::acp::snapshot::MAX_SNAPSHOT_PAGE_SIZE;
 use crate::*;
 
 pub(super) const INDETERMINATE_OPERATION_PREFIX: &str = "indeterminate operation outcome: ";
+
+fn bounded_page_limit(params: &Value, maximum: usize) -> usize {
+    let maximum_on_wire = u64::try_from(maximum).expect("page limit fits in u64");
+    let requested = params.get("limit").and_then(Value::as_u64).unwrap_or(50);
+    usize::try_from(requested.min(maximum_on_wire)).expect("bounded page limit fits in usize")
+}
 
 fn indeterminate_operation_error(error: impl std::fmt::Display) -> String {
     format!("{INDETERMINATE_OPERATION_PREFIX}{error}")
@@ -1454,7 +1461,6 @@ pub(super) trait QueueRuntimeDispatcher: Send + Sync {
         interaction_epoch: u64,
         prompt: Vec<ContentBlock>,
     ) -> BoxFuture<'a, Result<(), String>>;
-    #[allow(clippy::too_many_arguments)]
     fn deliver_live_agent_message<'a>(
         &'a self,
         _thread_id: &'a str,
@@ -1769,11 +1775,13 @@ impl RuntimeBackend {
         }
         self.manager.shutdown().await;
         self.manager.flush_events().await;
-        if let Some(pump) = self.event_pump.lock().await.take() {
+        let pump = self.event_pump.lock().await.take();
+        if let Some(pump) = pump {
             pump.abort();
             let _ = pump.await;
         }
-        if let Some(mut side_effects) = self.event_side_effects.lock().await.take() {
+        let side_effects = self.event_side_effects.lock().await.take();
+        if let Some(mut side_effects) = side_effects {
             if tokio::time::timeout(std::time::Duration::from_secs(5), &mut side_effects)
                 .await
                 .is_err()
@@ -1851,7 +1859,6 @@ impl RuntimeBackend {
             .map_err(|error| error.to_string())
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) async fn deliver_live_agent_message(
         &self,
         thread_id: &str,
@@ -1948,7 +1955,7 @@ impl RuntimeBackend {
             }
             "thread/list" => {
                 let cursor = read_string(params.get("cursor"));
-                let limit = params.get("limit").and_then(Value::as_u64).unwrap_or(50) as usize;
+                let limit = bounded_page_limit(&params, MAX_PAGE_SIZE);
                 let agent_id = read_string(params.get("agentId"));
                 let page = self
                     .manager
@@ -2053,7 +2060,7 @@ impl RuntimeBackend {
                 let thread_id = required_string(&params, "threadId")?;
                 let before = read_string(params.get("beforeCursor"));
                 let after = read_string(params.get("afterCursor"));
-                let limit = params.get("limit").and_then(Value::as_u64).unwrap_or(50) as usize;
+                let limit = bounded_page_limit(&params, MAX_SNAPSHOT_PAGE_SIZE);
                 let page = self
                     .manager
                     .snapshot_page(&thread_id, before.as_deref(), after.as_deref(), limit)
@@ -2713,6 +2720,27 @@ mod client_request_tests {
         sync::{oneshot, Notify, Semaphore},
         time::{timeout, Duration},
     };
+
+    #[test]
+    fn page_limits_are_bounded_before_platform_conversion() {
+        for maximum in [MAX_PAGE_SIZE, MAX_SNAPSHOT_PAGE_SIZE] {
+            assert_eq!(bounded_page_limit(&json!({}), maximum), 50);
+            assert_eq!(bounded_page_limit(&json!({ "limit": 0 }), maximum), 0);
+            assert_eq!(bounded_page_limit(&json!({ "limit": 42 }), maximum), 42);
+            assert_eq!(
+                bounded_page_limit(&json!({ "limit": u64::from(u32::MAX) + 1 }), maximum),
+                maximum
+            );
+            assert_eq!(
+                bounded_page_limit(&json!({ "limit": u64::MAX }), maximum),
+                maximum
+            );
+            assert_eq!(
+                bounded_page_limit(&json!({ "limit": "invalid" }), maximum),
+                50
+            );
+        }
+    }
 
     struct RetirementDispatcher;
 

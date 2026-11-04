@@ -34,7 +34,7 @@ impl Default for PushEventPreferences {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PushDeviceRegistration {
     pub(crate) profile_id: String,
@@ -48,6 +48,22 @@ pub(crate) struct PushDeviceRegistration {
     pub(crate) events: PushEventPreferences,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
+}
+
+impl std::fmt::Debug for PushDeviceRegistration {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PushDeviceRegistration")
+            .field("profile_id", &self.profile_id)
+            .field("registration_id", &self.registration_id)
+            .field("token", &"[REDACTED]")
+            .field("platform", &self.platform)
+            .field("device_name", &self.device_name)
+            .field("events", &self.events)
+            .field("created_at", &self.created_at)
+            .field("updated_at", &self.updated_at)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -257,6 +273,22 @@ mod tests {
             events: PushEventPreferences::default(),
             created_at: "created".to_string(),
             updated_at: "updated".to_string(),
+        }
+    }
+
+    #[test]
+    fn registration_and_registry_debug_redact_push_tokens() {
+        let device = registration("profile", "registration", "push-secret-for-test");
+        let registry = PushRegistry {
+            devices: vec![device.clone()],
+        };
+        for output in [
+            format!("{device:?}"),
+            format!("{device:#?}"),
+            format!("{registry:?}"),
+        ] {
+            assert!(!output.contains("push-secret-for-test"));
+            assert!(output.contains("[REDACTED]"));
         }
     }
 

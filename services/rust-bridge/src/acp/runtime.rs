@@ -919,7 +919,8 @@ impl AcpConnection {
         &self,
         make: impl FnOnce(oneshot::Sender<Result<T, AcpRuntimeError>>) -> Command,
     ) -> Result<T, AcpRuntimeError> {
-        if let Some(message) = self.failure.borrow().clone() {
+        let failure = self.failure.borrow().clone();
+        if let Some(message) = failure {
             return Err(AcpRuntimeError::ConnectionUnavailable(message));
         }
         let (response_tx, mut response_rx) = oneshot::channel();
@@ -1019,7 +1020,7 @@ impl Command {
         interactions: &InteractionRegistry,
     ) {
         macro_rules! dispatch_ordinary {
-            ($request:expr, $cancellation:expr, $response:expr, $after:expr) => {{
+            ($request:expr_2021, $cancellation:expr_2021, $response:expr_2021, $after:expr_2021) => {{
                 let sent = connection.send_request($request);
                 let cancellation = $cancellation;
                 let sessions = sessions.clone();
@@ -1647,12 +1648,12 @@ mod tests {
     }
 
     async fn finish_fixture(fixture: &PendingInteractionFixture) {
-        if let Some(responder) = fixture
+        let responder = fixture
             .prompt_responder
             .lock()
             .expect("prompt responder lock")
-            .take()
-        {
+            .take();
+        if let Some(responder) = responder {
             responder
                 .respond(PromptResponse::new(StopReason::Cancelled))
                 .expect("prompt response");
@@ -2358,7 +2359,8 @@ mod tests {
                 .expect("steer responder lock")
                 .take(),
         );
-        if let Some(responder) = prompt_responder.lock().expect("prompt lock").take() {
+        let responder = prompt_responder.lock().expect("prompt lock").take();
+        if let Some(responder) = responder {
             responder
                 .respond(PromptResponse::new(StopReason::EndTurn))
                 .expect("prompt response");
@@ -3582,7 +3584,8 @@ mod tests {
         })
         .await
         .expect("late cancellation notification timed out");
-        if let Some(responder) = prompt_responder.lock().expect("prompt lock").take() {
+        let responder = prompt_responder.lock().expect("prompt lock").take();
+        if let Some(responder) = responder {
             responder
                 .respond(PromptResponse::new(StopReason::Cancelled))
                 .expect("prompt response");
@@ -3752,7 +3755,8 @@ mod tests {
                         let restore_seen_tx = restore_seen_tx.clone();
                         let release_rx = release_rx.clone();
                         async move |_request: LoadSessionRequest, responder, _| {
-                            if let Some(sender) = restore_seen_tx.lock().unwrap().take() {
+                            let sender = restore_seen_tx.lock().unwrap().take();
+                            if let Some(sender) = sender {
                                 let _ = sender.send(());
                             }
                             let receiver = release_rx.lock().unwrap().take().unwrap();
@@ -3910,7 +3914,8 @@ mod tests {
             outcomes_rx.try_recv().is_err(),
             "each request resolves once"
         );
-        if let Some(responder) = prompt_responder.lock().expect("prompt lock").take() {
+        let responder = prompt_responder.lock().expect("prompt lock").take();
+        if let Some(responder) = responder {
             responder
                 .respond(PromptResponse::new(StopReason::Cancelled))
                 .expect("prompt response");
@@ -4042,7 +4047,8 @@ mod tests {
             outcomes_rx.try_recv().is_err(),
             "each request resolves once"
         );
-        if let Some(responder) = prompt_responder.lock().expect("prompt lock").take() {
+        let responder = prompt_responder.lock().expect("prompt lock").take();
+        if let Some(responder) = responder {
             responder
                 .respond(PromptResponse::new(StopReason::Cancelled))
                 .expect("prompt response");
@@ -4098,7 +4104,8 @@ mod tests {
                 {
                     let cancel_tx = cancel_tx.clone();
                     async move |_request: CancelNotification, _| {
-                        if let Some(cancel_tx) = cancel_tx.lock().expect("cancel sender").take() {
+                        let cancel_tx = cancel_tx.lock().expect("cancel sender").take();
+                        if let Some(cancel_tx) = cancel_tx {
                             let _ = cancel_tx.send(());
                         }
                         Ok(())
@@ -4650,7 +4657,8 @@ mod tests {
             );
         }
         assert!(connection.pending_permissions().await.is_empty());
-        if let Some(responder) = prompt_responder.lock().expect("prompt lock").take() {
+        let responder = prompt_responder.lock().expect("prompt lock").take();
+        if let Some(responder) = responder {
             responder
                 .respond(PromptResponse::new(StopReason::Cancelled))
                 .expect("prompt response");
@@ -4679,9 +4687,8 @@ mod tests {
                         connection.send_request(permission).on_receiving_result({
                             let outcome_tx = outcome_tx.clone();
                             async move |result| {
-                                if let Some(sender) =
-                                    outcome_tx.lock().expect("outcome lock").take()
-                                {
+                                let sender = outcome_tx.lock().expect("outcome lock").take();
+                                if let Some(sender) = sender {
                                     let _ = sender.send(result.map(|response| response.outcome));
                                 }
                                 responder.respond(LoadSessionResponse::new())
@@ -4910,7 +4917,8 @@ mod tests {
             {
                 let initialize_tx = initialize_tx.clone();
                 async move |request: InitializeRequest, responder, _| {
-                    if let Some(sender) = initialize_tx.lock().expect("initialize lock").take() {
+                    let sender = initialize_tx.lock().expect("initialize lock").take();
+                    if let Some(sender) = sender {
                         let _ = sender.send(request.clone());
                     }
                     responder.respond(initialized(AgentCapabilities::new()))
@@ -5098,14 +5106,16 @@ mod tests {
                         serde_json::json!({"sessionUpdate":"tool_call_update","toolCallId":"active-tool","status":"completed"}),
                     ] { connection.send_notification(SessionNotification::new(request.session_id.clone(), update(value)))?; }
                     *prompt_responder.lock().expect("prompt responder lock") = Some(responder);
-                    if let Some(sender) = prompt_seen_tx.lock().expect("prompt seen lock").take() { let _ = sender.send(()); }
+                    let sender = prompt_seen_tx.lock().expect("prompt seen lock").take();
+                    if let Some(sender) = sender { let _ = sender.send(()); }
                     Ok(())
                 }
             }, agent_client_protocol::on_receive_request!())
             .on_receive_notification({
                 let cancel_seen_tx = cancel_seen_tx.clone();
                 async move |_cancel: CancelNotification, _| {
-                    if let Some(sender) = cancel_seen_tx.lock().expect("cancel lock").take() { let _ = sender.send(()); }
+                    let sender = cancel_seen_tx.lock().expect("cancel lock").take();
+                    if let Some(sender) = sender { let _ = sender.send(()); }
                     Ok(())
                 }
             }, agent_client_protocol::on_receive_notification!());
@@ -5213,9 +5223,9 @@ mod tests {
                             if attempts.fetch_add(1, AtomicOrdering::SeqCst) == 0 {
                                 tokio::spawn(async move {
                                     responder.cancellation().cancelled().await;
-                                    if let Some(sender) =
-                                        cancelled_tx.lock().expect("cancelled sender lock").take()
-                                    {
+                                    let sender =
+                                        cancelled_tx.lock().expect("cancelled sender lock").take();
+                                    if let Some(sender) = sender {
                                         let _ = sender.send(());
                                     }
                                 });

@@ -1025,8 +1025,10 @@ mod tests {
 
         let overshot = std::cell::Cell::new(Duration::ZERO);
         let mut read_overshot = || overshot.get();
-        let mut fetch_overshot_health =
-            || overshot.get() >= START_TIMEOUT - Duration::from_millis(100);
+        let threshold = START_TIMEOUT
+            .checked_sub(Duration::from_millis(100))
+            .expect("startup timeout must exceed the test margin");
+        let mut fetch_overshot_health = || overshot.get() >= threshold;
         let mut overshot_process_alive = || true;
         let mut overshooting_sleep =
             |_| overshot.set(overshot.get() + Duration::from_millis(1_200));

@@ -1,0 +1,5 @@
+allow-panic-in-tests = true
+allow-unwrap-in-tests = true
+array-size-threshold = 16384
+future-size-threshold = 16384
+stack-size-threshold = 512000

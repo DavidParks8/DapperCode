@@ -1,4 +1,5 @@
 #![cfg_attr(all(test, coverage_nightly), feature(coverage_attribute))]
+#![forbid(unsafe_code)]
 
 //! Shared protocol primitives that must not depend on bridge runtime services.
 

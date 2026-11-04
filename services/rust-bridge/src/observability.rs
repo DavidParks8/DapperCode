@@ -127,7 +127,7 @@ impl OperationalMetrics {
             Some(&trace.request_id),
             Some(&trace.method),
             Some(&trace.backend),
-            Some(trace.started_at.elapsed().as_millis() as u64),
+            Some(u64::try_from(trace.started_at.elapsed().as_millis()).unwrap_or(u64::MAX)),
             Some(outcome),
         );
     }

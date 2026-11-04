@@ -134,8 +134,13 @@ fn without_test_items(source: &str) -> String {
             continue;
         }
         waiting_for_item = false;
-        block_depth += line.chars().filter(|character| *character == '{').count() as i32;
-        block_depth -= line.chars().filter(|character| *character == '}').count() as i32;
+        for character in line.chars() {
+            match character {
+                '{' => block_depth += 1,
+                '}' => block_depth -= 1,
+                _ => {}
+            }
+        }
         if block_depth == 0 && (line.contains(';') || line.contains('}') || trimmed.ends_with(','))
         {
             skipping = false;

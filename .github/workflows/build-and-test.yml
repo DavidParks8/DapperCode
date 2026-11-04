@@ -218,6 +218,7 @@ jobs:
         with:
           workspaces: |
             services/rust-bridge -> target
+            apps/desktop -> target
 
       - name: Check formatting
         working-directory: services/rust-bridge
@@ -230,6 +231,12 @@ jobs:
       - name: Lint all targets
         working-directory: services/rust-bridge
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Lint desktop on Linux
+        run: cargo clippy --locked --workspace --all-targets --all-features --manifest-path apps/desktop/Cargo.toml -- -D warnings
+
+      - name: Lint release desktop on Linux
+        run: cargo clippy --locked --release --workspace --all-features --lib --bins --manifest-path apps/desktop/Cargo.toml -- -D warnings
 
       - name: Run Rust tests
         working-directory: services/rust-bridge
@@ -283,7 +290,13 @@ jobs:
 
       - name: Lint desktop
         working-directory: apps/desktop
-        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Lint bridge on macOS
+        run: cargo clippy --locked --workspace --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml -- -D warnings
+
+      - name: Lint release desktop on macOS
+        run: cargo clippy --locked --release --workspace --all-features --lib --bins --manifest-path apps/desktop/Cargo.toml -- -D warnings
 
       - name: Test desktop
         run: pnpm run desktop:test
@@ -387,7 +400,8 @@ jobs:
       - name: Check and lint Windows Rust
         run: |
           cargo check --locked --workspace --all-targets --manifest-path apps/desktop/Cargo.toml
-          cargo clippy --locked --workspace --all-targets --manifest-path apps/desktop/Cargo.toml -- -D warnings
+          cargo clippy --locked --workspace --all-targets --all-features --manifest-path apps/desktop/Cargo.toml -- -D warnings
+          cargo clippy --locked --release --workspace --all-features --lib --bins --manifest-path apps/desktop/Cargo.toml -- -D warnings
           cargo check --locked --workspace --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml
           cargo clippy --locked --workspace --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml -- -D warnings
 

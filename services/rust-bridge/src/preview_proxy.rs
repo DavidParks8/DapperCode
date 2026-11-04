@@ -1,6 +1,5 @@
 use crate::*;
 
-#[derive(Debug)]
 pub(super) struct PreviewBootstrapParams {
     pub(super) session_id: Option<String>,
     pub(super) bootstrap_token: Option<String>,
@@ -113,7 +112,6 @@ pub(super) fn build_preview_viewport_config(
     }
 }
 
-#[derive(Debug)]
 pub(super) struct ResolvedPreviewRequest {
     pub(super) session: BrowserPreviewResolvedSession,
     pub(super) bootstrap_session_id: Option<String>,

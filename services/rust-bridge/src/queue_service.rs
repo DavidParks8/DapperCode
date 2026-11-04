@@ -116,12 +116,13 @@ impl ThreadRetirementFence {
     ) -> Result<ThreadRetirementAdmission, String> {
         let admission = self.gate.clone().read_owned().await;
         #[cfg(test)]
-        if let Some(notify) = self
+        let acquired = self
             .admission_acquired
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .clone()
-        {
+            .clone();
+        #[cfg(test)]
+        if let Some(notify) = acquired {
             notify.notify_one();
         }
         let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
@@ -136,12 +137,13 @@ impl ThreadRetirementFence {
 
     pub(crate) async fn block_admissions(self: &Arc<Self>) -> ThreadRetirementAdmissionBarrier {
         #[cfg(test)]
-        if let Some(notify) = self
+        let attempted = self
             .begin_attempted
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .clone()
-        {
+            .clone();
+        #[cfg(test)]
+        if let Some(notify) = attempted {
             notify.notify_one();
         }
         self.gate.clone().write_owned().await
@@ -458,7 +460,8 @@ impl BridgeQueueService {
     }
 
     pub(super) async fn thread_actor(&self, thread_id: &str) -> Arc<Mutex<()>> {
-        if let Some(actor) = self.thread_actors.read().await.get(thread_id).cloned() {
+        let actor = self.thread_actors.read().await.get(thread_id).cloned();
+        if let Some(actor) = actor {
             return actor;
         }
         let mut actors = self.thread_actors.write().await;
@@ -571,7 +574,8 @@ impl BridgeQueueService {
         let deadline = Instant::now() + Duration::from_millis(QUEUE_COMPLETION_DISPOSITION_WAIT_MS);
         loop {
             let notified = self.completion_disposition_notify.notified();
-            if let Some(disposition) = self.completion_dispositions.lock().await.remove(&event_id) {
+            let disposition = self.completion_dispositions.lock().await.remove(&event_id);
+            if let Some(disposition) = disposition {
                 return Some(disposition);
             }
 
@@ -1005,13 +1009,13 @@ impl BridgeQueueService {
         thread_id: &str,
     ) -> Result<Option<BridgeThreadQueueSendResponse>, String> {
         let persist_guard = self.submission_persist.lock().await;
-        if let Some(pending_thread_id) = self
+        let pending_thread_id = self
             .submission_pending
             .lock()
             .await
             .get(submission_id)
-            .cloned()
-        {
+            .cloned();
+        if let Some(pending_thread_id) = pending_thread_id {
             if pending_thread_id != thread_id {
                 return Err("submissionId is already bound to another thread".to_string());
             }
@@ -1035,13 +1039,13 @@ impl BridgeQueueService {
             drop(persist_guard);
             return Ok(Some(self.submission_response(result).await));
         }
-        if let Some(pending_thread_id) = self
+        let pending_thread_id = self
             .submission_volatile_pending
             .lock()
             .await
             .get(submission_id)
-            .cloned()
-        {
+            .cloned();
+        if let Some(pending_thread_id) = pending_thread_id {
             if pending_thread_id != thread_id {
                 return Err("submissionId is already bound to another thread".to_string());
             }
@@ -1392,12 +1396,12 @@ impl BridgeQueueService {
         }
         self.persist_submission_store_locked().await?;
         if was_sent {
-            if let Some(wake) = self
+            let wake = self
                 .submission_completion_wake
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
-                .upgrade()
-            {
+                .upgrade();
+            if let Some(wake) = wake {
                 wake.notify_one();
             }
         }
@@ -1790,13 +1794,13 @@ impl BridgeQueueService {
         let actor = self.thread_actor(&thread_id).await;
         let actor_guard = actor.lock().await;
         let persist_guard = self.submission_persist.lock().await;
-        if let Some(receipt) = self
+        let receipt = self
             .submission_results
             .lock()
             .await
             .get(&submission_id)
-            .cloned()
-        {
+            .cloned();
+        if let Some(receipt) = receipt {
             if receipt.thread_id != thread_id {
                 return Err("submissionId is already bound to another thread".to_string());
             }
@@ -1890,13 +1894,13 @@ impl BridgeQueueService {
         let actor = self.thread_actor(&thread_id).await;
         let _actor_guard = actor.lock().await;
         let persist_guard = self.submission_persist.lock().await;
-        if let Some(receipt) = self
+        let receipt = self
             .submission_results
             .lock()
             .await
             .get(&submission_id)
-            .cloned()
-        {
+            .cloned();
+        if let Some(receipt) = receipt {
             if receipt.thread_id != thread_id {
                 return Err("submissionId is already bound to another thread".to_string());
             }
@@ -3453,12 +3457,12 @@ mod tests {
             &'a self,
             _thread_id: &'a str,
         ) -> BoxFuture<'a, Result<QueueRuntimeSnapshot, String>> {
-            if let Some(error) = self
+            let error = self
                 .snapshot_error
                 .lock()
                 .expect("snapshot error lock")
-                .clone()
-            {
+                .clone();
+            if let Some(error) = error {
                 return Box::pin(async move { Err(error) });
             }
             let snapshot = self.snapshot.lock().expect("snapshot lock").clone();
@@ -3466,12 +3470,12 @@ mod tests {
         }
 
         fn supports_steer(&self, _thread_id: &str) -> Result<bool, String> {
-            if let Some(error) = self
+            let error = self
                 .supports_steer_error
                 .lock()
                 .expect("supports steer error lock")
-                .clone()
-            {
+                .clone();
+            if let Some(error) = error {
                 return Err(error);
             }
             Ok(self.supports_steer.load(Ordering::SeqCst))
@@ -3610,12 +3614,12 @@ mod tests {
             &'a self,
             messages: Vec<(String, crate::agent_messaging::AgentMessageOrigin)>,
         ) -> BoxFuture<'a, Result<(), String>> {
-            if let Some(error) = self
+            let error = self
                 .record_agent_messages_error
                 .lock()
                 .expect("record agent messages error lock")
-                .clone()
-            {
+                .clone();
+            if let Some(error) = error {
                 return Box::pin(async move { Err(error) });
             }
             self.recorded_agent_messages
@@ -9214,6 +9218,38 @@ mod tests {
             .await
             .unwrap_err()
             .contains("admission limit"));
+    }
+
+    #[tokio::test]
+    async fn reconciliation_of_a_completed_submission_releases_the_receipt_lock() {
+        let (backend, _) = fake_dispatcher();
+        let service = BridgeQueueService::new(backend, Arc::new(ClientHub::new()));
+        service.submission_results.lock().await.insert(
+            "completed".to_string(),
+            BridgeQueueSubmissionReceipt {
+                submission_id: "completed".to_string(),
+                thread_id: "owner".to_string(),
+                disposition: BridgeThreadQueueDisposition::Sent,
+                turn_id: Some("turn".to_string()),
+            },
+        );
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            service.reconcile_indeterminate_submission("owner", "completed"),
+        )
+        .await
+        .expect("reconciliation must not deadlock while persisting the receipt")
+        .unwrap()
+        .expect("the completed submission must be returned");
+        assert_eq!(result.submission_id, "completed");
+        assert!(matches!(
+            result.disposition,
+            BridgeThreadQueueDisposition::Sent
+        ));
+        assert_eq!(result.turn_id.as_deref(), Some("turn"));
+        assert!(service.submission_results.try_lock().is_ok());
+        assert!(service.submission_persist.try_lock().is_ok());
     }
 
     #[tokio::test]
