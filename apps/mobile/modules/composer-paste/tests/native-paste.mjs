@@ -29,6 +29,7 @@ export default async function scenario(e2e) {
         sdk.stdout.trim(),
         '-target',
         'arm64-apple-ios16.4-simulator',
+        '-warnings-as-errors',
         path.join(sources, 'ios/ComposerImagePasteHandler.swift'),
         path.join(sources, 'tests/PasteTestApp.swift'),
         '-o',

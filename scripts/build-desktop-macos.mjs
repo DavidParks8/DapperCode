@@ -173,6 +173,8 @@ const nativeExecutable = path.join(macosDir, 'DapperCode');
 run('xcrun', [
   'swiftc',
   '-parse-as-library',
+  '-warnings-as-errors',
+  '-strict-concurrency=complete',
   '-target',
   `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macos13.0`,
   'apps/desktop/macos/AppTermination.swift',

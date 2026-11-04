@@ -2,19 +2,51 @@ excluded:
   - apps/desktop/macos/tests
   - apps/mobile/modules/**/tests
 
-only_rules:
-  - block_based_kvo
-  - capture_variable
-  - discarded_notification_center_observer
-  - empty_count
-  - fatal_error_message
-  - force_cast
-  - force_try
-  - force_unwrapping
-  - implicitly_unwrapped_optional
-  - first_where
-  - overridden_super_call
-  - redundant_nil_coalescing
-  - implicit_optional_initialization
-  - weak_delegate
-  - yoda_condition
+opt_in_rules: all
+
+disabled_rules:
+  - anonymous_argument_in_multiline_closure
+  - attributes
+  - closure_body_length
+  - closure_parameter_position
+  - conditional_returns_on_newline
+  - contrasted_opening_brace
+  - discouraged_default_parameter
+  - discouraged_optional_collection
+  - explicit_acl
+  - explicit_enum_raw_value
+  - explicit_top_level_acl
+  - explicit_type_interface
+  - file_length
+  - file_name
+  - file_types_order
+  - function_body_length
+  - identifier_name
+  - indentation_width
+  - line_length
+  - legacy_objc_type
+  - multiline_arguments
+  - multiline_arguments_brackets
+  - multiline_call_arguments
+  - multiline_function_chains
+  - multiline_literal_brackets
+  - no_magic_numbers
+  - number_separator
+  - one_declaration_per_file
+  - object_literal
+  - opening_brace
+  - prefer_self_in_static_references
+  - required_deinit
+  - sorted_enum_cases
+  - sorted_imports
+  - switch_case_on_newline
+  - trailing_closure
+  - trailing_comma
+  - type_body_length
+  - type_contents_order
+  - variable_shadowing
+  - vertical_whitespace_between_cases
+
+cyclomatic_complexity:
+  warning: 16
+  error: 30

@@ -2,6 +2,7 @@ import Foundation
 
 private struct RuntimeDocumentError: LocalizedError {
   let errorDescription: String?
+
   init(_ message: String) { errorDescription = message }
 }
 

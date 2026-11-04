@@ -46,6 +46,7 @@ enum NativeMemory {
 
     private struct NativeMemoryError: LocalizedError {
       let errorDescription: String?
+
       init(_ message: String) { errorDescription = message }
     }
   #endif

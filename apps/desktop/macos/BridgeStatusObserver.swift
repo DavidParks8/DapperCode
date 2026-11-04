@@ -78,7 +78,7 @@ final class BridgeStatusObserver {
         desired = next
 
         for target in targets {
-            if entries[target.profileId] == nil && retryTasks[target.profileId] == nil {
+            if entries[target.profileId] == nil, retryTasks[target.profileId] == nil {
                 connect(target)
             }
         }
@@ -103,8 +103,8 @@ final class BridgeStatusObserver {
             target,
             { [weak self] health in
                 guard let self else { return }
-                self.failureCounts[target.profileId] = 0
-                self.onHealth(target.profileId, health)
+                failureCounts[target.profileId] = 0
+                onHealth(target.profileId, health)
             },
             { [weak self] in
                 self?.connectionDidClose(target)
@@ -130,8 +130,8 @@ final class BridgeStatusObserver {
         retryTasks[target.profileId] = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled, let self else { return }
-            self.retryTasks.removeValue(forKey: target.profileId)
-            self.connect(target)
+            retryTasks.removeValue(forKey: target.profileId)
+            connect(target)
         }
     }
 }
@@ -216,11 +216,11 @@ private final class URLSessionBridgeStatusConnection: BridgeStatusConnection {
 
     func start() {
         guard socket == nil, !isCancelled else { return }
-        let socket = URLSession.shared.webSocketTask(with: request)
-        self.socket = socket
-        socket.resume()
+        let webSocket = URLSession.shared.webSocketTask(with: request)
+        socket = webSocket
+        webSocket.resume()
         worker = Task { [weak self] in
-            await self?.run(socket)
+            await self?.run(webSocket)
         }
     }
 
@@ -248,9 +248,9 @@ private final class URLSessionBridgeStatusConnection: BridgeStatusConnection {
                     try? await Task.sleep(for: Self.heartbeatInterval)
                     guard !Task.isCancelled, let self, let socket else { return }
                     do {
-                        try await self.requestHealth(on: socket)
+                        try await requestHealth(on: socket)
                     } catch {
-                        self.reportDisconnect()
+                        reportDisconnect()
                         return
                     }
                 }
@@ -278,8 +278,8 @@ private final class URLSessionBridgeStatusConnection: BridgeStatusConnection {
         responseTimeouts[id]?.cancel()
         responseTimeouts[id] = Task { [weak self] in
             try? await Task.sleep(for: Self.responseTimeout)
-            guard !Task.isCancelled, let self, self.responseTimeouts[id] != nil else { return }
-            self.reportDisconnect()
+            guard !Task.isCancelled, let self, responseTimeouts[id] != nil else { return }
+            reportDisconnect()
         }
     }
 
@@ -321,11 +321,11 @@ private final class URLSessionBridgeStatusConnection: BridgeStatusConnection {
                 try? await Task.sleep(for: .seconds(delay))
             }
             guard !Task.isCancelled, let self, let socket else { return }
-            self.eventRefresh = nil
+            eventRefresh = nil
             do {
-                try await self.requestHealth(on: socket)
+                try await requestHealth(on: socket)
             } catch {
-                self.reportDisconnect()
+                reportDisconnect()
             }
         }
     }

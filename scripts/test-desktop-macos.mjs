@@ -41,6 +41,7 @@ try {
       'swiftc',
       '-parse-as-library',
       '-warnings-as-errors',
+      '-strict-concurrency=complete',
       '-D',
       'DAPPERCODE_TESTING',
       'apps/desktop/macos/AppTermination.swift',

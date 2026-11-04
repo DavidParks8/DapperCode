@@ -58,6 +58,7 @@ extension NativeCodedError {
 struct WorkspaceError: NativeCodedError {
   let code: NativeErrorCode
   let message: String
+
   init(_ code: NativeErrorCode, _ message: String) {
     self.code = code
     self.message = message
@@ -67,6 +68,7 @@ struct WorkspaceError: NativeCodedError {
 struct GitOperationError: NativeCodedError {
   let code: NativeErrorCode
   let message: String
+
   init(_ code: NativeErrorCode, _ message: String) {
     self.code = code
     self.message = message

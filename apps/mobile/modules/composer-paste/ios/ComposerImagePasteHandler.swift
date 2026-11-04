@@ -12,9 +12,9 @@ final class ComposerImagePasteHandler: NSObject, UITextPasteDelegate {
       }
     }
   }
-  var onImage: ([String: Any]) -> Void = { _ in }
-  var onBusy: ([String: Any]) -> Void = { _ in }
-  var onError: ([String: Any]) -> Void = { _ in }
+  var onImage: ([String: Any]) -> Void = { _ in /* No-op until attached by the module. */ }
+  var onBusy: ([String: Any]) -> Void = { _ in /* No-op until attached by the module. */ }
+  var onError: ([String: Any]) -> Void = { _ in /* No-op until attached by the module. */ }
   private weak var input: UITextView?
   private weak var previousDelegate: UITextPasteDelegate?
   private var previousConfiguration: UIPasteConfiguration?

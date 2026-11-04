@@ -167,7 +167,7 @@ actor WorkspaceStore {
         throw WorkspaceError(
           .pathUnsupported, "Hard-linked files cannot be accessed by workspace tools.")
       }
-      if index < components.count - 1 && entry != .directory {
+      if index < components.count - 1, entry != .directory {
         throw WorkspaceError(
           .pathNotDirectory, "A parent in the workspace path is not a directory: \(path)")
       }

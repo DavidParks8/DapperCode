@@ -145,10 +145,14 @@ pnpm run desktop:build:macos
 pnpm run desktop:build:windows
 ```
 
-On macOS, `pnpm run swift:lint` runs focused SwiftLint static-analysis rules over the
-desktop shell and native iOS modules. Install the tool once with `brew install swiftlint`.
-The macOS desktop test build also treats Swift compiler warnings as errors. The general
-`pnpm run lint` gate includes SwiftLint and skips it on non-macOS platforms.
+On macOS, `pnpm run swift:lint` enables all available SwiftLint rules for the desktop shell
+and native iOS modules. Install the tool once with `brew install swiftlint`. Rules that
+conflict with the repository's formatting conventions or Foundation/UIKit bridging are
+explicitly disabled in `.swiftlint.yml`; the rest are enforced strictly, including XCTest
+hygiene, SourceKit analyzers, and Sendable checks. The macOS desktop test and app builds treat
+Swift compiler warnings as errors and use complete strict-concurrency checking. Native iOS
+test builds also treat Swift compiler warnings as errors. The general `pnpm run lint` gate
+includes SwiftLint and skips it on non-macOS platforms.
 
 `pnpm run duplicates:check` scans authored mobile TypeScript and native Rust/Swift sources with
 separate production-focused thresholds. Generated artifacts and dedicated test files/directories

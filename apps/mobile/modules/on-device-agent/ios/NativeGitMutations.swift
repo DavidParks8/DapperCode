@@ -30,7 +30,7 @@ extension NativeGit {
       defer { git_index_free(index) }
       var object: OpaquePointer?
       let head = git_revparse_single(&object, repository, "HEAD^{tree}")
-      if head != GIT_ENOTFOUND.rawValue && head != GIT_EUNBORNBRANCH.rawValue {
+      if head != GIT_ENOTFOUND.rawValue, head != GIT_EUNBORNBRANCH.rawValue {
         try requireSuccess(head, "Read HEAD tree")
       }
       defer { git_object_free(object) }

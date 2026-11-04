@@ -83,6 +83,7 @@ enum GitCredentialStore {
 private struct CredentialError: NativeCodedError {
   let code: NativeErrorCode
   let message: String
+
   init(_ code: NativeErrorCode, _ message: String) {
     self.code = code
     self.message = message

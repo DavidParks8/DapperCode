@@ -266,8 +266,11 @@ final class ModelDownloadSession: NSObject, URLSessionDownloadDelegate, @uncheck
   // MARK: - URLSessionDownloadDelegate
 
   func urlSession(
-    _ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
-    totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
+    _: URLSession,
+    downloadTask: URLSessionDownloadTask,
+    didWriteData _: Int64,
+    totalBytesWritten: Int64,
+    totalBytesExpectedToWrite: Int64
   ) {
     guard let id = downloadTask.taskDescription else { return }
     let oversized = lock.withLock { () -> Bool in
@@ -278,7 +281,7 @@ final class ModelDownloadSession: NSObject, URLSessionDownloadDelegate, @uncheck
       guard record.task == nil || record.task === downloadTask else { return false }
       record.task = downloadTask
       record.bytesWritten = totalBytesWritten
-      if totalBytesExpectedToWrite > 0 && record.totalBytes <= 0 {
+      if totalBytesExpectedToWrite > 0, record.totalBytes <= 0 {
         record.totalBytes = totalBytesExpectedToWrite
       }
       records[id] = record
@@ -290,7 +293,8 @@ final class ModelDownloadSession: NSObject, URLSessionDownloadDelegate, @uncheck
   }
 
   func urlSession(
-    _ session: URLSession, downloadTask: URLSessionDownloadTask,
+    _: URLSession,
+    downloadTask: URLSessionDownloadTask,
     didFinishDownloadingTo location: URL
   ) {
     guard let id = downloadTask.taskDescription,
@@ -313,12 +317,12 @@ final class ModelDownloadSession: NSObject, URLSessionDownloadDelegate, @uncheck
     }
   }
 
-  func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+  func urlSession(_: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
     guard let id = task.taskDescription else { return }
     let settled = lock.withLock { () -> Bool in
       let paused = pausedTasks.remove(task.taskIdentifier) != nil
       let settled = cancelledTasks.remove(task.taskIdentifier) != nil || paused
-      if records[id]?.task === task && !settled { records.removeValue(forKey: id) }
+      if records[id]?.task === task, !settled { records.removeValue(forKey: id) }
       return settled
     }
     guard !settled, let error else { return }
@@ -334,12 +338,14 @@ final class ModelDownloadSession: NSObject, URLSessionDownloadDelegate, @uncheck
         try data.write(to: container.appendingPathComponent("resume.data"), options: .atomic)
         try Self.writeCheckpoint(container, checkpoint)
         return
-      } catch {}
+      } catch {
+        // The resume point could not be saved; report the transfer failure below.
+      }
     }
     record(failure: failure.localizedDescription, for: id)
   }
 
-  func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+  func urlSessionDidFinishEvents(forBackgroundURLSession _: URLSession) {
     let handlers = lock.withLock {
       defer { completionHandlers.removeAll() }
       return completionHandlers
@@ -413,9 +419,7 @@ final class ModelDownloadSession: NSObject, URLSessionDownloadDelegate, @uncheck
   }
 
   /// Reads a checkpoint written by the earlier JavaScript transfer implementation.
-  private static func legacyResume(_ container: URL) throws -> (
-    url: String, data: Data, bytesWritten: Int64
-  )? {
+  private static func legacyResume(_ container: URL) throws -> LegacyResume? {
     let file = container.appendingPathComponent("resume.json")
     guard FileManager.default.fileExists(atPath: file.path) else { return nil }
     guard
@@ -430,6 +434,13 @@ final class ModelDownloadSession: NSObject, URLSessionDownloadDelegate, @uncheck
     else {
       throw ModelFileError("Paused download data is damaged. Restart this model download.")
     }
-    return (url, data, bytes.int64Value)
+    return LegacyResume(url: url, data: data, bytesWritten: bytes.int64Value)
   }
+}
+
+/// A paused transfer saved by the earlier JavaScript transfer implementation.
+private struct LegacyResume {
+  let url: String
+  let data: Data
+  let bytesWritten: Int64
 }

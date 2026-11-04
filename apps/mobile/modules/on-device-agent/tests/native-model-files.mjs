@@ -27,6 +27,7 @@ export default async function scenario(e2e) {
           sdk.stdout.trim(),
           '-target',
           'arm64-apple-ios16.4-simulator',
+          '-warnings-as-errors',
           path.join(module, 'ios/ModelFileStore.swift'),
           path.join(module, 'ios/NativeMemory.swift'),
           path.join(module, 'ios/RuntimeDocumentStore.swift'),
