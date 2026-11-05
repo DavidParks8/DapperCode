@@ -165,6 +165,9 @@ extension NativeGit {
 
   static func history(repository: URL) throws -> [NativeGitCommit] {
     try withRepository(repository) { repository in
+      let unborn = git_repository_head_unborn(repository)
+      try requireSuccess(unborn, "Read history HEAD")
+      if unborn == 1 { return [] }
       var walk: OpaquePointer?
       try requireSuccess(git_revwalk_new(&walk, repository), "Initialize history")
       defer { git_revwalk_free(walk) }

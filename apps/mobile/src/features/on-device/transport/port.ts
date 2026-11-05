@@ -39,6 +39,8 @@ export interface LocalAgentPort {
   modelChoices(): readonly LocalModelChoice[];
   /** Uses a downloaded model for this chat and for new chats; it loads when the chat sends. */
   chooseModel(threadId: string, modelId: string): Promise<LocalThread>;
+  /** Changes the new-chat default without loading a model or changing a chat. */
+  chooseDefaultModel(modelId: string): Promise<void>;
   createThread(workspaceId: string, modelId: string): Promise<LocalThread>;
   updateThread(
     id: string,

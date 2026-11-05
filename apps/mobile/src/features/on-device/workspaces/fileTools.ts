@@ -30,11 +30,23 @@ export function isFileTool(name: string): name is FileToolName {
   return FILE_TOOL_DEFINITIONS.some((tool) => tool.definition.function.name === name);
 }
 
+function mutationRevision(
+  args: Record<string, unknown>,
+  observedRevision: string | undefined,
+  required = false,
+): string | null {
+  if (!Object.hasOwn(args, 'expected_revision') && observedRevision !== undefined) {
+    return observedRevision;
+  }
+  return expectedRevision(args, required);
+}
+
 export async function executeFileTool(
   workspaceId: string,
   name: string,
   input: unknown,
   native: FileToolPort,
+  observedRevision?: string,
 ): Promise<unknown> {
   switch (name) {
     case 'list_directory': {
@@ -61,14 +73,14 @@ export async function executeFileTool(
         workspaceId,
         path,
         text(args, 'content', 4 * 1024 * 1024, 0),
-        expectedRevision(args),
+        mutationRevision(args, observedRevision),
       );
       return { path, revision };
     }
     case 'edit_file': {
       const args = argumentsRecord(input, ['path', 'old_text', 'new_text', 'expected_revision']);
       const path = text(args, 'path');
-      const revision = expectedRevision(args, true);
+      const revision = mutationRevision(args, observedRevision, true);
       if (!revision) {
         throw new LocalToolInputError('A file revision is required.');
       }
@@ -85,13 +97,18 @@ export async function executeFileTool(
       const args = argumentsRecord(input, ['path', 'destination', 'expected_revision']);
       const path = text(args, 'path');
       const destination = text(args, 'destination');
-      await native.renameWorkspacePath(workspaceId, path, destination, expectedRevision(args));
+      await native.renameWorkspacePath(
+        workspaceId,
+        path,
+        destination,
+        mutationRevision(args, observedRevision),
+      );
       return { path, destination };
     }
     case 'delete_path': {
       const args = argumentsRecord(input, ['path', 'expected_revision']);
       const path = text(args, 'path');
-      await native.removeWorkspacePath(workspaceId, path, expectedRevision(args));
+      await native.removeWorkspacePath(workspaceId, path, mutationRevision(args, observedRevision));
       return { path, removed: true };
     }
     case 'search_files': {

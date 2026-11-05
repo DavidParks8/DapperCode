@@ -425,7 +425,6 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     theme.spacing.lg,
     sidebarMode !== 'overlay',
   );
-  const jumpToLatestHitSlop = useMemo(() => computeHitSlop(JUMP_TO_LATEST_VISIBLE_SIZE), []);
   const listBatchingConfig = resolveListBatchingConfig(
     displayMessages.length,
     visibleMessages.length,
@@ -504,6 +503,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
             Boolean(activityEvent),
             showJumpToLatest,
             isInteracting,
+            chat.status === 'running',
           )}
           inverted
           scrollEnabled={rail.scrollEnabled}
@@ -560,7 +560,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           foldLeadingInset,
           autoScrollStateRef,
           bottomInset,
-          hitSlop: jumpToLatestHitSlop,
+          hitSlop: computeHitSlop(JUMP_TO_LATEST_VISIBLE_SIZE),
           onJumpToLatest,
           railJumpControllerRef,
           setShowJumpToLatest,

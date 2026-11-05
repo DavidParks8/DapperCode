@@ -140,6 +140,109 @@ describe('useGitScreenController committed cwd handling', () => {
       jest.useRealTimers();
     });
 
+    it('keeps an explicit branch choice and Switch available across the maintenance poll', async () => {
+      const api = createApi();
+      jest.mocked(api.gitBranches).mockResolvedValue({
+        current: 'main',
+        branches: [
+          { name: 'main', remote: false, current: true },
+          { name: 'feature', remote: false, current: false },
+        ],
+      });
+      const harness = makeHarness(api);
+      await harness.mount();
+      await act(async () => {
+        harness.current.openBranchPanel();
+        await Promise.resolve();
+      });
+      await harness.flush();
+      act(() => harness.current.setBranchDraft('feature'));
+      expect(harness.current.branchDraft).toBe('feature');
+      expect(harness.current.derived.branchSwitchDisabled).toBe(false);
+      const previousReads = jest.mocked(api.gitStatus).mock.calls.length;
+      act(() => jest.advanceTimersByTime(GIT_SCREEN_REFRESH_INTERVAL_MS));
+      await harness.flush();
+      expect(api.gitStatus).toHaveBeenCalledTimes(previousReads + 1);
+      expect(harness.current.branchPanelOpen).toBe(true);
+      expect(harness.current.branchDraft).toBe('feature');
+      expect(harness.current.derived.branchSwitchDisabled).toBe(false);
+      expect(harness.current.loading).toBe(false);
+      expect(harness.current.refreshing).toBe(false);
+      await act(async () => {
+        await harness.current.switchBranch();
+      });
+      expect(api.gitSwitch).toHaveBeenCalledWith({ branch: 'feature', cwd: '/committed' });
+      expect(harness.current.switchingBranch).toBe(false);
+      expect(harness.current.branchPanelOpen).toBe(false);
+      harness.unmount();
+    });
+
+    it('does not replace a cached branch choice when opening-panel data arrives late', async () => {
+      const api = createApi();
+      const branches = {
+        current: 'main',
+        branches: [
+          { name: 'main', remote: false, current: true },
+          { name: 'feature', remote: false, current: false },
+        ],
+      };
+      jest.mocked(api.gitBranches).mockResolvedValue(branches);
+      const harness = makeHarness(api);
+      await harness.mount();
+      let finish!: (value: typeof branches) => void;
+      jest.mocked(api.gitBranches).mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+      act(() => harness.current.openBranchPanel());
+      act(() => harness.current.setBranchDraft('feature'));
+      await act(async () => {
+        finish(branches);
+        await Promise.resolve();
+      });
+      await harness.flush();
+      expect(harness.current.branchDraft).toBe('feature');
+      expect(harness.current.branchPanelOpen).toBe(true);
+      expect(harness.current.derived.branchSwitchDisabled).toBe(false);
+      expect(harness.current.error).toBeNull();
+      harness.unmount();
+    });
+
+    it('follows a changed HEAD when untouched and clears a choice whose branch disappeared', async () => {
+      const api = createApi();
+      const harness = makeHarness(api);
+      await harness.mount();
+      expect(harness.current.branchDraft).toBe('main');
+      jest.mocked(api.gitStatus).mockResolvedValue(statusFor('/committed', { branch: 'created' }));
+      jest.mocked(api.gitBranches).mockResolvedValue({
+        current: 'created',
+        branches: [
+          { name: 'main', remote: false, current: false },
+          { name: 'created', remote: false, current: true },
+          { name: 'feature', remote: false, current: false },
+        ],
+      });
+      await act(async () => {
+        await harness.current.refresh();
+      });
+      expect(harness.current.branchDraft).toBe('created');
+      expect(harness.current.derived.branchSwitchDisabled).toBe(true);
+      act(() => harness.current.setBranchDraft('feature'));
+      expect(harness.current.derived.branchSwitchDisabled).toBe(false);
+      jest.mocked(api.gitBranches).mockResolvedValue({
+        current: 'created',
+        branches: [{ name: 'created', remote: false, current: true }],
+      });
+      await act(async () => {
+        await harness.current.refresh();
+      });
+      expect(harness.current.branchDraft).toBe('created');
+      expect(harness.current.derived.branchSwitchDisabled).toBe(true);
+      expect(harness.current.refreshing).toBe(false);
+      harness.unmount();
+    });
+
     it('pauses refreshes in the background and resumes one polling loop in the foreground', async () => {
       let appStateListener: ((state: AppStateStatus) => void) | null = null;
       const appStateSpy = jest

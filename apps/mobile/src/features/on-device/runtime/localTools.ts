@@ -8,6 +8,7 @@ import type { LocalToolApprovalPolicy, LocalToolExecutor } from './agentLoop';
 import { executeWebFetch, WEB_TOOL_DEFINITIONS } from './webFetch';
 import { executeWebSearch, SEARCH_TOOL_DEFINITIONS } from './webSearch';
 import { LocalToolInputError } from './toolArguments';
+import { isRecord } from '@shared/records';
 
 const LOCAL_TOOLS = [
   ...FILE_TOOL_DEFINITIONS,
@@ -33,13 +34,23 @@ export const localToolApproval: LocalToolApprovalPolicy = (name, input) => {
   return tool.approval ? { kind: tool.kind, summary: tool.approval(input) } : null;
 };
 
-/** Routes model tool calls to the native file and Git tools; anything else is rejected. */
+function forgetPathVersions(versions: Map<string, string>, path: string): void {
+  for (const knownPath of versions.keys()) {
+    if (knownPath === path || knownPath.startsWith(`${path}/`)) {
+      versions.delete(knownPath);
+    }
+  }
+}
+
+/** Routes model tool calls to workspace tools or the approved HTTPS reader. */
 export function localToolExecutor(
   native: OnDeviceNativeServices,
   author: () => LocalGitIdentity | null,
   credential: (workspaceId: string) => Promise<string | null>,
   requireNetwork: (action: string) => void,
 ): LocalToolExecutor {
+  // Each run owns its signal, so observations cannot leak across turns or workspaces.
+  const observed = new WeakMap<AbortSignal, Map<string, Map<string, string>>>();
   return (workspace, name, input, signal) => {
     if (name === 'web_fetch') {
       requireNetwork('fetch web pages');
@@ -50,7 +61,44 @@ export function localToolExecutor(
       return executeWebSearch(input, signal);
     }
     if (isFileTool(name)) {
-      return executeFileTool(workspace, name, input, native);
+      let versions: Map<string, string> | undefined;
+      if (signal) {
+        let workspaces = observed.get(signal);
+        if (!workspaces) {
+          workspaces = new Map();
+          observed.set(signal, workspaces);
+        }
+        versions = workspaces.get(workspace);
+        if (!versions) {
+          versions = new Map();
+          workspaces.set(workspace, versions);
+        }
+      }
+      const args = isRecord(input) ? input : null;
+      const path = typeof args?.['path'] === 'string' ? args['path'] : null;
+      const revision = path === null ? undefined : versions?.get(path);
+      return executeFileTool(workspace, name, input, native, revision).then((result) => {
+        if (!versions || path === null) {
+          return result;
+        }
+        if (isRecord(result) && typeof result['revision'] === 'string') {
+          versions.set(path, result['revision']);
+        }
+        if (name === 'rename_path' || name === 'delete_path') {
+          const destination =
+            name === 'rename_path' && typeof args?.['destination'] === 'string'
+              ? args['destination']
+              : null;
+          forgetPathVersions(versions, path);
+          if (destination !== null) {
+            forgetPathVersions(versions, destination);
+            if (revision !== undefined) {
+              versions.set(destination, revision);
+            }
+          }
+        }
+        return result;
+      });
     }
     if (isGitTool(name)) {
       return executeGitTool(workspace, name, input, native, author, credential);

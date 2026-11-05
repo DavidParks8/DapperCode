@@ -68,13 +68,15 @@ export function isAutoStoreReviewEligible(state: AutoStoreReviewState): boolean 
   );
 }
 
-export async function requestNativeStoreReview(): Promise<boolean> {
+export async function requestNativeStoreReview(
+  shouldRequest: () => boolean = () => true,
+): Promise<boolean> {
   if (Platform.OS !== 'ios') {
     return false;
   }
 
   const available = await StoreReview.isAvailableAsync();
-  if (!available) {
+  if (!available || !shouldRequest()) {
     return false;
   }
 

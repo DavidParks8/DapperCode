@@ -389,12 +389,11 @@ export class OnDeviceRuntime {
     if (threadId && this.isRunning(threadId)) {
       throw new Error('Stop this conversation before changing its model.');
     }
-    this.settings.update({ modelId: id });
     if (threadId) {
       this.threads.change(threadId, (thread) => ({ ...thread, modelId: id }));
       await this.threads.save(threadId);
     }
-    await this.settings.save();
+    await this.settings.chooseModel(id);
   }
 
   /** Releases the loaded model; rejects while a conversation is using it. */

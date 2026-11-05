@@ -9,6 +9,7 @@ import { apiClientAtom } from '@shell/state/bridge/atoms';
 import { createBridgeTestStore } from '@shell/state/testing';
 import { defaultStartCwdAtom } from '@shell/state/appState/settings';
 import { routes } from '@shell/navigation/routes';
+import { resetMainScreenStateAtom } from '../../chat/state/registry';
 import {
   gitCheckoutCloningAtom,
   gitCheckoutDirectoryNameAtom,
@@ -675,6 +676,204 @@ describe('workspace actions', () => {
     expect(store.get(workspaceBrowseParentPathAtom)).toBe('/workspace');
     expect(router.dismissTo).toHaveBeenCalledWith(routes.newChat('profile-1'));
     expect(store.get(gitCheckoutCloningAtom)).toBe(false);
+  });
+
+  it('owns the clone before deferred root discovery and ignores duplicate submits', async () => {
+    const roots = deferred<{ bridgeRoot: string; workspaces: never[] }>();
+    const cloneStarted = deferred<void>();
+    const finishClone = deferred<void>();
+    const rootResponse = { bridgeRoot: '/bridge-root', workspaces: [] };
+    const { store, api } = createStore({
+      listWorkspaceRoots: jest.fn(() => roots.promise),
+      gitClone: jest.fn(async () => {
+        cloneStarted.resolve();
+        await finishClone.promise;
+        return { code: 0, stdout: '', stderr: '', cloned: true, cwd: '/bridge-root/repo' };
+      }),
+    });
+    store.set(gitCheckoutRepoUrlAtom, 'https://github.com/acme/repo.git');
+    store.set(gitCheckoutDirectoryNameAtom, 'repo');
+    store.set(gitCheckoutParentPathAtom, null);
+    const previousCwd = store.get(defaultStartCwdAtom);
+    const first = store.set(submitGitCheckoutAtom);
+    const duplicate = store.set(submitGitCheckoutAtom);
+    try {
+      expect(api.listWorkspaceRoots).toHaveBeenCalledTimes(1);
+      expect(api.gitClone).not.toHaveBeenCalled();
+      expect(store.get(gitCheckoutCloningAtom)).toBe(true);
+      expect(store.get(gitCheckoutErrorAtom)).toBeNull();
+      expect(store.get(defaultStartCwdAtom)).toBe(previousCwd);
+      roots.resolve(rootResponse);
+      await cloneStarted.promise;
+      await duplicate;
+      expect(api.gitClone).toHaveBeenCalledTimes(1);
+      expect(api.gitClone).toHaveBeenCalledWith({
+        url: 'https://github.com/acme/repo.git',
+        parentPath: '/bridge-root',
+        directoryName: 'repo',
+      });
+      expect(store.get(gitCheckoutCloningAtom)).toBe(true);
+      expect(store.get(gitCheckoutErrorAtom)).toBeNull();
+      expect(store.get(defaultStartCwdAtom)).toBe(previousCwd);
+    } finally {
+      roots.resolve(rootResponse);
+      finishClone.resolve();
+      await Promise.all([first, duplicate]);
+    }
+    expect(api.gitClone).toHaveBeenCalledTimes(1);
+    expect(store.get(gitCheckoutCloningAtom)).toBe(false);
+    expect(store.get(gitCheckoutErrorAtom)).toBeNull();
+    expect(store.get(defaultStartCwdAtom)).toBe('/bridge-root/repo');
+  });
+
+  it('does not clone after an in-place connection change during root discovery', async () => {
+    const roots = deferred<{ bridgeRoot: string; workspaces: never[] }>();
+    const { store, api } = createStore({
+      listWorkspaceRoots: jest.fn(() => roots.promise),
+      gitClone: jest.fn().mockResolvedValue({
+        code: 0,
+        stdout: '',
+        stderr: '',
+        cloned: true,
+        cwd: '/stale-root/repo',
+      }),
+    });
+    store.set(gitCheckoutRepoUrlAtom, 'https://github.com/acme/repo.git');
+    store.set(gitCheckoutDirectoryNameAtom, 'repo');
+    store.set(gitCheckoutParentPathAtom, null);
+    const previousCwd = store.get(defaultStartCwdAtom);
+    const pending = store.set(submitGitCheckoutAtom);
+    expect(api.listWorkspaceRoots).toHaveBeenCalledTimes(1);
+    editActiveProfile(store, {
+      bridgeUrl: 'wss://replacement.example.invalid/ws',
+      bridgeToken: 'replacement-test-token',
+    });
+    roots.resolve({ bridgeRoot: '/stale-root', workspaces: [] });
+    await pending;
+    expect(api.gitClone).not.toHaveBeenCalled();
+    expect(store.get(defaultStartCwdAtom)).toBe(previousCwd);
+    expect(store.get(gitCheckoutErrorAtom)).toBeNull();
+    expect(store.get(gitCheckoutCloningAtom)).toBe(false);
+  });
+
+  it('adopts a completed clone when only the API wrapper changes for the same connection', async () => {
+    const clone = deferred<{
+      code: number;
+      stdout: string;
+      stderr: string;
+      cloned: boolean;
+      cwd: string;
+    }>();
+    const { store } = createStore({ gitClone: jest.fn(() => clone.promise) });
+    store.set(gitCheckoutRepoUrlAtom, 'https://github.com/acme/repo.git');
+    store.set(gitCheckoutDirectoryNameAtom, 'repo');
+    store.set(gitCheckoutParentPathAtom, '/bridge-root');
+    const pending = store.set(submitGitCheckoutAtom);
+    const replacement = createStore().store.get(apiClientAtom);
+    store.set(apiClientAtom, replacement);
+    clone.resolve({ code: 0, stdout: '', stderr: '', cloned: true, cwd: '/bridge-root/repo' });
+    await pending;
+    expect(store.get(defaultStartCwdAtom)).toBe('/bridge-root/repo');
+    expect(store.get(gitCheckoutErrorAtom)).toBeNull();
+    expect(store.get(gitCheckoutCloningAtom)).toBe(false);
+    expect(router.dismissTo).toHaveBeenCalledWith(routes.newChat('profile-1'));
+  });
+
+  it('does not publish a stale clone error after an in-place connection change', async () => {
+    const clone = deferred<never>();
+    const { store, api } = createStore({ gitClone: jest.fn(() => clone.promise) });
+    store.set(gitCheckoutRepoUrlAtom, 'https://github.com/acme/repo.git');
+    store.set(gitCheckoutDirectoryNameAtom, 'repo');
+    store.set(gitCheckoutParentPathAtom, '/bridge-root');
+    const previousCwd = store.get(defaultStartCwdAtom);
+    const pending = store.set(submitGitCheckoutAtom);
+    expect(api.gitClone).toHaveBeenCalledTimes(1);
+    editActiveProfile(store, {
+      bridgeUrl: 'wss://replacement.example.invalid/ws',
+      bridgeToken: 'replacement-test-token',
+    });
+    store.set(gitCheckoutErrorAtom, 'Current connection message');
+    clone.reject(new Error('Previous connection clone failed'));
+    await pending;
+    expect(store.get(gitCheckoutErrorAtom)).toBe('Current connection message');
+    expect(store.get(defaultStartCwdAtom)).toBe(previousCwd);
+    expect(store.get(gitCheckoutCloningAtom)).toBe(false);
+  });
+
+  it('keeps an admitted clone owned across a MainScreen presentation reset', async () => {
+    const clone = deferred<{
+      code: number;
+      stdout: string;
+      stderr: string;
+      cloned: boolean;
+      cwd: string;
+    }>();
+    let admissions = 0;
+    const { store, api } = createStore({
+      gitClone: jest.fn(() => {
+        admissions += 1;
+        if (admissions > 1) {
+          throw new Error('Clone already active');
+        }
+        return clone.promise;
+      }),
+    });
+    const prepare = () => {
+      store.set(gitCheckoutRepoUrlAtom, 'https://github.com/acme/repo.git');
+      store.set(gitCheckoutDirectoryNameAtom, 'repo');
+      store.set(gitCheckoutParentPathAtom, '/bridge-root');
+    };
+    prepare();
+    const pending = store.set(submitGitCheckoutAtom);
+    store.set(resetMainScreenStateAtom);
+    prepare();
+    await store.set(submitGitCheckoutAtom);
+    try {
+      expect(api.gitClone).toHaveBeenCalledTimes(1);
+      expect(store.get(gitCheckoutCloningAtom)).toBe(true);
+      expect(store.get(gitCheckoutErrorAtom)).toBeNull();
+    } finally {
+      clone.resolve({ code: 0, stdout: '', stderr: '', cloned: true, cwd: '/bridge-root/repo' });
+      await pending;
+    }
+    expect(store.get(defaultStartCwdAtom)).toBe('/bridge-root/repo');
+    expect(store.get(gitCheckoutCloningAtom)).toBe(false);
+    expect(router.dismissTo).toHaveBeenCalledWith(routes.newChat('profile-1'));
+  });
+
+  it('does not let an old request settle or unlock a clone in a different profile after reset', async () => {
+    const old = deferred<never>();
+    const next = deferred<{
+      code: number;
+      stdout: string;
+      stderr: string;
+      cloned: boolean;
+      cwd: string;
+    }>();
+    const { store, api } = createStore({
+      gitClone: jest.fn().mockReturnValueOnce(old.promise).mockReturnValueOnce(next.promise),
+    });
+    const prepare = (name: string) => {
+      store.set(gitCheckoutRepoUrlAtom, `https://github.com/acme/${name}.git`);
+      store.set(gitCheckoutDirectoryNameAtom, name);
+      store.set(gitCheckoutParentPathAtom, '/bridge-root');
+    };
+    prepare('old');
+    const first = store.set(submitGitCheckoutAtom);
+    store.set(resetMainScreenStateAtom);
+    switchProfile(store, 'profile-2');
+    prepare('new');
+    const second = store.set(submitGitCheckoutAtom);
+    expect(api.gitClone).toHaveBeenCalledTimes(2);
+    old.reject(new Error('Old clone failed'));
+    await first;
+    expect(store.get(gitCheckoutCloningAtom)).toBe(true);
+    expect(store.get(gitCheckoutErrorAtom)).toBeNull();
+    next.resolve({ code: 0, stdout: '', stderr: '', cloned: true, cwd: '/bridge-root/new' });
+    await second;
+    expect(store.get(gitCheckoutCloningAtom)).toBe(false);
+    expect(store.get(gitCheckoutErrorAtom)).toBeNull();
+    expect(store.get(defaultStartCwdAtom)).toBe('/bridge-root/new');
   });
 
   it('resolves the parent path from the bridge root when none was chosen', async () => {

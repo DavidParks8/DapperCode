@@ -4,7 +4,10 @@ import { fileSystemMock as FileSystem } from '@shared/testing/expoFileSystemMock
 import { ComposerPasteView, type ComposerPasteViewProps } from '../composer/ComposerPasteView';
 import * as ImagePicker from 'expo-image-picker';
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
-jest.mock('expo-router/react-navigation', () => ({ usePreventRemove: jest.fn() }));
+jest.mock('expo-router/react-navigation', () => ({
+  usePreventRemove: jest.fn(),
+  useNavigation: () => ({ dispatch: jest.fn() }),
+}));
 import { router, useGlobalSearchParams, usePathname } from 'expo-router';
 import {
   AccessibilityInfo,

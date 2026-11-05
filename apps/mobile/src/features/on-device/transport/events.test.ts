@@ -188,6 +188,16 @@ describe('LocalEventProjector', () => {
     // Each call's whole-file arguments are parsed once, though it is described when it starts and
     // again when it completes.
     expect(argumentParses()).toBe(TOOLS);
+    expect(
+      eventsOf(out)
+        .filter((event) => event['type'] === EventType.TOOL_CALL_RESULT)
+        .map((event) => [event['toolCallId'], event['messageId']]),
+    ).toEqual(
+      Array.from({ length: TOOLS }, (_, index) => [
+        `call-${String(index + 1)}`,
+        `tool:call-${String(index + 1)}`,
+      ]),
+    );
     expect(summarize(out).filter((entry) => entry.startsWith('META'))).toEqual(
       Array.from({ length: TOOLS }, (_, offset) => {
         const title = `Write src/file-${String(offset + 1)}.ts`;

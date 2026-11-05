@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Stack } from 'expo-router';
-import { usePreventRemove } from 'expo-router/react-navigation';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useNavigation, usePreventRemove } from 'expo-router/react-navigation';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { useEffect, useMemo, useRef } from 'react';
 import {
   KeyboardAvoidingView,
@@ -51,6 +51,8 @@ import {
 import { createGitCheckoutScreenStyles } from './styles';
 
 export function GitCheckoutScreen() {
+  const store = useStore();
+  const navigation = useNavigation();
   const theme = useAppTheme();
   const styles = useMemo(() => createGitCheckoutScreenStyles(theme), [theme]);
   const sceneInsets = useSceneHorizontalInsets();
@@ -86,7 +88,12 @@ export function GitCheckoutScreen() {
     urlError,
   );
   const summary = checkoutSummary(managed, normalizedDirectoryName, targetPath);
-  usePreventRemove(cloning, () => undefined);
+  usePreventRemove(cloning, ({ data }) => {
+    // Completion can navigate before this hook rerenders with its settled value.
+    if (!store.get(gitCheckoutCloningAtom)) {
+      navigation.dispatch(data.action);
+    }
+  });
 
   // Announce loading state to screen readers, mirroring the GitScreen pattern.
   useAccessibilityAnnouncement(cloning ? 'Cloning repository' : null);

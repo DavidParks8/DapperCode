@@ -119,7 +119,10 @@ function buildTranscriptProjectionBase({
   const snapshotMessageIds = liveMessageState?.snapshotMessageIds
     ? new Set(liveMessageState.snapshotMessageIds)
     : null;
-  const rawLiveMessages = (liveMessageState?.messages ?? []).map((message) => {
+  const rawLiveMessages = getVisibleTranscriptMessages(
+    liveMessageState?.messages ?? [],
+    showToolCalls,
+  ).map((message) => {
     const reconstructed = findReconstructedUserMessage(messages, message, liveMessageState);
     if (reconstructed && snapshotMessageIds?.delete(message.id)) {
       snapshotMessageIds.add(reconstructed.id);

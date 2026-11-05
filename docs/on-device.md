@@ -13,7 +13,8 @@ continue to use desktop agents.
 2. Until a local chat first has a message, the new chat shows a **Set up On this iPhone**
    checklist: download a model (Settings → Models), clone or create a workspace (the workspace
    picker), add a Git author (Settings → Git & GitHub; recommended, since commits need it), and
-   start your first chat. Only the model and workspace are required; **Hide setup guide** removes
+   start your first chat. Missing-prerequisite guidance appears once beside its next action,
+   rather than repeating below the checklist. Only the model and workspace are required; **Hide setup guide** removes
    it for good. On **Settings → On this
    iPhone → Models**, search across families, sizes, and quants (for example "q8" or "2b");
    **Downloaded only** and **Include models too large for this iPhone** sit together under the
@@ -27,18 +28,29 @@ continue to use desktop agents.
    taken from the URL; progress shows and **Stop** cancels). Public repositories need no account.
    Sign in under **Settings → On this iPhone → Git & GitHub** before cloning a private GitHub
    repository. **New workspace** creates an empty one; **Initialize Git** on its Git page
-   (optionally with an HTTPS origin) to stage, commit, and later push or pull. Touch and hold a
+   (optionally with an HTTPS origin) to stage, commit, and later push or pull. Its history stays empty
+   until the first commit. Touch and hold a
    workspace to rename it or browse its files, and swipe left to delete it; deleting removes its
    files but keeps conversations that used it readable.
+   Clone submission is single-admission: repeated taps or Return events cannot unlock an active
+   transfer. Stop and failure settle the controls before retry; late results from an old connection
+   never change the current profile's form or selected workspace.
+   A completed clone releases the navigation lock before returning to chat, including when a
+   previous render's active-transfer guard is still registered.
 4. Set your commit author name/email on the same **Git & GitHub** page, then start a **New chat**.
    Pick the model with the chat's **Choose a model** sheet and the workspace with the workspace
    picker. The sheet lists downloaded models with whether each is loaded, marks the one new chats
-   use as **Default**, and links to **Download more models** in Settings. Choosing a model there
+   use as **Default**, and links to **Download more models** in Settings. The picker remains
+   available before the first download and refreshes when you return from Settings, including
+   after a download or deletion. Choosing a model there
    changes it for that chat and for new chats without loading it; it loads when you send.
+   A new-chat choice is confirmed only after the device saves it. Settings and the chat picker
+   share that default, independently of the resident model; saved desktop preferences do not
+   override it. A failed save keeps the previous choice and offers a visible error.
 5. After preparation, inference, file edits, workspace search, diffs, staging, discarding, branch creation and
    switching, history, and commits work without internet. Push, fetch, pull, cloning, sign-in, and
-   new downloads require connectivity. The local agent can also search the web and read HTTPS pages;
-   see [Web access](#web-access).
+   new downloads require connectivity. The local agent can also read HTTPS web pages and search URLs
+   through an approval-gated `web_fetch` tool; see [Web access](#web-access).
 
 Existing desktop profiles and conversations are not migrated or deleted. The last selected profile,
 local or desktop, is restored at startup. Builds that stored the old global "On this iPhone" mode
@@ -171,6 +183,10 @@ The current user message is never removed. If a single turn cannot fit even then
 clear message and the next conversation turn can continue. File reads default to 3 KiB chunks (16 KiB
 maximum) and directory listings to 64 entries (200 maximum).
 
+After earlier tool activity, model input labels the latest request as current and older workspace
+observations as historical snapshots. This encourages fresh reads instead of stale answers after
+edits or model switches; the stored user message and prior conversation remain unchanged.
+
 Native tuning (verify on a physical iPhone): 4 CPU threads on device with every layer on Metal, 6 on
 the CPU-only simulator, 512-token batches, one sequence, and native prompt-prefix reuse across rounds
 (state snapshots for hybrid/sliding-window models). The chat template is rendered once per attempt
@@ -178,10 +194,37 @@ and that prompt is passed straight to completion.
 
 ## Tool and lifecycle boundaries
 
+- Automatic App Store review requests wait for an idle chat surface after local preparation,
+  running turns, and tool approvals settle. A focused composer or unsent draft also defers them,
+  including with a hardware keyboard. They do not appear in model settings or file/Git editors.
+- Git initialization remains UI-only. The model's capability guidance directs requests for
+  `git init` to DapperCode's **Git > Initialize Git** from the chat's Git button, not a separate app.
+  Unavailable shell, package, and test commands must not be emulated through file or Git mutations.
+- A tool-result continuation includes an empty assistant prefill in model input, so native chat
+  templates open a fresh model-generation boundary rather than immediately returning EOS. The
+  prefill is not saved as a message, adds no user prompt, and never replays completed tools.
+- Authoritative local history retains client-only notes, such as a prior Stop notice, but does not
+  resurrect an optimistic user message once its real submitted message is present.
+- Live tool results use the same message identity as their saved ACP projection, so revalidation
+  does not print a result twice. **Show tool calls** applies to both live and saved output without
+  hiding approval controls or changing which tools execute.
+- Expanded results render opaque immediately; row-height changes still honor system Reduce Motion.
+  Touching a settled tool row does not enable native scroll anchoring underneath the finger.
+- Deleting the selected conversation returns to **New chat** while keeping the session list open.
+  An explicit close takes precedence over that navigation; other conversation histories remain intact.
 - Tools can list/read/write/exactly edit/rename/delete/search inside the selected app-private
   workspace. Paths cannot escape through traversal, symlinks, hard links, or Git metadata.
+- File tools and local Git changes run automatically within that workspace. Small models can
+  omit requested steps or make unwanted tool calls; a "do not change files" instruction is not an
+  enforced read-only permission mode. Use disposable workspaces and inspect actual file/Git changes.
+  Chat `git_push`, `web_fetch`, and `web_search` request explicit approval unless the app's global
+  **Require absolutely no approvals** mode is enabled.
 - Replacing existing files requires their last read revision. Output, search, and file sizes are
   bounded; truncation is explicit.
+- The runtime remembers file versions from successful reads/writes within the same turn and
+  workspace; the model does not copy opaque revision strings. Every mutation still checks that
+  observed version natively. External changes require another explicit source-file read; the
+  runtime never silently refreshes a version before writing. A rename destination must not exist.
 - Git uses linked libgit2, not a Git executable. Hooks, shell commands, package managers,
   interpreters, test runners, downloaded executable plugins, and JIT workarounds are unavailable.
   SSH, submodule/LFS hydration, custom providers' private credentials, and force-push are out of scope.
@@ -426,9 +469,23 @@ depends only on its own workspace and is never re-resolved onto another one:
 - `LocalPresencePublisher` repairs `localDefaultStartCwd` whenever workspaces or preferences change:
   a remembered path that no longer resolves becomes the workspace a new chat would fall back to,
   or is cleared, so the drawer's readiness and `thread/start` always agree.
+  Presence reads the repaired path directly from the store and follows its changes immediately;
+  queued runtime updates cannot republish a stale "Needs a workspace" state.
+  The setup checklist and profile summary resolve that same remembered workspace, rather than
+  requiring a separate runtime preference after deletion. Their fallback order matches chat
+  creation: a valid preference, a surviving recent chat's workspace, then the only workspace.
+
+Git refreshes preserve an explicit branch choice while that branch still exists. Unchanged default
+choices follow a changed HEAD, while a removed branch falls back to the current branch; background
+polls and late branch-panel responses do not silently disable the user's pending Switch action.
 
 A chat's model is an ACP config option (`id: 'model'`), so the existing model sheet changes
-it through `thread/config/set`, which also makes it the default for new chats without loading it. `thread/create` falls back to the runtime's remembered workspace and
+it through `thread/config/set`, which also makes it the default for new chats without loading it.
+Before a chat exists, the capability-gated host extension `model/default/set` saves the default
+without creating a conversation or loading a model. Local new chats take the default from
+`model/list.isDefault`, including after a Settings change. Model choices are saved in order,
+and a failed preference write restores the previous choice rather than acknowledging success.
+`thread/create` falls back to the runtime's remembered workspace and
 model when the composer sends none or a desktop path.
 
 ### Capability flags

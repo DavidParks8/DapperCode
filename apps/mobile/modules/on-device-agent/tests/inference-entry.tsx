@@ -5,9 +5,10 @@ import { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { getOnDeviceNativeServices } from '../../../src/features/on-device/native/services';
-import { FILE_TOOL_DEFINITIONS } from '../../../src/features/on-device/workspaces/fileToolDefinitions';
-import { GIT_TOOL_DEFINITIONS } from '../../../src/features/on-device/git/gitTools';
+import { LOCAL_TOOL_DEFINITIONS } from '../../../src/features/on-device/runtime/localTools';
 import { LOCAL_AGENT_SYSTEM_PROMPT } from '../../../src/features/on-device/runtime/agentLoop';
+import { localModelHistory } from '../../../src/features/on-device/runtime/modelHistory';
+import type { LocalMessage } from '../../../src/features/on-device/runtime/types';
 import { executeFileTool } from '../../../src/features/on-device/workspaces/fileTools';
 import { localModelDefinition } from '../../../src/features/on-device/models/catalog';
 import { promptFits } from '../../../src/features/on-device/models/contextWindow';
@@ -20,7 +21,10 @@ import type {
   LocalModelDefinition,
   LocalModelFile,
 } from '../../../src/features/on-device/models/types';
-import { nativeContextParams } from '../../../src/features/on-device/models/engine';
+import {
+  nativeContextParams,
+  type LocalModelMessage,
+} from '../../../src/features/on-device/models/engine';
 
 const checks: Record<string, boolean> = {};
 const metrics: Record<string, number> = {};
@@ -53,6 +57,108 @@ async function withModel(
   }
 }
 
+async function checkPostCancellationContinuation(
+  context: LlamaContext,
+  contextTokens: number,
+  result: string,
+) {
+  const at = new Date().toISOString();
+  const history: LocalMessage[] = [
+    {
+      id: 'push-request',
+      role: 'user',
+      content:
+        'Call git_push now. The tool itself will request approval. Do not ask in prose or wait before calling it. Do not inspect anything first or call any other tool.',
+      createdAt: at,
+    },
+    {
+      id: 'push-call',
+      role: 'assistant',
+      content: '',
+      createdAt: at,
+      toolCalls: [
+        { id: 'stopped-push', type: 'function', function: { name: 'git_push', arguments: '{}' } },
+      ],
+    },
+    {
+      id: 'push-result',
+      role: 'tool',
+      content: JSON.stringify({
+        error: 'Stopped before the user approved this request. It did not run.',
+      }),
+      createdAt: at,
+      tool: {
+        callId: 'stopped-push',
+        name: 'git_push',
+        status: 'interrupted',
+        startedAt: at,
+        completedAt: at,
+      },
+    },
+    {
+      id: 'read-request',
+      role: 'user',
+      content: 'Read hello.txt with read_file. Do not change files.',
+      createdAt: at,
+    },
+    {
+      id: 'read-call',
+      role: 'assistant',
+      content: '',
+      createdAt: at,
+      toolCalls: [
+        {
+          id: 'resumed-read',
+          type: 'function',
+          function: { name: 'read_file', arguments: '{"path":"hello.txt"}' },
+        },
+      ],
+    },
+    {
+      id: 'read-result',
+      role: 'tool',
+      content: result,
+      createdAt: at,
+      tool: {
+        callId: 'resumed-read',
+        name: 'read_file',
+        status: 'completed',
+        startedAt: at,
+        completedAt: at,
+      },
+    },
+  ];
+  const messages: LocalModelMessage[] = [
+    { role: 'system', content: LOCAL_AGENT_SYSTEM_PROMPT },
+    ...localModelHistory(history, 'pending-answer'),
+  ];
+  const format = (input: LocalModelMessage[]) =>
+    context.getFormattedChat(input, null, {
+      tools: LOCAL_TOOL_DEFINITIONS,
+      tool_choice: 'auto',
+      enable_thinking: false,
+      reasoning_format: 'auto',
+    });
+  const formatted = await format(messages);
+  const promptTokens = (await context.tokenize(formatted.prompt)).tokens.length;
+  check(
+    promptFits(promptTokens, contextTokens),
+    'postCancelledToolBudget',
+    `${promptTokens} prompt tokens in ${contextTokens}`,
+  );
+  const reply = await context.completion(completionParams(formatted, 512));
+  check(
+    reply.content?.includes('OFFLINE_TOOL_OK') === true,
+    'postCancelledToolContinuation',
+    JSON.stringify({
+      contextTokens,
+      promptTokens,
+      suffix: formatted.prompt.slice(-200),
+      reply,
+    }),
+  );
+}
+
 async function exerciseInference() {
   const native = getOnDeviceNativeServices();
   const memory = native.getMemoryInfo();
@@ -76,7 +182,7 @@ async function exerciseInference() {
       content: 'Call read_file with the exact path hello.txt. Do not guess its contents.',
     },
   ];
-  const tools = [...FILE_TOOL_DEFINITIONS, ...GIT_TOOL_DEFINITIONS];
+  const tools = LOCAL_TOOL_DEFINITIONS;
   await withModel(model, verified, async (context, contextTokens) => {
     check(Number.isFinite(context.id), 'nativeModelLoaded');
     metrics['contextTokens'] = contextTokens;
@@ -163,6 +269,7 @@ async function exerciseInference() {
     check(chunks > 0, 'nativeStreaming');
     metrics['secondRoundCachedTokens'] = second.timings.cache_n;
     metrics['secondRoundPromptTokens'] = second.timings.prompt_n;
+    await checkPostCancellationContinuation(context, contextTokens, JSON.stringify(file));
     await context.clearCache();
     let stop: Promise<void> | undefined;
     const stopped = await context.completion(

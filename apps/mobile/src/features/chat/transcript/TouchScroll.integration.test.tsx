@@ -273,6 +273,25 @@ describe('streaming scroll ownership', () => {
     });
   });
 
+  it('does not reconfigure native anchoring underneath a tap in a settled transcript', () => {
+    const app = setup();
+    app.update({
+      ...runningChat,
+      status: 'complete',
+      messages: runningChat.messages.map((message) =>
+        message.role === 'assistant' ? { ...message, pending: false } : message,
+      ),
+    });
+    app.scroll(12);
+    const anchoring = app.list().props['maintainVisibleContentPosition'];
+    expect(anchoring).toBeUndefined();
+    fireEvent(app.list(), 'touchStart');
+    expect(app.recovery.autoScrollStateRef.current.isUserInteracting).toBe(true);
+    expect(app.list().props['maintainVisibleContentPosition']).toBe(anchoring);
+    fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
+    expect(app.list().props['maintainVisibleContentPosition']).toBe(anchoring);
+  });
+
   it('anchors native growth above the streaming response from touch-down until release', () => {
     const app = setup();
     app.scroll(12);

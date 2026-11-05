@@ -21,6 +21,7 @@ import {
   applyGitRefreshSuccess,
   setGitRefreshLoadingState,
   shouldApplyGitRefreshResult,
+  reconcileGitBranchDraft,
 } from './refresh';
 import { useGitScreenReviewController } from './reviewController';
 
@@ -77,6 +78,7 @@ export function useGitScreenController({
   const hasLoadedRef = useRef(false);
   const refreshRequestIdRef = useRef(0);
   const refreshInFlightRef = useRef(false);
+  const appliedBranchRef = useRef<string | null>(null);
 
   const { height: windowHeight } = useWindowDimensions();
 
@@ -138,7 +140,9 @@ export function useGitScreenController({
         nextDiff,
         nextHistory,
         nextBranches,
+        appliedBranchRef.current,
       );
+      appliedBranchRef.current = nextBranches?.current ?? nextStatus.branch ?? null;
       hasLoadedRef.current = true;
       setNotRepository(false);
       setError(null);
@@ -190,6 +194,7 @@ export function useGitScreenController({
   useEffect(() => {
     refreshRequestIdRef.current += 1;
     hasLoadedRef.current = false;
+    appliedBranchRef.current = null;
     setStatus(null);
     setDiff(null);
     setHistory([]);
@@ -332,8 +337,18 @@ export function useGitScreenController({
         void api
           .gitBranches(requestedCwd)
           .then((result) => {
+            if (!mountedRef.current || requestedCwd !== requestedCwdRef.current) {
+              return;
+            }
             setBranches(result.branches);
-            setBranchDraft(result.current ?? status?.branch ?? '');
+            setBranchDraft((draft) =>
+              reconcileGitBranchDraft(
+                draft,
+                status?.branch ?? null,
+                result.current ?? status?.branch ?? '',
+                result.branches,
+              ),
+            );
           })
           .catch((err: unknown) => {
             setError(gitErrorMessage(err, 'Could not load branches.'));

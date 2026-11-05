@@ -81,6 +81,14 @@ JIT, extended virtual addressing, or other entitlements to make a model appear c
 Physical iPhone measurements are still required before publishing model/RAM compatibility claims.
 The native memory API is advisory; a simulator's host memory is not an iPhone memory budget.
 
+The app disables Reanimated's `FORCE_REACT_RENDER_FOR_SETTLED_ANIMATIONS` optimization in
+`apps/mobile/package.json`. With it enabled, a settled closed drawer can become visible again
+after a new chat's first Send, covering generation and approval controls even though the navigator
+still reports it closed. The native edge-flow scenario checks the real screen before and after
+Send, pending-approval cancellation, and the next turn. Keep the normal drawer animations; do not
+replace this with navigation retries or hide the drawer after sending. Changing this static flag
+requires `pod install` and a native rebuild, not just a JavaScript rebundle.
+
 ## Validation
 
 Native fixtures declare Expo's Metro types explicitly so lint/type-check works on a clean checkout,
@@ -106,12 +114,15 @@ node .agents/skills/local-e2e-validation/scripts/run.mjs \
   apps/mobile/modules/on-device-agent/tests/native-inference.mjs
 ```
 
-It requires the iOS 27.0 iPhone 18 Pro simulator runtime and downloads a checksum-verified Qwen3-1.7B
+It requires the iOS 27.0 iPhone 18 Pro simulator runtime and downloads a checksum-verified Qwen3.5-2B
 Q4_K_M fixture (approximately 1.3 GB) into test-owned storage. The runner removes the fixture and
 simulator after the run. It asserts structured tool calls, actual file reads, JSON tool-result
 consumption, streaming, cancellation, unload/reload, and native credential storage/removal.
+It also runs the production history projection after a stopped push and a successful file read,
+requiring a genuine answer from the tool result without an extra user instruction or retry.
 Set `DAPPERCODE_NATIVE_TEST_MODEL` to a bundled catalog ID to run the same complete-tool-schema
-gate for another model. The original Qwen3 entries and ABI-6 representatives of Bonsai 2, Qwen3.5,
+gate or native product scenario for another model. Both default to `qwen35-2b-q4-k-m`.
+The original Qwen3 entries and ABI-6 representatives of Bonsai 2, Qwen3.5,
 and Gemma 4 have passed the simulator gate. Prism-only Bonsai packings are explicitly unavailable.
 This is not proof
 of physical-iPhone Metal performance or measured phone RAM compatibility.
@@ -182,12 +193,57 @@ node .agents/skills/local-e2e-validation/scripts/run.mjs \
 `native-product.mjs` bundles the production router behind an isolated fixture bootstrap and drives
 the unified experience as a new user would: onboarding → **On this iPhone** → a new chat in the
 shared chat shell, Settings → Models and Git & GitHub, the shared model sheet and workspace chip, a
-real offline file/stage/commit turn, draft and history recovery across cold launches, stop on
-background, and the profile switcher. Its handles live in `nativeOnDeviceSelectors`
+real Settings-driven model download and load, an offline file/stage/commit turn, every local file
+tool plus Git inspection through chat, and a second workspace created and initialized through the
+UI with its first file and commit. It also checks draft and history recovery across cold launches,
+read-only file previews, dirty-edit protection, branch creation/switching, approved and denied
+network tools, and a public HTTPS clone/file-commit-push round trip against its own loopback Git
+server. No GitHub account is used. Automatic rating prompts are rejected during active work and
+can be dismissed normally while idle. It also covers stop on background and the profile switcher.
+Its handles live in `nativeOnDeviceSelectors`
 (`e2e/fixtures/selectors.ts`). It requires an installed Appium/XCUITest driver, owns its Appium
-server and disposable simulator, and serializes the WDA ports. Its native model/workspace
-preparation does not change the user app, Metro, or a desktop bridge. All fixture bundles disable `.env` loading and public environment
+server and disposable simulator, and serializes the WDA ports. Its native workspace
+preparation and app-driven model download do not change the user app, Metro, or a desktop bridge.
+Polling deadlines use monotonic elapsed time, so host clock corrections cannot prematurely
+expire a stable-control check.
+WDA's normal build cache is kept in this worktree's `local-builds/on-device-wda`, protected by that
+lease; simulator state, logs, certificates, and app containers remain per-run.
+All fixture bundles disable `.env` loading and public environment
 overrides so they cannot inherit a user's configured bridge credentials.
+
+`native-model-management.mjs` reuses that bootstrap for two-model transitions: a downloaded but
+nonresident new-chat choice, matching Settings/default/header state, a Settings round trip,
+an existing chat's lazy model change, real inference after switching the resident context,
+and deletion of selected weights without deleting history or the remaining model.
+The secondary download also exercises real Pause, Resume, Cancel, and a fresh verified retry,
+while preserving the resident primary model.
+Run it with each in-scope representative: secondary models cycle Qwen3.5 -> Bonsai 2 ->
+Gemma 4 -> Qwen3.5 so every family is exercised as both the deleted model and the surviving fallback.
+
+`native-sibling-branches.mjs` covers deliberate Git discard gestures (including staged-byte
+preservation), chat rename/delete confirmations and exact surviving history, and clone Stop/retry.
+Selected-chat deletion must leave the surviving session list visible after navigation to New chat,
+not merely preserve its persisted data.
+It disables automatic alert acceptance so cancellation is actually exercised. The clone test pauses
+only its tracked loopback Git-server PID, resumes it in `finally`, and verifies a real retry.
+Run it with the same E2E runner and a new evidence path.
+
+Tool-result expansion/collapse uses one physical tap at the measured header center per toggle.
+The fixture's read-only shell journal records expansion state, distinguishing native hit routing
+from application-state and rendering failures without a second, failure-hiding tap.
+The product scenario also changes **Show tool calls** off/on through Settings while approval is
+pending, verifies that approval stays available, and checks that one denied result renders once.
+Focused single-model campaigns can pass `singleModelFamily: true` to the product or sibling scenario
+to omit unrelated family browsing. The edge scenario's `sharedWorkflowOnly: true` retains shared
+file-conflict and cancellation checks while omitting model-specific unsupported-request wording.
+The original full scenario defaults remain unchanged.
+
+```bash
+DAPPERCODE_NATIVE_TEST_MODEL=qwen35-2b-q4-k-m \
+node .agents/skills/local-e2e-validation/scripts/run.mjs \
+  --evidence /absolute/path/to/new-model-management.jsonl \
+  apps/mobile/modules/on-device-agent/tests/native-model-management.mjs
+```
 
 GitHub sign-in uses the bundled public DapperCode client ID. Forks can override
 `EXPO_PUBLIC_GITHUB_CLIENT_ID` with their own Device Flow-enabled OAuth app, or set it empty to
@@ -202,5 +258,5 @@ implemented.
   [llama.cpp](https://github.com/ggml-org/llama.cpp): MIT.
 - [libgit2](https://github.com/libgit2/libgit2/tree/v1.9.7): GPLv2 with its linking exception.
   Retain upstream and bundled-dependency notices when distributing the native library.
-- Test model: [Qwen3-1.7B GGUF](https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF).
-  Model weights are test downloads, not committed application assets.
+- Test weights come from the selected entry in the [model catalog](../../src/features/on-device/models/catalog.json),
+  with its pinned revision, checksum, and license. They are downloads, not committed application assets.

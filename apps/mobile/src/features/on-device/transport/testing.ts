@@ -280,6 +280,10 @@ export class FakeAgentPort implements LocalAgentPort {
   refreshWorkspaces = async () => {
     this.calls.push('refreshWorkspaces');
   };
+  chooseDefaultModel = async (modelId: string) => {
+    this.calls.push(`chooseDefaultModel:${modelId}`);
+    this.defaultValues = { ...this.defaultValues, modelId };
+  };
   defaults = () => this.defaultValues;
   availableModels = () => this.models;
   loadedModelId: string | null = null;

@@ -1,6 +1,7 @@
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { Drawer, type DrawerContentComponentProps, useDrawerStatus } from 'expo-router/drawer';
-import { useEffect } from 'react';
+import { router, usePathname } from 'expo-router';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 
 import type { ShellLayout } from '@shell/layout/windowLayout';
 import { useShellLayout } from '@shell/layout/useShellLayout';
@@ -10,6 +11,7 @@ import { sidebarHiddenAtom } from '@shell/state/appState/settings';
 import { activeProfileIdAtom, apiClientAtom, wsClientAtom } from '@shell/state/bridge/atoms';
 import { drawerCommandsAtom, OPEN_NAVIGATION_LABEL } from '@shell/state/drawer/atoms';
 import { useAppTheme } from '@shared/theme';
+import { routes } from '@shell/navigation/routes';
 
 export const unstable_settings = {
   anchor: 'chats/[chatId]',
@@ -56,7 +58,48 @@ function RouterDrawerContent({
   const setDrawerCommands = useSetAtom(drawerCommandsAtom);
   const store = useStore();
   const docked = sidebarMode === 'docked';
+  const pathname = usePathname();
+  const pendingNewChat = useRef<{ profileId: string; pathname: string } | null>(null);
+  const closeDrawer = useCallback(() => {
+    pendingNewChat.current = null;
+    navigation.closeDrawer();
+  }, [navigation]);
+  const navigateToNewChatKeepingDrawerOpen = useCallback(
+    (profileId: string): boolean => {
+      if (profileId !== activeProfileId) {
+        return false;
+      }
+      const target = `/profiles/${encodeURIComponent(profileId)}/chats/new`;
+      if (pathname === target) {
+        pendingNewChat.current = null;
+        navigation.openDrawer();
+        return true;
+      }
+      if (pendingNewChat.current?.pathname !== target) {
+        pendingNewChat.current = { profileId, pathname: target };
+        router.navigate(routes.newChat(profileId));
+      }
+      return true;
+    },
+    [activeProfileId, navigation, pathname],
+  );
   useDrawerForegroundSync(sidebarMode === 'overlay' ? navigation : null, drawerStatus);
+
+  useEffect(() => {
+    const pending = pendingNewChat.current;
+    if (!pending) {
+      return;
+    }
+    if (pending.profileId !== activeProfileId || sidebarMode !== 'overlay') {
+      pendingNewChat.current = null;
+      return;
+    }
+    // Navigating closes an overlay drawer; restore it only after the intended route is active.
+    if (pathname === pending.pathname) {
+      pendingNewChat.current = null;
+      navigation.openDrawer();
+    }
+  }, [activeProfileId, navigation, pathname, sidebarMode]);
 
   useEffect(() => {
     if (sidebarMode === 'collapsed' && drawerStatus === 'open') {
@@ -64,22 +107,34 @@ function RouterDrawerContent({
     }
   }, [drawerStatus, navigation, sidebarMode]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setDrawerCommands(
       sidebarMode === 'overlay'
         ? {
-            closeDrawer: () => navigation.closeDrawer(),
-            toggleNavigation: () => navigation.toggleDrawer(),
+            closeDrawer,
+            navigateToNewChatKeepingDrawerOpen,
+            toggleNavigation: () => {
+              pendingNewChat.current = null;
+              navigation.toggleDrawer();
+            },
             navigationLabel: OPEN_NAVIGATION_LABEL,
           }
         : {
-            closeDrawer: () => navigation.closeDrawer(),
+            closeDrawer,
             toggleNavigation: () => store.set(sidebarHiddenAtom, !store.get(sidebarHiddenAtom)),
             navigationLabel: docked ? 'Hide sidebar' : 'Show sidebar',
           },
     );
     return () => setDrawerCommands(null);
-  }, [docked, navigation, setDrawerCommands, sidebarMode, store]);
+  }, [
+    closeDrawer,
+    docked,
+    navigateToNewChatKeepingDrawerOpen,
+    navigation,
+    setDrawerCommands,
+    sidebarMode,
+    store,
+  ]);
 
   // The local profile's clients appear only once its runtime has started; bridge clients exist
   // synchronously. The drawer needs both, so it waits instead of rendering without a client.
@@ -90,7 +145,7 @@ function RouterDrawerContent({
     <DrawerContent
       key={activeProfileId}
       active={docked || drawerStatus === 'open'}
-      onClose={docked ? undefined : () => navigation.closeDrawer()}
+      onClose={docked ? undefined : closeDrawer}
     />
   );
 }

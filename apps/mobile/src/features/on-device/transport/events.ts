@@ -372,7 +372,7 @@ export class LocalEventProjector {
       this.emit(out, thread.id, run, { type: EventType.TOOL_CALL_END, toolCallId: tool.callId });
       this.emit(out, thread.id, run, {
         type: EventType.TOOL_CALL_RESULT,
-        messageId: `${tool.callId}::result`,
+        messageId: `tool:${tool.callId}`,
         toolCallId: tool.callId,
         role: 'tool',
         content: message.content || '{}',

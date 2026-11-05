@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "main": "expo-router/entry",
+  "reanimated": {
+    "staticFeatureFlags": {
+      "FORCE_REACT_RENDER_FOR_SETTLED_ANIMATIONS": false
+    }
+  },
   "scripts": {
     "mermaid:prepare": "node scripts/prepare-mermaid-runtime.cjs",
     "mermaid:check": "node scripts/prepare-mermaid-runtime.cjs --check",

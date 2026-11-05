@@ -20,6 +20,7 @@ import { useAppTheme } from '@shared/theme';
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { feedback } from '@shared/feedback';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
+import { useStoreReviewComposer } from '@shell/state/storeReview';
 
 const ACTION_BUTTON_PRESS_RETENTION_OFFSET = 8;
 const ACTION_BUTTON_VISIBLE_SIZE = { width: 48, height: 48 };
@@ -362,6 +363,8 @@ export function ChatInput(props: ChatInputProps) {
     footer,
     reserveFooterSpace,
   } = normalizeChatInputProps(props);
+  const [focused, setFocused] = useState(false);
+  useStoreReviewComposer(focused || value.length > 0);
   const theme = useAppTheme();
   const { colors } = theme;
   const styles = useMemo(() => createChatInputStyles(theme), [theme]);
@@ -511,7 +514,11 @@ export function ChatInput(props: ChatInputProps) {
                       previousWidth === nextWidth ? previousWidth : nextWidth,
                     );
                   }}
-                  onFocus={onFocus}
+                  onFocus={() => {
+                    setFocused(true);
+                    onFocus?.();
+                  }}
+                  onBlur={() => setFocused(false)}
                   placeholder={placeholder}
                   placeholderTextColor={colors.textMuted}
                   multiline

@@ -2,7 +2,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAtom } from 'jotai';
 import { memo, useCallback, useMemo } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
-import Animated, { FadeIn, LinearTransition, ReduceMotion } from 'react-native-reanimated';
+import Animated, { LinearTransition, ReduceMotion } from 'react-native-reanimated';
 
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import { expandedToolInvocationIdsAtom } from '../state/toolInvocations';
@@ -324,17 +324,14 @@ export const ToolInvocationRow = memo(function ToolInvocationRowComponent({
       </View>
       <ToolPatchFiles invocation={invocation} />
       {expanded ? (
-        <Animated.View
-          entering={FadeIn.duration(motion.duration.routine).reduceMotion(ReduceMotion.System)}
-          testID="tool-output-container"
-        >
+        <View testID="tool-output-container">
           <ToolInvocationOutput
             invocation={invocation}
             headerLabel={header.label}
             bridgeUrl={bridgeUrl}
             bridgeToken={bridgeToken}
           />
-        </Animated.View>
+        </View>
       ) : null}
     </Animated.View>
   );

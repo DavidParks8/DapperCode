@@ -38,7 +38,23 @@ export interface GitRefreshSetters {
   setDiff: (value: GitDiffResponse) => void;
   setHistory: (value: GitHistoryCommit[]) => void;
   setBranches: (value: GitBranchSummary[]) => void;
-  setBranchDraft: (value: string) => void;
+  setBranchDraft: (value: string | ((current: string) => string)) => void;
+}
+
+export function reconcileGitBranchDraft(
+  draft: string,
+  previousBranch: string | null,
+  nextBranch: string,
+  available: readonly GitBranchSummary[] | null,
+): string {
+  if (
+    !draft ||
+    draft === previousBranch ||
+    (available !== null && !available.some((branch) => branch.name === draft))
+  ) {
+    return nextBranch;
+  }
+  return draft;
 }
 
 export function applyGitRefreshSuccess(
@@ -47,10 +63,18 @@ export function applyGitRefreshSuccess(
   nextDiff: GitDiffResponse,
   nextHistory: GitHistoryResponse,
   nextBranches: GitBranchesResponse | null,
+  previousBranch: string | null,
 ): void {
   setters.setStatus(nextStatus);
   setters.setDiff(nextDiff);
   setters.setHistory(nextHistory.commits);
   setters.setBranches(nextBranches?.branches ?? []);
-  setters.setBranchDraft(nextBranches?.current ?? nextStatus.branch ?? '');
+  setters.setBranchDraft((draft) =>
+    reconcileGitBranchDraft(
+      draft,
+      previousBranch,
+      nextBranches?.current ?? nextStatus.branch ?? '',
+      nextBranches?.branches ?? null,
+    ),
+  );
 }

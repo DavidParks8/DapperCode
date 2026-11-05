@@ -8,6 +8,10 @@ const LOCAL_TRANSCRIPT_MESSAGE_PREFIXES = [
 ] as const;
 
 export function reconcileChatTranscript(previous: Chat, next: Chat): Chat {
+  // Detect summary-only reads before client-only entries make an empty snapshot look populated.
+  if (previous.id === next.id && previous.messages.length > 0 && next.messages.length === 0) {
+    return withPreviousTranscript(previous, next);
+  }
   const known = withoutUnstoredMessages(previous, next);
   // Merge client-only entries first so later stale-transcript protection cannot discard them.
   const withLocalTranscript = preserveLocalTranscript(
@@ -100,11 +104,6 @@ function preserveRecentUserTurnTranscript(previous: Chat, next: Chat): Chat {
 
   if (isAgentMessageOnlySnapshot(next) && hasOrdinaryTranscript(previous)) {
     return mergeAgentMessageOnlySnapshot(previous, next);
-  }
-
-  // A summary-only fallback has no turns and must not erase already-hydrated history.
-  if (previous.messages.length > 0 && next.messages.length === 0) {
-    return withPreviousTranscript(previous, next);
   }
 
   if (next.historyAuthoritative) {
@@ -257,7 +256,10 @@ function preserveLocalTranscript(previous: Chat, next: Chat): Chat {
   }
 
   const nextMessagesById = new Map(next.messages.map((message) => [message.id, message]));
-  const messages = previous.messages.map((message) => nextMessagesById.get(message.id) ?? message);
+  const preserved = next.historyAuthoritative
+    ? previous.messages.filter(isLocalTranscriptMessage)
+    : previous.messages;
+  const messages = preserved.map((message) => nextMessagesById.get(message.id) ?? message);
   const mergedMessageIds = new Set(messages.map((message) => message.id));
 
   for (const message of next.messages) {

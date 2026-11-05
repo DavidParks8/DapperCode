@@ -1,9 +1,9 @@
+import type { CompletionParams, FormattedChatResult, TokenData } from 'llama.rn';
+import { randomUUID } from 'expo-crypto';
 import { TextDecoder } from 'node:util';
 import type * as NodeStreams from 'node:stream/web';
 import type * as NodeUtilities from 'node:util';
 import { fetch as fetchPage } from 'expo/fetch';
-import type { CompletionParams, FormattedChatResult, TokenData } from 'llama.rn';
-import { randomUUID } from 'expo-crypto';
 import { localModelDefinition } from '../models/catalog';
 import type { LocalModelContext, LocalModelReply } from '../models/engine';
 import { loadNativeModelContext } from '../models/engine';
@@ -22,6 +22,36 @@ import type { LocalThread, OnDeviceReachability } from './types';
 
 jest.mock('expo-crypto', () => ({ randomUUID: jest.fn() }));
 jest.mock('../models/engine', () => ({ loadNativeModelContext: jest.fn() }));
+jest.mock('expo/fetch', () => ({
+  fetch: jest.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method !== 'POST') {
+      return new Response(null, { status: 200, headers: { 'Content-Type': 'text/plain' } });
+    }
+    const { ReadableStream } = jest.requireActual<typeof NodeStreams>('node:stream/web');
+    const { TextEncoder } = jest.requireActual<typeof NodeUtilities>('node:util');
+    return {
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                id: 1,
+                result: {
+                  content: [{ type: 'text', text: 'Title: Rust\nURL: https://doc.rust-lang.org/' }],
+                },
+              }),
+            ),
+          );
+          controller.close();
+        },
+      }),
+    };
+  }),
+}));
+Object.defineProperty(globalThis, 'TextDecoder', { configurable: true, value: TextDecoder });
 
 const modelId = 'qwen3-1.7b-q4-k-m';
 const reply: LocalModelReply = {
@@ -216,6 +246,82 @@ beforeEach(() => {
   jest
     .mocked(randomUUID)
     .mockImplementation(() => `00000000-0000-4000-8000-${String(++sequence).padStart(12, '0')}`);
+});
+
+describe('persisted new-chat model selection', () => {
+  it('restores a rejected default without changing residency or documents and permits retry', async () => {
+    const h = harness();
+    await h.runtime.initialize();
+    const primary = localModelDefinition('qwen35-2b-q4-k-m').id;
+    const secondary = localModelDefinition('bonsai-2-2b-q2-0').id;
+    await h.runtime.chooseModel(primary);
+    const preferences = { ...h.runtime.preferences() };
+    const residency = { ...h.runtime.models.snapshot() };
+    const documents = new Map(h.documents);
+    const preferencesDocument = h.native.writeRuntimeDocument.mock.calls.at(-1)![0];
+    const failure = new Error('Preference persistence failed.');
+    h.native.writeRuntimeDocument.mockRejectedValueOnce(failure);
+    await expect(h.runtime.chooseModel(secondary)).rejects.toBe(failure);
+    expect(h.runtime.preferences()).toEqual(preferences);
+    expect(h.runtime.models.snapshot()).toEqual(residency);
+    expect(h.documents).toEqual(documents);
+    await h.runtime.chooseModel(secondary);
+    expect(h.runtime.preferences()).toEqual({ ...preferences, modelId: secondary });
+    expect(h.runtime.models.snapshot()).toEqual(residency);
+    expect(JSON.parse(h.documents.get(preferencesDocument)!)).toMatchObject({
+      modelId: secondary,
+    });
+  });
+
+  it('does not revert a newer default when an older persistence request rejects', async () => {
+    const h = harness();
+    await h.runtime.initialize();
+    const primary = localModelDefinition('qwen35-2b-q4-k-m').id;
+    const secondary = localModelDefinition('bonsai-2-2b-q2-0').id;
+    const latest = localModelDefinition('gemma-4-e2b-q4-0').id;
+    await h.runtime.chooseModel(primary);
+    const residency = { ...h.runtime.models.snapshot() };
+    let rejectWrite!: (error: Error) => void;
+    const writing = deferred<void>();
+    h.native.writeRuntimeDocument.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectWrite = reject;
+          writing.resolve();
+        }),
+    );
+    const older = h.runtime.chooseModel(secondary);
+    await writing.promise;
+    const newer = h.runtime.chooseModel(latest);
+    const failure = new Error('Older preference persistence failed.');
+    rejectWrite(failure);
+    await expect(older).rejects.toBe(failure);
+    await newer;
+    expect(h.runtime.preferences().modelId).toBe(latest);
+    expect(h.runtime.models.snapshot()).toEqual(residency);
+    const preferencesDocument = h.native.writeRuntimeDocument.mock.calls.at(-1)![0];
+    expect(JSON.parse(h.documents.get(preferencesDocument)!)).toMatchObject({
+      modelId: latest,
+    });
+  });
+
+  it('restores the durable default when consecutive overlapping selections both fail', async () => {
+    const h = harness();
+    await h.runtime.initialize();
+    const primary = localModelDefinition('qwen35-2b-q4-k-m').id;
+    await h.runtime.chooseModel(primary);
+    const documents = new Map(h.documents);
+    h.native.writeRuntimeDocument
+      .mockRejectedValueOnce(new Error('First write failed'))
+      .mockRejectedValueOnce(new Error('Second write failed'));
+    const selections = await Promise.allSettled([
+      h.runtime.chooseModel('bonsai-2-2b-q2-0'),
+      h.runtime.chooseModel('gemma-4-e2b-q4-0'),
+    ]);
+    expect(selections.map((result) => result.status)).toEqual(['rejected', 'rejected']);
+    expect(h.runtime.preferences().modelId).toBe(primary);
+    expect(h.documents).toEqual(documents);
+  });
 });
 
 describe('public GitHub OAuth configuration', () => {
@@ -1258,73 +1364,6 @@ test('a model-initiated push waits for approval and a decline never reaches the 
   await h.runtime.dispose();
 });
 
-test('a failed turn can be retried through the runtime without resending the message', async () => {
-  const h = await ready();
-  h.context.completion.mockRejectedValueOnce(new Error('Decode failed'));
-  await expect(
-    h.runtime.sendMessage(h.thread.id, 'Explain', 'submission', jest.fn()),
-  ).rejects.toThrow('Decode failed');
-  expect(controlsFor(h)).toMatchObject({ canRetry: true, status: 'Local turn failed' });
-  expect(h.runtime.models.snapshot().phase).toBe('ready');
-  const retried = await h.runtime.retryTurn(h.thread.id);
-  expect(retried.status).toBe('complete');
-  expect(retried.messages.filter((message) => message.role === 'user')).toHaveLength(1);
-  expect(loadNativeModelContext).toHaveBeenCalledTimes(1);
-  await h.runtime.dispose();
-});
-
-test('retrying a failed turn waits for a pending model unload instead of racing it', async () => {
-  const h = await ready();
-  h.context.completion.mockRejectedValueOnce(new Error('Decode failed'));
-  await expect(
-    h.runtime.sendMessage(h.thread.id, 'Explain', 'submission', jest.fn()),
-  ).rejects.toThrow('Decode failed');
-  const release = deferred<undefined>();
-  h.context.release.mockImplementationOnce(() => release.promise);
-  const unloading = h.runtime.unloadModel();
-  await settle(() => h.runtime.models.snapshot().phase === 'stopping');
-  const retried = h.runtime.retryTurn(h.thread.id);
-  await Promise.resolve();
-  expect(h.runtime.loop.snapshot().phase).toBe('idle');
-  release.resolve(undefined);
-  await unloading;
-  await expect(retried).resolves.toMatchObject({ status: 'complete' });
-  expect(loadNativeModelContext).toHaveBeenCalledTimes(2);
-  expect(controlsFor(h)).toMatchObject({ canRetry: false, showStopButton: false });
-  await h.runtime.dispose();
-});
-
-jest.mock('expo/fetch', () => ({
-  fetch: jest.fn(async (_url: string, init?: RequestInit) => {
-    if (init?.method !== 'POST') {
-      return new Response(null, { status: 200, headers: { 'Content-Type': 'text/plain' } });
-    }
-    const { ReadableStream } = jest.requireActual<typeof NodeStreams>('node:stream/web');
-    const { TextEncoder } = jest.requireActual<typeof NodeUtilities>('node:util');
-    return {
-      status: 200,
-      headers: new Headers({ 'Content-Type': 'application/json' }),
-      body: new ReadableStream({
-        start(controller) {
-          controller.enqueue(
-            new TextEncoder().encode(
-              JSON.stringify({
-                jsonrpc: '2.0',
-                id: 1,
-                result: {
-                  content: [{ type: 'text', text: 'Title: Rust\nURL: https://doc.rust-lang.org/' }],
-                },
-              }),
-            ),
-          );
-          controller.close();
-        },
-      }),
-    };
-  }),
-}));
-Object.defineProperty(globalThis, 'TextDecoder', { configurable: true, value: TextDecoder });
-
 function webCall(url: string): LocalModelReply {
   return {
     ...reply,
@@ -1526,4 +1565,40 @@ test('global bypass lets Exa searches execute on consecutive turns without reque
     unsubscribe();
     await h.runtime.dispose();
   }
+});
+
+test('a failed turn can be retried through the runtime without resending the message', async () => {
+  const h = await ready();
+  h.context.completion.mockRejectedValueOnce(new Error('Decode failed'));
+  await expect(
+    h.runtime.sendMessage(h.thread.id, 'Explain', 'submission', jest.fn()),
+  ).rejects.toThrow('Decode failed');
+  expect(controlsFor(h)).toMatchObject({ canRetry: true, status: 'Local turn failed' });
+  expect(h.runtime.models.snapshot().phase).toBe('ready');
+  const retried = await h.runtime.retryTurn(h.thread.id);
+  expect(retried.status).toBe('complete');
+  expect(retried.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+  expect(loadNativeModelContext).toHaveBeenCalledTimes(1);
+  await h.runtime.dispose();
+});
+
+test('retrying a failed turn waits for a pending model unload instead of racing it', async () => {
+  const h = await ready();
+  h.context.completion.mockRejectedValueOnce(new Error('Decode failed'));
+  await expect(
+    h.runtime.sendMessage(h.thread.id, 'Explain', 'submission', jest.fn()),
+  ).rejects.toThrow('Decode failed');
+  const release = deferred<undefined>();
+  h.context.release.mockImplementationOnce(() => release.promise);
+  const unloading = h.runtime.unloadModel();
+  await settle(() => h.runtime.models.snapshot().phase === 'stopping');
+  const retried = h.runtime.retryTurn(h.thread.id);
+  await Promise.resolve();
+  expect(h.runtime.loop.snapshot().phase).toBe('idle');
+  release.resolve(undefined);
+  await unloading;
+  await expect(retried).resolves.toMatchObject({ status: 'complete' });
+  expect(loadNativeModelContext).toHaveBeenCalledTimes(2);
+  expect(controlsFor(h)).toMatchObject({ canRetry: false, showStopButton: false });
+  await h.runtime.dispose();
 });

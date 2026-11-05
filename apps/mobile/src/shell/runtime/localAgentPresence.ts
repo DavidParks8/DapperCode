@@ -7,6 +7,7 @@ import {
 import type { OnDeviceRuntimeSlice } from '../../features/on-device/runtime/types';
 import {
   LOCAL_WORKSPACE_ROOT,
+  localFallbackWorkspaceId,
   localWorkspaceIdForPath,
   localWorkspacePaths,
 } from '../../features/on-device/transport/wire';
@@ -48,13 +49,9 @@ function newChatDefaults(runtime: OnDeviceRuntime, cwd: string | null) {
     preferences.modelId ??
     null;
   const workspaces = runtime.workspaces();
-  const exists = (id: string | null | undefined) =>
-    id && workspaces.some((workspace) => workspace.id === id) ? id : null;
   const workspaceId = isLocalWorkspacePath(cwd)
     ? localWorkspaceIdForPath(workspaces, cwd)
-    : (exists(preferences.workspaceId) ??
-      exists(recent?.workspaceId) ??
-      (workspaces.length === 1 ? (workspaces[0]?.id ?? null) : null));
+    : localFallbackWorkspaceId(workspaces, preferences.workspaceId, recent?.workspaceId);
   return { modelId, workspaceId, workspaces };
 }
 

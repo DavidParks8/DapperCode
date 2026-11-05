@@ -518,6 +518,41 @@ describe('resolveEquivalentChat with an authoritative on-device history', () => 
     expect(resolveEquivalentChat(cached, partial).messages).toEqual(cached.messages);
   });
 
+  it('acknowledges the next optimistic request once while retaining a prior local Stop note', () => {
+    const note = {
+      id: 'local-system-stopped',
+      role: 'system' as const,
+      content: 'Turn stopped by user.',
+      createdAt: '2026-07-25T00:00:02.000Z',
+    };
+    const pending = {
+      id: 'msg-optimistic-next',
+      role: 'user' as const,
+      content: 'Read seed.txt instead.',
+      createdAt: '2026-07-25T00:00:03.000Z',
+    };
+    const current = chat({ status: 'running', messages: [ask, tool, note, pending] });
+    const echoed = { ...pending, id: 'user-submission-next' };
+    const answer = {
+      ...lostReply,
+      id: 'next-answer',
+      content: 'fixture',
+      createdAt: '2026-07-25T00:00:04.000Z',
+    };
+    const complete = chat({
+      status: 'idle',
+      messages: [ask, tool, echoed, answer],
+      historyAuthoritative: true,
+    });
+    const reconciled = resolveEquivalentChat(current, complete);
+    expect(reconciled.messages).toEqual([ask, tool, note, echoed, answer]);
+    expect(
+      reconciled.messages.filter((message) => message.content === pending.content),
+    ).toHaveLength(1);
+    expect(reconciled.status).toBe('idle');
+    expect(resolveEquivalentChat(reconciled, complete)).toBe(reconciled);
+  });
+
   it('keeps unconfirmed sends, client-only entries, and history against a summary-only read', () => {
     const pending = {
       id: 'local-user-2',
@@ -543,5 +578,8 @@ describe('resolveEquivalentChat with an authoritative on-device history', () => 
     expect(
       resolveEquivalentChat(cached, chat({ messages: [], historyAuthoritative: true })).messages,
     ).toEqual(cached.messages);
+    expect(
+      resolveEquivalentChat(withLocal, chat({ messages: [], historyAuthoritative: true })).messages,
+    ).toEqual(withLocal.messages);
   });
 });

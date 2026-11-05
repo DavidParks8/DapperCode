@@ -2,6 +2,7 @@ import { requireTestValue } from '@shared/testing/requireTestValue';
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 jest.mock('expo-router/react-navigation', () => ({
   usePreventRemove: jest.fn(),
+  useNavigation: () => ({ dispatch: jest.fn() }),
 }));
 jest.mock('react-native-reanimated', () => {
   // Require react-native in this context so View/Text are valid renderable types.

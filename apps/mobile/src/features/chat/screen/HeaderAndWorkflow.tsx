@@ -21,6 +21,7 @@ import { useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
 import { useInlineToolbar, useToolbarPlacement } from '@shell/layout/SceneToolbar';
 import { resolveInlineHeaderButtons } from './chatToolbar';
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
+import { activeProfileFeaturesAtom } from '@shell/state/bridge/atoms';
 import { AppSheet } from '@shared/ui/AppSheet';
 import { WorkflowCard } from '../workflow/Workflow';
 import { SESSION_META_CHIP_HEIGHT } from '../styles/sessionMetaChip';
@@ -167,6 +168,7 @@ function SessionMetaRow(props: {
 }) {
   const { context, styles, theme, hitSlop, tokenTotals, onOpenTokenSheet } = props;
   const sceneInsets = useSceneHorizontalInsets();
+  const { modelLibrary } = useAtomValue(activeProfileFeaturesAtom);
   const {
     selectedChat,
     readyAgents,
@@ -215,7 +217,7 @@ function SessionMetaRow(props: {
             onPress={openAgentModal}
           />
         ) : null}
-        {modelOptions.length > 0 ? (
+        {modelOptions.length > 0 || modelLibrary ? (
           <SessionMetaChip
             styles={styles}
             theme={theme}

@@ -95,12 +95,15 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     if (selectedChatId) {
       return;
     }
-    setSelectedModelId(preferredDefaultModelId);
+    if (!modelLibrary) {
+      setSelectedModelId(preferredDefaultModelId);
+    }
     setSelectedEffort(preferredDefaultEffort);
     setSelectedServiceTier(preferredServiceTier);
     setSelectedCollaborationMode(preferredCollaborationMode as CollaborationMode);
   }, [
     defaultServiceTier,
+    modelLibrary,
     pendingAgentId,
     preferredDefaultEffort,
     preferredDefaultModelId,
@@ -112,6 +115,11 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     setSelectedModelId,
     setSelectedServiceTier,
   ]);
+  useEffect(() => {
+    if (modelLibrary && !selectedChatId) {
+      setSelectedModelId(modelOptions.find((model) => model.isDefault)?.id ?? null);
+    }
+  }, [modelLibrary, modelOptions, selectedChatId, setSelectedModelId]);
   const {
     serverDefaultModel,
     serverDefaultModelId,
@@ -147,7 +155,7 @@ export function useMainScreenModelCatalogState(context: MainScreenModelCatalogSt
     effortConfig,
     modeConfig,
     modelOptions,
-    preferredDefaultModelId,
+    preferredDefaultModelId: modelLibrary ? null : preferredDefaultModelId,
     preferredDefaultEffort,
     chatModelPreferencesRef,
     defaultServiceTier,

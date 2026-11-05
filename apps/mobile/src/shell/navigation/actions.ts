@@ -21,7 +21,7 @@ import {
   openChatWithTransitionAtom,
 } from '@shell/state/chat/actions';
 import { mainScreenCommandsAtom } from '@shell/state/commands';
-import { closeDrawerAtom } from '@shell/state/drawer/atoms';
+import { closeDrawerAtom, drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { agentRootThreadIdAtom } from '../../features/workspace/state/workspace';
 import type { DrawerScreen } from '@shell/navigation/drawerContentTypes';
 import { navigateRoot, replaceRoot } from '@shell/navigation/routeNavigation';
@@ -99,6 +99,12 @@ export const startNewChatAtom = atom(
     if (profileId) {
       // `new` is commonly absent from the current stack. Do not call navigateRoot here: its
       // dismissTo preflight can replace the current route when the destination is not in history.
+      if (
+        options.keepDrawerOpen &&
+        get(drawerCommandsAtom)?.navigateToNewChatKeepingDrawerOpen?.(profileId)
+      ) {
+        return;
+      }
       router.navigate(routes.newChat(profileId));
     } else {
       replaceRoot(routes.onboarding);

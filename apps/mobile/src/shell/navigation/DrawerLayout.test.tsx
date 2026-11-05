@@ -1,5 +1,6 @@
 let mockDrawerProps: Record<string, unknown> | null = null;
 
+jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 jest.mock('expo-router/drawer', () => ({
   Drawer: (props: Record<string, unknown>) => {
     mockDrawerProps = props;
@@ -175,6 +176,7 @@ describe('DrawerLayout responsive sizing', () => {
 
     let tree = renderContent(false);
     expect(store.get(drawerCommandsAtom)?.navigationLabel).toBe('Hide sidebar');
+    expect(store.get(drawerCommandsAtom)?.navigateToNewChatKeepingDrawerOpen).toBeUndefined();
     act(() => store.get(drawerCommandsAtom)?.toggleNavigation?.());
     expect(store.get(sidebarHiddenAtom)).toBe(true);
     expect(navigation.toggleDrawer).not.toHaveBeenCalled();
@@ -196,6 +198,9 @@ describe('DrawerLayout responsive sizing', () => {
     act(() => tree.update(withAppStore(store, drawerContent({ navigation }))));
 
     expect(store.get(drawerCommandsAtom)?.navigationLabel).toBe('Open navigation drawer');
+    expect(typeof store.get(drawerCommandsAtom)?.navigateToNewChatKeepingDrawerOpen).toBe(
+      'function',
+    );
     act(() => store.get(drawerCommandsAtom)?.toggleNavigation?.());
     expect(navigation.toggleDrawer).toHaveBeenCalledTimes(1);
     expect(store.get(sidebarHiddenAtom)).toBe(false);

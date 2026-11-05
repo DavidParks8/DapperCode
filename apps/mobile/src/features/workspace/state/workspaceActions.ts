@@ -5,24 +5,16 @@ import type { FileSystemListResponse, WorkspaceListResponse } from '@bridge/type
 import { MainScreenPersistenceController } from '../../chat/session/controllers/persistenceController';
 import {
   deriveCloneDirectoryName,
-  formatGitCloneFailureMessage,
   getWorkspaceBrowseCacheKey,
-  joinWorkspacePath,
-  normalizeCloneDirectoryName,
   normalizeWorkspacePath,
   scheduleIdleTask,
   WORKSPACE_FAVORITES_LIMIT,
   type WorkspacePickerPurpose,
 } from '../../chat/helpers/helpers';
 import { defaultStartCwdAtom } from '@shell/state/appState/settings';
-import {
-  activeProfileFeaturesAtom,
-  activeProfileIdAtom,
-  apiClientAtom,
-} from '@shell/state/bridge/atoms';
+import { activeProfileFeaturesAtom, activeProfileIdAtom } from '@shell/state/bridge/atoms';
 import { routes } from '@shell/navigation/routes';
-import { describeHostError } from '../api/errors';
-import { httpsRemoteError } from '../api/remoteUrl';
+import { submitGitCheckoutRequest } from './gitCheckoutSubmission';
 import { sharedBrowseRequest } from './browseRequests';
 import { getWorkspaceRouteIds, returnToChat } from './workspaceRouteNavigation';
 import {
@@ -37,6 +29,7 @@ import {
   gitCheckoutErrorAtom,
   gitCheckoutParentPathAtom,
   gitCheckoutRepoUrlAtom,
+  gitCheckoutRequestOwnerAtom,
   resumeGitCheckoutAfterWorkspacePickerAtom,
 } from './gitCheckout';
 import {
@@ -485,7 +478,12 @@ export const openGitCheckoutAtom = atom(
     set(gitCheckoutDirectoryNameEditedAtom, false);
     set(gitCheckoutParentPathAtom, defaultParentPath);
     set(gitCheckoutErrorAtom, null);
-    set(gitCheckoutCloningAtom, false);
+    const requestOwner = get(gitCheckoutRequestOwnerAtom);
+    set(
+      gitCheckoutCloningAtom,
+      requestOwner !== null &&
+        requestOwner.identityKey === get(activeWorkspaceIdentityAtom)?.identityKey,
+    );
     set(resumeGitCheckoutAfterWorkspacePickerAtom, false);
     router.push(routes.gitCheckout(profileId, chatId));
     void set(refreshWorkspaceRootsAtom).then((response) => {
@@ -532,62 +530,6 @@ export const changeGitCheckoutDirectoryNameAtom = atom(null, (get, set, value: s
   set(gitCheckoutErrorAtom, null);
 });
 
-export const submitGitCheckoutAtom = atom(null, async (get, set): Promise<void> => {
-  const api = get(apiClientAtom);
-  const url = get(gitCheckoutRepoUrlAtom).trim();
-  const directoryName = normalizeCloneDirectoryName(get(gitCheckoutDirectoryNameAtom));
-  if (!url) {
-    set(gitCheckoutErrorAtom, 'Paste an HTTPS or SSH repository URL first.');
-    return;
-  }
-  const urlError = get(activeProfileFeaturesAtom).managedWorkspaces ? httpsRemoteError(url) : null;
-  if (urlError) {
-    set(gitCheckoutErrorAtom, urlError);
-    return;
-  }
-  if (!directoryName) {
-    set(gitCheckoutErrorAtom, 'Choose a valid folder name for the cloned repo.');
-    return;
-  }
-
-  let parentPath =
-    normalizeWorkspacePath(get(gitCheckoutParentPathAtom)) ?? get(workspaceBridgeRootAtom);
-  if (!parentPath) {
-    const response = await set(refreshWorkspaceRootsAtom);
-    parentPath = normalizeWorkspacePath(response?.bridgeRoot);
-  }
-  if (!parentPath || !api) {
-    set(gitCheckoutErrorAtom, 'Choose where the repository should be cloned.');
-    return;
-  }
-
-  try {
-    set(gitCheckoutCloningAtom, true);
-    set(gitCheckoutErrorAtom, null);
-    const startedForProfile = get(activeProfileIdAtom);
-    const cloned = await api.gitClone({ url, parentPath, directoryName });
-    // A clone can take minutes; its result belongs to the profile that started it.
-    if (get(activeProfileIdAtom) !== startedForProfile) {
-      return;
-    }
-    const cloneFailureMessage = formatGitCloneFailureMessage(cloned, directoryName);
-    if (cloneFailureMessage) {
-      set(gitCheckoutErrorAtom, cloneFailureMessage);
-      return;
-    }
-    const clonedPath =
-      normalizeWorkspacePath(cloned.cwd) ?? joinWorkspacePath(parentPath, directoryName);
-    set(defaultStartCwdAtom, clonedPath);
-    set(workspaceBrowsePathAtom, clonedPath);
-    set(workspaceBrowseParentPathAtom, parentPath);
-    set(workspaceBrowseErrorAtom, null);
-    const { profileId, chatId } = getWorkspaceRouteIds(get);
-    if (profileId) {
-      router.dismissTo(routes.chat(profileId, chatId));
-    }
-  } catch (err) {
-    set(gitCheckoutErrorAtom, describeHostError(err, 'The repository could not be cloned.'));
-  } finally {
-    set(gitCheckoutCloningAtom, false);
-  }
-});
+export const submitGitCheckoutAtom = atom(null, (get, set): Promise<void> =>
+  submitGitCheckoutRequest(get, set, () => set(refreshWorkspaceRootsAtom)),
+);

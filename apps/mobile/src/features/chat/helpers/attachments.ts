@@ -178,7 +178,11 @@ export function reconcileChatWithPendingOptimisticMessages(
     };
   }
 
-  const userMessages = chat.messages.filter((message) => message.role === 'user');
+  const pendingIds = new Set(pendingMessages.map((entry) => entry.message.id));
+  const acknowledgedIds = new Set<string>();
+  const userMessages = chat.messages.filter(
+    (message) => message.role === 'user' && !pendingIds.has(message.id),
+  );
   const remainingPendingMessages = pendingMessages.filter((entry) => {
     const pendingContent = normalizeChatMessageMatchContent(getMessageText(entry.message));
     const matchedUserMessage = userMessages[entry.userOrdinal - 1];
@@ -187,16 +191,28 @@ export function reconcileChatWithPendingOptimisticMessages(
       return true;
     }
 
-    return normalizeChatMessageMatchContent(getMessageText(matchedUserMessage)) !== pendingContent;
+    if (normalizeChatMessageMatchContent(getMessageText(matchedUserMessage)) !== pendingContent) {
+      return true;
+    }
+    acknowledgedIds.add(entry.message.id);
+    return false;
   });
+  const messages = chat.messages.filter((message) => !acknowledgedIds.has(message.id));
 
   if (remainingPendingMessages.length === 0) {
     return {
-      chat,
+      chat: messages.length === chat.messages.length ? chat : { ...chat, messages },
       remainingPendingMessages,
     };
   }
 
+  const present = new Set(messages.map((message) => message.id));
+  for (const entry of remainingPendingMessages) {
+    if (!present.has(entry.message.id)) {
+      messages.push(entry.message);
+      present.add(entry.message.id);
+    }
+  }
   const lastPendingMessage = remainingPendingMessages[remainingPendingMessages.length - 1]?.message;
   return {
     chat: {
@@ -205,7 +221,7 @@ export function reconcileChatWithPendingOptimisticMessages(
         normalizeChatMessageMatchContent(
           lastPendingMessage ? getMessageText(lastPendingMessage) : '',
         ).slice(0, 120) || chat.lastMessagePreview,
-      messages: [...chat.messages, ...remainingPendingMessages.map((entry) => entry.message)],
+      messages,
     },
     remainingPendingMessages,
   };

@@ -82,7 +82,7 @@ export function ComposeView({
         <BrandMark size={52} />
       </View>
       <Text style={styles.composeTitle}>Let's build</Text>
-      <NewChatRunTarget />
+      <NewChatRunTarget readinessReason={readiness?.reason} />
       <Pressable
         style={({ pressed }) => [
           styles.workspaceCapsule,

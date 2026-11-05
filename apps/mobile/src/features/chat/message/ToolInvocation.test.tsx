@@ -646,26 +646,33 @@ describe('ToolInvocationRow', () => {
     act(() => tree.unmount());
   });
 
-  it('animates the row layout while removing collapsed output immediately', () => {
-    const value = invocation({ id: 'tool-animated', textLines: ['out'] });
-    const tree = render(value);
+  it.each([true, false])(
+    'keeps output opaque while animating the row and collapsing immediately (running %s)',
+    (threadRunning) => {
+      const value = invocation({
+        id: `tool-animated-${String(threadRunning)}`,
+        textLines: ['out'],
+      });
+      const tree = render(value, null, threadRunning);
 
-    expand(tree, value.title);
-    expect(textLines(tree)).toContain('out');
-    const outputPanel = requireTestValue(
-      tree.root.findAllByProps({ testID: 'tool-output-panel' })[0],
-      'tool output panel',
-    );
-    const outputContainer = tree.root.findByProps({ testID: 'tool-output-container' });
-    expect(outputContainer.props['entering']).toBeDefined();
-    expect(outputContainer.props['exiting']).toBeUndefined();
-    expect(ancestorTestIDs(outputPanel)).toContain('tool-output-container');
+      expand(tree, value.title);
+      expect(textLines(tree)).toContain('out');
+      const outputPanel = requireTestValue(
+        tree.root.findAllByProps({ testID: 'tool-output-panel' })[0],
+        'tool output panel',
+      );
+      const outputContainer = tree.root.findByProps({ testID: 'tool-output-container' });
+      expect(outputContainer.props['entering']).toBeUndefined();
+      expect(tree.root.findByProps({ testID: 'tool-row-layout' }).props['layout']).toBeDefined();
+      expect(outputContainer.props['exiting']).toBeUndefined();
+      expect(ancestorTestIDs(outputPanel)).toContain('tool-output-container');
 
-    expand(tree, value.title);
-    expect(textLines(tree)).not.toContain('out');
+      expand(tree, value.title);
+      expect(textLines(tree)).not.toContain('out');
 
-    act(() => tree.unmount());
-  });
+      act(() => tree.unmount());
+    },
+  );
 
   it('clips expanding output to the animated row layout', () => {
     const value = invocation({ id: 'tool-collapse-clip', textLines: ['out'] });

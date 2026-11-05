@@ -146,6 +146,20 @@ export function localWorkspaceIdForPath(
   return tagged.length === 1 ? (tagged[0]?.id ?? null) : null;
 }
 
+export function localFallbackWorkspaceId(
+  workspaces: readonly LocalWorkspace[],
+  preferred: string | null | undefined,
+  recent: string | null | undefined,
+): string | null {
+  const exists = (id: string | null | undefined) =>
+    id && workspaces.some((workspace) => workspace.id === id) ? id : null;
+  return (
+    exists(preferred) ??
+    exists(recent) ??
+    (workspaces.length === 1 ? (workspaces[0]?.id ?? null) : null)
+  );
+}
+
 export function localRunId(threadId: string, turnId: string): string {
   return `${threadId}::turn::${turnId}`;
 }
@@ -170,7 +184,9 @@ const TOOL_VERBS: Record<
   git_history: { kind: 'read', verb: 'Git history', activity: 'Reading Git history' },
   git_stage: { kind: 'other', verb: 'Git stage', activity: 'Staging', pathKey: 'path' },
   git_commit: { kind: 'other', verb: 'Git commit', activity: 'Committing' },
-  git_push: { kind: 'fetch', verb: 'Git push', activity: 'Pushing' },
+  git_push: { kind: 'other', verb: 'Git push', activity: 'Pushing' },
+  web_fetch: { kind: 'fetch', verb: 'Fetch', activity: 'Fetching', pathKey: 'url' },
+  web_search: { kind: 'search', verb: 'Search web', activity: 'Searching web', pathKey: 'query' },
 };
 
 /**

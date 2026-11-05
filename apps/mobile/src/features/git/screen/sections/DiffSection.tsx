@@ -42,6 +42,7 @@ function GitDiffFileRow({
       {entry.diffFileId ? (
         <Pressable
           style={styles.filePathPressable}
+          testID={`git-file-${entry.stagePath}`}
           onPress={() => {
             if (entry.diffFileId) {
               controller.selectDiffFile(entry.diffFileId);
@@ -60,7 +61,9 @@ function GitDiffFileRow({
           </Text>
         </Pressable>
       ) : (
-        <Text style={styles.filePath}>{entry.path}</Text>
+        <Text style={styles.filePath} testID={`git-file-${entry.stagePath}`}>
+          {entry.path}
+        </Text>
       )}
       {entry.stats ? (
         <View style={styles.fileStats}>

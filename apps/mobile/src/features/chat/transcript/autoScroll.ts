@@ -24,8 +24,10 @@ export function getMaintainedScrollPosition(
   hasHeader: boolean,
   browsingHistory: boolean,
   isInteracting: boolean,
+  running: boolean,
 ) {
-  if (!browsingHistory && !isInteracting) {
+  // Starting native anchoring under a settled-row tap moves its target before release.
+  if (!browsingHistory && (!isInteracting || !running)) {
     return undefined;
   }
   const userIndex = items.findIndex(

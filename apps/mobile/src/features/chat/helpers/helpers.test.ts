@@ -704,6 +704,40 @@ describe('mainScreenHelpers branch behavior', () => {
     ).toBe('fallback');
   });
 
+  it('removes an acknowledged optimistic copy already mixed into an authoritative transcript', () => {
+    const first = message('server-first', 'user', 'Push');
+    const echoed = message('server-next', 'user', 'Read seed.txt');
+    const pending = { message: message('msg-next', 'user', 'Read seed.txt'), userOrdinal: 2 };
+    const note = message('local-system-stop', 'system', 'Turn stopped by user.');
+    const incoming = chat({
+      historyAuthoritative: true,
+      messages: [first, echoed, note, pending.message],
+    });
+    const reconciled = helpers.reconcileChatWithPendingOptimisticMessages(incoming, [pending]);
+    expect(reconciled.remainingPendingMessages).toEqual([]);
+    expect(reconciled.chat.messages).toEqual([first, echoed, note]);
+    expect(helpers.reconcileChatWithPendingOptimisticMessages(reconciled.chat, [])).toEqual({
+      chat: reconciled.chat,
+      remainingPendingMessages: [],
+    });
+  });
+
+  it('does not acknowledge its own optimistic copy or collapse a genuinely repeated prompt', () => {
+    const first = message('server-first', 'user', 'Read seed.txt');
+    const pending = { message: message('msg-next', 'user', 'Read seed.txt'), userOrdinal: 2 };
+    const cached = chat({ messages: [first, pending.message] });
+    const waiting = helpers.reconcileChatWithPendingOptimisticMessages(cached, [pending]);
+    expect(waiting.remainingPendingMessages).toEqual([pending]);
+    expect(waiting.chat.messages).toEqual([first, pending.message]);
+    const echoed = message('server-next', 'user', 'Read seed.txt');
+    const completed = helpers.reconcileChatWithPendingOptimisticMessages(
+      { ...cached, messages: [first, echoed, pending.message] },
+      waiting.remainingPendingMessages,
+    );
+    expect(completed.remainingPendingMessages).toEqual([]);
+    expect(completed.chat.messages).toEqual([first, echoed]);
+  });
+
   it('normalizes attachment labels and detects draft mentions', () => {
     expect(helpers.toPathBasename('')).toBe('image');
     expect(helpers.toPathBasename('a\\b.ts')).toBe('b.ts');

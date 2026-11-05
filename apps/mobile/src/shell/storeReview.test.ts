@@ -104,4 +104,23 @@ describe('storeReview helpers', () => {
     await expect(requestNativeStoreReview()).resolves.toBe(false);
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOs });
   });
+
+  it('rechecks interaction safety after native availability resolves', async () => {
+    let resolveAvailability!: (available: boolean) => void;
+    const availability = new Promise<boolean>((resolve) => {
+      resolveAvailability = resolve;
+    });
+    jest.spyOn(StoreReview, 'isAvailableAsync').mockReturnValueOnce(availability);
+    const request = jest
+      .spyOn(StoreReview, 'requestReview')
+      .mockResolvedValue(undefined)
+      .mockClear();
+    let safe = true;
+    const pending = requestNativeStoreReview(() => safe);
+    safe = false;
+    resolveAvailability(true);
+
+    await expect(pending).resolves.toBe(false);
+    expect(request).not.toHaveBeenCalled();
+  });
 });

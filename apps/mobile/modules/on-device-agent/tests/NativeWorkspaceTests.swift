@@ -408,6 +408,13 @@ private func runLifecycleGate(_ store: WorkspaceStore) async throws {
     unborn.branch == "trunk" && unborn.remote.unborn && unborn.remote.origin == nil
       && unborn.stagedFiles == 0 && unborn.payload["hasOrigin"] as? Bool == false,
     "initialized repositories report the initial branch, no commits, and no origin")
+  try check(
+    try await store.gitHistory(id).isEmpty,
+    "newly initialized repositories expose empty history instead of a missing HEAD error")
+  let unbornDiff = try await store.gitDiff(id, maximumBytes: 4096)
+  try check(
+    unbornDiff.returnedBytes <= 4096 && unbornDiff.diff.contains("Unstaged changes"),
+    "newly initialized repositories expose bounded diffs before their first commit")
   try await rejected("empty commits are rejected with a typed error", code: .gitNothingToCommit) {
     _ = try await store.gitCommit(id, message: "empty", name: "Fixture", email: "f@example.invalid")
   }
@@ -425,10 +432,19 @@ private func runLifecycleGate(_ store: WorkspaceStore) async throws {
   }
   try await store.gitCreateBranch(id, name: "main", checkout: true)
   try check(try await store.gitStatus(id).branch == "main", "unborn branch checkout renames it")
+  try check(
+    try await store.gitHistory(id).isEmpty,
+    "renaming an unborn branch preserves readable empty history")
   try await store.gitStage(id, path: nil)
   let staged = try await store.gitStatus(id)
   try check(staged.stagedFiles == 3, "status counts staged files")
-  _ = try await store.gitCommit(id, message: "initial", name: "Fixture", email: "f@example.invalid")
+  let initialCommit = try await store.gitCommit(
+    id, message: "initial", name: "Fixture", email: "f@example.invalid")
+  let initialHistory = try await store.gitHistory(id)
+  try check(
+    initialHistory.count == 1 && initialHistory.first?.hash == initialCommit
+      && initialHistory.first?.subject == "initial" && initialHistory.first?.isHead == true,
+    "history transitions from empty to the actual first commit")
   try await store.gitCreateBranch(id, name: "topic", checkout: true)
   try check(try await store.gitStatus(id).branch == "topic", "new branches can be checked out")
   try await rejected("duplicate branches are rejected", code: .gitBranchExists) {

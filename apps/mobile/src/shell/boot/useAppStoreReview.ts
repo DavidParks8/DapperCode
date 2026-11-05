@@ -1,4 +1,4 @@
-import { useAtomValue } from 'jotai';
+import { atom, useAtomValue, useStore } from 'jotai';
 import { usePathname } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
@@ -14,9 +14,33 @@ import {
 } from '@shell/storeReview';
 import { appStateLoadedAtom } from '@shell/state/appState/atoms';
 import { AUTO_STORE_REVIEW_RETRY_MS } from '@shell/boot/appConstants';
+import {
+  activeChatAtom,
+  mainOpeningChatIdAtom,
+  pendingMainChatSnapshotAtom,
+} from '@shell/state/chat/atoms';
+import { localAgentPresenceAtom } from '@shell/state/local/atoms';
+import { storeReviewComposerOwnersAtom } from '@shell/state/storeReview';
+
+const reviewInteractionPendingAtom = atom((get) => {
+  const localPresence = get(localAgentPresenceAtom);
+  return (
+    get(storeReviewComposerOwnersAtom).size > 0 ||
+    get(activeChatAtom)?.status === 'running' ||
+    get(pendingMainChatSnapshotAtom)?.status === 'running' ||
+    get(mainOpeningChatIdAtom) !== null ||
+    (localPresence !== null && localPresence.status.kind !== 'ready')
+  );
+});
+
+function isReviewRoute(pathname: string): boolean {
+  return /\/chats\/[^/]+$/u.test(pathname);
+}
 
 export function useAppStoreReview(): void {
+  const store = useStore();
   const settingsLoaded = useAtomValue(appStateLoadedAtom);
+  const interactionPending = useAtomValue(reviewInteractionPendingAtom);
   const pathname = usePathname();
   const [appLifecycleState, setAppLifecycleState] = useState<AppStateStatus>(AppState.currentState);
   const [storeReviewStateLoaded, setStoreReviewStateLoaded] = useState(false);
@@ -31,6 +55,11 @@ export function useAppStoreReview(): void {
   const activeUsageStartedAtRef = useRef<number | null>(null);
   const storeReviewStateRef = useRef<AutoStoreReviewState>(createDefaultAutoStoreReviewState());
   const automaticStoreReviewInFlightRef = useRef(false);
+  const pathnameRef = useRef(pathname);
+
+  useLayoutEffect(() => {
+    pathnameRef.current = pathname;
+  }, [pathname]);
 
   useLayoutEffect(() => {
     const currentState = AppState.currentState;
@@ -102,13 +131,21 @@ export function useAppStoreReview(): void {
     );
   }, []);
 
+  const canPresentAutomaticReview = useCallback(
+    () =>
+      appLifecycleStateRef.current === 'active' &&
+      store.get(appStateLoadedAtom) &&
+      !store.get(reviewInteractionPendingAtom) &&
+      isReviewRoute(pathnameRef.current),
+    [store],
+  );
+
   const requestAutomaticStoreReview = useCallback(async () => {
     if (
       automaticStoreReviewInFlightRef.current ||
       !settingsLoaded ||
       !storeReviewStateLoaded ||
-      pathname === '/onboarding' ||
-      pathname.endsWith('/connection') ||
+      !canPresentAutomaticReview() ||
       (automaticStoreReviewRetryAt !== null && automaticStoreReviewRetryAt > Date.now())
     ) {
       return;
@@ -126,7 +163,7 @@ export function useAppStoreReview(): void {
     try {
       const now = Date.now();
       flushActiveUsageTime(now, true);
-      const didRequest = await requestNativeStoreReview();
+      const didRequest = await requestNativeStoreReview(canPresentAutomaticReview);
       if (!didRequest) {
         setAutomaticStoreReviewRetryAt(now + AUTO_STORE_REVIEW_RETRY_MS);
         return;
@@ -149,7 +186,7 @@ export function useAppStoreReview(): void {
     }
   }, [
     automaticStoreReviewRetryAt,
-    pathname,
+    canPresentAutomaticReview,
     flushActiveUsageTime,
     getEffectiveForegroundUsageMs,
     settingsLoaded,
@@ -203,8 +240,8 @@ export function useAppStoreReview(): void {
       appLifecycleState !== 'active' ||
       !settingsLoaded ||
       !storeReviewStateLoaded ||
-      pathname === '/onboarding' ||
-      pathname.endsWith('/connection') ||
+      interactionPending ||
+      !isReviewRoute(pathname) ||
       storeReviewState.automaticRequestAt
     ) {
       return;
@@ -230,6 +267,7 @@ export function useAppStoreReview(): void {
     appLifecycleState,
     automaticStoreReviewRetryAt,
     pathname,
+    interactionPending,
     getEffectiveForegroundUsageMs,
     requestAutomaticStoreReview,
     settingsLoaded,

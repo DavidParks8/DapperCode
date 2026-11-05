@@ -1,4 +1,5 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
+import { createStore, Provider } from 'jotai';
 import {
   ActivityIndicator,
   Platform,
@@ -17,6 +18,7 @@ import {
   setMockLiquidGlassAvailable,
 } from '@shared/testing/glassEffectMock';
 import { ChatInput } from './ChatInput';
+import { storeReviewComposerOwnersAtom } from '@shell/state/storeReview';
 
 jest.mock('@expo/vector-icons', () => {
   const mockReact = jest.requireActual('react');
@@ -107,6 +109,34 @@ describe('ChatInput behavior', () => {
   };
 
   afterEach(() => jest.clearAllMocks());
+
+  it('keeps review blocked for focused or drafted composers until their own interaction settles', () => {
+    const store = createStore();
+    const view = (value: string, second = true) =>
+      wrap(
+        <Provider store={store}>
+          <ChatInput key="first" {...base} value={value} isLoading={false} />
+          {second ? <ChatInput key="second" {...base} value="Unsent" isLoading={false} /> : null}
+        </Provider>,
+      );
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(view(''));
+    });
+    expect(store.get(storeReviewComposerOwnersAtom).size).toBe(1);
+    act(() => (tree.root as Queryable).findAllByType(TextInput)[0]!.props.onFocus());
+    expect(store.get(storeReviewComposerOwnersAtom).size).toBe(2);
+    act(() => tree.update(view('', false)));
+    expect(store.get(storeReviewComposerOwnersAtom).size).toBe(1);
+    act(() =>
+      ((tree.root as Queryable).findAllByType(TextInput)[0]!.props['onBlur'] as () => void)(),
+    );
+    expect(store.get(storeReviewComposerOwnersAtom).size).toBe(0);
+    act(() => tree.update(view('Draft', false)));
+    expect(store.get(storeReviewComposerOwnersAtom).size).toBe(1);
+    act(() => tree.unmount());
+    expect(store.get(storeReviewComposerOwnersAtom).size).toBe(0);
+  });
 
   it('renders attachment, send, stop, loading, and disabled action states', () => {
     let tree: ReactTestRenderer | undefined;

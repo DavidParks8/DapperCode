@@ -228,6 +228,42 @@ describe('LocalRuntimeHost', () => {
     act(() => mockRuntime().change({ workspaces: [demo], preferredWorkspaceId: null }));
   });
 
+  it('publishes the repaired workspace and readiness together before a React effect can catch up', () => {
+    const selected = { id: 'selected', name: 'Selected', isRepository: true };
+    const remaining = { id: 'remaining', name: 'Remaining', isRepository: true };
+    act(() =>
+      mockRuntime().change({
+        workspaces: [selected, remaining],
+        preferredWorkspaceId: selected.id,
+        downloaded: true,
+      }),
+    );
+    const store = storeWith(LOCAL_PROFILE_ID);
+    store.set(defaultStartCwdAtom, '/On this iPhone/Selected');
+    const tree = render(store);
+    try {
+      act(() => {
+        mockRuntime().change({ workspaces: [remaining], preferredWorkspaceId: null });
+        expect(store.get(defaultStartCwdAtom)).toBe('/On this iPhone/Remaining');
+        expect(store.get(localAgentPresenceAtom)).toMatchObject({
+          readiness: null,
+          defaultWorkspacePath: '/On this iPhone/Remaining',
+          status: { kind: 'ready' },
+        });
+        mockRuntime().change({});
+        expect(store.get(localAgentPresenceAtom)?.readiness).toBeNull();
+      });
+    } finally {
+      act(() => tree.unmount());
+      act(() =>
+        mockRuntime().change({
+          workspaces: [{ id: 'ws-one', name: 'Demo', isRepository: true }],
+          preferredWorkspaceId: null,
+        }),
+      );
+    }
+  });
+
   it('never repairs a desktop default into an on-device path when switching back to a desktop', () => {
     const store = storeWith(LOCAL_PROFILE_ID);
     const updateSettings = (patch: Record<string, unknown>) => {

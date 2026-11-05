@@ -7,13 +7,16 @@ import {
   selectedServiceTierAtom,
 } from '../state/models';
 import { activityAtom } from '../state/composer';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback, useEffect, useMemo } from 'react';
+import { useFocusEffect } from 'expo-router';
 import type { AgentId, ServiceTier } from '@bridge/types/types';
 import type { SelectionSheetOption } from '@shared/ui/SelectionSheet';
 import { normalizeModelId } from '../helpers/helpers';
 import { agentModelPreferenceKey } from '../helpers/preferences';
 import { ATTACHMENT_MAX_LABEL } from './controllers/attachmentController';
+import { useHostModelSelection } from './useHostModelSelection';
+import { activeProfileFeaturesAtom } from '@shell/state/bridge/atoms';
 import type {
   MainScreenModeConfigurationSessionContext,
   MainScreenModeConfigurationSessionResult,
@@ -32,6 +35,7 @@ export type MainScreenComposerControlActionsContext = MainScreenModeConfiguratio
 export function useMainScreenComposerControlActions(
   context: MainScreenComposerControlActionsContext,
 ) {
+  const { modelLibrary } = useAtomValue(activeProfileFeaturesAtom);
   const {
     activeServiceTier,
     activeAgentId,
@@ -66,10 +70,14 @@ export function useMainScreenComposerControlActions(
   const setEffortModalVisible = useSetAtom(effortModalVisibleAtom);
   const setEffortPickerModelId = useSetAtom(effortPickerModelIdAtom);
 
+  const selectHostDefaultModel = useHostModelSelection(
+    ws,
+    JSON.stringify([activeAgentId, selectedChatId, modelLibrary]),
+  );
   const selectModel = useCallback(
     (modelId: string | null) => {
       const normalizedModelId = normalizeModelId(modelId);
-      if (normalizedModelId && modelConfig) {
+      if (normalizedModelId && modelConfig && (!modelLibrary || selectedChatId)) {
         if (
           !applyAcpConfigOption(
             modelConfig,
@@ -88,36 +96,56 @@ export function useMainScreenComposerControlActions(
           return false;
         }
       }
-      setSelectedModelId(normalizedModelId);
-      setSelectedEffort(null);
-      setModelModalVisible(false);
-      setError(null);
-      if (selectedChatId) {
-        if (!modelConfig) {
-          rememberChatModelPreference(selectedChatId, normalizedModelId, null, activeServiceTier);
+      const applySelection = () => {
+        setSelectedModelId(normalizedModelId);
+        setSelectedEffort(null);
+        setModelModalVisible(false);
+        setError(null);
+        if (selectedChatId) {
+          if (!modelConfig) {
+            rememberChatModelPreference(selectedChatId, normalizedModelId, null, activeServiceTier);
+          }
+        } else if (activeAgentId && !modelLibrary) {
+          const key = agentModelPreferenceKey(activeAgentId);
+          const nextPreferences = {
+            ...chatModelPreferencesRef.current,
+            [key]: {
+              modelId: normalizedModelId,
+              effort: null,
+              serviceTier: activeServiceTier,
+              updatedAt: new Date().toISOString(),
+            },
+          };
+          chatModelPreferencesRef.current = nextPreferences;
+          void saveChatModelPreferences(nextPreferences);
         }
-      } else if (activeAgentId) {
-        const key = agentModelPreferenceKey(activeAgentId);
-        const nextPreferences = {
-          ...chatModelPreferencesRef.current,
-          [key]: {
-            modelId: normalizedModelId,
-            effort: null,
-            serviceTier: activeServiceTier,
-            updatedAt: new Date().toISOString(),
-          },
-        };
-        chatModelPreferencesRef.current = nextPreferences;
-        void saveChatModelPreferences(nextPreferences);
-      }
 
-      if (normalizedModelId) {
-        const model = modelOptions.find((entry) => entry.id === normalizedModelId) ?? null;
-        if ((model?.reasoningEffort?.length ?? 0) > 0) {
-          setEffortPickerModelId(normalizedModelId);
-          setEffortModalVisible(true);
+        if (normalizedModelId) {
+          const model = modelOptions.find((entry) => entry.id === normalizedModelId) ?? null;
+          if ((model?.reasoningEffort?.length ?? 0) > 0) {
+            setEffortPickerModelId(normalizedModelId);
+            setEffortModalVisible(true);
+          }
         }
+      };
+      if (modelLibrary && !selectedChatId) {
+        if (!normalizedModelId) {
+          setError('Choose a downloaded model.');
+          return false;
+        }
+        return selectHostDefaultModel(
+          normalizedModelId,
+          () => {
+            applySelection();
+            void refreshModelOptions();
+          },
+          (error) => {
+            setModelModalVisible(false);
+            setError(`Could not select model: ${error.message}`);
+          },
+        );
       }
+      applySelection();
       return true;
     },
     [
@@ -126,9 +154,12 @@ export function useMainScreenComposerControlActions(
       applyAcpConfigOption,
       chatModelPreferencesRef,
       modelConfig,
+      modelLibrary,
       modelOptions,
       rememberChatModelPreference,
+      refreshModelOptions,
       saveChatModelPreferences,
+      selectHostDefaultModel,
       selectedChatId,
       setEffortModalVisible,
       setEffortPickerModelId,
@@ -173,11 +204,16 @@ export function useMainScreenComposerControlActions(
     ],
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      if (modelLibrary && ws.isConnected) {
+        void refreshModelOptions({ silent: true });
+      }
+    }, [modelLibrary, refreshModelOptions, ws]),
+  );
+
   useEffect(() => {
-    // Connection-driven refreshes are background/automatic, not an explicit
-    // user action, so failures should stay silent and keep serving whatever
-    // models are already cached instead of surfacing a global error.
-    if (ws.isConnected) {
+    if (!modelLibrary && ws.isConnected) {
       void refreshModelOptions({ silent: true });
     }
     return ws.onStatus((connected) => {
@@ -185,7 +221,7 @@ export function useMainScreenComposerControlActions(
         void refreshModelOptions({ silent: true });
       }
     });
-  }, [refreshModelOptions, ws]);
+  }, [modelLibrary, refreshModelOptions, ws]);
 
   const openCollaborationModeMenu = useCallback(() => {
     setCollaborationModeMenuVisible(true);

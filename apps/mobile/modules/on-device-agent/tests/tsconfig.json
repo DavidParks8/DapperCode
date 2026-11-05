@@ -3,5 +3,10 @@
   "compilerOptions": {
     "types": ["node", "jest", "expo/types"]
   },
-  "include": ["./*.tsx", "../../../expo-env.d.ts", "../../../src/shared/env.d.ts"]
+  "include": [
+    "./*.tsx",
+    "../../../expo-env.d.ts",
+    "../../../src/shared/env.d.ts",
+    "../../../src/shared/types/assets.d.ts"
+  ]
 }

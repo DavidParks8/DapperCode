@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Text } from 'react-native';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
-import { localSetupCompletedAtom } from '@shell/state/appState/settings';
+import { localDefaultStartCwdAtom, localSetupCompletedAtom } from '@shell/state/appState/settings';
 import { localRuntimeAtom } from '@shell/state/local/atoms';
 import { createTestStore } from '@shell/state/testing';
 import { localSetupState, useLocalSetup } from './localSetup';
@@ -138,6 +138,39 @@ describe('local setup progress', () => {
     expect(seen.at(-1)).toBe('Ready');
     act(() => store.set(localRuntimeAtom, null));
     expect(seen.at(-1)).toBeNull();
+    act(() => tree?.unmount());
+  });
+
+  it('follows the remembered new-chat workspace rather than an unrelated runtime preference', () => {
+    const store = createTestStore();
+    const fake = createFakeSetupRuntime({
+      modelId: MODEL,
+      workspaceId: 'w1',
+      workspaces: [workspace, { id: 'w2', name: 'other' }],
+      downloadPhase: 'ready',
+    });
+    store.set(localRuntimeAtom, fake.runtime);
+    store.set(localDefaultStartCwdAtom, '/On this iPhone/other');
+    let setup: ReturnType<typeof useLocalSetup> = null;
+    function Probe() {
+      setup = useLocalSetup();
+      return null;
+    }
+    let tree: ReactTestRenderer | undefined;
+    act(() => {
+      tree = renderer.create(
+        <Provider store={store}>
+          <Probe />
+        </Provider>,
+      );
+    });
+    expect(setup).toMatchObject({ workspace: 'done', summary: 'Ready' });
+    act(() => store.set(localDefaultStartCwdAtom, '/On this iPhone/deleted'));
+    expect(setup).toMatchObject({ workspace: 'todo', summary: 'Needs a workspace' });
+    act(() => store.set(localDefaultStartCwdAtom, '/On this iPhone/other'));
+    expect(setup).toMatchObject({ workspace: 'done', summary: 'Ready' });
+    act(() => fake.update({ workspaceId: null, workspaces: [{ id: 'w2', name: 'other' }] }));
+    expect(setup).toMatchObject({ workspace: 'done', summary: 'Ready' });
     act(() => tree?.unmount());
   });
 

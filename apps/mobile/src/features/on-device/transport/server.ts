@@ -5,6 +5,7 @@ import type {
 } from '@bridge/types/types';
 import type { LocalThread } from '../runtime/types';
 import { failure, LOCAL_RPC_ERROR, LocalRpcError } from './errors';
+import { MODEL_HOST_METHODS } from '@shared/hostModels';
 import { forwardLocalCloneProgress, LocalEventProjector, type LocalNotification } from './events';
 import { LocalApprovalRelay } from './approvals';
 import { createLocalGitHandlers } from './gitHandlers';
@@ -18,6 +19,7 @@ import {
   LOCAL_MODEL_CONFIG_ID,
   LOCAL_WORKSPACE_ROOT,
   localCapabilities,
+  localFallbackWorkspaceId,
   localRunActivity,
   localWorkspaceIdForPath,
   localWorkspacePaths,
@@ -87,6 +89,7 @@ export const LOCAL_IMPLEMENTED_METHODS = [
   'bridge/git/switch',
   'bridge/git/push',
   ...LOCAL_WORKSPACE_METHODS,
+  ...Object.values(MODEL_HOST_METHODS),
 ] as const;
 
 function emptyQueue(threadId: string): BridgeThreadQueueState {
@@ -286,12 +289,11 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
       return requested;
     }
     const workspaces = this.port.workspaces();
-    const exists = (id: string | null | undefined) =>
-      id && workspaces.some((workspace) => workspace.id === id) ? id : null;
-    const fallback =
-      exists(this.port.defaults().workspaceId) ??
-      exists(this.port.threads()[0]?.workspaceId) ??
-      (workspaces.length === 1 ? (workspaces[0]?.id ?? null) : null);
+    const fallback = localFallbackWorkspaceId(
+      workspaces,
+      this.port.defaults().workspaceId,
+      this.port.threads()[0]?.workspaceId,
+    );
     if (!fallback) {
       throw new LocalRpcError(
         LOCAL_RPC_ERROR.invalidParams,
@@ -551,6 +553,18 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
         threadId: readParam(params, 'threadId') ?? '',
         schedules: [],
       }),
+      [MODEL_HOST_METHODS.setDefault]: async (params) => {
+        const model = this.availableModel(readParam(params, 'modelId'));
+        if (!model) {
+          throw new LocalRpcError(
+            LOCAL_RPC_ERROR.invalidParams,
+            'Choose a downloaded model for On this iPhone.',
+            { error: 'on_device_model_required' },
+          );
+        }
+        await port.chooseDefaultModel(model);
+        return { modelId: model };
+      },
       'model/list': () => ({
         data: localModelListEntries(port.modelChoices(), this.defaultModel()),
       }),

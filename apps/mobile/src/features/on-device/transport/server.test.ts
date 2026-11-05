@@ -17,6 +17,8 @@ import {
 } from './server';
 import { localModelDisplayName } from '../models/catalog';
 import { FakeAgentPort } from './testing';
+import { MODEL_HOST_METHODS } from '@shared/hostModels';
+import { localModelDefinition } from '../models/catalog';
 import {
   describeLocalTool,
   LOCAL_AGENT_ID,
@@ -403,6 +405,33 @@ describe('LocalBridgeServer', () => {
     expect(nothing.code).toBe(-32602);
   });
 
+  it.each([
+    ['git_push', {}, { kind: 'other', title: 'Git push', activity: 'Pushing' }],
+    [
+      'web_fetch',
+      { url: 'https://example.com/' },
+      {
+        kind: 'fetch',
+        title: 'Fetch https://example.com/',
+        activity: 'Fetching https://example.com/',
+      },
+    ],
+    [
+      'web_search',
+      { query: 'IANA Example Domain' },
+      {
+        kind: 'search',
+        title: 'Search web “IANA Example Domain”',
+        activity: 'Searching web “IANA Example Domain”',
+      },
+    ],
+  ])(
+    'describes %s accurately in the shared live and historical transcript',
+    (name, args, expected) => {
+      expect(describeLocalTool(name, JSON.stringify(args))).toEqual(expected);
+    },
+  );
+
   it('titles local tools with their subject and marks interrupted ones as interrupted', async () => {
     expect(describeLocalTool('search_files', '{"query":"TODO"}')).toEqual({
       kind: 'search',
@@ -648,6 +677,43 @@ describe('LocalBridgeServer', () => {
     expect(list.data[0]!['displayName']).toBe(localModelDisplayName('qwen3-1.7b-q4-k-m'));
     port.models = [];
     expect(await server.request('model/list', {})).toEqual({ data: [] });
+  });
+
+  it('changes only the new-chat default without loading a model or modifying existing conversations', async () => {
+    const { server, port } = setup();
+    await createChat(server);
+    const primary = localModelDefinition('qwen35-2b-q4-k-m');
+    const secondary = localModelDefinition('bonsai-2-2b-q2-0');
+    port.models = [...port.models, primary, secondary];
+    port.defaultValues = { ...port.defaultValues, modelId: primary.id };
+    port.loadedModelId = primary.id;
+    const existingThreads = structuredClone(port.threads());
+    const callsBefore = [...port.calls];
+    await expect(
+      server.request(MODEL_HOST_METHODS.setDefault, { modelId: secondary.id }),
+    ).resolves.toEqual({ modelId: secondary.id });
+    expect(port.defaultValues.modelId).toBe(secondary.id);
+    expect(port.loadedModelId).toBe(primary.id);
+    expect(port.threads()).toEqual(existingThreads);
+    expect(port.calls).toEqual([...callsBefore, `chooseDefaultModel:${secondary.id}`]);
+    const list = (await server.request('model/list', {})) as {
+      data: { id: string; isDefault: boolean }[];
+    };
+    expect(list.data.find((entry) => entry.isDefault)?.id).toBe(secondary.id);
+  });
+
+  it('rejects an unavailable new-chat default without changing preferences or conversations', async () => {
+    const { server, port } = setup();
+    await createChat(server);
+    const preferences = { ...port.defaultValues };
+    const threads = structuredClone(port.threads());
+    const calls = [...port.calls];
+    await expect(
+      server.request(MODEL_HOST_METHODS.setDefault, { modelId: 'not-downloaded' }),
+    ).rejects.toMatchObject({ data: { error: 'on_device_model_required' } });
+    expect(port.defaultValues).toEqual(preferences);
+    expect(port.threads()).toEqual(threads);
+    expect(port.calls).toEqual(calls);
   });
 
   it('changes a chat model through the model config option and makes it the new-chat default', async () => {

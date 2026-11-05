@@ -1,10 +1,19 @@
 import React from 'react';
 import { getDefaultStore } from 'jotai';
-import { Dimensions, StyleSheet } from 'react-native';
+import { Dimensions, StyleSheet, Text } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { windowTraitsAtom } from '@shell/state/layout/atoms';
+import { createTestStore } from '@shell/state/testing';
+import { AppStateProvider } from '@shell/state/store';
+import { localProfileAvailableAtom } from '@shell/state/bridge/atoms';
+import { createDefaultAppStateData } from '@shell/state/appState';
+import { localRuntimeAtom } from '@shell/state/local/atoms';
+import { localSetupDismissedAtom } from '@shell/state/appState/settings';
+import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
+import { createFakeSetupRuntime } from '@shell/profiles/testing';
 import {
   getRenderedGlassViewProps,
   resetMockGlassEffect,
@@ -31,7 +40,10 @@ type QueryableInstance = Omit<ReactTestInstance, 'props' | 'children' | 'findAll
 
 const theme = createAppTheme('dark');
 
-function renderCompose(overrides: Partial<React.ComponentProps<typeof ComposeView>> = {}) {
+function renderCompose(
+  overrides: Partial<React.ComponentProps<typeof ComposeView>> = {},
+  store?: ReturnType<typeof createTestStore>,
+) {
   const props: React.ComponentProps<typeof ComposeView> = {
     startWorkspaceLabel: '/Users/dev/Code/clawdex-mobile',
     keyboardVisible: false,
@@ -43,10 +55,20 @@ function renderCompose(overrides: Partial<React.ComponentProps<typeof ComposeVie
   };
   let tree: ReactTestRenderer | undefined;
   act(() => {
+    const content = (
+      <SafeAreaProvider
+        initialMetrics={{
+          frame: { x: 0, y: 0, width: 750, height: 1334 },
+          insets: { top: 0, bottom: 0, left: 0, right: 0 },
+        }}
+      >
+        <AppThemeProvider theme={theme}>
+          <ComposeView {...props} />
+        </AppThemeProvider>
+      </SafeAreaProvider>
+    );
     tree = renderer.create(
-      <AppThemeProvider theme={theme}>
-        <ComposeView {...props} />
-      </AppThemeProvider>,
+      store ? <AppStateProvider store={store}>{content}</AppStateProvider> : content,
     );
   });
   if (!tree) {
@@ -80,6 +102,44 @@ function hasText(root: QueryableInstance, text: string): boolean {
 }
 
 describe('ComposeView', () => {
+  it('shows a missing-model reason once with the setup guide and keeps it after hiding the guide', () => {
+    const data = createDefaultAppStateData();
+    data.bridgeProfiles.activeProfileId = LOCAL_PROFILE_ID;
+    const store = createTestStore({ data });
+    const fake = createFakeSetupRuntime({
+      modelId: 'qwen35-2b-q4-k-m',
+      workspaceId: 'w1',
+      workspaces: [{ id: 'w1', name: 'demo' }],
+      downloadPhase: 'not_downloaded',
+    });
+    store.set(localProfileAvailableAtom, true);
+    store.set(localRuntimeAtom, fake.runtime);
+    const reason = 'Download Qwen3.5 2B Q4_K_M to start a conversation.';
+    const { tree, root } = renderCompose(
+      {
+        readiness: {
+          reason,
+          action: { label: 'Get a model', hint: 'Opens the model library.', onPress: jest.fn() },
+        },
+      },
+      store,
+    );
+    const reasons = () =>
+      root.findAll((node) => node.type === Text && node.props['children'] === reason);
+    expect(
+      root.findAll((node) => node.props['testID'] === 'local-setup-guide').length,
+    ).toBeGreaterThan(0);
+    expect(reasons()).toHaveLength(1);
+    expect(findByLabel(root, 'Get a model')).toBeTruthy();
+
+    act(() => store.set(localSetupDismissedAtom, true));
+
+    expect(root.findAll((node) => node.props['testID'] === 'local-setup-guide')).toHaveLength(0);
+    expect(reasons()).toHaveLength(1);
+    expect(findByLabel(root, 'Get a model')).toBeTruthy();
+    act(() => tree.unmount());
+  });
+
   it('centers its actions on the trailing page instead of on a fold', () => {
     act(() => {
       Dimensions.set({

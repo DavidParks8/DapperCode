@@ -3,6 +3,17 @@ import { FILE_TOOL_DEFINITIONS } from './fileToolDefinitions';
 
 const revision = 'a'.repeat(64);
 
+test.each(['write_file', 'edit_file', 'rename_path', 'delete_path'])(
+  '%s generation does not require the model to copy opaque revision strings',
+  (name) => {
+    const definition = FILE_TOOL_DEFINITIONS.find(
+      (tool) => tool.definition.function.name === name,
+    )?.definition;
+    expect(definition?.function.parameters.required).not.toContain('expected_revision');
+    expect(definition?.function.parameters.properties).not.toHaveProperty('expected_revision');
+  },
+);
+
 function port() {
   return {
     listWorkspaceFiles: jest.fn(async () => ({ entries: [], truncated: false })),

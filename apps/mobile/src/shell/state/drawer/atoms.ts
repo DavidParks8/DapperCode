@@ -2,6 +2,7 @@ import { atom, useAtomValue } from 'jotai';
 
 export interface DrawerCommands {
   closeDrawer: () => void;
+  navigateToNewChatKeepingDrawerOpen?: (profileId: string) => boolean;
   toggleNavigation?: () => void;
   /** Accessibility label for the control that runs `toggleNavigation`. */
   navigationLabel?: string;

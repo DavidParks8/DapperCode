@@ -21,6 +21,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { createServer } from 'node:net';
+import { performance } from 'node:perf_hooks';
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_INTERVAL_MS = 100;
@@ -805,11 +806,11 @@ export class E2EHarness {
   async waitFor(description, predicate, options = {}) {
     const timeoutMs = options.timeoutMs ?? this.defaultTimeoutMs;
     const intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS;
-    const deadline = Date.now() + timeoutMs;
+    const deadline = performance.now() + timeoutMs;
     let lastError = null;
-    while (Date.now() < deadline) {
+    while (performance.now() < deadline) {
       try {
-        const remainingMs = Math.max(1, deadline - Date.now());
+        const remainingMs = Math.max(1, deadline - performance.now());
         if (
           await withTimeout(
             Promise.resolve().then(predicate),

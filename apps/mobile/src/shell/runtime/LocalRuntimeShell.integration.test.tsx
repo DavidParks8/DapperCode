@@ -53,6 +53,7 @@ import {
   type FakeOnDeviceNative,
 } from '../../features/on-device/runtime/testing';
 import { MainScreen } from '../../features/chat/screen/MainScreen';
+import { ToolInvocationRow } from '../../features/chat/message/ChatMessage';
 import { LocalProfileSection } from '../../features/settings/LocalProfileSection';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { DrawerContent } from '@shell/navigation/DrawerContent';
@@ -66,14 +67,21 @@ import {
 } from '@shell/state/bridge/atoms';
 import { localRuntimeAtom } from '@shell/state/local/atoms';
 import { activeChatAtom } from '@shell/state/chat/atoms';
-import { approvalModeAtom, defaultStartCwdAtom } from '@shell/state/appState/settings';
 import {
+  approvalModeAtom,
+  defaultStartCwdAtom,
+  showToolCallsAtom,
+} from '@shell/state/appState/settings';
+import {
+  deleteManagedWorkspaceAtom,
   renameManagedWorkspaceAtom,
   selectManagedWorkspaceAtom,
 } from '../../features/workspace/state/managedWorkspaces';
 import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 import { createTestStore, withAppStore } from '@shell/state/testing';
 import { LocalRuntimeHost } from './LocalRuntimeHost';
+import { startNewChatAtom } from '@shell/navigation/actions';
+import { toRecord } from '@shared/runtimeValidation';
 
 const QWEN = 'qwen3-1.7b-q4-k-m';
 
@@ -146,6 +154,20 @@ function texts(root: Node): string[] {
 
 function hasText(root: Node, text: string): boolean {
   return texts(root).some((entry) => entry.includes(text));
+}
+
+function deniedPushCopies(root: Node): number {
+  const failedTool = root
+    .findAllByType(ToolInvocationRow)
+    .map((node) => toRecord(node.props['invocation']))
+    .find((value) => value?.['status'] === 'failed');
+  const lines = failedTool?.['textLines'];
+  if (!Array.isArray(lines)) {
+    throw new Error('Expected the rendered denied push output.');
+  }
+  return lines.filter(
+    (line: unknown) => typeof line === 'string' && line.includes('The user declined'),
+  ).length;
 }
 
 /** The drawer footer, which reports the local agent's status. */
@@ -435,6 +457,124 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     act(() => tree.unmount());
   });
 
+  it('applies global bypass to a waiting local approval and restores prompts when tightened', async () => {
+    const { tree, root, runtime, store } = await renderShell();
+    const api = store.get(apiClientAtom);
+    if (!api) {
+      throw new Error('The local API did not start.');
+    }
+    mockLlama.reply(
+      { toolCalls: [{ name: 'git_push', arguments: {} }] },
+      { content: 'Pushed with bypass.' },
+    );
+    await submit(root, 'Push my branch');
+    expect(labeled(root, 'Allow')).toBeDefined();
+    expect(mockNative.calls).not.toContain('pushWorkspaceGit:["ws-one"]');
+
+    await act(async () => {
+      await api.setApprovalPolicy('never');
+      store.set(approvalModeAtom, 'none');
+      await flush();
+    });
+    await settle();
+    expect(mockNative.calls.filter((call) => call === 'pushWorkspaceGit:["ws-one"]')).toHaveLength(
+      1,
+    );
+    expect(labeled(root, 'Allow')).toBeUndefined();
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    expect(transcript(root)).toContain('Pushed with bypass.');
+    expect(runtime.loop.snapshot()).toMatchObject({ phase: 'idle', approval: null });
+    expect(runtime.threads.list()[0]?.status).toBe('complete');
+
+    await act(async () => {
+      store.set(approvalModeAtom, 'all');
+      await api.setApprovalPolicy('untrusted');
+    });
+    mockLlama.holdCompletions = true;
+    mockLlama.reply(
+      { toolCalls: [{ name: 'git_push', arguments: {} }] },
+      { content: 'The second push was declined.' },
+    );
+    await submit(root, 'Push again');
+    await drive(() => mockLlama.finishCompletion());
+    expect(labeled(root, 'Allow')).toBeDefined();
+    expect(labeled(root, 'Stop agent')).toBeDefined();
+    expect(drawerStatus(root)).toContain('Waiting for your approval');
+    expect(mockNative.calls.filter((call) => call === 'pushWorkspaceGit:["ws-one"]')).toHaveLength(
+      1,
+    );
+    act(() => store.set(showToolCallsAtom, false));
+    expect(root.findAllByType(ToolInvocationRow)).toHaveLength(0);
+    expect(labeled(root, 'Allow')).toBeDefined();
+    expect(labeled(root, 'Stop agent')).toBeDefined();
+    act(() => store.set(showToolCallsAtom, true));
+    expect(root.findAllByType(ToolInvocationRow).length).toBeGreaterThan(0);
+    await press(root, 'Deny');
+    expect(labeled(root, 'Allow')).toBeUndefined();
+    expect(labeled(root, 'Stop agent')).toBeDefined();
+    expect(deniedPushCopies(root)).toBe(1);
+    await drive(() => mockLlama.finishCompletion());
+    expect(labeled(root, 'Allow')).toBeUndefined();
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    expect(composerText(root)).toBe('');
+    expect(runtime.loop.snapshot()).toMatchObject({ phase: 'idle', approval: null });
+    expect(deniedPushCopies(root)).toBe(1);
+    expect(mockNative.calls.filter((call) => call === 'pushWorkspaceGit:["ws-one"]')).toHaveLength(
+      1,
+    );
+    act(() => tree.unmount());
+  });
+
+  it('renders the next request once and settles every control after stopping a tool approval', async () => {
+    const { tree, root, runtime, store } = await renderShell({
+      files: { 'ws-one:seed.txt': 'fixture\n' },
+    });
+    mockLlama.reply(
+      { toolCalls: [{ name: 'read_file', arguments: { path: 'seed.txt' } }] },
+      { content: 'First chat read.' },
+    );
+    await submit(root, 'Read seed.txt first.');
+    await act(async () => {
+      store.set(startNewChatAtom);
+      await flush();
+    });
+    await settle();
+    mockLlama.reply({ toolCalls: [{ name: 'git_push', arguments: {} }] });
+    await submit(root, 'Push my branch');
+    expect(labeled(root, 'Allow')).toBeTruthy();
+    await press(root, 'Stop agent');
+    expect(labeled(root, 'Allow')).toBeUndefined();
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    expect(transcript(root).filter((value) => value === 'Push my branch')).toHaveLength(1);
+
+    mockLlama.holdCompletions = true;
+    mockLlama.reply(
+      { toolCalls: [{ name: 'read_file', arguments: { path: 'seed.txt' } }] },
+      { content: 'The current file contains fixture.' },
+    );
+    const request = 'Read seed.txt instead.';
+    await submit(root, request);
+    await settle(20_000);
+    expect(transcript(root).filter((value) => value === request)).toHaveLength(1);
+    expect(labeled(root, 'Stop agent')).toBeTruthy();
+    await drive(() => mockLlama.finishCompletion());
+    expect(transcript(root).filter((value) => value === request)).toHaveLength(1);
+    await drive(() => mockLlama.finishCompletion());
+    expect(runtime.threads.list()[0]?.status).toBe('complete');
+    expect(transcript(root).filter((value) => value === request)).toHaveLength(1);
+    expect(store.get(activeChatAtom)?.status).toBe('idle');
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    expect(labeled(root, 'Stopping agent')).toBeUndefined();
+    expect(drawerStatus(root)).toBe('Qwen3 1.7B Q4_K_M · ready on this iPhone');
+    expect(composerText(root)).toBe('');
+    const next = transcript(root).indexOf(request);
+    expect(transcript(root).slice(0, next)).not.toContain('Turn stopped by user.');
+    expect(mockNative.calls.filter((value) => value.startsWith('readWorkspaceFile:'))).toHaveLength(
+      2,
+    );
+    act(() => tree.unmount());
+  });
+
   it('disposes the runtime when switching to a desktop profile and restores chats on return', async () => {
     const { tree, root, store, runtime } = await renderShell();
     mockLlama.holdCompletions = true;
@@ -570,58 +710,39 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     expect(drawerStatus(root)).toBe('Qwen3 1.7B Q4_K_M · loads when you send');
     act(() => tree.unmount());
   });
-  it('applies global bypass to a waiting local approval and restores prompts when tightened', async () => {
-    const { tree, root, runtime, store } = await renderShell();
-    const api = store.get(apiClientAtom);
-    if (!api) {
-      throw new Error('The local API did not start.');
-    }
-    mockLlama.reply(
-      { toolCalls: [{ name: 'git_push', arguments: {} }] },
-      { content: 'Pushed with bypass.' },
-    );
-    await submit(root, 'Push my branch');
-    expect(labeled(root, 'Allow')).toBeDefined();
-    expect(mockNative.calls).not.toContain('pushWorkspaceGit:["ws-one"]');
 
+  it('keeps new-chat setup, presence, and workspace selection consistent after deleting its default', async () => {
+    const { tree, root, store, runtime } = await renderShell({
+      workspaces: [
+        { id: 'ws-one', name: 'Demo', isRepository: true },
+        { id: 'ws-two', name: 'Scratch', isRepository: true },
+      ],
+    });
     await act(async () => {
-      await api.setApprovalPolicy('never');
-      store.set(approvalModeAtom, 'none');
+      await store.set(selectManagedWorkspaceAtom, '/On this iPhone/Scratch');
       await flush();
     });
     await settle();
-    expect(mockNative.calls.filter((call) => call === 'pushWorkspaceGit:["ws-one"]')).toHaveLength(
-      1,
-    );
-    expect(labeled(root, 'Allow')).toBeUndefined();
-    expect(labeled(root, 'Stop agent')).toBeUndefined();
-    expect(transcript(root)).toContain('Pushed with bypass.');
-    expect(runtime.loop.snapshot()).toMatchObject({ phase: 'idle', approval: null });
-    expect(runtime.threads.list()[0]?.status).toBe('complete');
-
+    expect(hasText(root, 'Needs a workspace')).toBe(false);
     await act(async () => {
-      store.set(approvalModeAtom, 'all');
-      await api.setApprovalPolicy('untrusted');
+      expect(await store.set(deleteManagedWorkspaceAtom, '/On this iPhone/Scratch')).toBe(true);
+      await flush();
     });
-    mockLlama.reply(
-      { toolCalls: [{ name: 'git_push', arguments: {} }] },
-      { content: 'The second push was declined.' },
-    );
-    await submit(root, 'Push again');
-    expect(labeled(root, 'Allow')).toBeDefined();
-    expect(labeled(root, 'Stop agent')).toBeDefined();
-    expect(drawerStatus(root)).toContain('Waiting for your approval');
-    expect(mockNative.calls.filter((call) => call === 'pushWorkspaceGit:["ws-one"]')).toHaveLength(
-      1,
-    );
-    await press(root, 'Deny');
-    expect(labeled(root, 'Allow')).toBeUndefined();
-    expect(labeled(root, 'Stop agent')).toBeUndefined();
-    expect(composerText(root)).toBe('');
-    expect(runtime.loop.snapshot()).toMatchObject({ phase: 'idle', approval: null });
-    expect(mockNative.calls.filter((call) => call === 'pushWorkspaceGit:["ws-one"]')).toHaveLength(
-      1,
-    );
+    await settle();
+    expect(runtime.preferences().workspaceId).toBeNull();
+    expect(store.get(defaultStartCwdAtom)).toBe('/On this iPhone/Demo');
+    expect(labeled(root, 'Workspace, /On this iPhone/Demo')).toBeTruthy();
+    expect(hasText(root, 'Needs a workspace')).toBe(false);
+    expect(
+      labeled(root, 'Where agents run, On this iPhone, Ready · Private offline models'),
+    ).toBeTruthy();
+    await act(async () => {
+      expect(await store.set(deleteManagedWorkspaceAtom, '/On this iPhone/Demo')).toBe(true);
+      await flush();
+    });
+    await settle();
+    expect(store.get(defaultStartCwdAtom)).toBeNull();
+    expect(hasText(root, 'Needs a workspace')).toBe(true);
     act(() => tree.unmount());
   });
 });

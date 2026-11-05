@@ -31,6 +31,44 @@ function liveState(
 }
 
 describe('transcriptProjectionController', () => {
+  it('hides live and stored tools without losing streamed text or the hidden source history', () => {
+    const storedTool: Chat['messages'][number] = {
+      id: 'stored-tool',
+      role: 'tool',
+      toolCallId: 'old-call',
+      content: 'stored result',
+      createdAt: '',
+    };
+    const liveTool: Chat['messages'][number] = {
+      id: 'live-tool',
+      role: 'tool',
+      toolCallId: 'new-call',
+      content: 'live result',
+      createdAt: '',
+    };
+    const answer: Chat['messages'][number] = {
+      id: 'live-answer',
+      role: 'assistant',
+      content: 'Still streaming',
+      pending: true,
+      createdAt: '',
+    };
+    const state = liveState([liveTool, answer]);
+    const base = {
+      chat: { ...chat, messages: [...chat.messages, storedTool] },
+      parentChat: null,
+      threadStatuses: new Map<string, Chat['status']>(),
+      liveMessageState: state,
+    };
+    expect(
+      projectTranscript({ ...base, showToolCalls: false }).messages.map(({ content }) => content),
+    ).toEqual(['child prompt', 'Still streaming']);
+    expect(
+      projectTranscript({ ...base, showToolCalls: true }).messages.map(({ content }) => content),
+    ).toEqual(['child prompt', 'stored result', 'live result', 'Still streaming']);
+    expect(state.messages).toEqual([liveTool, answer]);
+  });
+
   it('applies an empty snapshot without letting it erase a later prompt during streaming', () => {
     const snapshot = liveState([]);
     snapshot.snapshotMessageIds = [];

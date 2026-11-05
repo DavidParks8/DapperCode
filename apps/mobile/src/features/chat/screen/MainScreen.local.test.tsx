@@ -1,4 +1,23 @@
-jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
+import type * as ReactModule from 'react';
+
+const mockFocusCallbacks = new Set<() => void | (() => void)>();
+jest.mock('expo-router', () => {
+  const actual = jest.requireActual('@shared/testing/expoRouterMock');
+  const React = jest.requireActual<typeof ReactModule>('react');
+  return {
+    ...actual,
+    useFocusEffect: (effect: () => void | (() => void)) => {
+      React.useEffect(() => {
+        mockFocusCallbacks.add(effect);
+        const cleanup = effect();
+        return () => {
+          mockFocusCallbacks.delete(effect);
+          cleanup?.();
+        };
+      }, [effect]);
+    },
+  };
+});
 jest.mock('expo-router/react-navigation', () => ({ usePreventRemove: jest.fn() }));
 jest.mock('@expo/vector-icons', () => ({
   Ionicons: Object.assign(() => null, { glyphMap: {} }),
@@ -34,6 +53,9 @@ import { LOCAL_SETUP_DESTINATIONS } from '@shell/profiles/localSetup';
 import { localAgentPresenceAtom } from '@shell/state/local/atoms';
 import { MainScreen } from './MainScreen';
 import { selectedChatIdAtom } from '../state/session';
+import { localModelDefinition } from '../../on-device/models/catalog';
+import { activeChatAtom } from '@shell/state/chat/atoms';
+import { SelectionSheet, type SelectionSheetOption } from '@shared/ui/SelectionSheet';
 
 type Node = ReactTestInstance & {
   props: Record<string, unknown>;
@@ -93,11 +115,26 @@ async function press(node: Node | undefined): Promise<void> {
   await settle();
 }
 
-async function renderLocalMain() {
-  const port = new FakeAgentPort();
+function modelPickerOption(root: Node, modelId: string): SelectionSheetOption {
+  for (const sheet of root.findAllByType(SelectionSheet)) {
+    const option = (sheet.props['options'] as SelectionSheetOption[]).find(
+      (entry) => entry.key === modelId,
+    );
+    if (option) {
+      return option;
+    }
+  }
+  throw new Error(`Missing model picker option: ${modelId}`);
+}
+
+async function renderLocalMain(port = new FakeAgentPort()) {
   const ws = new LocalBridgeWsClient(new LocalBridgeServer(port));
   ws.connect();
-  const api = new HostBridgeApiClient({ ws, profileId: LOCAL_PROFILE_ID });
+  const api = new HostBridgeApiClient({
+    ws,
+    profileId: LOCAL_PROFILE_ID,
+    modelListCacheTtlMs: 0,
+  });
   const store = createBridgeTestStore({ api, ws, bridgeProfileId: 'bridge-1' });
   store.set(localProfileAvailableAtom, true);
   const snapshot = store.get(appStateSnapshotAtom);
@@ -158,11 +195,146 @@ async function submit(root: Node, text: string): Promise<void> {
 describe('MainScreen on the local profile', () => {
   beforeEach(() => {
     jest.useFakeTimers();
+    mockFocusCallbacks.clear();
     Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
   });
 
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  it('keeps the local model picker reachable and refreshes the catalog after download and deletion', async () => {
+    const port = new FakeAgentPort();
+    port.models = [];
+    const { tree, root, ws } = await renderLocalMain(port);
+    expect(labeled(root, 'Model, Choose a model')).toBeTruthy();
+    await press(labeled(root, 'Model, Choose a model'));
+    expect(hasText(root, 'Download a model')).toBe(true);
+    const closePicker = () =>
+      press(
+        root.findAll(
+          (node) =>
+            node.props['testID'] === 'selection-sheet-close' &&
+            typeof node.props['onPress'] === 'function',
+        )[0],
+      );
+    await closePicker();
+
+    const model = localModelDefinition('bonsai-2-2b-q2-0');
+    await act(async () => {
+      port.models = [model];
+      port.defaultValues.modelId = model.id;
+      port.setModel({ phase: 'ready', modelId: model.id, progress: 100 });
+      for (const effect of mockFocusCallbacks) {
+        effect();
+      }
+      await flush();
+    });
+    await settle();
+
+    expect(ws.isConnected).toBe(true);
+    expect(labeled(root, 'Model, Bonsai 2 2B Q2_0')).toBeTruthy();
+    await press(labeled(root, 'Model, Bonsai 2 2B Q2_0'));
+    expect(hasText(root, 'Download more models')).toBe(true);
+    expect(hasText(root, 'Default')).toBe(true);
+    await closePicker();
+
+    await act(async () => {
+      port.models = [];
+      port.defaultValues.modelId = null;
+      port.setModel({ phase: 'empty', modelId: null, progress: 0 });
+      for (const effect of mockFocusCallbacks) {
+        effect();
+      }
+      await flush();
+    });
+    await settle();
+
+    expect(labeled(root, 'Model, Choose a model')).toBeTruthy();
+    expect(labeled(root, 'Model, Bonsai 2 2B Q2_0')).toBeUndefined();
+    await press(labeled(root, 'Model, Choose a model'));
+    expect(hasText(root, 'Download a model')).toBe(true);
+    expect(hasText(root, 'Download more models')).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('keeps new-chat selection and Settings defaults consistent without changing the resident model', async () => {
+    const port = new FakeAgentPort();
+    const primary = localModelDefinition('bonsai-2-2b-q2-0');
+    const secondary = localModelDefinition('qwen35-2b-q4-k-m');
+    port.models = [primary, secondary];
+    port.defaultValues.modelId = primary.id;
+    port.loadedModelId = primary.id;
+    const { tree, root } = await renderLocalMain(port);
+    expect(labeled(root, 'Model, Bonsai 2 2B Q2_0')).toBeTruthy();
+    await press(labeled(root, 'Model, Bonsai 2 2B Q2_0'));
+    await act(async () => {
+      modelPickerOption(root, secondary.id).onPress();
+      await flush();
+    });
+    await settle();
+    expect(labeled(root, 'Model, Qwen3.5 2B Q4_K_M')).toBeTruthy();
+    expect(port.defaultValues.modelId).toBe(secondary.id);
+    expect(port.loadedModelId).toBe(primary.id);
+    expect(port.threads()).toHaveLength(0);
+
+    await act(async () => {
+      port.defaultValues.modelId = primary.id;
+      for (const effect of mockFocusCallbacks) {
+        effect();
+      }
+      await flush();
+    });
+    await settle();
+    expect(labeled(root, 'Model, Bonsai 2 2B Q2_0')).toBeTruthy();
+    expect(labeled(root, 'Model, Qwen3.5 2B Q4_K_M')).toBeUndefined();
+    expect(port.loadedModelId).toBe(primary.id);
+    act(() => tree.unmount());
+  });
+
+  it('does not present a pending or failed host model selection as successful and allows retry', async () => {
+    const port = new FakeAgentPort();
+    const primary = localModelDefinition('bonsai-2-2b-q2-0');
+    const secondary = localModelDefinition('qwen35-2b-q4-k-m');
+    port.models = [primary, secondary];
+    port.defaultValues.modelId = primary.id;
+    port.loadedModelId = primary.id;
+    let reject!: (error: Error) => void;
+    jest.spyOn(port, 'chooseDefaultModel').mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, fail) => {
+          reject = fail;
+        }),
+    );
+    const { tree, root } = await renderLocalMain(port);
+    await press(labeled(root, 'Model, Bonsai 2 2B Q2_0'));
+    await act(async () => {
+      modelPickerOption(root, secondary.id).onPress();
+      await flush();
+    });
+    expect(labeled(root, 'Model, Bonsai 2 2B Q2_0')).toBeTruthy();
+    expect(port.defaultValues.modelId).toBe(primary.id);
+    await act(async () => {
+      reject(new Error('Preference persistence failed.'));
+      await flush();
+    });
+    await settle();
+    expect(hasText(root, 'Could not select model: Preference persistence failed.')).toBe(true);
+    expect(labeled(root, 'Model, Bonsai 2 2B Q2_0')).toBeTruthy();
+    expect(port.defaultValues.modelId).toBe(primary.id);
+    expect(port.loadedModelId).toBe(primary.id);
+    expect(port.threads()).toHaveLength(0);
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    await press(labeled(root, 'Model, Bonsai 2 2B Q2_0'));
+    await act(async () => {
+      modelPickerOption(root, secondary.id).onPress();
+      await flush();
+    });
+    await settle();
+    expect(labeled(root, 'Model, Qwen3.5 2B Q4_K_M')).toBeTruthy();
+    expect(port.defaultValues.modelId).toBe(secondary.id);
+    expect(hasText(root, 'Could not select model: Preference persistence failed.')).toBe(false);
+    act(() => tree.unmount());
   });
 
   it('starts a local chat, streams the reply into the transcript, and stops it', async () => {
@@ -368,7 +540,7 @@ describe('MainScreen on the local profile', () => {
   });
 
   it('answers a local tool approval from the shared banner, including Deny', async () => {
-    const { tree, root, port } = await renderLocalMain();
+    const { tree, root, port, store } = await renderLocalMain();
     await submit(root, 'Push my branch');
     const [thread] = port.threads();
     await act(async () => {
@@ -377,12 +549,21 @@ describe('MainScreen on the local profile', () => {
     });
     await settle();
     expect(hasText(root, 'Push main to origin')).toBe(true);
+    expect(store.get(activeChatAtom)?.status).toBe('running');
 
     await press(labeled(root, 'Deny'));
 
     expect(port.approvals).toEqual([{ callId: 'call-push', approved: false }]);
     expect(labeled(root, 'Deny')).toBeUndefined();
     expect(labeled(root, 'Stop agent')).toBeTruthy();
+    expect(store.get(activeChatAtom)?.status).toBe('running');
+    await act(async () => {
+      port.settle(thread!.id, 'complete');
+      await flush();
+    });
+    await settle();
+    expect(store.get(activeChatAtom)?.status).toBe('idle');
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
     act(() => tree.unmount());
   });
 

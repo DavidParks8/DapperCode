@@ -138,12 +138,11 @@ function LocalIssueAnnouncer() {
 function LocalPresencePublisher() {
   const runtime = useOnDeviceRuntime();
   const store = useStore();
-  const startCwd = useAtomValue(localDefaultStartCwdAtom);
   const setPresence = useSetAtom(localAgentPresenceAtom);
   useEffect(() => {
     let current: ReturnType<typeof describeLocalAgentPresence> | null = null;
     const publish = () => {
-      const next = describeLocalAgentPresence(runtime, startCwd);
+      const next = describeLocalAgentPresence(runtime, store.get(localDefaultStartCwdAtom));
       if (!sameLocalAgentPresence(current, next)) {
         current = next;
         setPresence(next);
@@ -151,10 +150,12 @@ function LocalPresencePublisher() {
     };
     publish();
     const unsubscribe = runtime.subscribe(publish, LOCAL_PRESENCE_SLICES);
+    const stopDefault = store.sub(localDefaultStartCwdAtom, publish);
     return () => {
       unsubscribe();
+      stopDefault();
     };
-  }, [runtime, setPresence, startCwd]);
+  }, [runtime, setPresence, store]);
   useEffect(() => () => setPresence(null), [setPresence]);
   useEffect(() => {
     // Reads the remembered path when it runs, never a render's copy, so a rename that has already

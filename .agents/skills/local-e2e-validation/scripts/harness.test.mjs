@@ -204,6 +204,28 @@ test('concurrent process starts reserve labels before spawning', async () => {
   }
 });
 
+test('waitFor tolerates forward wall-clock adjustments while polling stable state', async (context) => {
+  const harness = createHarness({ name: 'monotonic-polling', output: memoryOutput().stream });
+  let wallClock = Date.now();
+  const clock = context.mock.method(Date, 'now', () => wallClock);
+  let attempts = 0;
+  try {
+    await harness.waitFor(
+      'three observations',
+      () => {
+        wallClock += 60_000;
+        attempts += 1;
+        return attempts === 3;
+      },
+      { timeoutMs: 1_000, intervalMs: 1 },
+    );
+    assert.equal(attempts, 3);
+  } finally {
+    clock.mock.restore();
+    await harness.cleanup();
+  }
+});
+
 test('waitFor bounds a predicate that never settles', async () => {
   const harness = createHarness({ name: 'predicate-timeout', output: memoryOutput().stream });
   try {

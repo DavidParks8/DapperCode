@@ -12,7 +12,16 @@ import {
   type LocalConversationReadiness,
 } from '../../features/on-device/runtime/status';
 import type { OnDeviceRuntimeSlice } from '../../features/on-device/runtime/types';
-import { localSetupCompletedAtom, localSetupDismissedAtom } from '@shell/state/appState/settings';
+import {
+  LOCAL_WORKSPACE_ROOT,
+  localFallbackWorkspaceId,
+  localWorkspaceIdForPath,
+} from '../../features/on-device/transport/wire';
+import {
+  localDefaultStartCwdAtom,
+  localSetupCompletedAtom,
+  localSetupDismissedAtom,
+} from '@shell/state/appState/settings';
 import { localRuntimeAtom } from '@shell/state/local/atoms';
 
 /**
@@ -76,6 +85,23 @@ function effectiveModelId(runtime: LocalSetupRuntime, selected: string | null): 
   return runnable.find((model) => IN_PROGRESS_PHASES.has(phase(model.id)))?.id ?? selected;
 }
 
+function effectiveWorkspaceId(
+  runtime: LocalSetupRuntime,
+  cwd: string | null | undefined,
+): string | null {
+  const workspaces = runtime.workspaces();
+  if (cwd?.trim().startsWith(LOCAL_WORKSPACE_ROOT)) {
+    return localWorkspaceIdForPath(workspaces, cwd);
+  }
+  const fallback = localFallbackWorkspaceId(workspaces, runtime.preferences().workspaceId, null);
+  return (
+    fallback ??
+    (workspaces.length > 1
+      ? localFallbackWorkspaceId(workspaces, null, runtime.threads.list()[0]?.workspaceId)
+      : null)
+  );
+}
+
 const THREAD_SLICES: readonly OnDeviceRuntimeSlice[] = ['threads'];
 
 /** The last scan of each thread repository: its `threads` revision and whether a chat started. */
@@ -114,9 +140,11 @@ function knownChatStarted(runtime: ChatRuntime): boolean {
 export function localSetupState(
   runtime: LocalSetupRuntime,
   chatStarted = localChatStarted(runtime),
+  cwd?: string | null,
 ): LocalSetupState {
-  const { modelId: selected, workspaceId, author } = runtime.preferences();
+  const { modelId: selected, author } = runtime.preferences();
   const workspaces = runtime.workspaces();
+  const workspaceId = effectiveWorkspaceId(runtime, cwd);
   const modelId = effectiveModelId(runtime, selected);
   const download =
     modelId && findLocalModelDefinition(modelId) ? runtime.downloads.snapshot(modelId) : null;
@@ -165,6 +193,7 @@ const noop = () => undefined;
  */
 export function useLocalSetup(): LocalSetupState | null {
   const runtime = useAtomValue(localRuntimeAtom);
+  const cwd = useAtomValue(localDefaultStartCwdAtom);
   const completed = useAtomValue(localSetupCompletedAtom);
   const dismissed = useAtomValue(localSetupDismissedAtom);
   const settled = completed || dismissed;
@@ -181,10 +210,14 @@ export function useLocalSetup(): LocalSetupState | null {
     () =>
       runtime
         ? JSON.stringify(
-            localSetupState(runtime, settled ? completed || knownChatStarted(runtime) : undefined),
+            localSetupState(
+              runtime,
+              settled ? completed || knownChatStarted(runtime) : undefined,
+              cwd,
+            ),
           )
         : null,
-    [completed, runtime, settled],
+    [completed, cwd, runtime, settled],
   );
   const snapshot = useSyncExternalStore(subscribe, key, key);
   return useMemo(

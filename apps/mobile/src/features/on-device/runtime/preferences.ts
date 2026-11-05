@@ -126,6 +126,7 @@ export class LocalPreferencesStore {
   private dirty = false;
   private failureValue: Error | null = null;
   private writes: Promise<void> = Promise.resolve();
+  private modelChoices: Promise<void> = Promise.resolve();
   /** Inline drafts from older builds, kept in the document until each one is confirmed. */
   private legacyDrafts: Record<string, string> = {};
 
@@ -191,6 +192,26 @@ export class LocalPreferencesStore {
     this.value = { ...this.value, ...patch };
     this.dirty = true;
     this.changed('value');
+  }
+
+  chooseModel(modelId: string): Promise<void> {
+    const choice = this.modelChoices.then(async () => {
+      const previousModelId = this.value.modelId;
+      this.update({ modelId });
+      try {
+        await this.save();
+      } catch (error) {
+        if (this.value.modelId === modelId) {
+          this.update({ modelId: previousModelId });
+        }
+        throw error;
+      }
+    });
+    this.modelChoices = choice.then(
+      () => undefined,
+      () => undefined,
+    );
+    return choice;
   }
 
   save(): Promise<void> {

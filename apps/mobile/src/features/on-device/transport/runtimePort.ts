@@ -36,6 +36,7 @@ export function createRuntimeAgentPort(runtime: OnDeviceRuntime): LocalAgentPort
     run: () => runtime.loop.snapshot(),
     workspaces: () => runtime.workspaces(),
     refreshWorkspaces: () => runtime.refreshWorkspaces(),
+    chooseDefaultModel: (modelId) => runtime.chooseModel(modelId),
     defaults: () => {
       const { workspaceId, modelId } = runtime.preferences();
       return { workspaceId, modelId };

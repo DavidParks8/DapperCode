@@ -1,4 +1,11 @@
-import { Stack, router, useGlobalSearchParams, useLocalSearchParams } from 'expo-router';
+import {
+  Stack,
+  router,
+  useGlobalSearchParams,
+  useLocalSearchParams,
+  useNavigation,
+} from 'expo-router';
+import { useDrawerStatus } from 'expo-router/drawer';
 jest.mock('react-native-drawer-layout', () => {
   const React = jest.requireActual('react');
   const progress = { value: 0 };
@@ -26,14 +33,9 @@ jest.mock('@shell/boot/AppShells', () => ({
 }));
 
 import { act, fireEvent, renderRouter, screen, waitFor } from 'expo-router/testing-library';
-import {
-  useEffect,
-  useState,
-  type ComponentType,
-  type PropsWithChildren,
-  type ReactNode,
-} from 'react';
+import { useEffect, type ComponentType, type PropsWithChildren, type ReactNode } from 'react';
 import { Text } from 'react-native';
+import { useAtom } from 'jotai';
 
 import { createDefaultAppStateData } from '@shell/state/appState';
 import { activeBridgeProfileAtom } from '@shell/state/bridge/atoms';
@@ -43,13 +45,16 @@ import { navigateRoot, replaceRoot } from '@shell/navigation/routeNavigation';
 import { routes } from '@shell/navigation/routes';
 import { usePromoteNewChatRoute } from '@shell/navigation/usePromoteNewChatRoute';
 import { useProfileRouteReady } from '@shell/navigation/ProfileRouteBoundary';
-import { navigateAtom, openBrowserAtom } from '@shell/navigation/actions';
+import { navigateAtom, openBrowserAtom, startNewChatAtom } from '@shell/navigation/actions';
 import { selectedChatIdAtom } from '@shell/state/chat/atoms';
+import { closeDrawerAtom } from '@shell/state/drawer/atoms';
+import { windowTraitsAtom } from '@shell/state/layout/atoms';
 import { BrowserChatReturn } from '../../features/browser/screen/TopSections';
 
 const mainLifecycle: string[] = [];
 const mainRenders: string[] = [];
 let promoteChat: ((chatId: string) => void) | null = null;
+let drawerNavigation: { openDrawer: () => void } | null = null;
 let defaultWrapper: ComponentType<PropsWithChildren>;
 let navigationStore: ReturnType<typeof createTestStore>;
 
@@ -75,10 +80,17 @@ function ReadyMainRoute() {
 
 function PromotingMainRoute() {
   const { chatId = 'new' } = useLocalSearchParams<{ chatId?: string }>();
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [selectedChatId, setSelectedChatId] = useAtom(selectedChatIdAtom);
+  drawerNavigation = useNavigation<{ openDrawer: () => void }>('/profiles/[profileId]/(drawer)');
+  const drawerStatus = useDrawerStatus();
   promoteChat = setSelectedChatId;
   usePromoteNewChatRoute(chatId, selectedChatId);
-  return <MainRoute />;
+  return (
+    <>
+      <MainRoute />
+      <Text>Drawer status: {drawerStatus}</Text>
+    </>
+  );
 }
 
 function GitRoute() {
@@ -223,6 +235,7 @@ describe('Expo Router route topology', () => {
     mainRenders.length = 0;
     formLifecycle.length = 0;
     promoteChat = null;
+    drawerNavigation = null;
     mockConnectionScreenProps = null;
     const data = createDefaultAppStateData();
     data.bridgeProfiles = {
@@ -286,6 +299,69 @@ describe('Expo Router route topology', () => {
 
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-created');
     expect(mainLifecycle).toEqual(['mount']);
+  });
+
+  it.each(['open', 'closed'])(
+    'honors the %s session-list intent while clearing a deleted current chat',
+    (status) => {
+      navigationStore.set(windowTraitsAtom, {
+        horizontalSizeClass: 'compact',
+        verticalSizeClass: 'regular',
+        divisions: [],
+      });
+      const result = renderRouter(
+        {
+          appDir: './src/app',
+          overrides: {
+            ...baseOverrides,
+            'profiles/[profileId]/(drawer)/chats/[chatId]/index': PromotingMainRoute,
+          },
+        },
+        { initialUrl: '/profiles/profile-1/chats/deleted-chat', wrapper: defaultWrapper },
+      );
+      act(() => drawerNavigation?.openDrawer());
+      expect(screen.getByText('Drawer status: open')).toBeTruthy();
+      act(() => {
+        navigationStore.set(startNewChatAtom, { keepDrawerOpen: true });
+        if (status === 'closed') {
+          navigationStore.set(closeDrawerAtom);
+        }
+      });
+      expect(result.getPathname()).toBe('/profiles/profile-1/chats/new');
+      expect(screen.getByText(`Drawer status: ${status}`)).toBeTruthy();
+      if (status === 'open') {
+        act(() => navigationStore.set(startNewChatAtom, { keepDrawerOpen: true }));
+        expect(screen.getByText('Drawer status: open')).toBeTruthy();
+      }
+    },
+  );
+
+  it('keeps the drawer closed when a subsequent new chat is promoted after returning from Files', () => {
+    const result = renderRouter(
+      {
+        appDir: './src/app',
+        overrides: {
+          ...baseOverrides,
+          'profiles/[profileId]/(drawer)/chats/[chatId]/index': PromotingMainRoute,
+          'profiles/[profileId]/(drawer)/chats/[chatId]/git': GitRoute,
+          'profiles/[profileId]/(drawer)/chats/[chatId]/files': () => <Text>Files detail</Text>,
+        },
+      },
+      { initialUrl: '/profiles/profile-1/chats/new', wrapper: defaultWrapper },
+    );
+    act(() => promoteChat?.('first-created'));
+    act(() => router.push(routes.git('profile-1', 'first-created')));
+    act(() => router.push(routes.files('profile-1', 'first-created', '/workspace')));
+    act(() => router.back());
+    act(() => router.back());
+    act(() => drawerNavigation?.openDrawer());
+    expect(screen.getByText('Drawer status: open')).toBeTruthy();
+    act(() => navigationStore.set(startNewChatAtom));
+    expect(result.getPathname()).toBe('/profiles/profile-1/chats/new');
+    expect(screen.getByText('Drawer status: closed')).toBeTruthy();
+    act(() => promoteChat?.('second-created'));
+    expect(result.getPathname()).toBe('/profiles/profile-1/chats/second-created');
+    expect(screen.getByText('Drawer status: closed')).toBeTruthy();
   });
 
   it('collapses pushed agents before switching chats and keeps one MainScreen', () => {

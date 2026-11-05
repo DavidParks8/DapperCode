@@ -8,7 +8,6 @@ export const LIST_DIRECTORY_MAX_LIMIT = 200;
 
 // Keep generation grammars structural; the dispatcher and native boundary enforce all bounds.
 const path = { type: 'string' } as const;
-const revision = { type: ['string', 'null'] } as const;
 
 export const FILE_TOOL_DEFINITIONS = [
   definition(
@@ -34,34 +33,33 @@ export const FILE_TOOL_DEFINITIONS = [
   ),
   definition(
     'write_file',
-    'Create or replace UTF-8 text, at most 4 MiB. Replacing a file requires its last read revision.',
-    { path, content: { type: 'string' }, expected_revision: revision },
+    'Create or replace UTF-8 text, at most 4 MiB. Read an existing file first. The runtime checks its observed version so external changes cannot be overwritten.',
+    { path, content: { type: 'string' } },
     ['path', 'content'],
     { kind: 'edit', approval: null },
   ),
   definition(
     'edit_file',
-    'Replace exactly one literal occurrence in a UTF-8 file. Requires the last read revision.',
+    'Replace exactly one literal occurrence in a UTF-8 file previously read or written in this turn. The runtime checks and updates its observed version.',
     {
       path,
       old_text: { type: 'string' },
       new_text: { type: 'string' },
-      expected_revision: { type: 'string' },
     },
-    ['path', 'old_text', 'new_text', 'expected_revision'],
+    ['path', 'old_text', 'new_text'],
     { kind: 'edit', approval: null },
   ),
   definition(
     'rename_path',
-    'Rename a workspace path without overwriting another path. Files require their last read revision.',
-    { path, destination: path, expected_revision: revision },
+    'Move an existing source path to a destination that must not exist. Read or write a source file in this turn first; its version is checked by the runtime. Never create or read the destination first. Git staging is not needed.',
+    { path, destination: path },
     ['path', 'destination'],
     { kind: 'move', approval: null },
   ),
   definition(
     'delete_path',
-    'Remove a workspace path. Files require their last read revision. Repository roots and Git metadata are protected.',
-    { path, expected_revision: revision },
+    'Remove a workspace path. Read or write a file in this turn first; the runtime checks its observed version. Repository roots and Git metadata are protected.',
+    { path },
     ['path'],
     { kind: 'delete', approval: null },
   ),

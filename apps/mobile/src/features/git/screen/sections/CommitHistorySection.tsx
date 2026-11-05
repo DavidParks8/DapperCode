@@ -157,6 +157,7 @@ function GitCommitComposer({ controller, styles, theme }: GitSectionCommonProps)
         scrollEnabled
         textAlignVertical="top"
         accessibilityLabel="Commit message"
+        testID="git-commit-message"
       />
 
       <Pressable

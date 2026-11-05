@@ -1,4 +1,4 @@
-import { executeGitTool, type GitToolPort } from './gitTools';
+import { executeGitTool, GIT_TOOL_DEFINITIONS, type GitToolPort } from './gitTools';
 
 function harness() {
   const native = {
@@ -40,7 +40,7 @@ function harness() {
     commitWorkspaceGit: jest.fn(async () => 'actual-hash'),
     pushWorkspaceGit: jest.fn(async () => undefined),
   } satisfies GitToolPort;
-  const credentials = jest.fn(async () => 'opaque-reference');
+  const credentials = jest.fn(async (): Promise<string | null> => 'opaque-reference');
   const author = jest.fn(() => ({ name: 'Author', email: 'author@example.invalid' }));
   const call = (name: string, input: unknown = {}) =>
     executeGitTool('fixed-workspace', name, input, native, author, credentials);
@@ -53,6 +53,21 @@ test('Git tool results are bounded and retain truncation metadata and actual nat
   expect(status).toMatchObject({ totalFiles: 30, omittedFiles: 10, truncated: true, maxFiles: 20 });
   await expect(h.call('git_diff')).resolves.toMatchObject({ diff: 'actual diff' });
   expect(h.native.getWorkspaceGitDiff).toHaveBeenCalledWith('fixed-workspace', 4096);
+});
+
+test('model descriptions distinguish changed paths and optional remote authentication', async () => {
+  expect(
+    GIT_TOOL_DEFINITIONS.find((tool) => tool.definition.function.name === 'git_status')?.definition
+      .function.description,
+  ).toContain('changed paths');
+  expect(
+    GIT_TOOL_DEFINITIONS.find((tool) => tool.definition.function.name === 'git_push')?.definition
+      .function.description,
+  ).toContain('Some remotes also require sign-in');
+  const h = harness();
+  h.credentials.mockResolvedValueOnce(null);
+  await expect(h.call('git_push')).resolves.toEqual({ pushed: true });
+  expect(h.native.pushWorkspaceGit).toHaveBeenCalledWith('fixed-workspace', null);
 });
 
 test('mutation dispatch is workspace-bound and never accepts model-supplied credentials or identity', async () => {

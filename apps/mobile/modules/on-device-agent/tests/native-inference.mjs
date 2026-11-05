@@ -5,7 +5,7 @@ import catalog from '../../../src/features/on-device/models/catalog.json' with {
 export const name = 'on-device-native-inference';
 export const contract = { requiredPhases: ['bundle', 'prepare', 'native-inference', 'settled'] };
 
-const modelId = process.env.DAPPERCODE_NATIVE_TEST_MODEL ?? 'qwen3-1.7b-q4-k-m';
+const modelId = process.env.DAPPERCODE_NATIVE_TEST_MODEL ?? 'qwen35-2b-q4-k-m';
 const testModel = catalog.find((entry) => entry.id === modelId);
 if (!testModel) {
   throw new Error('Choose a model from the bundled catalog for native validation.');
@@ -129,6 +129,8 @@ export default async function scenario(e2e) {
         nativeFileToolResult: true,
         toolResultInPrompt: true,
         toolResultUsed: true,
+        postCancelledToolContinuation: true,
+        postCancelledToolBudget: true,
         nativeStreaming: true,
         nativeCancellation: true,
         modelUnloaded: true,

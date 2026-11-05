@@ -121,9 +121,9 @@ const STEP_VALUE: Record<LocalSetupStepStatus, string> = {
   recommended: 'Recommended',
 };
 
-function setupFooter(setup: LocalSetupState): string {
+function setupFooter(setup: LocalSetupState, readinessReason?: string): string | undefined {
   if (setup.readiness.reason) {
-    return setup.readiness.reason;
+    return setup.readiness.reason === readinessReason ? undefined : setup.readiness.reason;
   }
   return setup.author === 'done'
     ? 'Type a message below to start your first chat.'
@@ -136,7 +136,7 @@ function setupFooter(setup: LocalSetupState): string {
  * chat and stays until the first local chat has a message (recorded for good by
  * `useRecordLocalSetupCompletion`) or the user hides it.
  */
-export function LocalSetupGuide() {
+export function LocalSetupGuide({ readinessReason }: { readinessReason?: string } = {}) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const setup = useLocalSetup();
@@ -148,7 +148,10 @@ export function LocalSetupGuide() {
   }
   return (
     <View style={styles.guide} testID="local-setup-guide">
-      <SettingsGroup title={`Set up ${LOCAL_PROFILE_NAME}`} footer={setupFooter(setup)}>
+      <SettingsGroup
+        title={`Set up ${LOCAL_PROFILE_NAME}`}
+        footer={setupFooter(setup, readinessReason)}
+      >
         <SettingsRow
           label="1. Download a model"
           value={STEP_VALUE[setup.model]}
@@ -181,7 +184,7 @@ export function LocalSetupGuide() {
  * New-chat controls for choosing where the chat runs, plus first-run setup when the local
  * profile is not ready yet. Renders nothing when there is no choice to make.
  */
-export function NewChatRunTarget() {
+export function NewChatRunTarget({ readinessReason }: { readinessReason?: string } = {}) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const choices = useProfileChoices();
@@ -223,7 +226,7 @@ export function NewChatRunTarget() {
           />
         </GlassSurface>
       </Pressable>
-      <LocalSetupGuide />
+      <LocalSetupGuide readinessReason={readinessReason} />
       <ProfileSwitcherSheet choices={choices} visible={visible} onClose={() => setVisible(false)} />
     </>
   );

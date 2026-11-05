@@ -6,11 +6,12 @@ const [root, certificate, privateKey] = process.argv.slice(2);
 const authorization = `Basic ${Buffer.from(
   `${process.env.NATIVE_GIT_USER}:${process.env.NATIVE_GIT_PASSWORD}`,
 ).toString('base64')}`;
+const anonymous = process.env.NATIVE_GIT_ALLOW_ANONYMOUS === '1';
 
 const server = https.createServer(
   { cert: fs.readFileSync(certificate), key: fs.readFileSync(privateKey) },
   (request, response) => {
-    if (request.headers.authorization !== authorization) {
+    if (!anonymous && request.headers.authorization !== authorization) {
       response.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Native Git fixture"' });
       response.end('Authentication required.');
       return;
@@ -36,7 +37,7 @@ const server = https.createServer(
         QUERY_STRING: url.search.slice(1),
         CONTENT_TYPE: request.headers['content-type'] ?? '',
         CONTENT_LENGTH: request.headers['content-length'] ?? '',
-        REMOTE_USER: process.env.NATIVE_GIT_USER,
+        REMOTE_USER: anonymous ? 'public-fixture' : process.env.NATIVE_GIT_USER,
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });

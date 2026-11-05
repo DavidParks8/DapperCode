@@ -5,7 +5,7 @@ import { toolDefinition } from '../runtime/toolDefinition';
 export const GIT_TOOL_DEFINITIONS = [
   toolDefinition(
     'git_status',
-    'Read workspace Git status. Large results are explicitly truncated.',
+    'Read the branch and changed paths, not a directory listing. An empty files list means no Git changes, not an empty workspace. Large results are explicitly truncated.',
     {},
     [],
     { kind: 'read', approval: null },
@@ -37,7 +37,7 @@ export const GIT_TOOL_DEFINITIONS = [
   ),
   toolDefinition(
     'git_push',
-    'Push the current branch to its configured origin. Requires network and sign-in.',
+    'Push the current branch to its configured origin, subject to the app approval settings. Requires network. Some remotes also require sign-in.',
     {},
     [],
     { kind: 'other', approval: () => 'Push the current branch to its remote' },
