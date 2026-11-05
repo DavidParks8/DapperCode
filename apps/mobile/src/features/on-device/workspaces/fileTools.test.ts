@@ -131,7 +131,7 @@ test('unknown tools cannot invoke credentials, processes, or arbitrary native me
 });
 
 test('every advertised file tool has a handler and a closed argument schema', () => {
-  for (const definition of FILE_TOOL_DEFINITIONS) {
+  for (const { definition } of FILE_TOOL_DEFINITIONS) {
     expect(isFileTool(definition.function.name)).toBe(true);
     expect(definition.function.parameters.additionalProperties).toBe(false);
   }

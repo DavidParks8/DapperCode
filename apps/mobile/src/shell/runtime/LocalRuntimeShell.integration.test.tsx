@@ -66,7 +66,7 @@ import {
 } from '@shell/state/bridge/atoms';
 import { localRuntimeAtom } from '@shell/state/local/atoms';
 import { activeChatAtom } from '@shell/state/chat/atoms';
-import { defaultStartCwdAtom } from '@shell/state/appState/settings';
+import { approvalModeAtom, defaultStartCwdAtom } from '@shell/state/appState/settings';
 import {
   renameManagedWorkspaceAtom,
   selectManagedWorkspaceAtom,
@@ -568,6 +568,60 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     await press(root, 'Retry saving');
     expect(hasText(root, 'The disk is full.')).toBe(false);
     expect(drawerStatus(root)).toBe('Qwen3 1.7B Q4_K_M · loads when you send');
+    act(() => tree.unmount());
+  });
+  it('applies global bypass to a waiting local approval and restores prompts when tightened', async () => {
+    const { tree, root, runtime, store } = await renderShell();
+    const api = store.get(apiClientAtom);
+    if (!api) {
+      throw new Error('The local API did not start.');
+    }
+    mockLlama.reply(
+      { toolCalls: [{ name: 'git_push', arguments: {} }] },
+      { content: 'Pushed with bypass.' },
+    );
+    await submit(root, 'Push my branch');
+    expect(labeled(root, 'Allow')).toBeDefined();
+    expect(mockNative.calls).not.toContain('pushWorkspaceGit:["ws-one"]');
+
+    await act(async () => {
+      await api.setApprovalPolicy('never');
+      store.set(approvalModeAtom, 'none');
+      await flush();
+    });
+    await settle();
+    expect(mockNative.calls.filter((call) => call === 'pushWorkspaceGit:["ws-one"]')).toHaveLength(
+      1,
+    );
+    expect(labeled(root, 'Allow')).toBeUndefined();
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    expect(transcript(root)).toContain('Pushed with bypass.');
+    expect(runtime.loop.snapshot()).toMatchObject({ phase: 'idle', approval: null });
+    expect(runtime.threads.list()[0]?.status).toBe('complete');
+
+    await act(async () => {
+      store.set(approvalModeAtom, 'all');
+      await api.setApprovalPolicy('untrusted');
+    });
+    mockLlama.reply(
+      { toolCalls: [{ name: 'git_push', arguments: {} }] },
+      { content: 'The second push was declined.' },
+    );
+    await submit(root, 'Push again');
+    expect(labeled(root, 'Allow')).toBeDefined();
+    expect(labeled(root, 'Stop agent')).toBeDefined();
+    expect(drawerStatus(root)).toContain('Waiting for your approval');
+    expect(mockNative.calls.filter((call) => call === 'pushWorkspaceGit:["ws-one"]')).toHaveLength(
+      1,
+    );
+    await press(root, 'Deny');
+    expect(labeled(root, 'Allow')).toBeUndefined();
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    expect(composerText(root)).toBe('');
+    expect(runtime.loop.snapshot()).toMatchObject({ phase: 'idle', approval: null });
+    expect(mockNative.calls.filter((call) => call === 'pushWorkspaceGit:["ws-one"]')).toHaveLength(
+      1,
+    );
     act(() => tree.unmount());
   });
 });

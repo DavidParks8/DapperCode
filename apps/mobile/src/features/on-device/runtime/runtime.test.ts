@@ -1,3 +1,7 @@
+import { TextDecoder } from 'node:util';
+import type * as NodeStreams from 'node:stream/web';
+import type * as NodeUtilities from 'node:util';
+import { fetch as fetchPage } from 'expo/fetch';
 import type { CompletionParams, FormattedChatResult, TokenData } from 'llama.rn';
 import { randomUUID } from 'expo-crypto';
 import { localModelDefinition } from '../models/catalog';
@@ -1288,4 +1292,238 @@ test('retrying a failed turn waits for a pending model unload instead of racing 
   expect(loadNativeModelContext).toHaveBeenCalledTimes(2);
   expect(controlsFor(h)).toMatchObject({ canRetry: false, showStopButton: false });
   await h.runtime.dispose();
+});
+
+jest.mock('expo/fetch', () => ({
+  fetch: jest.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method !== 'POST') {
+      return new Response(null, { status: 200, headers: { 'Content-Type': 'text/plain' } });
+    }
+    const { ReadableStream } = jest.requireActual<typeof NodeStreams>('node:stream/web');
+    const { TextEncoder } = jest.requireActual<typeof NodeUtilities>('node:util');
+    return {
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                id: 1,
+                result: {
+                  content: [{ type: 'text', text: 'Title: Rust\nURL: https://doc.rust-lang.org/' }],
+                },
+              }),
+            ),
+          );
+          controller.close();
+        },
+      }),
+    };
+  }),
+}));
+Object.defineProperty(globalThis, 'TextDecoder', { configurable: true, value: TextDecoder });
+
+function webCall(url: string): LocalModelReply {
+  return {
+    ...reply,
+    content: '',
+    tool_calls: [
+      {
+        id: 'web',
+        type: 'function',
+        function: { name: 'web_fetch', arguments: JSON.stringify({ url }) },
+      },
+    ],
+  };
+}
+
+test.each([false, true])(
+  'a web fetch waits for approval and runs only when allowed: %s',
+  async (allowed) => {
+    const h = await ready();
+    const url = 'https://search.example/?q=rust+docs';
+    h.context.completion.mockResolvedValueOnce(webCall(url));
+    const running = h.runtime.sendMessage(h.thread.id, 'Find Rust docs', 'submission', jest.fn());
+    await settle(() => h.runtime.loop.snapshot().phase === 'approval');
+    expect(controlsFor(h)).toMatchObject({
+      isLoading: true,
+      showStopButton: true,
+      submitDisabled: true,
+      approval: { toolName: 'web_fetch', summary: expect.stringContaining(url) },
+    });
+    expect(fetchPage).not.toHaveBeenCalled();
+    h.runtime.loop.resolveApproval(h.runtime.loop.snapshot().approval!.callId, allowed);
+    const result = await running;
+    expect(result.messages.find((message) => message.role === 'tool')).toMatchObject({
+      tool: { name: 'web_fetch', status: allowed ? 'completed' : 'failed' },
+      content: expect.stringContaining(allowed ? '"status":200' : 'declined'),
+    });
+    expect(fetchPage).toHaveBeenCalledTimes(allowed ? 1 : 0);
+    expect(controlsFor(h)).toMatchObject({
+      isLoading: false,
+      showStopButton: false,
+      submitDisabled: false,
+      approval: null,
+    });
+    await h.runtime.dispose();
+  },
+);
+
+test.each(['web_fetch', 'web_search'])(
+  'Stop aborts an in-flight %s request and settles all conversation controls',
+  async (name) => {
+    const h = await ready();
+    h.context.completion.mockResolvedValueOnce({
+      ...webCall('https://docs.example/'),
+      tool_calls: [
+        {
+          id: 'web',
+          type: 'function',
+          function: {
+            name,
+            arguments: JSON.stringify(
+              name === 'web_search'
+                ? { query: 'Rust documentation' }
+                : { url: 'https://docs.example/' },
+            ),
+          },
+        },
+      ],
+    });
+    jest.mocked(fetchPage).mockImplementationOnce(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('Request aborted')));
+        }),
+    );
+    const running = h.runtime.sendMessage(
+      h.thread.id,
+      'Read documentation',
+      'submission',
+      jest.fn(),
+    );
+    await settle(() => h.runtime.loop.snapshot().phase === 'approval');
+    h.runtime.loop.resolveApproval(h.runtime.loop.snapshot().approval!.callId, true);
+    await settle(() => jest.mocked(fetchPage).mock.calls.length === 1);
+    expect(controlsFor(h)).toMatchObject({
+      isLoading: true,
+      showStopButton: true,
+      submitDisabled: true,
+    });
+    await h.runtime.stop();
+    const result = await running;
+    expect(result).toMatchObject({ status: 'interrupted', activeTurnId: null });
+    expect(result.messages.find((message) => message.role === 'tool')).toMatchObject({
+      tool: { status: 'interrupted' },
+      content: expect.stringContaining('stopped'),
+    });
+    expect(h.context.completion).toHaveBeenCalledTimes(1);
+    expect(controlsFor(h)).toMatchObject({
+      isLoading: false,
+      isStopping: false,
+      showStopButton: false,
+      submitDisabled: false,
+      approval: null,
+      canRetry: true,
+    });
+    await h.runtime.dispose();
+  },
+);
+
+test.each(['web_fetch', 'web_search'])(
+  'an offline %s is an explicit tool error and never contacts the server',
+  async (name) => {
+    const h = harness();
+    const runtime = new OnDeviceRuntime(h.native, { network: fakeNetwork('offline').port });
+    await runtime.initialize();
+    await runtime.selectWorkspace('workspace-one');
+    await runtime.selectModel(modelId);
+    const thread = await runtime.createThread();
+    h.context.completion.mockResolvedValueOnce({
+      ...webCall('https://docs.example/'),
+      tool_calls: [
+        {
+          id: 'web',
+          type: 'function',
+          function: {
+            name,
+            arguments: JSON.stringify(
+              name === 'web_search'
+                ? { query: 'Rust documentation' }
+                : { url: 'https://docs.example/' },
+            ),
+          },
+        },
+      ],
+    });
+    const running = runtime.sendMessage(thread.id, 'Read documentation', 'submission', jest.fn());
+    await settle(() => runtime.loop.snapshot().phase === 'approval');
+    runtime.loop.resolveApproval(runtime.loop.snapshot().approval!.callId, true);
+    const result = await running;
+    expect(fetchPage).not.toHaveBeenCalled();
+    expect(result.messages.find((message) => message.role === 'tool')).toMatchObject({
+      tool: { status: 'failed' },
+      content: expect.stringContaining("You're offline"),
+    });
+    expect(runtime.loop.snapshot().phase).toBe('idle');
+    await runtime.dispose();
+  },
+);
+
+test('global bypass lets Exa searches execute on consecutive turns without requesting approval', async () => {
+  const h = await ready();
+  h.runtime.loop.setApprovalPolicy('never');
+  const states: LocalRunSnapshot[] = [];
+  const unsubscribe = h.runtime.subscribe(() => states.push(h.runtime.loop.snapshot()), ['loop']);
+  try {
+    for (const [index, query] of ['Rust documentation', 'Rust async documentation'].entries()) {
+      h.context.completion.mockResolvedValueOnce({
+        ...reply,
+        content: '',
+        tool_calls: [
+          {
+            id: 'search',
+            type: 'function',
+            function: { name: 'web_search', arguments: JSON.stringify({ query }) },
+          },
+        ],
+      });
+      const running = h.runtime.sendMessage(
+        h.thread.id,
+        `Search the web for ${query}`,
+        `search-submission-${index}`,
+        jest.fn(),
+      );
+      await settle(
+        () =>
+          jest.mocked(fetchPage).mock.calls.length > index ||
+          h.runtime.loop.snapshot().phase === 'approval',
+      );
+      expect(h.runtime.loop.snapshot().approval).toBeNull();
+      const result = await running;
+      expect(fetchPage).toHaveBeenCalledTimes(index + 1);
+      expect(result).toMatchObject({ status: 'complete', activeTurnId: null });
+      expect(result.messages.filter((message) => message.role === 'tool').at(-1)).toMatchObject({
+        tool: { name: 'web_search', status: 'completed' },
+        content: expect.stringContaining('https://doc.rust-lang.org/'),
+      });
+      expect(controlsFor(h)).toMatchObject({
+        isLoading: false,
+        showStopButton: false,
+        submitDisabled: false,
+        approval: null,
+      });
+    }
+    expect(states.some((state) => state.phase === 'approval' || state.approval !== null)).toBe(
+      false,
+    );
+    expect(states.map((state) => state.phase)).toEqual(
+      expect.arrayContaining(['generating', 'tool', 'persisting', 'idle']),
+    );
+  } finally {
+    unsubscribe();
+    await h.runtime.dispose();
+  }
 });

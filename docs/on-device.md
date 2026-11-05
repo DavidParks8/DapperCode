@@ -35,14 +35,62 @@ continue to use desktop agents.
    picker. The sheet lists downloaded models with whether each is loaded, marks the one new chats
    use as **Default**, and links to **Download more models** in Settings. Choosing a model there
    changes it for that chat and for new chats without loading it; it loads when you send.
-5. After preparation, inference, file edits, search, diffs, staging, discarding, branch creation and
+5. After preparation, inference, file edits, workspace search, diffs, staging, discarding, branch creation and
    switching, history, and commits work without internet. Push, fetch, pull, cloning, sign-in, and
-   new downloads require connectivity.
+   new downloads require connectivity. The local agent can also search the web and read HTTPS pages;
+   see [Web access](#web-access).
 
 Existing desktop profiles and conversations are not migrated or deleted. The last selected profile,
 local or desktop, is restored at startup. Builds that stored the old global "On this iPhone" mode
 open the local profile instead. Switching to another profile settles local work and unloads its
 model.
+
+## Web access
+
+Every local chat includes `web_search` and `web_fetch` by default, alongside the file and Git tools.
+There is no toggle, MCP configuration, account, or API key to set up.
+
+Ask the agent to **search the web** with a normal query. `web_search` uses
+[Exa's hosted search service](https://docs.exa.ai/reference/exa-mcp), one of the keyless backends
+used by [OpenCode](https://opencode.ai/docs/tools/#websearch), and returns search text with source
+URLs. Approval follows the global **Settings → Chat → Approvals** setting, also available in the
+local profile. **Require all approvals** asks before Exa searches, HTTPS fetches, and model-requested
+Git pushes. **Require some approvals** allows searches automatically but still asks for fetches and
+pushes. **Require absolutely no approvals** bypasses all local tool prompts, including requests
+already waiting for a decision. Switching back to a stricter mode gates subsequent tool calls.
+The same setting is restored on startup, reconnect, and profile switches; it does not change native
+workspace boundaries, input validation, or network limits.
+
+Every tool declares its category and permission sensitivity in its definition. One shared policy
+handles approvals and pending requests using that metadata, not tool-name exceptions. In
+**Require some approvals**, permission-sensitive `read`, `search`, and `think` categories are
+allowed automatically; other permission-sensitive categories still prompt. Model schemas contain
+only the callable schema, not the runtime's approval metadata.
+
+Each search query is sent to Exa; never include secrets or
+private workspace content. Searches default to three results (maximum eight), cap returned text at 8,192 characters
+with explicit truncation, and time out after 30 seconds. Exa's free keyless service is rate limited;
+errors are shown rather than silently switching providers. This is a fixed search integration, not
+general-purpose remote MCP server configuration. Inference still runs on the phone.
+
+The read-only, curl-like `web_fetch` tool reads the resulting HTTPS pages or documentation URLs.
+When approvals are required, each request
+shows the destination URL for **Allow** or **Deny** before any network access; scroll the request
+details to inspect long URLs in full. The URL and its
+query are sent to that server; do not approve URLs containing secrets or private workspace content.
+No cookies, authorization headers, request bodies, or workspace files are attached automatically.
+Local inference still runs on the phone, without a desktop bridge or remote model.
+
+Only HTTPS GET is supported. Redirects are reported, not followed: fetching their destination needs
+another approval. Responses must be text, HTML, JSON, or XML. HTML is returned as source, not a
+rendered page; JavaScript-only pages, sign-in, CAPTCHAs, and search-provider restrictions are not
+bypassed. This is URL access, not a configured search-provider API.
+
+Reads default to 4,096 text characters (maximum 16,384), with `offset` and `nextOffset` for further
+chunks up to offset 262,144. `truncated` marks incomplete output. Each request has a 1 MiB download
+budget and a 15-second deadline. **Stop**, backgrounding, and memory pressure abort an in-flight
+request; declining approval or stopping while approval is pending sends nothing. Web failures
+appear in the tool transcript and are returned to the model, with no silent offline fallback.
 
 ## Model downloads
 
@@ -165,7 +213,8 @@ and that prompt is passed straight to completion.
   Opposing changes are not collapsed away; only the staged content is committed. Both sections,
   including their labels, share the reported output byte limit.
 - File, status, diff, history, stage, and commit tools run without per-tool approval. A
-  model-requested `git_push` always waits for explicit approval in the conversation; declining
+  model-requested `git_push`, `web_search`, and `web_fetch` follow the global approval setting described
+  above; declining a requested approval
   returns a tool error to the model, and Stop leaves the push unrun. Manual pushes from the Git
   screen are user actions and are unaffected. Desktop approval settings are unchanged.
 - Stop waits for current tool work to settle. Stop during a model load settles the turn immediately;

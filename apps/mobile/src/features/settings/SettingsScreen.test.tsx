@@ -358,8 +358,13 @@ describe('SettingsScreen behavior', () => {
       downloadPhase: 'not_downloaded',
     });
     store.set(localRuntimeAtom, fake.runtime);
-    const { tree } = await renderSettings({ store, connected: true });
+    const { tree, api } = await renderSettings({ store, connected: true });
     const root = tree.root as Queryable;
+    expect(hasText(root, 'Require all approvals')).toBe(true);
+    await press(findPressableByText(root, 'Approvals'));
+    await press(findPressableByText(root, 'Require absolutely no approvals'));
+    expect(store.get(approvalModeAtom)).toBe('none');
+    expect(api['setApprovalPolicy']).toHaveBeenCalledWith('never');
     const byLabel = (label: string) =>
       root.findAll(
         (node) => typeof node.type === 'string' && node.props['accessibilityLabel'] === label,

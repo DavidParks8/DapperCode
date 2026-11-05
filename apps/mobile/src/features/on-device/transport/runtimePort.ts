@@ -72,6 +72,7 @@ export function createRuntimeAgentPort(runtime: OnDeviceRuntime): LocalAgentPort
     retryTurn: (id) => runtime.retryTurn(id),
     modelSession: () => runtime.models.snapshot(),
     resolveApproval: (callId, approved) => runtime.loop.resolveApproval(callId, approved),
+    setApprovalPolicy: (policy) => runtime.loop.setApprovalPolicy(policy),
     git: {
       status: (id) => native.getWorkspaceGitStatus(id),
       diff: (id) => native.getWorkspaceGitDiff(id, null),

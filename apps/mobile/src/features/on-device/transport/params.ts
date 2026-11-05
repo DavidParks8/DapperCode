@@ -1,4 +1,25 @@
+import type { ApprovalPolicy } from '@bridge/types/types';
+import { LOCAL_RPC_ERROR, LocalRpcError } from './errors';
+
 export type RpcParams = Record<string, unknown>;
+
+export function readApprovalPolicy(params: RpcParams, required = false): ApprovalPolicy | null {
+  const policy = params['approvalPolicy'];
+  if (!required && (policy === undefined || policy === null)) {
+    return null;
+  }
+  if (
+    policy !== 'untrusted' &&
+    policy !== 'on-request' &&
+    policy !== 'on-failure' &&
+    policy !== 'never'
+  ) {
+    throw new LocalRpcError(LOCAL_RPC_ERROR.invalidParams, 'A valid approval policy is required.', {
+      error: 'on_device_failed',
+    });
+  }
+  return policy;
+}
 
 export function readParam(params: RpcParams, key: string): string | null {
   const value = params[key];

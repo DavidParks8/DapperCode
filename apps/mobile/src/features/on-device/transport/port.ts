@@ -1,4 +1,9 @@
-import type { GitBranchesResponse, GitDiffResponse, GitHistoryResponse } from '@bridge/types/types';
+import type {
+  ApprovalPolicy,
+  GitBranchesResponse,
+  GitDiffResponse,
+  GitHistoryResponse,
+} from '@bridge/types/types';
 import type { LocalModelSessionSnapshot } from '../models/session';
 import type { LocalModelDefinition } from '../models/types';
 import type { LocalRunSnapshot } from '../runtime/agentLoop';
@@ -55,6 +60,7 @@ export interface LocalAgentPort {
   modelSession(): Pick<LocalModelSessionSnapshot, 'phase' | 'modelId' | 'progress' | 'error'>;
   /** Answers the pending tool approval in `run().approval`. */
   resolveApproval(callId: string, approved: boolean): void;
+  setApprovalPolicy(policy: ApprovalPolicy): void;
   git: LocalGitPort;
   workspaceAdmin: LocalWorkspaceAdminPort;
   files: LocalFilesPort;

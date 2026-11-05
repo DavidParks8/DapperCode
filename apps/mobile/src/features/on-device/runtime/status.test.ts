@@ -113,6 +113,7 @@ test('every run and model phase has a user-facing label, including load progress
           callId: 'call',
           toolName: 'git_push',
           summary: 'Push the current branch to its remote',
+          kind: 'other',
         },
       }),
     }),

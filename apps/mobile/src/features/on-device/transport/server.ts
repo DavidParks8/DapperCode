@@ -12,7 +12,7 @@ import { localModelListEntries } from './modelOptions';
 import { LOCAL_TURN_RETRY_METHOD, startLocalRetry } from './retry';
 import { startLocalTurn } from './turnStart';
 import { createLocalWorkspaceHandlers, LOCAL_WORKSPACE_METHODS } from './workspaceHandlers';
-import { readParam, readRecord, type RpcParams } from './params';
+import { readApprovalPolicy, readParam, readRecord, type RpcParams } from './params';
 import type { LocalAgentPort } from './port';
 import {
   LOCAL_MODEL_CONFIG_ID,
@@ -317,12 +317,21 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
     return { id, cwd };
   }
 
+  private applyApprovalPolicy(params: Params, required = false): void {
+    const policy = readApprovalPolicy(params, required);
+    if (policy !== null) {
+      this.port.setApprovalPolicy(policy);
+    }
+  }
+
   private async createThread(threadStart: Params, submissionId: string | null) {
+    this.applyApprovalPolicy(threadStart);
     const existing = submissionId ? this.createdBySubmission.get(submissionId) : undefined;
     const existingThread = existing ? this.port.thread(existing) : null;
     if (existingThread) {
       return existingThread;
     }
+
     const workspaceId = await this.resolveWorkspace(readParam(threadStart, 'cwd'));
     const modelId = this.resolveModel(readParam(threadStart, 'model'));
     const thread = await this.port.createThread(workspaceId, modelId);
@@ -386,7 +395,10 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
     const handlers: Record<(typeof LOCAL_IMPLEMENTED_METHODS)[number], Handler> = {
       'bridge/capabilities/read': () => localCapabilities(),
       'bridge/health/read': () => ({ ok: true, status: 'ok', backend: 'on-device' }),
-      'thread/approvalPolicy/set': () => ({ ok: true }),
+      'thread/approvalPolicy/set': (params) => {
+        this.applyApprovalPolicy(params, true);
+        return { ok: true };
+      },
       'thread/list': (params) => {
         const all = port.threads();
         const offset = Number.parseInt(readParam(params, 'cursor') ?? '0', 10) || 0;
@@ -472,6 +484,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
       },
       'thread/resume': async (params) => {
         let thread = this.requireThread(params);
+        this.applyApprovalPolicy(params);
         const workspaceId = await this.workspaceForPath(readParam(params, 'cwd'));
         if (workspaceId && workspaceId !== thread.workspaceId) {
           if (thread.messages.length > 0) {
@@ -489,6 +502,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
       },
       'turn/start': async (params) => {
         const thread = this.requireThread(params);
+        this.applyApprovalPolicy(params);
         await this.applyTurnModel(thread, params);
         const submissionId = readParam(params, 'submissionId') ?? `turn-${Date.now().toString(36)}`;
         const turnId = await startLocalTurn(
@@ -515,6 +529,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
         const submissionId =
           readParam(params, 'submissionId') ?? `queue-${Date.now().toString(36)}`;
         const turnStart = readRecord(params['turnStart']);
+        this.applyApprovalPolicy(turnStart);
         await this.applyTurnModel(thread, turnStart);
         const content =
           typeof params['content'] === 'string' ? params['content'] : inputText(turnStart);

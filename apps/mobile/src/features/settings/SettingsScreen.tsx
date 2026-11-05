@@ -182,16 +182,9 @@ interface ChatSettingsSectionProps {
   api: HostBridgeApiClient | null;
   bridgeConnected: boolean;
   onError: (message: string | null) => void;
-  /** The local agent has no approval flow, so its profile hides the approvals row. */
-  showApprovals: boolean;
 }
 
-function ChatSettingsSection({
-  api,
-  bridgeConnected,
-  onError,
-  showApprovals,
-}: ChatSettingsSectionProps) {
+function ChatSettingsSection({ api, bridgeConnected, onError }: ChatSettingsSectionProps) {
   const [confirmSessionDeletion, setConfirmSessionDeletion] = useAtom(confirmSessionDeletionAtom);
   const [showToolCalls, setShowToolCalls] = useAtom(showToolCallsAtom);
   const [workspaceChatLimit, setWorkspaceChatLimit] = useAtom(workspaceChatLimitAtom);
@@ -205,20 +198,13 @@ function ChatSettingsSection({
 
   return (
     <>
-      <SettingsGroup
-        title="Chat"
-        footer={
-          showApprovals ? 'Approvals decide when an agent must ask before it acts.' : undefined
-        }
-      >
-        {showApprovals ? (
-          <SettingsRow
-            label="Approvals"
-            value={approvalModeTitle(approvalMode)}
-            accessory="expand"
-            onPress={() => setApprovalSheetVisible(true)}
-          />
-        ) : null}
+      <SettingsGroup title="Chat" footer="Approvals decide when an agent must ask before it acts.">
+        <SettingsRow
+          label="Approvals"
+          value={approvalModeTitle(approvalMode)}
+          accessory="expand"
+          onPress={() => setApprovalSheetVisible(true)}
+        />
         <SettingsToggleRow
           label="Show tool calls"
           value={showToolCalls}
@@ -428,12 +414,7 @@ export function SettingsScreen() {
             theme={theme}
           />
 
-          <ChatSettingsSection
-            api={api}
-            bridgeConnected={bridgeConnected}
-            onError={setError}
-            showApprovals={!localProfile}
-          />
+          <ChatSettingsSection api={api} bridgeConnected={bridgeConnected} onError={setError} />
 
           {features.pushNotifications ? (
             <NotificationsSection

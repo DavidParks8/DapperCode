@@ -27,7 +27,7 @@ export type FileToolPort = Pick<
 >;
 
 export function isFileTool(name: string): name is FileToolName {
-  return FILE_TOOL_DEFINITIONS.some((definition) => definition.function.name === name);
+  return FILE_TOOL_DEFINITIONS.some((tool) => tool.definition.function.name === name);
 }
 
 export async function executeFileTool(

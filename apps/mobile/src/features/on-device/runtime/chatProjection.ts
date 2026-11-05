@@ -1,24 +1,6 @@
-import type { Chat, ChatMessage, ChatToolKind } from '@bridge/types/types';
+import type { Chat, ChatMessage } from '@bridge/types/types';
 import type { LocalMessage, LocalThread } from './types';
-
-function toolKind(name: string): ChatToolKind {
-  if (name === 'write_file' || name === 'edit_file') {
-    return 'edit';
-  }
-  if (name === 'delete_path') {
-    return 'delete';
-  }
-  if (name === 'rename_path') {
-    return 'move';
-  }
-  if (name === 'search_files') {
-    return 'search';
-  }
-  if (['read_file', 'list_directory', 'git_status', 'git_diff', 'git_history'].includes(name)) {
-    return 'read';
-  }
-  return 'other';
-}
+import { localToolKind } from './localTools';
 
 function messageProjection(message: LocalMessage, pending: boolean): ChatMessage {
   const base = { id: message.id, createdAt: message.createdAt, content: message.content };
@@ -43,7 +25,7 @@ function messageProjection(message: LocalMessage, pending: boolean): ChatMessage
         toolCallId: tool.callId,
         toolMeta: {
           toolCallId: tool.callId,
-          kind: toolKind(tool.name),
+          kind: localToolKind(tool.name),
           status:
             tool.status === 'running'
               ? 'in_progress'

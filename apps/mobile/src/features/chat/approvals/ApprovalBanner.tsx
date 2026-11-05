@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown, ReduceMotion } from 'react-native-reanimated';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -76,9 +76,15 @@ export function ApprovalBanner({ approval, onResolve }: ApprovalBannerProps) {
         <Text style={styles.title}>Approval requested</Text>
       </View>
 
-      <Text style={styles.command} numberOfLines={3}>
-        {label}
-      </Text>
+      <ScrollView
+        accessibilityLabel="Approval request details"
+        nestedScrollEnabled
+        style={styles.commandScroll}
+      >
+        <Text selectable style={styles.command}>
+          {label}
+        </Text>
+      </ScrollView>
 
       {approval.reason ? (
         <Text style={styles.reason} numberOfLines={2}>
@@ -180,14 +186,16 @@ const createStyles = (theme: AppTheme) =>
       color: theme.colors.accent,
       fontWeight: '600',
     },
+    commandScroll: {
+      maxHeight: 120,
+      marginBottom: theme.spacing.sm,
+    },
     command: {
       ...theme.typography.mono,
       color: theme.colors.textPrimary,
       backgroundColor: theme.colors.bgItem,
       borderRadius: theme.radius.sm,
       padding: theme.spacing.sm,
-      marginBottom: theme.spacing.sm,
-      overflow: 'hidden',
     },
     reason: {
       ...theme.typography.caption,

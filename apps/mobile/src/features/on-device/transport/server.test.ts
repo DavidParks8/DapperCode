@@ -65,6 +65,49 @@ async function createChat(server: LocalBridgeServer, submissionId = 'create-1') 
 }
 
 describe('LocalBridgeServer', () => {
+  it.each(['untrusted', 'on-request', 'on-failure', 'never'])(
+    'applies the global %s policy to the local runtime',
+    async (approvalPolicy) => {
+      const { server, port } = setup();
+      const setApprovalPolicy = jest.spyOn(port, 'setApprovalPolicy');
+      await expect(
+        server.request('thread/approvalPolicy/set', { approvalPolicy }),
+      ).resolves.toEqual({ ok: true });
+      expect(setApprovalPolicy).toHaveBeenCalledWith(approvalPolicy);
+    },
+  );
+
+  it.each([
+    'thread/start',
+    'bridge/thread/create',
+    'thread/resume',
+    'turn/start',
+    'bridge/thread/queue/send',
+  ])('honors approval policy supplied through %s', async (method) => {
+    const { server, port } = setup();
+    const threadId = await createChat(server);
+    const policy = { approvalPolicy: 'never' };
+    const params =
+      method === 'bridge/thread/create'
+        ? { threadStart: { cwd: DEMO, ...policy }, submissionId: 'policy-create' }
+        : method === 'bridge/thread/queue/send'
+          ? { threadId, content: 'Hello', turnStart: policy }
+          : { threadId, cwd: DEMO, input: [{ type: 'text', text: 'Hello' }], ...policy };
+    await server.request(method, params);
+    expect(port.approvalPolicy).toBe('never');
+    server.stop();
+  });
+
+  it.each([undefined, null, '', 'invalid', 'NEVER', true])(
+    'rejects invalid global approval policy %s',
+    async (approvalPolicy) => {
+      const { server } = setup();
+      await expect(
+        server.request('thread/approvalPolicy/set', { approvalPolicy }),
+      ).rejects.toMatchObject({ code: -32602 });
+    },
+  );
+
   it('advertises a single local agent and hides unsupported affordances', async () => {
     const { server } = setup();
     const capabilities = (await server.request('bridge/capabilities/read')) as {

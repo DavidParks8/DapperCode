@@ -3,12 +3,14 @@ import type { LocalModelReply } from '../models/engine';
 import { LocalModelInterrupted } from '../models/session';
 import type { LocalModelSession } from '../models/session';
 import { FILE_TOOL_DEFINITIONS } from '../workspaces/fileToolDefinitions';
-import { gitToolApproval } from '../git/gitTools';
+import { localToolApproval } from './localTools';
+import type { ApprovalPolicy, ChatToolKind } from '@bridge/types/types';
 import {
   LocalAgentLoop,
   localConversationTitle,
   type LocalRunSnapshot,
   type LocalToolExecutor,
+  type LocalToolApprovalPolicy,
 } from './agentLoop';
 import { LocalThreadRepository, type LocalDocumentPort } from './threads';
 import { storedLocalThread } from './testing';
@@ -53,7 +55,7 @@ function response(content: string, names: string[] = []): LocalModelReply {
 
 async function harness(
   contents = new Map<string, string>(),
-  approval: (name: string) => string | null = () => null,
+  approval: LocalToolApprovalPolicy = () => null,
 ) {
   const storage = {
     readRuntimeDocument: jest.fn(async (name: string) => contents.get(name) ?? null),
@@ -92,7 +94,7 @@ async function harness(
   const loop = new LocalAgentLoop(
     threads,
     model,
-    FILE_TOOL_DEFINITIONS,
+    FILE_TOOL_DEFINITIONS.map((tool) => tool.definition),
     execute,
     (state) => events.push(state),
     approval,
@@ -119,7 +121,12 @@ test('real run ordering persists user input and tool intent before executing and
   const accepted = jest.fn();
   const finished = await h.loop.send(h.thread.id, 'Read main.txt', 'request-one', accepted);
   expect(accepted).toHaveBeenCalledTimes(1);
-  expect(h.execute).toHaveBeenCalledWith('workspace-fixed', 'read_file', { path: 'main.txt' });
+  expect(h.execute).toHaveBeenCalledWith(
+    'workspace-fixed',
+    'read_file',
+    { path: 'main.txt' },
+    expect.any(AbortSignal),
+  );
   expect(finished.status).toBe('complete');
   expect(finished.activeTurnId).toBeNull();
   expect(finished.messages.map((message) => message.role)).toEqual([
@@ -513,15 +520,20 @@ test('long write_file payloads reach the tool intact', async () => {
   const content = 'const value = 1;\n'.repeat(2000);
   h.model.generate.mockResolvedValueOnce(call('write_file', { path: 'big.ts', content }));
   await h.loop.send(h.thread.id, 'Write big.ts', 'request-one');
-  expect(h.execute).toHaveBeenCalledWith('workspace-fixed', 'write_file', {
-    path: 'big.ts',
-    content,
-  });
+  expect(h.execute).toHaveBeenCalledWith(
+    'workspace-fixed',
+    'write_file',
+    {
+      path: 'big.ts',
+      content,
+    },
+    expect.any(AbortSignal),
+  );
 });
 
 describe('model-initiated push approval', () => {
   test('push waits for approval, and a decline returns a tool error to the model', async () => {
-    const h = await harness(new Map(), gitToolApproval);
+    const h = await harness(new Map(), localToolApproval);
     h.model.generate.mockResolvedValueOnce(call('git_push', {}));
     const running = h.loop.send(h.thread.id, 'Push it', 'request-one');
     await waitFor(() => h.loop.snapshot().phase === 'approval');
@@ -547,7 +559,7 @@ describe('model-initiated push approval', () => {
   });
 
   test('an approved push runs exactly once', async () => {
-    const h = await harness(new Map(), gitToolApproval);
+    const h = await harness(new Map(), localToolApproval);
     h.model.generate.mockResolvedValueOnce(call('git_push', {}));
     h.execute.mockResolvedValueOnce({ pushed: true });
     const running = h.loop.send(h.thread.id, 'Push it', 'request-one');
@@ -555,11 +567,16 @@ describe('model-initiated push approval', () => {
     h.loop.resolveApproval(h.loop.snapshot().approval!.callId, true);
     await running;
     expect(h.execute).toHaveBeenCalledTimes(1);
-    expect(h.execute).toHaveBeenCalledWith('workspace-fixed', 'git_push', {});
+    expect(h.execute).toHaveBeenCalledWith(
+      'workspace-fixed',
+      'git_push',
+      {},
+      expect.any(AbortSignal),
+    );
   });
 
   test('stop while awaiting approval interrupts without pushing', async () => {
-    const h = await harness(new Map(), gitToolApproval);
+    const h = await harness(new Map(), localToolApproval);
     h.model.generate.mockResolvedValueOnce(call('git_push', {}));
     const running = h.loop.send(h.thread.id, 'Push it', 'request-one');
     await waitFor(() => h.loop.snapshot().phase === 'approval');
@@ -583,3 +600,135 @@ async function waitFor(condition: () => boolean): Promise<void> {
   }
   throw new Error('Condition was not reached.');
 }
+
+jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
+
+describe('metadata-driven tool approval', () => {
+  test.each([
+    ['untrusted', 'web_search', 'search', true],
+    ['untrusted', 'web_fetch', 'fetch', true],
+    ['untrusted', 'git_push', 'other', true],
+    ['on-request', 'web_search', 'search', false],
+    ['on-request', 'web_fetch', 'fetch', true],
+    ['on-request', 'git_push', 'other', true],
+    ['never', 'web_search', 'search', false],
+    ['never', 'web_fetch', 'fetch', false],
+    ['never', 'git_push', 'other', false],
+    ['on-failure', 'web_search', 'search', true],
+    ['on-request', 'custom_reader', 'read', false],
+    ['on-request', 'custom_searcher', 'search', false],
+    ['on-request', 'custom_reasoner', 'think', false],
+    ['on-request', 'custom_editor', 'edit', true],
+    ['on-request', 'custom_command', 'execute', true],
+    ['on-request', 'web_search', 'execute', true],
+    ['untrusted', 'custom_reader', 'read', true],
+    ['never', 'custom_command', 'execute', false],
+  ] satisfies [ApprovalPolicy, string, ChatToolKind, boolean][])(
+    '%s policy gates %s by its %s category (%s)',
+    async (policy, name, kind, requiresApproval) => {
+      const h = await harness(new Map(), () => ({
+        kind,
+        summary: 'Permission-sensitive operation',
+      }));
+      h.loop.setApprovalPolicy(policy);
+      h.model.generate.mockResolvedValueOnce(call(name, {}));
+      const running = h.loop.send(h.thread.id, 'Use the tool', 'policy-turn');
+      await waitFor(
+        () => h.loop.snapshot().phase === 'approval' || h.execute.mock.calls.length > 0,
+      );
+      if (requiresApproval) {
+        expect(h.execute).not.toHaveBeenCalled();
+        h.loop.resolveApproval(h.loop.snapshot().approval!.callId, true);
+      }
+      const result = await running;
+      expect(h.execute).toHaveBeenCalledTimes(1);
+      expect(h.events.some((state) => state.phase === 'approval')).toBe(requiresApproval);
+      expect(result).toMatchObject({ status: 'complete', activeTurnId: null });
+      expect(h.loop.snapshot()).toMatchObject({ phase: 'idle', approval: null });
+    },
+  );
+
+  test.each(['git_push', 'web_fetch', 'web_search'])(
+    'enabling bypass releases a pending %s approval exactly once',
+    async (name) => {
+      const h = await harness(new Map(), () => ({ kind: 'other', summary: 'Network operation' }));
+      h.model.generate.mockResolvedValueOnce(call(name, {}));
+      const running = h.loop.send(h.thread.id, 'Use the tool', 'pending-policy');
+      await waitFor(() => h.loop.snapshot().phase === 'approval');
+      expect(h.execute).not.toHaveBeenCalled();
+      const callId = h.loop.snapshot().approval!.callId;
+      h.loop.setApprovalPolicy('never');
+      const result = await running;
+      expect(result.status).toBe('complete');
+      expect(h.execute).toHaveBeenCalledTimes(1);
+      expect(h.loop.snapshot()).toMatchObject({ phase: 'idle', approval: null });
+      expect(() => h.loop.resolveApproval(callId, true)).toThrow('no longer pending');
+    },
+  );
+
+  test.each(['read', 'search', 'think'] satisfies ChatToolKind[])(
+    'switching to some approvals releases a custom %s request based on metadata',
+    async (kind) => {
+      const h = await harness(new Map(), () => ({ kind, summary: 'Custom operation' }));
+      h.model.generate.mockResolvedValueOnce(call('not_a_builtin_tool', {}));
+      const running = h.loop.send(h.thread.id, 'Use a custom tool', 'custom-policy');
+      await waitFor(() => h.loop.snapshot().phase === 'approval');
+      expect(h.execute).not.toHaveBeenCalled();
+      expect(h.loop.snapshot().approval).toMatchObject({ kind, toolName: 'not_a_builtin_tool' });
+      h.loop.setApprovalPolicy('on-request');
+      expect((await running).status).toBe('complete');
+      expect(h.execute).toHaveBeenCalledTimes(1);
+      expect(h.loop.snapshot()).toMatchObject({ phase: 'idle', approval: null });
+    },
+  );
+
+  test('tightening the policy during a turn gates its next tool instead of keeping stale bypass', async () => {
+    const h = await harness(new Map(), localToolApproval);
+    h.loop.setApprovalPolicy('never');
+    h.model.generate
+      .mockResolvedValueOnce(call('git_push', {}))
+      .mockResolvedValueOnce(call('git_push', {}));
+    h.execute.mockImplementationOnce(async () => {
+      h.loop.setApprovalPolicy('untrusted');
+      return { pushed: true };
+    });
+    const running = h.loop.send(h.thread.id, 'Push twice', 'tighten-policy');
+    await waitFor(() => h.loop.snapshot().phase === 'approval');
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    h.loop.resolveApproval(h.loop.snapshot().approval!.callId, false);
+    const result = await running;
+    expect(h.execute).toHaveBeenCalledTimes(1);
+    expect(
+      result.messages
+        .filter((message) => message.role === 'tool')
+        .map((message) => message.tool?.status),
+    ).toEqual(['completed', 'failed']);
+    expect(h.loop.snapshot().phase).toBe('idle');
+  });
+
+  test('a policy approval queued before tightening cannot execute after bypass is disabled', async () => {
+    const h = await harness(new Map(), localToolApproval);
+    h.model.generate.mockResolvedValueOnce(call('git_push', {}));
+    const running = h.loop.send(h.thread.id, 'Push', 'rapid-policy');
+    await waitFor(() => h.loop.snapshot().phase === 'approval');
+    h.loop.setApprovalPolicy('never');
+    h.loop.setApprovalPolicy('untrusted');
+    await waitFor(() => h.events.filter((state) => state.phase === 'approval').length === 2);
+    expect(h.execute).not.toHaveBeenCalled();
+    h.loop.resolveApproval(h.loop.snapshot().approval!.callId, false);
+    await running;
+    expect(h.execute).not.toHaveBeenCalled();
+  });
+
+  test('Stop fences a pending approval just released by bypass', async () => {
+    const h = await harness(new Map(), localToolApproval);
+    h.model.generate.mockResolvedValueOnce(call('git_push', {}));
+    const running = h.loop.send(h.thread.id, 'Push', 'stop-policy');
+    await waitFor(() => h.loop.snapshot().phase === 'approval');
+    h.loop.setApprovalPolicy('never');
+    await h.loop.stop();
+    expect((await running).status).toBe('interrupted');
+    expect(h.execute).not.toHaveBeenCalled();
+    expect(h.loop.snapshot()).toMatchObject({ phase: 'idle', approval: null });
+  });
+});

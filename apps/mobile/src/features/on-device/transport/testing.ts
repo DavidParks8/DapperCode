@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/require-await -- the fake mirrors the async port contract */
 import type { LocalModelDefinition } from '../models/types';
+import type { ApprovalPolicy } from '@bridge/types/types';
 import { localModelDefinition } from '../models/catalog';
 import { localConversationTitle, type LocalRunSnapshot } from '../runtime/agentLoop';
 import type { LocalMessage, LocalThread } from '../runtime/types';
@@ -29,6 +30,11 @@ const IDLE: LocalRunSnapshot = {
  * mutates thread state, so the transport's event projection is exercised without native code.
  */
 export class FakeAgentPort implements LocalAgentPort {
+  approvalPolicy: ApprovalPolicy = 'untrusted';
+  setApprovalPolicy(policy: ApprovalPolicy): void {
+    this.approvalPolicy = policy;
+  }
+
   readonly listeners = new Set<() => void>();
   readonly cloneProgressListeners = new Set<
     Parameters<LocalAgentPort['workspaceAdmin']['onCloneProgress']>[0]
@@ -460,12 +466,9 @@ export class FakeAgentPort implements LocalAgentPort {
 
   /** Asks for approval of a tool call, as the loop does for network side effects. */
   requestApproval(threadId: string, callId: string, toolName: string, summary: string): void {
-    this.runValue = {
-      ...this.runValue,
-      phase: 'approval',
-      toolName,
-      approval: { threadId, turnId: this.runValue.turnId ?? '', callId, toolName, summary },
-    };
+    const turnId = this.runValue.turnId ?? '';
+    const approval = { threadId, turnId, callId, toolName, summary, kind: 'other' as const };
+    this.runValue = { ...this.runValue, phase: 'approval', toolName, approval };
     this.emit();
   }
 

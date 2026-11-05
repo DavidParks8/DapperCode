@@ -8,31 +8,39 @@ export const GIT_TOOL_DEFINITIONS = [
     'Read workspace Git status. Large results are explicitly truncated.',
     {},
     [],
+    { kind: 'read', approval: null },
   ),
   toolDefinition(
     'git_diff',
     'Read separately labelled staged (HEAD to index) and unstaged (index to working tree) patches within one shared output budget.',
     {},
     [],
+    { kind: 'read', approval: null },
   ),
-  toolDefinition('git_history', 'Read recent workspace commits.', {}, []),
+  toolDefinition('git_history', 'Read recent workspace commits.', {}, [], {
+    kind: 'read',
+    approval: null,
+  }),
   toolDefinition(
     'git_stage',
     'Stage a literal file path, or omit path to stage all non-ignored changes.',
     { path: { type: 'string' } },
     [],
+    { kind: 'other', approval: null },
   ),
   toolDefinition(
     'git_commit',
     'Commit staged changes using the configured author identity.',
     { message: { type: 'string' } },
     ['message'],
+    { kind: 'other', approval: null },
   ),
   toolDefinition(
     'git_push',
-    'Push the current branch to its configured origin. The user must approve each push. Requires network and sign-in.',
+    'Push the current branch to its configured origin. Requires network and sign-in.',
     {},
     [],
+    { kind: 'other', approval: () => 'Push the current branch to its remote' },
   ),
 ];
 
@@ -51,17 +59,8 @@ export type GitToolPort = Pick<
   | 'pushWorkspaceGit'
 >;
 
-const APPROVAL_SUMMARIES: ReadonlyMap<string, string> = new Map([
-  ['git_push', 'Push the current branch to its remote'],
-]);
-
-/** A user-facing summary when a model tool call needs explicit approval, otherwise null. */
-export function gitToolApproval(name: string): string | null {
-  return APPROVAL_SUMMARIES.get(name) ?? null;
-}
-
 export function isGitTool(name: string): boolean {
-  return GIT_TOOL_DEFINITIONS.some((definition) => definition.function.name === name);
+  return GIT_TOOL_DEFINITIONS.some((tool) => tool.definition.function.name === name);
 }
 
 export async function executeGitTool(

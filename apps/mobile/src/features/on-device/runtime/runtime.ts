@@ -1,6 +1,5 @@
 import { GitHubAuthStrategy } from '../auth/github';
 import type { GitDeviceAuthorization } from '../auth/strategy';
-import { gitToolApproval } from '../git/gitTools';
 import type { LocalGitIdentity } from '../git/gitTools';
 import { LOCAL_MODEL_CATALOG, localModelDefinition } from '../models/catalog';
 import { ModelDownloadController, type ModelDownloadSnapshot } from '../models/downloads';
@@ -11,7 +10,7 @@ import type { LocalWorkspace } from '../workspaces/types';
 import { LocalAgentLoop } from './agentLoop';
 import { LegacyDraftReader, type LegacyDraftOutcome, type LocalDraftRestore } from './drafts';
 import { RuntimeSliceEmitter } from './emitter';
-import { LOCAL_TOOL_DEFINITIONS, localToolExecutor } from './localTools';
+import { LOCAL_TOOL_DEFINITIONS, localToolApproval, localToolExecutor } from './localTools';
 import { NetworkMonitor, unknownNetwork, type OnDeviceNetworkPort } from './network';
 import {
   recoveryNotices,
@@ -122,9 +121,10 @@ export class OnDeviceRuntime {
         native,
         () => this.settings.get().author,
         (id) => this.credential(id),
+        (action) => this.requireNetwork(action),
       ),
       () => this.emitter.emit('loop'),
-      gitToolApproval,
+      localToolApproval,
     );
     this.residency = new ModelResidency({
       models: this.models,

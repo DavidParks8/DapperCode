@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: October 26, 2026
+Last updated: November 4, 2026
 
 ## Overview
 
@@ -50,9 +50,17 @@ DapperCode does not include advertising SDKs. Data may be transmitted to third-p
 
 Model downloads contact the selected catalog artifact host (currently Hugging Face). Optional
 GitHub sign-in contacts GitHub. HTTPS clone/push contacts the repository origin and push transmits
-the selected Git history and committed content. Local tools have no per-tool approval dialogs and
-can push when authorized; review the workspace and its permissions. Offline inference and local
-file/Git actions have no automatic bridge or cloud fallback.
+the selected Git history and committed content. Local model-requested pushes, web searches, and
+HTTPS reads follow **Settings → Chat → Approvals**. Requiring all approvals asks before every
+permission-sensitive network tool; requiring some allows searches automatically; bypassing approvals
+allows all these tools without prompts. Web searches send each query to Exa's
+hosted search service (`https://mcp.exa.ai/mcp`), without an account or API key. For a web read, the full approved
+URL (including its search query) is sent
+to the destination server; no cookies, credentials, request body, or workspace files are attached
+automatically. Retrieved text is processed by the local model and stored in the local tool
+transcript. Review URLs before allowing them, especially their query parameters; when bypassing
+approvals, queries and URLs are sent without that review step. Offline inference
+and local file/Git actions have no automatic bridge or cloud fallback.
 
 When notifications are enabled, the self-hosted bridge sends the device push token, notification
 title/body, and routing/deep-link identifiers through the Expo Push Notification Service and then

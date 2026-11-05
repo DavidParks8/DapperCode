@@ -1,4 +1,5 @@
 import React from 'react';
+import { ScrollView } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -106,6 +107,43 @@ describe('ApprovalBanner', () => {
       runApprovalResolution('approval-1', 'accept', resolve, setResolving),
     ).rejects.toThrow('temporary failure');
     expect(setResolving.mock.calls).toEqual([['accept'], [null]]);
+  });
+
+  it('keeps long URLs fully inspectable without moving approval controls into the scroller', () => {
+    const url = `https://search.example/?q=${'topic+'.repeat(100)}&last=visible`;
+    const command = `Fetch ${url}\nReview the full URL before allowing this request.`;
+    const approval: PendingApproval = {
+      requestId: 'web-approval',
+      agentId: 'on-device',
+      kind: 'commandExecution',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'item-1',
+      title: 'Fetch web page',
+      message: command,
+      command,
+      requestedAt: '2026-11-04T00:00:00Z',
+      options: [
+        { id: 'allow', label: 'Allow', kind: 'AllowOnce' },
+        { id: 'deny', label: 'Deny', kind: 'RejectOnce' },
+      ],
+    };
+    const tree = render(<ApprovalBanner approval={approval} onResolve={jest.fn()} />);
+    const root = queryRoot(tree);
+    const details = root.findAll((node) => node.type === ScrollView)[0];
+    if (!details) {
+      throw new Error('Approval request must have a bounded scroller.');
+    }
+    expect(details.props['style']).toEqual(expect.objectContaining({ maxHeight: 120 }));
+    expect(details.props['nestedScrollEnabled']).toBe(true);
+    const label = details.findAll((node) => node.props['children'] === command)[0];
+    expect(label?.props['numberOfLines']).toBeUndefined();
+    expect(label?.props['selectable']).toBe(true);
+    expect(textContent(details)).toContain('&last=visible');
+    expect(details.findAll((node) => typeof node.props['onPress'] === 'function')).toHaveLength(0);
+    expect(findPressable(root, 'Allow')).toBeDefined();
+    expect(findPressable(root, 'Deny')).toBeDefined();
+    act(() => tree.unmount());
   });
 
   it('resolves command and file approvals across pending, reject, and retry states', async () => {

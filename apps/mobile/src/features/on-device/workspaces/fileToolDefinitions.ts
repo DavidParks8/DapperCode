@@ -19,6 +19,7 @@ export const FILE_TOOL_DEFINITIONS = [
       limit: { type: 'integer' },
     },
     [],
+    { kind: 'read', approval: null },
   ),
   definition(
     'read_file',
@@ -29,12 +30,14 @@ export const FILE_TOOL_DEFINITIONS = [
       limit: { type: 'integer' },
     },
     ['path'],
+    { kind: 'read', approval: null },
   ),
   definition(
     'write_file',
     'Create or replace UTF-8 text, at most 4 MiB. Replacing a file requires its last read revision.',
     { path, content: { type: 'string' }, expected_revision: revision },
     ['path', 'content'],
+    { kind: 'edit', approval: null },
   ),
   definition(
     'edit_file',
@@ -46,25 +49,29 @@ export const FILE_TOOL_DEFINITIONS = [
       expected_revision: { type: 'string' },
     },
     ['path', 'old_text', 'new_text', 'expected_revision'],
+    { kind: 'edit', approval: null },
   ),
   definition(
     'rename_path',
     'Rename a workspace path without overwriting another path. Files require their last read revision.',
     { path, destination: path, expected_revision: revision },
     ['path', 'destination'],
+    { kind: 'move', approval: null },
   ),
   definition(
     'delete_path',
     'Remove a workspace path. Files require their last read revision. Repository roots and Git metadata are protected.',
     { path, expected_revision: revision },
     ['path'],
+    { kind: 'delete', approval: null },
   ),
   definition(
     'search_files',
     'Find literal single-line text. Results report truncation, excluded files, and resource budgets.',
     { query: { type: 'string' } },
     ['query'],
+    { kind: 'search', approval: null },
   ),
 ];
 
-export type FileToolName = (typeof FILE_TOOL_DEFINITIONS)[number]['function']['name'];
+export type FileToolName = (typeof FILE_TOOL_DEFINITIONS)[number]['definition']['function']['name'];

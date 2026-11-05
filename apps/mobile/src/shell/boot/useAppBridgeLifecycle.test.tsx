@@ -317,48 +317,62 @@ describe('useAppBridgeLifecycle route gates', () => {
     act(() => tree?.unmount());
   });
 
-  it('pushes the persisted approval policy on boot and reconnect', async () => {
-    const setApprovalPolicy = jest.fn().mockResolvedValue(undefined);
-    const api = {
-      primeChats: jest.fn().mockResolvedValue(undefined),
-      rememberChat: jest.fn(),
-      setApprovalPolicy,
-    } as unknown as HostBridgeApiClient;
-    const statusListeners = new Set<(connected: boolean) => void>();
-    let connected = true;
-    const ws = {
-      get isConnected() {
-        return connected;
-      },
-      onStatus: jest.fn((listener: (connected: boolean) => void) => {
-        statusListeners.add(listener);
-        return () => statusListeners.delete(listener);
-      }),
-    } as unknown as HostBridgeWsClient;
-    const store = createBridgeTestStore({ api, ws });
-    store.set(approvalModeAtom, 'none');
-    router.replace('/profiles/profile-1/chats/new');
+  it.each(['profile-1', LOCAL_PROFILE_ID])(
+    'pushes the persisted approval policy on boot and reconnect for %s',
+    async (profileId) => {
+      const setApprovalPolicy = jest.fn().mockResolvedValue(undefined);
+      const api = {
+        primeChats: jest.fn().mockResolvedValue(undefined),
+        rememberChat: jest.fn(),
+        setApprovalPolicy,
+      } as unknown as HostBridgeApiClient;
+      const statusListeners = new Set<(connected: boolean) => void>();
+      let connected = true;
+      const ws = {
+        get isConnected() {
+          return connected;
+        },
+        onStatus: jest.fn((listener: (connected: boolean) => void) => {
+          statusListeners.add(listener);
+          return () => statusListeners.delete(listener);
+        }),
+      } as unknown as HostBridgeWsClient;
+      const store = createBridgeTestStore({ api, ws });
+      store.set(approvalModeAtom, 'none');
+      if (profileId === LOCAL_PROFILE_ID) {
+        store.set(localProfileAvailableAtom, true);
+        const snapshot = store.get(appStateSnapshotAtom);
+        store.set(appStateSnapshotAtom, {
+          ...snapshot,
+          data: {
+            ...snapshot.data,
+            bridgeProfiles: { ...snapshot.data.bridgeProfiles, activeProfileId: profileId },
+          },
+        });
+      }
+      router.replace(`/profiles/${profileId}/chats/new`);
 
-    let tree: ReactTestRenderer | undefined;
-    await act(async () => {
-      tree = renderer.create(withAppStore(store, <Harness />));
-      await Promise.resolve();
-    });
-    expect(setApprovalPolicy).toHaveBeenCalledTimes(1);
-    expect(setApprovalPolicy).toHaveBeenLastCalledWith('never');
+      let tree: ReactTestRenderer | undefined;
+      await act(async () => {
+        tree = renderer.create(withAppStore(store, <Harness />));
+        await Promise.resolve();
+      });
+      expect(setApprovalPolicy).toHaveBeenCalledTimes(1);
+      expect(setApprovalPolicy).toHaveBeenLastCalledWith('never');
 
-    await act(async () => {
-      connected = false;
-      statusListeners.forEach((listener) => listener(false));
-      connected = true;
-      statusListeners.forEach((listener) => listener(true));
-      await Promise.resolve();
-    });
+      await act(async () => {
+        connected = false;
+        statusListeners.forEach((listener) => listener(false));
+        connected = true;
+        statusListeners.forEach((listener) => listener(true));
+        await Promise.resolve();
+      });
 
-    expect(setApprovalPolicy).toHaveBeenCalledTimes(2);
-    expect(setApprovalPolicy).toHaveBeenLastCalledWith('never');
-    act(() => tree?.unmount());
-  });
+      expect(setApprovalPolicy).toHaveBeenCalledTimes(2);
+      expect(setApprovalPolicy).toHaveBeenLastCalledWith('never');
+      act(() => tree?.unmount());
+    },
+  );
 
   it('reconciles a newer local mode after an older boot sync finishes', async () => {
     let resolveInitialSync!: () => void;
