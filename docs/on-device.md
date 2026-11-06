@@ -500,6 +500,10 @@ The preference store publishes a model default only after its write succeeds, an
 other preference saves from the latest confirmed state when their queued writes run. A concurrent
 workspace or author save cannot persist a rejected model choice or clear a persistence warning
 unless it has saved all current settings.
+Deleting a conversation fences every conversation write queued during or after the deletion, so
+a failed model-choice rollback cannot recreate the deleted conversation. While a model's weights
+are being deleted it is hidden from the picker, and choosing, loading, sending or retrying on it
+is rejected until removal settles.
 Send, Retry, and competing model/workspace changes are rejected while a model choice is still
 saving. The composer also waits for its pending model configuration acknowledgment, so Send
 cannot overtake a newer queued choice. An unadmitted request keeps its draft and can be sent again

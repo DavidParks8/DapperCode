@@ -135,6 +135,31 @@ export function parseThreadSegmentName(name: string): { id: string; sequence: nu
   }
 }
 
+export type SegmentName = { name: string; sequence: number };
+
+/** Groups segment documents by conversation in journal order; other names are unexpected. */
+export function groupSegments(names: readonly string[]): {
+  segments: Map<string, SegmentName[]>;
+  unexpected: string[];
+} {
+  const segments = new Map<string, SegmentName[]>();
+  const unexpected: string[] = [];
+  for (const name of names) {
+    const segment = parseThreadSegmentName(name);
+    if (!segment) {
+      unexpected.push(name);
+      continue;
+    }
+    const list = segments.get(segment.id) ?? [];
+    list.push({ name, sequence: segment.sequence });
+    segments.set(segment.id, list);
+  }
+  for (const list of segments.values()) {
+    list.sort((a, b) => a.sequence - b.sequence);
+  }
+  return { segments, unexpected };
+}
+
 export function durableLocalThread(thread: LocalThread): DurableLocalThread {
   const header = {} as Record<LocalThreadHeaderKey, unknown>;
   for (const key of LOCAL_THREAD_HEADER_KEYS) {

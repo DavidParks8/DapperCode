@@ -184,6 +184,57 @@ test.each(['segment', 'base'])(
   },
 );
 
+test.each([
+  ['segment', 'rejected'],
+  ['segment', 'written-then-rejected'],
+  ['base', 'rejected'],
+  ['base', 'written-then-rejected'],
+])(
+  'deleting a conversation during a failing %s write (%s) and its rollback save stays deleted',
+  async (kind, failure) => {
+    const h = await open();
+    const original = await h.threads.create('workspace', 'model-a');
+    const write = h.port.writeRuntimeDocument.getMockImplementation()!;
+    let reject!: (error: Error) => void;
+    let started!: () => void;
+    const writing = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    h.port.writeRuntimeDocument.mockImplementationOnce(async (name, contents) => {
+      if (failure === 'written-then-rejected') {
+        await write(name, contents);
+      }
+      started();
+      await new Promise<void>((_resolve, rejectWrite) => {
+        reject = rejectWrite;
+      });
+    });
+    h.threads.change(original.id, (thread) => ({
+      ...thread,
+      modelId: 'model-b',
+      messages:
+        kind === 'base'
+          ? [userMessage('unconfirmed', 'x'.repeat(THREAD_SEGMENT_MAX_BYTES))]
+          : thread.messages,
+    }));
+    // Mirrors the model-selection rollback: a failed choice restores and re-saves the chat.
+    const choosing = h.threads.save(original.id).catch(async () => {
+      h.threads.change(original.id, () => original);
+      await h.threads.save(original.id);
+    });
+    await writing;
+    const removing = h.threads.remove(original.id);
+    reject(new Error('Thread write failed.'));
+    await Promise.allSettled([choosing, removing]);
+    await removing;
+    expect(h.threads.find(original.id)).toBeNull();
+    expect([...h.documents.keys()].filter((name) => name.includes(original.id))).toEqual([]);
+    const restored = await open(new Map(h.documents));
+    expect(restored.threads.find(original.id)).toBeNull();
+    expect(restored.threads.list()).toEqual([]);
+  },
+);
+
 test('older whole-conversation documents are read as the base and positioned before any segment', async () => {
   const legacy = legacyThread('Legacy conversation', [
     userMessage('user-legacy', 'Hello from an older build'),

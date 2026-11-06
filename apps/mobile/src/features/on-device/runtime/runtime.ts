@@ -68,6 +68,7 @@ export class OnDeviceRuntime {
   private workspaceOperation: Promise<unknown> | null = null;
   private workspaceOperationLabel: string | null = null;
   private readonly modelSelection: LocalModelSelection;
+  private readonly removingModels = new Set<string>();
 
   constructor(
     readonly native: OnDeviceNativeServices,
@@ -244,6 +245,7 @@ export class OnDeviceRuntime {
   ): Promise<LocalThread> {
     await this.residency.settled();
     this.requireModelSelectionSettled();
+    await this.requireModelPresent(this.threads.find(id)?.modelId);
     if (this.workspaceOperation || this.suspension || this.disposal) {
       throw new Error('Wait for on-device operations to settle before sending.');
     }
@@ -253,6 +255,7 @@ export class OnDeviceRuntime {
   async retryTurn(id: string): Promise<LocalThread> {
     await this.residency.settled();
     this.requireModelSelectionSettled();
+    await this.requireModelPresent(this.threads.find(id)?.modelId);
     if (this.workspaceOperation || this.suspension || this.disposal) {
       throw new Error('Wait for on-device operations to settle before retrying.');
     }
@@ -368,7 +371,7 @@ export class OnDeviceRuntime {
    * conversation when the change would replace the model that run is using.
    */
   selectModel(id: string, threadId?: string): Promise<void> {
-    return this.modelSelection.select(id, threadId);
+    return this.requireModelPresent(id) ?? this.modelSelection.select(id, threadId);
   }
 
   /**
@@ -376,7 +379,18 @@ export class OnDeviceRuntime {
    * loading it; it loads when that conversation next sends. Rejects while the conversation runs.
    */
   chooseModel(id: string, threadId?: string): Promise<void> {
-    return this.modelSelection.choose(id, threadId);
+    return this.requireModelPresent(id) ?? this.modelSelection.choose(id, threadId);
+  }
+
+  /** Rejects while `id`'s weights are being deleted, so nothing loads a file being removed. */
+  isRemovingModel(id: string | null | undefined): boolean {
+    return id !== null && id !== undefined && this.removingModels.has(id);
+  }
+
+  private requireModelPresent(id: string | null | undefined): Promise<never> | null {
+    return this.isRemovingModel(id)
+      ? Promise.reject(new Error('This model is being deleted. Choose another model.'))
+      : null;
   }
 
   requireModelSelectionSettled(): void {
@@ -403,10 +417,17 @@ export class OnDeviceRuntime {
       throw new Error('Stop the running local conversation before deleting the model it uses.');
     }
     this.residency.forget(id);
-    if (loaded) {
-      await this.residency.transition(() => this.models.unload());
+    this.removingModels.add(id);
+    this.emitter.emit('models', 'downloads');
+    try {
+      if (loaded) {
+        await this.residency.transition(() => this.models.unload());
+      }
+      await this.downloads.remove(id);
+    } finally {
+      this.removingModels.delete(id);
+      this.emitter.emit('models', 'downloads');
     }
-    await this.downloads.remove(id);
     if (this.settings.get().modelId === id) {
       this.settings.update({ modelId: null });
       await this.settings.save();

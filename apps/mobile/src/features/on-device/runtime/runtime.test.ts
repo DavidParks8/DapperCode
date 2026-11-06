@@ -15,6 +15,7 @@ import { COALESCED_EMIT_INTERVAL_MS } from './emitter';
 import { OnDeviceOfflineError, type OnDeviceNetworkPort } from './network';
 import { emptyLocalPreferences } from './preferences';
 import { OnDeviceRuntime } from './runtime';
+import { createRuntimeAgentPort } from '../transport/runtimePort';
 import { localAgentStatus, type LocalDownloadState } from './status';
 import { storedLocalThread } from './testing';
 import { THREAD_PROGRESS_SAVE_DELAY_MS } from './threads';
@@ -614,6 +615,35 @@ test('deleting the selected download unloads it and clears the new-conversation 
   expect(h.runtime.preferences().modelId).toBeNull();
   expect(h.runtime.threads.get(h.thread.id).modelId).toBe(modelId);
   await expect(h.runtime.createThread()).rejects.toThrow('downloaded model');
+  await h.runtime.dispose();
+});
+
+test('a model being deleted cannot be chosen, sent or retried until removal settles', async () => {
+  const h = await ready();
+  const removal = deferred<undefined>();
+  h.native.removeModelFile.mockImplementationOnce(() => removal.promise);
+  const removing = h.runtime.removeModel(modelId);
+  for (let step = 0; step < 20 && h.native.removeModelFile.mock.calls.length === 0; step += 1) {
+    await Promise.resolve();
+  }
+  expect(h.native.removeModelFile).toHaveBeenCalledWith(modelId);
+  const loads = jest.mocked(loadNativeModelContext).mock.calls.length;
+  const accepted = jest.fn();
+  await expect(
+    h.runtime.sendMessage(h.thread.id, 'Send during deletion', 'deleting', accepted),
+  ).rejects.toThrow('being deleted');
+  await expect(h.runtime.retryTurn(h.thread.id)).rejects.toThrow('being deleted');
+  await expect(h.runtime.chooseModel(modelId, h.thread.id)).rejects.toThrow('being deleted');
+  await expect(h.runtime.selectModel(modelId)).rejects.toThrow('being deleted');
+  expect(accepted).not.toHaveBeenCalled();
+  expect(jest.mocked(loadNativeModelContext).mock.calls).toHaveLength(loads);
+  expect(h.runtime.threads.get(h.thread.id).messages).toEqual([]);
+  expect(h.runtime.models.snapshot().modelId).not.toBe(modelId);
+  const port = createRuntimeAgentPort(h.runtime);
+  expect(port.availableModels().map((model) => model.id)).not.toContain(modelId);
+  removal.resolve(undefined);
+  await removing;
+  expect(h.runtime.preferences().modelId).toBeNull();
   await h.runtime.dispose();
 });
 

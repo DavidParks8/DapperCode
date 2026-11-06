@@ -13,11 +13,11 @@ import {
   durableLocalThread,
   encodeLocalThreadBase,
   encodeLocalThreadSegment,
+  groupSegments,
   journalEntries,
   localThreadDelta,
   messageJournalEntries,
   parseLocalThreadSegment,
-  parseThreadSegmentName,
   THREAD_COMPACT_MIN_BYTES,
   THREAD_COMPACT_SEGMENTS,
   THREAD_SEGMENT_MAX_BYTES,
@@ -28,6 +28,7 @@ import {
   type DurableLocalThread,
   type JournalEntries,
   type LocalThreadDelta,
+  type SegmentName,
 } from './threadJournal';
 import type { LocalThread } from './types';
 
@@ -69,8 +70,6 @@ interface PersistedThread {
 /** Delay for coalescing progress writes that are not needed by the run journal. */
 export const THREAD_PROGRESS_SAVE_DELAY_MS = 250;
 
-type SegmentName = { name: string; sequence: number };
-
 /** The conversation identity of a canonical base document name, or null. */
 function threadIdOf(name: string): string | null {
   const id = /^thread-([a-f0-9-]+)\.json$/u.exec(name)?.[1];
@@ -81,29 +80,6 @@ function threadIdOf(name: string): string | null {
   }
 }
 
-/** Groups segment documents by conversation in journal order; other names are unexpected. */
-function groupSegments(names: readonly string[]): {
-  segments: Map<string, SegmentName[]>;
-  unexpected: string[];
-} {
-  const segments = new Map<string, SegmentName[]>();
-  const unexpected: string[] = [];
-  for (const name of names) {
-    const segment = parseThreadSegmentName(name);
-    if (!segment) {
-      unexpected.push(name);
-      continue;
-    }
-    const list = segments.get(segment.id) ?? [];
-    list.push({ name, sequence: segment.sequence });
-    segments.set(segment.id, list);
-  }
-  for (const list of segments.values()) {
-    list.sort((a, b) => a.sequence - b.sequence);
-  }
-  return { segments, unexpected };
-}
-
 export class LocalThreadRepository {
   private readonly threads = new Map<string, LocalThread>();
   private readonly failures = new Map<string, Error>();
@@ -112,6 +88,8 @@ export class LocalThreadRepository {
   private readonly progress = new Map<string, ReturnType<typeof setTimeout>>();
   /** Conversations whose next write must be a new base, after startup set journal damage aside. */
   private readonly rebase = new Set<string>();
+  /** Conversations being deleted; their queued and later writes must not recreate documents. */
+  private readonly removing = new Set<string>();
   /** `list()` order, kept until the collection changes. */
   private sorted: readonly LocalThread[] | null = null;
   private writes: Promise<void> = Promise.resolve();
@@ -248,10 +226,19 @@ export class LocalThreadRepository {
       throw new Error('Stop the local run before deleting its conversation.');
     }
     this.cancelProgress(id);
-    await this.writes;
-    // The base goes first: segments left by an interrupted delete have no base and are discarded
-    // at the next startup instead of resurrecting the conversation.
-    await this.storage.removeRuntimeDocument(threadDocument(id));
+    this.removing.add(id);
+    try {
+      await this.writes;
+      // The base goes first: segments left by an interrupted delete have no base and are discarded
+      // at the next startup instead of resurrecting the conversation.
+      await this.storage.removeRuntimeDocument(threadDocument(id));
+    } catch (error) {
+      this.removing.delete(id);
+      // A write skipped while removal was pending must still reach disk.
+      this.rebase.add(id);
+      void this.write(id).catch(() => undefined);
+      throw error;
+    }
     const segments = await this.storage
       .listRuntimeDocuments(threadSegmentPrefix(id))
       .catch((): string[] => []);
@@ -261,6 +248,7 @@ export class LocalThreadRepository {
     this.failures.delete(id);
     this.persisted.delete(id);
     this.rebase.delete(id);
+    this.removing.delete(id);
     this.changed('persistence');
   }
 
@@ -327,7 +315,7 @@ export class LocalThreadRepository {
     const write = this.writes.then(async () => {
       this.queued.delete(id);
       const thread = this.threads.get(id);
-      if (thread) {
+      if (thread && !this.removing.has(id)) {
         await this.persist(id, thread);
       }
     });

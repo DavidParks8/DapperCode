@@ -19,7 +19,10 @@ const TRANSPORT_SLICES: readonly OnDeviceRuntimeSlice[] = [
 
 function availableModels(runtime: OnDeviceRuntime) {
   return LOCAL_MODEL_CATALOG.filter(
-    (model) => !model.runtimeIssue && runtime.downloads.snapshot(model.id).phase === 'ready',
+    (model) =>
+      !model.runtimeIssue &&
+      !runtime.isRemovingModel(model.id) &&
+      runtime.downloads.snapshot(model.id).phase === 'ready',
   );
 }
 
