@@ -126,7 +126,6 @@ export class LocalPreferencesStore {
   private dirty = false;
   private failureValue: Error | null = null;
   private writes: Promise<void> = Promise.resolve();
-  private modelChoices: Promise<void> = Promise.resolve();
   /** Inline drafts from older builds, kept in the document until each one is confirmed. */
   private legacyDrafts: Record<string, string> = {};
 
@@ -194,27 +193,16 @@ export class LocalPreferencesStore {
     this.changed('value');
   }
 
+  /** Unrelated saves must never publish an unconfirmed model choice. */
   chooseModel(modelId: string): Promise<void> {
-    const choice = this.modelChoices.then(async () => {
-      const previousModelId = this.value.modelId;
-      this.update({ modelId });
-      try {
-        await this.save();
-      } catch (error) {
-        if (this.value.modelId === modelId) {
-          this.update({ modelId: previousModelId });
-        }
-        throw error;
-      }
-    });
-    this.modelChoices = choice.then(
-      () => undefined,
-      () => undefined,
-    );
-    return choice;
+    return this.persist(modelId);
   }
 
   save(): Promise<void> {
+    return this.persist();
+  }
+
+  private persist(modelId?: string): Promise<void> {
     if (!this.loaded) {
       return Promise.reject(
         new Error(
@@ -222,35 +210,39 @@ export class LocalPreferencesStore {
         ),
       );
     }
-    const contents = serializeLocalPreferences(this.value, this.legacyDrafts);
-    const write = this.writes.then(() =>
-      this.storage.writeRuntimeDocument(PREFERENCES_DOCUMENT, contents),
-    );
-    this.writes = write.then(
-      () => undefined,
-      () => undefined,
-    );
-    return write.then(
-      () => {
-        if (contents === serializeLocalPreferences(this.value, this.legacyDrafts)) {
-          this.dirty = false;
-        }
-        if (this.failureValue) {
-          this.failureValue = null;
-          this.changed('persistence');
-        }
-      },
-      (error: unknown) => {
+    const write = this.writes.then(async () => {
+      const candidate = modelId === undefined ? this.value : { ...this.value, modelId };
+      const contents = serializeLocalPreferences(candidate, this.legacyDrafts);
+      try {
+        await this.storage.writeRuntimeDocument(PREFERENCES_DOCUMENT, contents);
+      } catch (error) {
+        this.dirty = true;
         this.failureValue =
           error instanceof Error ? error : new Error('Local settings could not be saved.');
         this.changed('persistence');
         throw error;
-      },
+      }
+      if (modelId !== undefined) {
+        this.update({ modelId });
+      }
+      this.dirty = contents !== serializeLocalPreferences(this.value, this.legacyDrafts);
+      if (!this.dirty && this.failureValue) {
+        this.failureValue = null;
+        this.changed('persistence');
+      }
+    });
+    this.writes = write.then(
+      () => undefined,
+      () => undefined,
     );
+    return write;
   }
 
   /** Writes only unsaved or previously failed changes; never overwrites settings left in place. */
-  flush(): Promise<void> {
-    return this.loaded && (this.dirty || this.failureValue) ? this.save() : Promise.resolve();
+  async flush(): Promise<void> {
+    await this.writes;
+    if (this.loaded && (this.dirty || this.failureValue)) {
+      await this.save();
+    }
   }
 }

@@ -68,6 +68,14 @@ interface HeldStep {
 export class FakeLlama {
   /** Every load request, in order. */
   readonly loads: { modelId: string; contextTokens: number }[] = [];
+  readonly executions: string[] = [];
+  readonly tokenCallbacks: Array<(text: string) => void> = [];
+  readonly resourceEvents: {
+    type: 'initializing' | 'ready' | 'releasing' | 'released';
+    modelId: string;
+  }[] = [];
+  private readonly owners = new Set<object>();
+  ownershipHighWater = 0;
   /** Token counts of every prompt passed to completion, in order. */
   readonly promptTokens: number[] = [];
   /** `n_predict` of every completion, in order. */
@@ -80,6 +88,8 @@ export class FakeLlama {
   holdCompletions = false;
   /** Keeps `stopCompletion` pending until `finishStop`, so the stopping phase is observable. */
   holdStops = false;
+  holdReleases = false;
+  private releaseStep: HeldStep | null = null;
   /** Completions interrupted by `stopCompletion`. */
   stops = 0;
   private stopStep: (() => void) | null = null;
@@ -138,24 +148,50 @@ export class FakeLlama {
     step?.();
   }
 
+  get releasePending(): boolean {
+    return this.releaseStep !== null;
+  }
+
+  finishRelease(): void {
+    const step = this.releaseStep;
+    this.releaseStep = null;
+    step?.resolve();
+  }
+
+  failRelease(message: string): void {
+    const step = this.releaseStep;
+    this.releaseStep = null;
+    step?.reject(new Error(message));
+  }
+
   readonly loader: LocalContextLoader = async (model, _file, options, progress) => {
+    const owner = {};
+    this.owners.add(owner);
+    this.ownershipHighWater = Math.max(this.ownershipHighWater, this.owners.size);
+    this.resourceEvents.push({ type: 'initializing', modelId: model.id });
     this.loads.push({ modelId: model.id, contextTokens: options.contextTokens });
-    progress(0);
-    if (this.holdLoads) {
-      await new Promise<void>((resolve, reject) => {
-        this.loadStep = { resolve, reject, progress };
+    try {
+      progress(0);
+      if (this.holdLoads) {
+        await new Promise<void>((resolve, reject) => {
+          this.loadStep = { resolve, reject, progress };
+        });
+      }
+      progress(100);
+      const context = this.context(model.id, owner);
+      this.resident.set(context, {
+        modelId: model.id,
+        bytes: residentModelBytes({ model, contextTokens: options.contextTokens }),
       });
+      this.resourceEvents.push({ type: 'ready', modelId: model.id });
+      return context;
+    } catch (error) {
+      this.owners.delete(owner);
+      throw error;
     }
-    progress(100);
-    const context = this.context();
-    this.resident.set(context, {
-      modelId: model.id,
-      bytes: residentModelBytes({ model, contextTokens: options.contextTokens }),
-    });
-    return context;
   };
 
-  private context(): LocalModelContext {
+  private context(modelId: string, owner: object): LocalModelContext {
     let interrupted = false;
     const context: LocalModelContext = {
       getFormattedChat: async (messages): Promise<FormattedChatResult> => ({
@@ -167,12 +203,14 @@ export class FakeLlama {
         tokens: new Array<number>(Math.ceil(text.length / this.charactersPerToken)).fill(1),
       }),
       completion: async (params: CompletionParams, callback?: (value: TokenData) => void) => {
+        this.executions.push(modelId);
         interrupted = false;
         this.promptTokens.push(Math.ceil((params.prompt ?? '').length / this.charactersPerToken));
         this.predictBudgets.push(params.n_predict ?? -1);
         const script = this.replies.shift() ?? { content: 'Done.' };
         const emit = (text: string) =>
           callback?.({ token: text, content: text, accumulated_text: text });
+        this.tokenCallbacks.push(emit);
         if (this.holdCompletions) {
           await new Promise<void>((resolve, reject) => {
             this.completionStep = { resolve, reject, stream: emit };
@@ -197,8 +235,16 @@ export class FakeLlama {
         this.finishCompletion();
       },
       release: async () => {
+        this.resourceEvents.push({ type: 'releasing', modelId });
+        if (this.holdReleases) {
+          await new Promise<void>((resolve, reject) => {
+            this.releaseStep = { resolve, reject };
+          });
+        }
         this.releases += 1;
         this.resident.delete(context);
+        this.owners.delete(owner);
+        this.resourceEvents.push({ type: 'released', modelId });
       },
       isJinjaSupported: () => true,
     };

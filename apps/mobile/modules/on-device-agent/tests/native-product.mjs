@@ -54,6 +54,9 @@ export default async function scenario(
   let publicOrigin;
   let publicRepository;
   let publicGit;
+  let searchOrigin;
+  const certificate = path.join(e2e.dataDir, 'public-certificate.pem');
+  const privateKey = path.join(e2e.dataDir, 'public-private-key.pem');
   let physicalToolTaps = 0;
   const gitEnvironment = {
     HOME: e2e.dataDir,
@@ -412,7 +415,15 @@ export default async function scenario(
         entryFile: path.join(sources, 'product-entry.tsx'),
         bundleId,
         name: 'OfflineProduct',
+        metroConfig: path.join(sources, 'product.metro.config.mjs'),
       });
+      await e2e.check(
+        'the isolated product bundle includes its owned network transport',
+        async () =>
+          (await fs.readFile(path.join(app, 'main.jsbundle'), 'utf8')).includes(
+            'X-DapperCode-Fixture-Target',
+          ),
+      );
       const executable = await e2e.run('which', ['appium']);
       await e2e.acquireLease('dappercode-native-product-wda-8100-mjpeg-9100', {
         timeoutMs: 180_000,
@@ -449,8 +460,6 @@ export default async function scenario(
         'public seed',
       ]);
       await git(['-C', seedRepository, 'push', publicRepository, 'main']);
-      const certificate = path.join(e2e.dataDir, 'public-certificate.pem');
-      const privateKey = path.join(e2e.dataDir, 'public-private-key.pem');
       await e2e.run(
         '/usr/bin/openssl',
         [
@@ -505,6 +514,28 @@ export default async function scenario(
         certificate,
         `${publicOrigin}/info/refs?service=git-upload-pack`,
       ]);
+      await e2e.start(
+        'node',
+        [path.join(sources, 'search-mcp-server.mjs'), certificate, privateKey],
+        { label: 'search-fixture' },
+      );
+      const searchPort = await e2e.waitForLog('search-fixture', /SEARCH_FIXTURE_PORT=(\d+)/);
+      searchOrigin = `https://127.0.0.1:${searchPort[1]}`;
+      const searchState = await e2e.run('curl', [
+        '--fail',
+        '--silent',
+        '--show-error',
+        '--max-time',
+        '10',
+        '--cacert',
+        certificate,
+        `${searchOrigin}/state`,
+      ]);
+      await e2e.expectEqual(
+        'the owned HTTPS search fixture starts without requests',
+        JSON.parse(searchState.stdout).requests,
+        [],
+      );
       const created = await e2e.run('xcrun', [
         'simctl',
         'create',
@@ -526,6 +557,14 @@ export default async function scenario(
         'data',
       ]);
       container = data.stdout.trim();
+      const transportConfig = e2e.writeFile(
+        'data/product-transport.json',
+        JSON.stringify({ searchOrigin, modelDownloads: {} }),
+      );
+      await e2e.run('cp', [
+        transportConfig,
+        path.join(container, 'Documents/product-transport.json'),
+      ]);
       const modelIdentifier = e2e.writeFile('data/model-id.txt', model.id);
       await e2e.run('cp', [modelIdentifier, path.join(container, 'Documents/model-id.txt')]);
       await e2e.run('xcrun', ['simctl', 'launch', simulator, bundleId], { timeoutMs: 60_000 });
@@ -1445,6 +1484,21 @@ export default async function scenario(
           { timeoutMs: 30_000 },
         );
       }
+      const deniedSearch = await e2e.run('curl', [
+        '--fail',
+        '--silent',
+        '--show-error',
+        '--max-time',
+        '10',
+        '--cacert',
+        certificate,
+        `${searchOrigin}/state`,
+      ]);
+      await e2e.expectEqual(
+        'denied web searches never reach the owned network transport',
+        JSON.parse(deniedSearch.stdout).requests.length,
+        0,
+      );
       for (const [tool, request] of [
         ['web_fetch', 'Use web_fetch to read https://example.com/ and tell me its title.'],
         [
@@ -1485,6 +1539,37 @@ export default async function scenario(
           }
           return /example\.com|iana\.org/iu.test(result.content);
         });
+        if (tool === 'web_search') {
+          const recorded = await e2e.run('curl', [
+            '--fail',
+            '--silent',
+            '--show-error',
+            '--max-time',
+            '10',
+            '--cacert',
+            certificate,
+            `${searchOrigin}/state`,
+          ]);
+          const requests = JSON.parse(recorded.stdout).requests;
+          await e2e.expectEqual(
+            'one approved search executes one actual HTTPS MCP request',
+            requests.length,
+            1,
+          );
+          const result = thread.messages
+            .slice(previousMessages)
+            .find((entry) => entry.tool?.name === tool && entry.tool.status === 'completed');
+          await e2e.expectEqual(
+            'the production search parser consumes its exact network query',
+            JSON.parse(result.content).query,
+            requests[0].query,
+          );
+          await e2e.expectEqual(
+            'the fixture preserves the production public provider destination',
+            requests[0].target,
+            'https://mcp.exa.ai/mcp',
+          );
+        }
       }
       await capture('on-device-network-tools');
     });

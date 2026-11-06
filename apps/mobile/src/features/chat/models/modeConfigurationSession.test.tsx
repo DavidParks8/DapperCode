@@ -67,9 +67,11 @@ function deferred<T>() {
 }
 
 type TestContextOverrides = Omit<Partial<MainScreenModeConfigurationSessionContext>, 'api'> & {
-  api?: Pick<
-    MainScreenModeConfigurationSessionContext['api'],
-    'listModelOptions' | 'peekModelOptions' | 'rememberChat' | 'setThreadConfigOption'
+  api?: Partial<
+    Pick<
+      MainScreenModeConfigurationSessionContext['api'],
+      'listModelOptions' | 'peekModelOptions' | 'rememberChat' | 'setThreadConfigOption' | 'getChat'
+    >
   >;
 };
 
@@ -82,12 +84,6 @@ function createContext(
     activeModelId: null,
     effectiveModelId: null,
     activeServiceTier: null,
-    api: {
-      listModelOptions,
-      peekModelOptions: jest.fn().mockReturnValue(null),
-      rememberChat: jest.fn(),
-      setThreadConfigOption: jest.fn(),
-    },
     chatModelPreferencesRef: { current: {} },
     effortConfig: null,
     modelOptionsRequestRef: { current: 0 },
@@ -97,6 +93,14 @@ function createContext(
     selectedChatRef: { current: null },
     setSelectedChat: jest.fn(),
     ...overrides,
+    api: {
+      listModelOptions,
+      peekModelOptions: jest.fn().mockReturnValue(null),
+      rememberChat: jest.fn(),
+      setThreadConfigOption: jest.fn(),
+      getChat: jest.fn().mockResolvedValue(configuredChat),
+      ...overrides.api,
+    },
   } as unknown as MainScreenModeConfigurationSessionContext;
 }
 
@@ -408,6 +412,7 @@ describe('useMainScreenModeConfigurationSession config outbox', () => {
         listModelOptions: jest.fn(),
         peekModelOptions: jest.fn().mockReturnValue(null),
         rememberChat: jest.fn(),
+        getChat: jest.fn().mockResolvedValue(configuredChat),
         setThreadConfigOption: jest.fn().mockReturnValue(request.promise),
       },
     });

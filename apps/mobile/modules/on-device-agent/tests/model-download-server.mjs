@@ -3,6 +3,11 @@ import https from 'node:https';
 
 const [dataFile, certificate, key] = process.argv.slice(2);
 const data = fs.readFileSync(dataFile);
+let chunkBytes = 16 * 1024;
+process.on('SIGUSR2', () => {
+  chunkBytes = 1024 * 1024;
+  console.log('MODEL_FAST_TRANSFER_ENABLED');
+});
 const server = https.createServer(
   {
     cert: fs.readFileSync(certificate),
@@ -42,9 +47,16 @@ const server = https.createServer(
       response.end();
       return;
     }
+    let blocked = false;
+    response.on('drain', () => {
+      blocked = false;
+    });
     const timer = setInterval(() => {
-      const next = Math.min(data.length, offset + 16 * 1024);
-      response.write(data.subarray(offset, next));
+      if (blocked) {
+        return;
+      }
+      const next = Math.min(data.length, offset + chunkBytes);
+      blocked = !response.write(data.subarray(offset, next));
       offset = next;
       if (offset === data.length) {
         clearInterval(timer);

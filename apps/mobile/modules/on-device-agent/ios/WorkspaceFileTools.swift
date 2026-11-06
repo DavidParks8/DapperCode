@@ -65,10 +65,11 @@ extension WorkspaceStore {
     guard (1...1000).contains(limit) else {
       throw WorkspaceError(.invalidArgument, "Directory limits must be between 1 and 1000.")
     }
-    let directory = try resolve(id, path: path, allowRoot: true)
-    guard try kind(directory) == .directory else {
+    let requested = try resolve(id, path: path, allowRoot: true)
+    guard try kind(requested) == .directory else {
       throw WorkspaceError(.pathNotDirectory, "Choose a directory to list.")
     }
+    let directory = try Self.enumerationDirectory(requested)
     var enumerationError: Error?
     guard
       let enumerator = fileManager.enumerator(
@@ -240,7 +241,7 @@ extension WorkspaceStore {
     else {
       throw WorkspaceError(.invalidArgument, "Search text must be a single line of 1-1024 UTF-8 bytes.")
     }
-    let root = try resolve(id, path: "", allowRoot: true)
+    let root = try Self.enumerationDirectory(resolve(id, path: "", allowRoot: true))
     var matches: [NativeSearchMatch] = []
     var skipped = 0
     var scanned = 0

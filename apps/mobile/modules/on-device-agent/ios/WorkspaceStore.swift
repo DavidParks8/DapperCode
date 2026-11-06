@@ -24,8 +24,13 @@ enum WorkspacePathKind: String, Sendable {
 actor WorkspaceStore {
   let fileManager = FileManager.default
   static let maximumFileBytes = 4 * 1024 * 1024
+  private let rootDirectory: URL?
   private let session = UUID().uuidString.prefix(8)
   private var changes: [String: Int] = [:]
+
+  init(rootDirectory: URL? = nil) {
+    self.rootDirectory = rootDirectory
+  }
 
   func listWorkspaces() throws -> [NativeWorkspaceSummary] {
     let root = try storageRoot()
@@ -196,13 +201,26 @@ actor WorkspaceStore {
     return info
   }
 
+  static func enumerationDirectory(_ directory: URL) throws -> URL {
+    // Foundation can shorten /private/var to /var while enumeration returns physical paths.
+    guard let physical = realpath(directory.path, nil) else {
+      let code = errno
+      throw WorkspaceError(
+        .storageFailure, "Could not resolve the workspace directory (POSIX error \(code)).")
+    }
+    defer { free(physical) }
+    return URL(
+      fileURLWithFileSystemRepresentation: physical, isDirectory: true, relativeTo: nil)
+  }
+
   private func storageRoot() throws -> URL {
     guard
       let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
     else {
       throw WorkspaceError(.storageFailure, "The application support directory is unavailable.")
     }
-    let root = support.appendingPathComponent("OnDeviceAgent/workspaces", isDirectory: true)
+    let root =
+      rootDirectory ?? support.appendingPathComponent("OnDeviceAgent/workspaces", isDirectory: true)
     try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
     return root
   }

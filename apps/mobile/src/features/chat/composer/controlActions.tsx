@@ -64,6 +64,7 @@ export function useMainScreenComposerControlActions(
   const setSelectedCollaborationMode = useSetAtom(selectedCollaborationModeAtom);
   const setSelectedAcpModeId = useSetAtom(selectedAcpModeIdAtom);
   const setActivity = useSetAtom(activityAtom);
+  const modelModalVisible = useAtomValue(modelModalVisibleAtom);
   const setModelModalVisible = useSetAtom(modelModalVisibleAtom);
   const setAgentModalVisible = useSetAtom(agentModalVisibleAtom);
   const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);
@@ -83,13 +84,17 @@ export function useMainScreenComposerControlActions(
             modelConfig,
             normalizedModelId,
             selectedChatId
-              ? () =>
+              ? () => {
                   rememberChatModelPreference(
                     selectedChatId,
                     normalizedModelId,
                     null,
                     activeServiceTier,
-                  )
+                  );
+                  if (modelLibrary) {
+                    void refreshModelOptions({ silent: true });
+                  }
+                }
               : undefined,
           )
         ) {
@@ -211,6 +216,18 @@ export function useMainScreenComposerControlActions(
       }
     }, [modelLibrary, refreshModelOptions, ws]),
   );
+
+  useEffect(() => {
+    if (!modelLibrary || !modelModalVisible) {
+      return;
+    }
+    const timer = setInterval(() => {
+      if (ws.isConnected) {
+        void refreshModelOptions({ silent: true });
+      }
+    }, 1_000);
+    return () => clearInterval(timer);
+  }, [modelLibrary, modelModalVisible, refreshModelOptions, ws]);
 
   useEffect(() => {
     if (!modelLibrary && ws.isConnected) {

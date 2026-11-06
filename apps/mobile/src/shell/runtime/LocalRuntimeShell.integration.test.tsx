@@ -64,9 +64,11 @@ import {
   activeProfileIsLocalAtom,
   apiClientAtom,
   localProfileAvailableAtom,
+  wsClientAtom,
 } from '@shell/state/bridge/atoms';
 import { localRuntimeAtom } from '@shell/state/local/atoms';
 import { activeChatAtom } from '@shell/state/chat/atoms';
+import { TURN_RETRY_METHOD } from '../../features/chat/turn/turnRetry';
 import {
   approvalModeAtom,
   defaultStartCwdAtom,
@@ -80,10 +82,18 @@ import {
 import { LOCAL_PROFILE_ID } from '@shell/state/localProfile';
 import { createTestStore, withAppStore } from '@shell/state/testing';
 import { LocalRuntimeHost } from './LocalRuntimeHost';
-import { startNewChatAtom } from '@shell/navigation/actions';
+import { selectChatAtom, startNewChatAtom } from '@shell/navigation/actions';
 import { toRecord } from '@shared/runtimeValidation';
+import { SelectionSheet, type SelectionSheetOption } from '@shared/ui/SelectionSheet';
+import { emptyLocalPreferences } from '../../features/on-device/runtime/preferences';
+import { localModelDefinition } from '../../features/on-device/models/catalog';
+import { modelMemoryBytes } from '../../features/on-device/models/memory';
+import { fileSystemMock } from '@shared/testing/expoFileSystemMock';
+import { WORKSPACE_HOST_METHODS } from '../../features/workspace/api/protocol';
 
 const QWEN = 'qwen3-1.7b-q4-k-m';
+const TRANSITION_A = 'bonsai-2-2b-q2-0';
+const TRANSITION_B = 'qwen35-0.8b-q4-0';
 
 type Node = ReactTestInstance & {
   props: Record<string, unknown>;
@@ -211,6 +221,18 @@ function composerText(root: Node): unknown {
     .find((node) => node.props['accessibilityLabel'] === 'Message')?.props['value'];
 }
 
+function modelPickerOption(root: Node, modelId: string): SelectionSheetOption {
+  for (const sheet of root.findAllByType(SelectionSheet)) {
+    const option = (sheet.props['options'] as SelectionSheetOption[]).find(
+      (entry) => entry.key === modelId,
+    );
+    if (option) {
+      return option;
+    }
+  }
+  throw new Error(`Missing model picker option: ${modelId}`);
+}
+
 /** The profile's screens mount once its clients exist, as the profile route boundary does. */
 function ProfileScreens() {
   const api = useAtomValue(apiClientAtom);
@@ -301,6 +323,32 @@ async function renderShell(options: FakeNativeOptions = {}) {
   return { tree: tree!, root: tree!.root as Node, store, runtime };
 }
 
+async function renderTransitionChat(options: FakeNativeOptions = {}) {
+  const shell = await renderShell({
+    downloaded: [TRANSITION_A, TRANSITION_B],
+    files: { 'ws-one:seed.txt': 'alpha\n' },
+    documents: {
+      'preferences.json': JSON.stringify({
+        ...emptyLocalPreferences(),
+        modelId: TRANSITION_A,
+        workspaceId: 'ws-one',
+        author: { name: 'Transition fixture', email: 'transition@example.invalid' },
+      }),
+    },
+    ...options,
+  });
+  mockLlama.reply(
+    { toolCalls: [{ name: 'read_file', arguments: { path: 'seed.txt' } }] },
+    { content: 'Read alpha.' },
+  );
+  await submit(shell.root, 'Read seed.txt.');
+  const [thread] = shell.runtime.threads.list();
+  if (!thread) {
+    throw new Error('Expected the original A conversation.');
+  }
+  return { ...shell, thread, history: structuredClone(thread.messages) };
+}
+
 describe('On this iPhone through the real runtime, transport, and shell', () => {
   beforeEach(() => {
     jest.useFakeTimers();
@@ -318,11 +366,1060 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     mockLlama.holdLoads = false;
     mockLlama.holdCompletions = false;
     mockLlama.holdStops = false;
+    mockLlama.holdReleases = false;
+    await drive(() => mockLlama.finishRelease());
     await drive(() => mockLlama.finishLoad());
     await drive(() => mockLlama.finishStop());
     await drive(() => mockLlama.finishCompletion());
     jest.restoreAllMocks();
     jest.useRealTimers();
+  });
+
+  it.each([false, true])(
+    'switches an existing chat to a newly downloaded model on Send, without explicit Load (held ack %s)',
+    async (heldAck) => {
+      const { tree, root, runtime, store } = await renderShell({
+        downloaded: [TRANSITION_A],
+        files: { 'ws-one:seed.txt': 'alpha\n' },
+        documents: {
+          'preferences.json': JSON.stringify({
+            ...emptyLocalPreferences(),
+            modelId: TRANSITION_A,
+            workspaceId: 'ws-one',
+          }),
+        },
+      });
+      mockLlama.reply(
+        { toolCalls: [{ name: 'read_file', arguments: { path: 'seed.txt' } }] },
+        { content: 'Read alpha.' },
+      );
+      await submit(root, 'Read seed.txt.');
+      const [existing] = runtime.threads.list();
+      if (!existing) {
+        throw new Error('Expected the existing A conversation.');
+      }
+      const history = structuredClone(existing.messages);
+      expect(existing.modelId).toBe(TRANSITION_A);
+      expect(runtime.models.snapshot()).toMatchObject({ modelId: TRANSITION_A, phase: 'ready' });
+      await act(async () => {
+        await runtime.downloadModel(TRANSITION_B);
+        mockNative.completeDownload(TRANSITION_B);
+        await flush();
+      });
+      await settle(2_000);
+      expect(runtime.downloads.snapshot(TRANSITION_B).phase).toBe('ready');
+      const api = store.get(apiClientAtom);
+      if (!api) {
+        throw new Error('Expected the existing local client.');
+      }
+      let acknowledge: (() => void) | undefined;
+      if (heldAck) {
+        const original = api.setThreadConfigOption.bind(api);
+        const gate = new Promise<void>((resolve) => {
+          acknowledge = resolve;
+        });
+        jest.spyOn(api, 'setThreadConfigOption').mockImplementationOnce(async (...args) => {
+          const updated = await original(...args);
+          await gate;
+          return updated;
+        });
+      }
+      await press(root, 'Model, Bonsai 2 2B Q2_0');
+      await act(async () => {
+        modelPickerOption(root, TRANSITION_B).onPress();
+        await flush();
+      });
+      await settle();
+      expect(runtime.threads.get(existing.id).modelId).toBe(TRANSITION_B);
+      expect(runtime.preferences().modelId).toBe(TRANSITION_B);
+      expect(runtime.models.snapshot()).toMatchObject({ modelId: TRANSITION_A, phase: 'ready' });
+      expect(mockLlama.loads.map(({ modelId }) => modelId)).toEqual([TRANSITION_A]);
+      mockLlama.holdLoads = true;
+      mockLlama.holdCompletions = true;
+      mockLlama.reply({ content: 'New-model reply.' });
+      await submit(root, 'Continue this same conversation.');
+      if (heldAck) {
+        expect(mockLlama.loads.map(({ modelId }) => modelId)).toEqual([TRANSITION_A]);
+        expect(composerText(root)).toBe('Continue this same conversation.');
+        expect(hasText(root, 'Wait for the model selection to finish saving')).toBe(true);
+        await drive(() => acknowledge?.());
+        await press(root, 'Send message');
+      }
+      expect(mockLlama.loads.at(-1)?.modelId).toBe(TRANSITION_B);
+      expect(runtime.threads.get(existing.id).messages).toEqual(history);
+      expect(composerText(root)).toBe('');
+      expect(labeled(root, 'Stop agent')).toBeDefined();
+      await drive(() => mockLlama.finishLoad());
+      expect(mockLlama.executions.at(-1)).toBe(TRANSITION_B);
+      expect(composerText(root)).toBe('');
+      await drive(() => mockLlama.finishCompletion());
+      acknowledge?.();
+      await settle();
+      const completed = runtime.threads.get(existing.id);
+      expect(completed.status).toBe('complete');
+      expect(completed.messages.slice(0, history.length)).toEqual(history);
+      expect(runtime.threads.list()).toHaveLength(1);
+      expect(mockLlama.ownershipHighWater).toBe(1);
+      expect(mockLlama.resourceEvents).toEqual([
+        { type: 'initializing', modelId: TRANSITION_A },
+        { type: 'ready', modelId: TRANSITION_A },
+        { type: 'releasing', modelId: TRANSITION_A },
+        { type: 'released', modelId: TRANSITION_A },
+        { type: 'initializing', modelId: TRANSITION_B },
+        { type: 'ready', modelId: TRANSITION_B },
+      ]);
+      expect(labeled(root, 'Model, Qwen3.5 0.8B Q4_0')).toBeDefined();
+      expect(labeled(root, 'Stop agent')).toBeUndefined();
+      expect(labeled(root, 'Retry turn')).toBeUndefined();
+      expect(store.get(activeChatAtom)?.id).toBe(existing.id);
+      act(() => tree.unmount());
+    },
+  );
+
+  it('refreshes an already open model picker when a background download becomes verified', async () => {
+    const { tree, root, runtime, thread, store } = await renderTransitionChat({
+      downloaded: [TRANSITION_A],
+    });
+    const api = store.get(apiClientAtom);
+    if (!api) {
+      throw new Error('Expected the mounted model catalog client.');
+    }
+    const catalogReads = jest.spyOn(api, 'listModelOptions');
+    await act(async () => {
+      await runtime.downloadModel(TRANSITION_B);
+      await flush();
+    });
+    await press(root, 'Model, Bonsai 2 2B Q2_0');
+    expect(() => modelPickerOption(root, TRANSITION_B)).toThrow('Missing model picker option');
+    await act(async () => {
+      await runtime.downloads.pause(TRANSITION_B);
+    });
+    expect(runtime.downloads.snapshot(TRANSITION_B).phase).toBe('paused');
+    expect(() => modelPickerOption(root, TRANSITION_B)).toThrow('Missing model picker option');
+    await act(async () => {
+      await runtime.downloadModel(TRANSITION_B);
+    });
+    let finishVerification: (() => void) | undefined;
+    const verification = new Promise<void>((resolve) => {
+      finishVerification = resolve;
+    });
+    const finalize = runtime.native.finalizeModelDownload.bind(runtime.native);
+    jest.spyOn(runtime.native, 'finalizeModelDownload').mockImplementationOnce(async (...args) => {
+      await verification;
+      return finalize(...args);
+    });
+    await drive(() => mockNative.completeDownload(TRANSITION_B));
+    await settle(2_000);
+    expect(runtime.downloads.snapshot(TRANSITION_B).phase).toBe('verifying');
+    expect(() => modelPickerOption(root, TRANSITION_B)).toThrow('Missing model picker option');
+    await drive(() => finishVerification?.());
+    await settle(1_000);
+    expect(runtime.downloads.snapshot(TRANSITION_B).phase).toBe('ready');
+    expect(modelPickerOption(root, TRANSITION_B)).toBeDefined();
+    expect(runtime.threads.get(thread.id).modelId).toBe(TRANSITION_A);
+    expect(runtime.preferences().modelId).toBe(TRANSITION_A);
+    expect(mockLlama.loads).toHaveLength(1);
+    await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+    await submit(root, 'Use the newly verified background download.');
+    expect(mockLlama.executions.at(-1)).toBe(TRANSITION_B);
+    expect(runtime.threads.get(thread.id).status).toBe('complete');
+    const readsAfterClosing = catalogReads.mock.calls.length;
+    await settle(3_000);
+    expect(catalogReads).toHaveBeenCalledTimes(readsAfterClosing);
+    act(() => tree.unmount());
+  });
+
+  it('immediately carries an existing-chat model choice into New chat while keeping per-chat choices independent', async () => {
+    const { tree, root, runtime, thread, history, store } = await renderTransitionChat();
+    await press(root, 'Model, Bonsai 2 2B Q2_0');
+    await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+    expect(runtime.preferences().modelId).toBe(TRANSITION_B);
+    act(() => store.set(startNewChatAtom));
+    await settle();
+    expect(labeled(root, 'Model, Qwen3.5 0.8B Q4_0')).toBeDefined();
+    expect(runtime.models.snapshot()).toMatchObject({ modelId: TRANSITION_A, phase: 'ready' });
+    await press(root, 'Model, Qwen3.5 0.8B Q4_0');
+    await drive(() => modelPickerOption(root, TRANSITION_A).onPress());
+    expect(runtime.preferences().modelId).toBe(TRANSITION_A);
+    expect(runtime.threads.get(thread.id).modelId).toBe(TRANSITION_B);
+    await submit(root, 'Create an A sibling without changing T.');
+    const sibling = runtime.threads.list().find((entry) => entry.id !== thread.id);
+    expect(sibling?.modelId).toBe(TRANSITION_A);
+    act(() => store.set(selectChatAtom, thread.id));
+    await settle();
+    expect(labeled(root, 'Model, Qwen3.5 0.8B Q4_0')).toBeDefined();
+    await submit(root, 'Continue T on B without changing the new-chat A default.');
+    expect(mockLlama.executions.at(-1)).toBe(TRANSITION_B);
+    expect(runtime.threads.get(thread.id).messages.slice(0, history.length)).toEqual(history);
+    expect(runtime.preferences().modelId).toBe(TRANSITION_A);
+    expect(runtime.threads.list().find((entry) => entry.id === sibling?.id)?.modelId).toBe(
+      TRANSITION_A,
+    );
+    expect(mockLlama.ownershipHighWater).toBe(1);
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    act(() => tree.unmount());
+  });
+
+  it('preserves the latest queued choice when Send races an older configuration acknowledgment', async () => {
+    const { tree, root, runtime, store, thread } = await renderTransitionChat();
+    const api = store.get(apiClientAtom);
+    if (!api) {
+      throw new Error('Expected the local configuration client.');
+    }
+    const original = api.setThreadConfigOption.bind(api);
+    let acknowledge: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      acknowledge = resolve;
+    });
+    const save = jest
+      .spyOn(api, 'setThreadConfigOption')
+      .mockImplementationOnce(async (...args) => {
+        const updated = await original(...args);
+        await gate;
+        return updated;
+      });
+    try {
+      await press(root, 'Model, Bonsai 2 2B Q2_0');
+      await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+      await press(root, 'Model, Qwen3.5 0.8B Q4_0');
+      await drive(() => modelPickerOption(root, TRANSITION_A).onPress());
+      expect(runtime.threads.get(thread.id).modelId).toBe(TRANSITION_B);
+      expect(save).toHaveBeenCalledTimes(1);
+      mockLlama.holdCompletions = true;
+      const executions = mockLlama.executions.length;
+      await submit(root, 'The latest accepted A selection should execute.');
+      await drive(() => acknowledge?.());
+      if (mockLlama.executions.length === executions) {
+        expect(composerText(root)).toBe('The latest accepted A selection should execute.');
+        expect(hasText(root, 'Wait for the model selection to finish saving')).toBe(true);
+        await press(root, 'Send message');
+      }
+      await drive(() => mockLlama.finishCompletion());
+      expect(runtime.threads.get(thread.id).modelId).toBe(TRANSITION_A);
+      expect(runtime.preferences().modelId).toBe(TRANSITION_A);
+      expect(save).toHaveBeenCalledTimes(2);
+      expect(mockLlama.loads).toHaveLength(1);
+      expect(mockLlama.executions.at(-1)).toBe(TRANSITION_A);
+      expect(labeled(root, 'Model, Bonsai 2 2B Q2_0')).toBeDefined();
+      expect(runtime.threads.get(thread.id).status).toBe('complete');
+    } finally {
+      acknowledge?.();
+      act(() => tree.unmount());
+    }
+  });
+
+  it('reconciles the actual saved choice when its configuration acknowledgment fails after commit', async () => {
+    const { tree, root, runtime, thread, history } = await renderTransitionChat();
+    const choose = runtime.chooseModel.bind(runtime);
+    jest.spyOn(runtime, 'chooseModel').mockImplementationOnce(async (...args) => {
+      await choose(...args);
+      throw new Error('Model acknowledgment failed after saving.');
+    });
+    await press(root, 'Model, Bonsai 2 2B Q2_0');
+    await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+    expect(runtime.threads.get(thread.id).modelId).toBe(TRANSITION_B);
+    expect(runtime.preferences().modelId).toBe(TRANSITION_B);
+    expect(labeled(root, 'Model, Qwen3.5 0.8B Q4_0')).toBeDefined();
+    expect(runtime.threads.get(thread.id).messages).toEqual(history);
+    expect(hasText(root, 'Model acknowledgment failed after saving.')).toBe(true);
+    await submit(root, 'Use the actually saved B choice.');
+    expect(mockLlama.executions.at(-1)).toBe(TRANSITION_B);
+    expect(runtime.threads.get(thread.id).status).toBe('complete');
+    expect(runtime.threads.get(thread.id).modelId).toBe(TRANSITION_B);
+    expect(runtime.preferences().modelId).toBe(TRANSITION_B);
+    act(() => tree.unmount());
+  });
+
+  it('keeps an uncertain choice blocked when read-back fails until the user explicitly selects again', async () => {
+    const { tree, root, runtime, thread, history, store } = await renderTransitionChat();
+    const api = store.get(apiClientAtom);
+    if (!api) {
+      throw new Error('Expected the local configuration client.');
+    }
+    const choose = runtime.chooseModel.bind(runtime);
+    const choices = jest.spyOn(runtime, 'chooseModel').mockImplementationOnce(async (...args) => {
+      await choose(...args);
+      throw new Error('Selection response uncertain.');
+    });
+    jest.spyOn(api, 'getChat').mockRejectedValueOnce(new Error('Read-back unavailable.'));
+    await press(root, 'Model, Bonsai 2 2B Q2_0');
+    await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+    expect(hasText(root, 'Could not confirm the saved configuration: Read-back unavailable.')).toBe(
+      true,
+    );
+    const executions = mockLlama.executions.length;
+    await submit(root, 'Preserve this unconfirmed-choice request.');
+    expect(mockLlama.executions).toHaveLength(executions);
+    expect(runtime.threads.get(thread.id).messages).toEqual(history);
+    expect(composerText(root)).toBe('Preserve this unconfirmed-choice request.');
+    expect(hasText(root, 'Select the option again before sending.')).toBe(true);
+    expect(choices).toHaveBeenCalledTimes(1);
+    await press(root, 'Model, Qwen3.5 0.8B Q4_0');
+    await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+    expect(choices).toHaveBeenCalledTimes(2);
+    await press(root, 'Send message');
+    expect(mockLlama.executions.at(-1)).toBe(TRANSITION_B);
+    expect(runtime.threads.get(thread.id).status).toBe('complete');
+    expect(composerText(root)).toBe('');
+    act(() => tree.unmount());
+  });
+
+  it.each(['new-chat', 'existing-chat', 'lost-ack', 'successful-choice'])(
+    'keeps disk, UI and crash-restored defaults consistent when a workspace save overlaps %s selection',
+    async (variant) => {
+      const { tree, root, runtime, thread, store } = await renderTransitionChat({
+        workspaces: [
+          { id: 'ws-one', name: 'Demo', isRepository: true },
+          { id: 'ws-two', name: 'Scratch', isRepository: false },
+        ],
+      });
+      const existing = variant === 'existing-chat';
+      if (!existing) {
+        act(() => store.set(startNewChatAtom));
+        await settle();
+      }
+      const original = runtime.native.writeRuntimeDocument.bind(runtime.native);
+      let held = false;
+      let resolveWrite: (() => void) | undefined;
+      let rejectWrite: ((error: Error) => void) | undefined;
+      jest
+        .spyOn(runtime.native, 'writeRuntimeDocument')
+        .mockImplementation(async (name, contents) => {
+          if (name === 'preferences.json' && !held) {
+            held = true;
+            if (variant === 'lost-ack') {
+              await original(name, contents);
+            }
+            await new Promise<void>((resolve, reject) => {
+              resolveWrite = resolve;
+              rejectWrite = reject;
+            });
+            if (variant !== 'lost-ack') {
+              await original(name, contents);
+            }
+            return;
+          }
+          await original(name, contents);
+        });
+      let selectingWorkspace: Promise<boolean> | undefined;
+      let snapshot: Record<string, string>;
+      try {
+        await press(root, 'Model, Bonsai 2 2B Q2_0');
+        await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+        expect(held).toBe(true);
+        if (existing) {
+          act(() => store.set(startNewChatAtom));
+          await settle();
+        }
+        await act(async () => {
+          selectingWorkspace = store.set(selectManagedWorkspaceAtom, '/On this iPhone/Scratch');
+          await flush();
+        });
+        await settle();
+        if (variant === 'successful-choice') {
+          await drive(() => resolveWrite?.());
+        } else {
+          await drive(() => rejectWrite?.(new Error('Overlapping model choice failed.')));
+        }
+        expect(await selectingWorkspace).toBe(true);
+        await settle();
+        const expected = variant === 'successful-choice' ? TRANSITION_B : TRANSITION_A;
+        expect(runtime.preferences()).toMatchObject({ modelId: expected, workspaceId: 'ws-two' });
+        snapshot = Object.fromEntries(mockNative.documents);
+        expect(JSON.parse(snapshot['preferences.json']!)).toMatchObject({
+          modelId: expected,
+          workspaceId: 'ws-two',
+        });
+        expect(runtime.threads.get(thread.id).modelId).toBe(TRANSITION_A);
+        expect(
+          labeled(
+            root,
+            `Model, ${expected === TRANSITION_A ? 'Bonsai 2 2B Q2_0' : 'Qwen3.5 0.8B Q4_0'}`,
+          ),
+        ).toBeDefined();
+        expect(labeled(root, 'Retry saving')).toBeUndefined();
+        expect(drawerStatus(root)).not.toBe('1 issue needs attention');
+        expect(labeled(root, 'Stop agent')).toBeUndefined();
+      } finally {
+        rejectWrite?.(new Error('Fixture cleanup.'));
+        act(() => tree.unmount());
+      }
+      const restarted = await renderShell({
+        downloaded: [TRANSITION_A, TRANSITION_B],
+        workspaces: [
+          { id: 'ws-one', name: 'Demo', isRepository: true },
+          { id: 'ws-two', name: 'Scratch', isRepository: false },
+        ],
+        documents: snapshot!,
+      });
+      const expected = variant === 'successful-choice' ? TRANSITION_B : TRANSITION_A;
+      expect(restarted.runtime.preferences()).toMatchObject({
+        modelId: expected,
+        workspaceId: 'ws-two',
+      });
+      expect(restarted.runtime.threads.get(thread.id).modelId).toBe(TRANSITION_A);
+      expect(
+        labeled(
+          restarted.root,
+          `Model, ${expected === TRANSITION_A ? 'Bonsai 2 2B Q2_0' : 'Qwen3.5 0.8B Q4_0'}`,
+        ),
+      ).toBeDefined();
+      act(() => restarted.tree.unmount());
+    },
+  );
+
+  it.each(['write-failed', 'write-before-reject', 'rollback-failed'])(
+    'keeps restored chat models honest after a %s thread acknowledgment',
+    async (variant) => {
+      const { tree, root, runtime, thread, history } = await renderTransitionChat();
+      await act(async () => {
+        await runtime.flush();
+      });
+      await settle();
+      const write = runtime.native.writeRuntimeDocument.bind(runtime.native);
+      let faulted = false;
+      let failRecovery = variant === 'rollback-failed';
+      jest
+        .spyOn(runtime.native, 'writeRuntimeDocument')
+        .mockImplementation(async (name, contents) => {
+          if (name.startsWith('thread')) {
+            const value = toRecord(JSON.parse(contents));
+            const set = toRecord(value?.['set']);
+            if (
+              !faulted &&
+              (value?.['modelId'] === TRANSITION_B || set?.['modelId'] === TRANSITION_B)
+            ) {
+              faulted = true;
+              if (variant !== 'write-failed') {
+                await write(name, contents);
+              }
+              throw new Error('Thread model acknowledgment failed.');
+            }
+            if (faulted && failRecovery) {
+              throw new Error('Thread rollback storage unavailable.');
+            }
+          }
+          await write(name, contents);
+        });
+      await press(root, 'Model, Bonsai 2 2B Q2_0');
+      await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+      expect(faulted).toBe(true);
+      expect(runtime.threads.get(thread.id).modelId).toBe(TRANSITION_A);
+      expect(runtime.preferences().modelId).toBe(TRANSITION_A);
+      expect(labeled(root, 'Model, Bonsai 2 2B Q2_0')).toBeDefined();
+      expect(runtime.threads.get(thread.id).messages).toEqual(history);
+      if (variant === 'rollback-failed') {
+        expect(drawerStatus(root)).toBe('1 issue needs attention');
+        expect(labeled(root, 'Retry saving')).toBeDefined();
+        failRecovery = false;
+        await press(root, 'Retry saving');
+      }
+      expect(drawerStatus(root)).not.toBe('1 issue needs attention');
+      expect(labeled(root, 'Retry saving')).toBeUndefined();
+      await changeAppState('background');
+      const snapshot = Object.fromEntries(mockNative.documents);
+      act(() => tree.unmount());
+      const restarted = await renderShell({
+        downloaded: [TRANSITION_A, TRANSITION_B],
+        documents: snapshot,
+        files: { 'ws-one:seed.txt': 'alpha\n' },
+      });
+      expect(restarted.runtime.threads.get(thread.id)).toMatchObject({
+        modelId: TRANSITION_A,
+        workspaceId: thread.workspaceId,
+        messages: history,
+      });
+      act(() => restarted.store.set(selectChatAtom, thread.id));
+      await settle();
+      expect(labeled(restarted.root, 'Model, Bonsai 2 2B Q2_0')).toBeDefined();
+      await submit(restarted.root, 'Confirm the restored A choice.');
+      expect(mockLlama.executions.at(-1)).toBe(TRANSITION_A);
+      expect(restarted.runtime.threads.get(thread.id).status).toBe('complete');
+      expect(labeled(restarted.root, 'Stop agent')).toBeUndefined();
+      act(() => restarted.tree.unmount());
+    },
+  );
+
+  it('rejects Send while a model choice is not durable and restores its draft after the choice fails', async () => {
+    const { tree, root, runtime } = await renderShell({
+      downloaded: [TRANSITION_A, TRANSITION_B],
+      documents: {
+        'preferences.json': JSON.stringify({
+          ...emptyLocalPreferences(),
+          modelId: TRANSITION_A,
+          workspaceId: 'ws-one',
+        }),
+      },
+    });
+    await submit(root, 'Baseline A.');
+    const [thread] = runtime.threads.list();
+    if (!thread) {
+      throw new Error('Expected the original conversation.');
+    }
+    const history = structuredClone(thread.messages);
+    const original = runtime.native.writeRuntimeDocument.bind(runtime.native);
+    let rejectChoice: ((error: Error) => void) | undefined;
+    let held = false;
+    jest
+      .spyOn(runtime.native, 'writeRuntimeDocument')
+      .mockImplementation(async (name, contents) => {
+        if (name === 'preferences.json' && !held) {
+          held = true;
+          await new Promise<void>((_resolve, reject) => {
+            rejectChoice = reject;
+          });
+        }
+        await original(name, contents);
+      });
+    try {
+      await press(root, 'Model, Bonsai 2 2B Q2_0');
+      await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+      expect(held).toBe(true);
+      await submit(root, 'Keep this draft if selection fails.');
+      expect(mockLlama.executions).toEqual([TRANSITION_A]);
+      expect(runtime.threads.get(thread.id).messages).toEqual(history);
+      rejectChoice?.(new Error('Default selection could not be saved.'));
+      await settle();
+      expect(runtime.threads.get(thread.id).modelId).toBe(TRANSITION_A);
+      expect(runtime.preferences().modelId).toBe(TRANSITION_A);
+      expect(composerText(root)).toBe('Keep this draft if selection fails.');
+      expect(labeled(root, 'Stop agent')).toBeUndefined();
+      expect(labeled(root, 'Retry turn')).toBeUndefined();
+      expect(labeled(root, 'Model, Bonsai 2 2B Q2_0')).toBeDefined();
+      await press(root, 'Model, Bonsai 2 2B Q2_0');
+      await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+      await press(root, 'Send message');
+      expect(mockLlama.executions).toEqual([TRANSITION_A, TRANSITION_B]);
+      expect(
+        runtime.threads
+          .get(thread.id)
+          .messages.filter(
+            (message) =>
+              message.role === 'user' && message.content === 'Keep this draft if selection fails.',
+          ),
+      ).toHaveLength(1);
+      expect(runtime.threads.get(thread.id).status).toBe('complete');
+      expect(composerText(root)).toBe('');
+    } finally {
+      rejectChoice?.(new Error('Fixture cleanup.'));
+      act(() => tree.unmount());
+    }
+  });
+
+  it('stops a B preparation, preserves its draft, and releases a late B before recovering on A', async () => {
+    const { tree, root, runtime, thread, history } = await renderTransitionChat();
+    await press(root, 'Model, Bonsai 2 2B Q2_0');
+    await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+    mockLlama.holdLoads = true;
+    await submit(root, 'Preserve this unadmitted request.');
+    expect(mockLlama.loadPending).toBe(true);
+    await press(root, 'Stop agent');
+    expect(runtime.loop.snapshot().phase).toBe('idle');
+    expect(runtime.threads.get(thread.id).messages).toEqual(history);
+    expect(composerText(root)).toBe('Preserve this unadmitted request.');
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    expect(labeled(root, 'Retry turn')).toBeUndefined();
+    await press(root, 'Model, Qwen3.5 0.8B Q4_0');
+    await drive(() => modelPickerOption(root, TRANSITION_A).onPress());
+    mockLlama.holdCompletions = true;
+    await submit(root, 'A recovery request.');
+    expect(mockLlama.loads.map((load) => load.modelId)).toEqual([TRANSITION_A, TRANSITION_B]);
+    mockLlama.holdLoads = false;
+    await drive(() => mockLlama.loadProgress(91));
+    await drive(() => mockLlama.finishLoad());
+    expect(mockLlama.executions.at(-1)).toBe(TRANSITION_A);
+    expect(mockLlama.ownershipHighWater).toBe(1);
+    const releasedB = mockLlama.resourceEvents.findIndex(
+      (event) => event.type === 'released' && event.modelId === TRANSITION_B,
+    );
+    expect(releasedB).toBeGreaterThan(0);
+    expect(mockLlama.resourceEvents.slice(releasedB + 1)).toEqual([
+      { type: 'initializing', modelId: TRANSITION_A },
+      { type: 'ready', modelId: TRANSITION_A },
+    ]);
+    await drive(() => mockLlama.finishCompletion());
+    expect({
+      status: runtime.threads.get(thread.id).status,
+      error: runtime.threads.get(thread.id).lastError,
+      stops: mockLlama.stops,
+      loop: runtime.loop.snapshot(),
+    }).toMatchObject({ status: 'complete', error: null, stops: 0 });
+    expect(
+      runtime.threads
+        .get(thread.id)
+        .messages.filter((message) => message.content === 'Preserve this unadmitted request.'),
+    ).toHaveLength(0);
+    expect(runtime.threads.get(thread.id).messages.slice(0, history.length)).toEqual(history);
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    expect(composerText(root)).toBe('');
+    act(() => tree.unmount());
+  });
+
+  it('rejects switching during generation and stopping, then fences late A tokens from B', async () => {
+    const { tree, root, runtime, thread } = await renderTransitionChat();
+    mockLlama.holdCompletions = true;
+    await submit(root, 'A running request.');
+    const lateA = mockLlama.tokenCallbacks.at(-1);
+    await press(root, 'Model, Bonsai 2 2B Q2_0');
+    await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+    expect(runtime.threads.get(thread.id).modelId).toBe(TRANSITION_A);
+    expect(hasText(root, 'Stop this conversation before changing its model.')).toBe(true);
+    expect(mockLlama.loads).toHaveLength(1);
+    mockLlama.holdStops = true;
+    await press(root, 'Stop agent');
+    expect(labeled(root, 'Stopping agent')).toBeDefined();
+    await press(root, 'Model, Bonsai 2 2B Q2_0');
+    await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+    expect(runtime.threads.get(thread.id).modelId).toBe(TRANSITION_A);
+    await drive(() => mockLlama.finishStop());
+    expect(runtime.threads.get(thread.id).status).toBe('interrupted');
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    expect(labeled(root, 'Stopping agent')).toBeUndefined();
+    await press(root, 'Model, Bonsai 2 2B Q2_0');
+    await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+    mockLlama.holdStops = false;
+    await submit(root, 'B running request.');
+    await drive(() => lateA?.('STALE A OUTPUT'));
+    await drive(() => mockLlama.finishCompletion());
+    expect(mockLlama.executions.at(-1)).toBe(TRANSITION_B);
+    expect(runtime.threads.get(thread.id).status).toBe('complete');
+    expect(transcript(root).join(' ')).not.toContain('STALE A OUTPUT');
+    expect(labeled(root, 'Model, Qwen3.5 0.8B Q4_0')).toBeDefined();
+    expect(mockLlama.ownershipHighWater).toBe(1);
+    act(() => tree.unmount());
+  });
+
+  it('rejects removed B weights before allocation and recovers after verified reinstallation without changing history', async () => {
+    const { tree, root, runtime, thread, history } = await renderTransitionChat();
+    await press(root, 'Model, Bonsai 2 2B Q2_0');
+    await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+    mockNative.installed.delete(TRANSITION_B);
+    await submit(root, 'Keep this request while B is unavailable.');
+    expect(mockLlama.loads.map((load) => load.modelId)).toEqual([TRANSITION_A]);
+    expect(runtime.threads.get(thread.id).messages).toEqual(history);
+    expect(runtime.threads.get(thread.id).modelId).toBe(TRANSITION_B);
+    expect(runtime.preferences().modelId).toBe(TRANSITION_B);
+    expect(composerText(root)).toBe('Keep this request while B is unavailable.');
+    expect(hasText(root, 'Download and verify this catalog model before loading it.')).toBe(true);
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    expect(mockLlama.resident.size).toBe(0);
+    mockNative.installed.add(TRANSITION_B);
+    await press(root, 'Send message');
+    expect(mockLlama.executions.at(-1)).toBe(TRANSITION_B);
+    expect(runtime.threads.get(thread.id).status).toBe('complete');
+    expect(runtime.threads.get(thread.id).messages.slice(0, history.length)).toEqual(history);
+    expect(mockLlama.ownershipHighWater).toBe(1);
+    expect(composerText(root)).toBe('');
+    act(() => tree.unmount());
+  });
+
+  it.each(['memory', 'initialize', 'release'])(
+    'recovers a failed %s during lazy A-to-B replacement without admitting or losing the request',
+    async (failure) => {
+      const { tree, root, runtime, thread, history } = await renderTransitionChat();
+      const executions = mockLlama.executions.length;
+      await press(root, 'Model, Bonsai 2 2B Q2_0');
+      await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+      if (failure === 'memory') {
+        mockNative.memory.availableBytes = 64 * 1024 ** 2;
+      }
+      mockLlama.holdLoads = failure === 'initialize';
+      mockLlama.holdReleases = failure === 'release';
+      await submit(root, 'Keep my request after replacement failure.');
+      if (failure === 'initialize') {
+        await drive(() => mockLlama.failLoad('B initialization failed.'));
+      } else if (failure === 'release') {
+        expect(mockLlama.loads).toHaveLength(1);
+        await drive(() => mockLlama.failRelease('A release failed.'));
+      }
+      expect(mockLlama.executions).toHaveLength(executions);
+      expect(runtime.loop.snapshot().phase).toBe('idle');
+      expect(runtime.threads.get(thread.id).messages).toEqual(history);
+      expect(runtime.threads.get(thread.id).modelId).toBe(TRANSITION_B);
+      expect(runtime.preferences().modelId).toBe(TRANSITION_B);
+      expect(composerText(root)).toBe('Keep my request after replacement failure.');
+      expect(labeled(root, 'Stop agent')).toBeUndefined();
+      expect(labeled(root, 'Retry turn')).toBeUndefined();
+      expect([...mockLlama.resident.values()].map((model) => model.modelId)).toEqual(
+        failure === 'release' ? [TRANSITION_A] : [],
+      );
+      mockNative.memory.availableBytes = 6 * 1024 ** 3;
+      mockLlama.holdLoads = false;
+      mockLlama.holdReleases = false;
+      await press(root, 'Send message');
+      expect(mockLlama.executions).toHaveLength(executions + 1);
+      expect(mockLlama.executions.at(-1)).toBe(TRANSITION_B);
+      expect(runtime.threads.get(thread.id).status).toBe('complete');
+      expect(
+        runtime.threads
+          .get(thread.id)
+          .messages.filter(
+            (message) =>
+              message.role === 'user' &&
+              message.content === 'Keep my request after replacement failure.',
+          ),
+      ).toHaveLength(1);
+      expect(mockLlama.ownershipHighWater).toBe(1);
+      expect(composerText(root)).toBe('');
+      act(() => tree.unmount());
+    },
+  );
+
+  it('admits B using fresh physical-shaped memory measured only after A actually releases', async () => {
+    const { tree, root, runtime } = await renderTransitionChat();
+    const required = modelMemoryBytes(localModelDefinition(TRANSITION_B));
+    mockNative.memory.availableBytes = required + 32 * 1024 ** 2;
+    expect(runtime.native.getMemoryInfo().availableBytes).toBeLessThan(required);
+    await press(root, 'Model, Bonsai 2 2B Q2_0');
+    await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+    await submit(root, 'Switch with only enough memory after release.');
+    expect(mockLlama.executions.at(-1)).toBe(TRANSITION_B);
+    expect(runtime.models.snapshot()).toMatchObject({ modelId: TRANSITION_B, phase: 'ready' });
+    expect(mockLlama.ownershipHighWater).toBe(1);
+    act(() => tree.unmount());
+  });
+
+  it.each(['stopped', 'failed'])(
+    'retries a %s tool-rich A turn on B without repeating completed file or Git mutations',
+    async (outcome) => {
+      const { tree, root, runtime, thread, store } = await renderTransitionChat();
+      const commit = runtime.native.commitWorkspaceGit.bind(runtime.native);
+      jest.spyOn(runtime.native, 'commitWorkspaceGit').mockImplementation(async (...args) => {
+        const hash = await commit(...args);
+        mockLlama.holdCompletions = true;
+        return hash;
+      });
+      mockLlama.reply(
+        {
+          toolCalls: [
+            { name: 'write_file', arguments: { path: 'result.txt', content: 'COMMITTED\n' } },
+            { name: 'git_stage', arguments: { path: 'result.txt' } },
+            { name: 'git_commit', arguments: { message: 'Transition fixture' } },
+          ],
+        },
+        outcome === 'failed'
+          ? { fail: 'Final answer failed.' }
+          : { content: 'Committed the fixture.' },
+      );
+      await submit(root, 'Create and commit result.txt.');
+      expect(mockLlama.completionPending).toBe(true);
+      expect(runtime.native.commitWorkspaceGit).toHaveBeenCalledTimes(1);
+      if (outcome === 'stopped') {
+        await press(root, 'Stop agent');
+      } else {
+        await drive(() => mockLlama.finishCompletion());
+      }
+      expect(runtime.threads.get(thread.id).status).toBe(
+        outcome === 'stopped' ? 'interrupted' : 'failed',
+      );
+      const completedTools = runtime.threads
+        .get(thread.id)
+        .messages.filter((message) => message.tool);
+      expect(completedTools.filter((message) => message.tool?.name === 'git_commit')).toHaveLength(
+        1,
+      );
+      const mutations = mockNative.calls.filter((call) =>
+        /^(writeWorkspaceFile|stageWorkspaceGit|commitWorkspaceGit):/u.test(call),
+      );
+      await press(root, 'Model, Bonsai 2 2B Q2_0');
+      await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+      mockLlama.holdCompletions = false;
+      if (outcome === 'stopped') {
+        expect(labeled(root, 'Retry turn')).toBeUndefined();
+        const ws = store.get(wsClientAtom);
+        if (!ws) {
+          throw new Error('Expected the local transport for interrupted-turn continuation.');
+        }
+        await act(async () => {
+          await ws.request(TURN_RETRY_METHOD, { threadId: thread.id });
+          await flush();
+        });
+        await settle();
+      } else {
+        await press(root, 'Retry turn');
+      }
+      expect(mockLlama.executions.at(-1)).toBe(TRANSITION_B);
+      expect(runtime.threads.get(thread.id).status).toBe('complete');
+      expect(runtime.threads.get(thread.id).messages.filter((message) => message.tool)).toEqual(
+        completedTools,
+      );
+      expect(
+        runtime.threads
+          .get(thread.id)
+          .messages.filter(
+            (message) =>
+              message.role === 'user' && message.content === 'Create and commit result.txt.',
+          ),
+      ).toHaveLength(1);
+      expect(
+        mockNative.calls.filter((call) =>
+          /^(writeWorkspaceFile|stageWorkspaceGit|commitWorkspaceGit):/u.test(call),
+        ),
+      ).toEqual(mutations);
+      expect(mockNative.files.get('ws-one:result.txt')).toBe('COMMITTED\n');
+      expect(labeled(root, 'Retry turn')).toBeUndefined();
+      expect(labeled(root, 'Stop agent')).toBeUndefined();
+      expect(composerText(root)).toBe('');
+      act(() => tree.unmount());
+    },
+  );
+
+  it.each([false, true])(
+    'fences a model switch and stale approval around push Stop (allowed %s)',
+    async (allowed) => {
+      const { tree, root, runtime, thread } = await renderTransitionChat();
+      let acknowledgePush: (() => void) | undefined;
+      const push = runtime.native.pushWorkspaceGit.bind(runtime.native);
+      jest.spyOn(runtime.native, 'pushWorkspaceGit').mockImplementation(async (...args) => {
+        await push(...args);
+        await new Promise<void>((resolve) => {
+          acknowledgePush = resolve;
+        });
+      });
+      mockLlama.reply(
+        { toolCalls: [{ name: 'git_push', arguments: {} }] },
+        { content: 'Push completed.' },
+      );
+      await submit(root, 'Push the committed branch.');
+      const allow = labeled(root, 'Allow');
+      if (!allow) {
+        throw new Error('Expected the actual Git push approval.');
+      }
+      const staleAllow = allow.props['onPress'] as () => void;
+      await press(root, 'Model, Bonsai 2 2B Q2_0');
+      await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+      expect(runtime.threads.get(thread.id).modelId).toBe(TRANSITION_A);
+      if (allowed) {
+        await press(root, 'Allow');
+        expect(runtime.native.pushWorkspaceGit).toHaveBeenCalledTimes(1);
+      }
+      await press(root, 'Stop agent');
+      if (allowed) {
+        await press(root, 'Model, Bonsai 2 2B Q2_0');
+        await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+        expect(runtime.threads.get(thread.id).modelId).toBe(TRANSITION_A);
+        await drive(() => acknowledgePush?.());
+      } else {
+        await drive(() => staleAllow());
+      }
+      expect(runtime.native.pushWorkspaceGit).toHaveBeenCalledTimes(allowed ? 1 : 0);
+      expect(runtime.threads.get(thread.id).status).toBe('interrupted');
+      if (allowed) {
+        expect(
+          runtime.threads
+            .get(thread.id)
+            .messages.find((message) => message.tool?.name === 'git_push')?.tool?.status,
+        ).toBe('completed');
+      }
+      expect(labeled(root, 'Allow')).toBeUndefined();
+      expect(labeled(root, 'Stop agent')).toBeUndefined();
+      await press(root, 'Model, Bonsai 2 2B Q2_0');
+      await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+      await submit(root, 'Continue on B without pushing again.');
+      expect(runtime.threads.get(thread.id).status).toBe('complete');
+      expect(mockLlama.executions.at(-1)).toBe(TRANSITION_B);
+      expect(runtime.native.pushWorkspaceGit).toHaveBeenCalledTimes(allowed ? 1 : 0);
+      expect(mockLlama.ownershipHighWater).toBe(1);
+      act(() => tree.unmount());
+    },
+  );
+
+  it('does not deliver an old model-selection failure into a reactivated profile screen', async () => {
+    const { tree, root, runtime, store } = await renderTransitionChat();
+    const api = store.get(apiClientAtom);
+    if (!api) {
+      throw new Error('Expected the original configuration client.');
+    }
+    const original = api.setThreadConfigOption.bind(api);
+    let rejectAcknowledgment: ((error: Error) => void) | undefined;
+    const gate = new Promise<void>((_resolve, reject) => {
+      rejectAcknowledgment = reject;
+    });
+    jest.spyOn(api, 'setThreadConfigOption').mockImplementationOnce(async (...args) => {
+      const updated = await original(...args);
+      await gate;
+      return updated;
+    });
+    try {
+      await press(root, 'Model, Bonsai 2 2B Q2_0');
+      await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+      act(() => setActiveProfile(store, 'bridge-1'));
+      await settle();
+      expect(store.get(localRuntimeAtom)).toBeNull();
+      act(() => setActiveProfile(store, LOCAL_PROFILE_ID));
+      await settle();
+      expect(store.get(localRuntimeAtom)).not.toBe(runtime);
+      expect(labeled(root, 'Model, Qwen3.5 0.8B Q4_0')).toBeDefined();
+      await drive(() =>
+        rejectAcknowledgment?.(new Error('Old profile model acknowledgment failed.')),
+      );
+      expect(hasText(root, 'Old profile model acknowledgment failed.')).toBe(false);
+      expect(labeled(root, 'Stop agent')).toBeUndefined();
+      expect(labeled(root, 'Model, Qwen3.5 0.8B Q4_0')).toBeDefined();
+    } finally {
+      rejectAcknowledgment?.(new Error('Fixture cleanup.'));
+      act(() => tree.unmount());
+    }
+  });
+
+  it('restores a confirmed B choice and draft through an actual profile disposal without replay', async () => {
+    const storedFiles = new Map<string, string>();
+    fileSystemMock.read.mockImplementation(async (path) => {
+      const contents = storedFiles.get(path);
+      if (contents === undefined) {
+        throw new Error('Missing fixture profile document.');
+      }
+      return contents;
+    });
+    fileSystemMock.write.mockImplementation(async (path, contents) => {
+      storedFiles.set(path, contents);
+    });
+    fileSystemMock.info.mockImplementation(async (path) => ({
+      exists: storedFiles.has(path),
+      size: storedFiles.get(path)?.length ?? 0,
+    }));
+    fileSystemMock.exists.mockImplementation((path) => storedFiles.has(path));
+    const { tree, root, runtime, thread, history, store } = await renderTransitionChat();
+    await press(root, 'Model, Bonsai 2 2B Q2_0');
+    await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+    await act(async () => {
+      const input = labeled(root, 'Message');
+      if (!input) {
+        throw new Error('Expected the composer before profile disposal.');
+      }
+      (input.props['onChangeText'] as (value: string) => void)('Persist this B draft.');
+      await flush();
+    });
+    await settle();
+    expect(composerText(root)).toBe('Persist this B draft.');
+    const executions = [...mockLlama.executions];
+    act(() => setActiveProfile(store, 'bridge-1'));
+    await settle();
+    expect(store.get(localRuntimeAtom)).toBeNull();
+    expect(mockLlama.resident.size).toBe(0);
+    act(() => setActiveProfile(store, LOCAL_PROFILE_ID));
+    await settle();
+    const restored = store.get(localRuntimeAtom);
+    if (!restored) {
+      throw new Error('Expected a new local runtime after profile activation.');
+    }
+    expect(restored).not.toBe(runtime);
+    expect(restored.threads.get(thread.id)).toMatchObject({
+      modelId: TRANSITION_B,
+      workspaceId: thread.workspaceId,
+      messages: history,
+    });
+    expect(restored.preferences().modelId).toBe(TRANSITION_B);
+    expect(mockLlama.executions).toEqual(executions);
+    act(() => store.set(selectChatAtom, thread.id));
+    await settle();
+    expect(store.get(activeChatAtom)?.id).toBe(thread.id);
+    expect(composerText(root)).toBe('Persist this B draft.');
+    expect(labeled(root, 'Model, Qwen3.5 0.8B Q4_0')).toBeDefined();
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    await press(root, 'Send message');
+    expect(mockLlama.executions.at(-1)).toBe(TRANSITION_B);
+    expect(restored.threads.get(thread.id).status).toBe('complete');
+    expect(mockLlama.ownershipHighWater).toBe(1);
+    act(() => tree.unmount());
+  });
+
+  it('compacts A history for a smaller B context without rewriting durable history or tool pairs', async () => {
+    const { tree, root, runtime, thread } = await renderTransitionChat();
+    await submit(root, `An older large note: ${'x'.repeat(70_000)}`);
+    const history = structuredClone(runtime.threads.get(thread.id).messages);
+    mockNative.memory.availableBytes = modelMemoryBytes(localModelDefinition(TRANSITION_B));
+    await press(root, 'Model, Bonsai 2 2B Q2_0');
+    await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+    mockLlama.reply(
+      { toolCalls: [{ name: 'read_file', arguments: { path: 'seed.txt' } }] },
+      { content: 'B read alpha.' },
+    );
+    await submit(root, 'Read seed.txt using the smaller B context.');
+    expect(mockLlama.executions.at(-1)).toBe(TRANSITION_B);
+    expect(runtime.threads.get(thread.id).status).toBe('complete');
+    expect(runtime.threads.get(thread.id).messages.slice(0, history.length)).toEqual(history);
+    expect(runtime.threads.get(thread.id).messages.at(-1)?.content).toBe('B read alpha.');
+    expect(runtime.models.snapshot().contextTokens).toBe(
+      localModelDefinition(TRANSITION_B).contextTokens,
+    );
+    expect(mockLlama.promptTokens.at(-1)).toBeLessThan(
+      localModelDefinition(TRANSITION_B).contextTokens,
+    );
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    expect(composerText(root)).toBe('');
+    act(() => tree.unmount());
+  });
+
+  it('excludes a lazy B Send from manual Files Save in both operation orders without replaying the save', async () => {
+    const { tree, root, runtime, thread, history, store } = await renderTransitionChat();
+    const ws = store.get(wsClientAtom);
+    const cwd = store.get(activeChatAtom)?.cwd;
+    if (!ws || !cwd) {
+      throw new Error('Expected the real Files transport and selected workspace.');
+    }
+    await press(root, 'Model, Bonsai 2 2B Q2_0');
+    await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
+    const file = await ws.request<{ revision: string }>(WORKSPACE_HOST_METHODS.filesRead, {
+      cwd,
+      path: 'seed.txt',
+    });
+    let acknowledgeSave: (() => void) | undefined;
+    const save = runtime.native.writeWorkspaceFile.bind(runtime.native);
+    const writes = jest
+      .spyOn(runtime.native, 'writeWorkspaceFile')
+      .mockImplementationOnce(async (...args) => {
+        const revision = await save(...args);
+        await new Promise<void>((resolve) => {
+          acknowledgeSave = resolve;
+        });
+        return revision;
+      });
+    const executions = mockLlama.executions.length;
+    let saving: Promise<unknown> | undefined;
+    try {
+      await drive(() => {
+        saving = ws.request(WORKSPACE_HOST_METHODS.filesWrite, {
+          cwd,
+          path: 'seed.txt',
+          content: 'MANUAL\n',
+          revision: file.revision,
+        });
+      });
+      expect(mockNative.files.get('ws-one:seed.txt')).toBe('MANUAL\n');
+      await submit(root, 'Send on B once manual Save settles.');
+      expect(mockLlama.executions).toHaveLength(executions);
+      expect(mockLlama.loads).toHaveLength(1);
+      expect(runtime.threads.get(thread.id).messages).toEqual(history);
+      expect(composerText(root)).toBe('Send on B once manual Save settles.');
+      expect(labeled(root, 'Stop agent')).toBeUndefined();
+      await drive(() => acknowledgeSave?.());
+      await saving;
+      await press(root, 'Send message');
+      expect(mockLlama.executions.at(-1)).toBe(TRANSITION_B);
+      expect(runtime.threads.get(thread.id).status).toBe('complete');
+      expect(writes).toHaveBeenCalledTimes(1);
+      mockLlama.holdCompletions = true;
+      await submit(root, 'Keep B generation active.');
+      await expect(
+        ws.request(WORKSPACE_HOST_METHODS.filesWrite, {
+          cwd,
+          path: 'seed.txt',
+          content: 'MUST NOT WRITE\n',
+          revision: 'rev-7',
+        }),
+      ).rejects.toThrow(/Stop|running|Wait/u);
+      expect(writes).toHaveBeenCalledTimes(1);
+      expect(mockNative.files.get('ws-one:seed.txt')).toBe('MANUAL\n');
+      await drive(() => mockLlama.finishCompletion());
+      expect(runtime.threads.get(thread.id).status).toBe('complete');
+      expect(mockLlama.ownershipHighWater).toBe(1);
+      expect(labeled(root, 'Stop agent')).toBeUndefined();
+      expect(composerText(root)).toBe('');
+    } finally {
+      acknowledgeSave?.();
+      act(() => tree.unmount());
+    }
   });
 
   it('keeps a turn and its model through inactive states, stops on background, and warms on return', async () => {

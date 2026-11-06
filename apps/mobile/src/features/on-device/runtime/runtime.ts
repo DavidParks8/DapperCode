@@ -21,6 +21,7 @@ import {
 } from './issues';
 import { LocalPreferencesStore } from './preferences';
 import { ModelResidency } from './residency';
+import { LocalModelSelection } from './modelSelection';
 import type { LocalPreferences } from './preferences';
 import { LocalThreadRepository } from './threads';
 import type {
@@ -66,6 +67,7 @@ export class OnDeviceRuntime {
   private disposing = false;
   private workspaceOperation: Promise<unknown> | null = null;
   private workspaceOperationLabel: string | null = null;
+  private readonly modelSelection: LocalModelSelection;
 
   constructor(
     readonly native: OnDeviceNativeServices,
@@ -132,6 +134,7 @@ export class OnDeviceRuntime {
       idle: () => this.loop.snapshot().phase === 'idle',
       memory: () => native.getMemoryInfo(),
     });
+    this.modelSelection = new LocalModelSelection(this, this.settings, this.residency);
   }
 
   /** Subscribes to the given slices (all by default); unrelated changes do not notify. */
@@ -240,6 +243,7 @@ export class OnDeviceRuntime {
     accepted: () => void,
   ): Promise<LocalThread> {
     await this.residency.settled();
+    this.requireModelSelectionSettled();
     if (this.workspaceOperation || this.suspension || this.disposal) {
       throw new Error('Wait for on-device operations to settle before sending.');
     }
@@ -248,6 +252,7 @@ export class OnDeviceRuntime {
 
   async retryTurn(id: string): Promise<LocalThread> {
     await this.residency.settled();
+    this.requireModelSelectionSettled();
     if (this.workspaceOperation || this.suspension || this.disposal) {
       throw new Error('Wait for on-device operations to settle before retrying.');
     }
@@ -362,38 +367,20 @@ export class OnDeviceRuntime {
    * Selects (and loads, when needed) a model. Rejects instead of interrupting a running
    * conversation when the change would replace the model that run is using.
    */
-  async selectModel(id: string, threadId?: string): Promise<void> {
-    localModelDefinition(id);
-    if (threadId && this.isRunning(threadId)) {
-      throw new Error('Stop this conversation before changing its model.');
-    }
-    await this.residency.settled();
-    const loaded = this.models.snapshot();
-    if (loaded.modelId !== id || (loaded.phase !== 'ready' && loaded.phase !== 'running')) {
-      if (this.loop.snapshot().phase !== 'idle') {
-        throw new Error(
-          'A local conversation is running. Stop it or wait for it to finish before loading another model.',
-        );
-      }
-      await this.residency.transition(() => this.models.load(id));
-    }
-    await this.chooseModel(id, threadId);
+  selectModel(id: string, threadId?: string): Promise<void> {
+    return this.modelSelection.select(id, threadId);
   }
 
   /**
    * Uses a downloaded model for a conversation (when given) and for new conversations without
    * loading it; it loads when that conversation next sends. Rejects while the conversation runs.
    */
-  async chooseModel(id: string, threadId?: string): Promise<void> {
-    localModelDefinition(id);
-    if (threadId && this.isRunning(threadId)) {
-      throw new Error('Stop this conversation before changing its model.');
-    }
-    if (threadId) {
-      this.threads.change(threadId, (thread) => ({ ...thread, modelId: id }));
-      await this.threads.save(threadId);
-    }
-    await this.settings.chooseModel(id);
+  chooseModel(id: string, threadId?: string): Promise<void> {
+    return this.modelSelection.choose(id, threadId);
+  }
+
+  requireModelSelectionSettled(): void {
+    this.modelSelection.requireSettled();
   }
 
   /** Releases the loaded model; rejects while a conversation is using it. */
@@ -408,6 +395,7 @@ export class OnDeviceRuntime {
   /** Deletes a download. Unrelated downloads never interrupt a running conversation. */
   async removeModel(id: string): Promise<void> {
     localModelDefinition(id);
+    this.requireModelSelectionSettled();
     const run = this.loop.snapshot();
     const loaded = this.models.snapshot().modelId === id;
     const used = run.threadId ? this.threads.find(run.threadId)?.modelId === id : false;
@@ -633,17 +621,10 @@ export class OnDeviceRuntime {
     }
   }
 
-  private isRunning(threadId: string): boolean {
-    const run = this.loop.snapshot();
-    return (
-      (run.phase !== 'idle' && run.threadId === threadId) ||
-      this.threads.find(threadId)?.status === 'running'
-    );
-  }
-
   /** Writes settings and conversation progress that have not been saved yet. */
-  flush(): Promise<void> {
-    return this.persist(this.threads.flush());
+  async flush(): Promise<void> {
+    await this.modelSelection.settled();
+    await this.persist(this.threads.flush());
   }
 
   private async persist(threads: Promise<void>): Promise<void> {

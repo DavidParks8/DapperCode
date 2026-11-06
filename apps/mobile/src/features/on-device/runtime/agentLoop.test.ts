@@ -263,15 +263,18 @@ test('stop during generation preserves partial output and fences callbacks after
 
 test('recovery never replays pending edits and supplies results for unadmitted tool calls', async () => {
   const h = await harness();
+  const workspaceFiles = new Map([['main.txt', 'before']]);
   h.model.generate.mockResolvedValueOnce(response('', ['write_file', 'read_file']));
   const started = deferred<void>();
   const pending = deferred<unknown>();
   h.execute.mockImplementation(() => {
+    workspaceFiles.set('main.txt', 'changed before acknowledgment');
     started.resolve();
     return pending.promise;
   });
   const running = h.loop.send(h.thread.id, 'Change files', 'request-one');
   await started.promise;
+  expect(workspaceFiles.get('main.txt')).toBe('changed before acknowledgment');
   const snapshot = new Map(h.contents);
   // The intent is durable as journal segments after the base, not as a rewritten conversation.
   expect([...snapshot.keys()].filter((name) => name.startsWith('threadseg-'))).not.toEqual([]);
@@ -300,6 +303,19 @@ test('recovery never replays pending edits and supplies results for unadmitted t
   pending.resolve({ result: 'settled after test snapshot' });
   await stopping;
   await running;
+  const retry = new LocalAgentLoop(
+    restored,
+    h.model,
+    FILE_TOOL_DEFINITIONS.map((tool) => tool.definition),
+    h.execute,
+    jest.fn(),
+    () => null,
+  );
+  const settled = await retry.retry(recovered.id);
+  expect(settled.status).toBe('complete');
+  expect(h.execute).toHaveBeenCalledTimes(1);
+  expect(workspaceFiles.get('main.txt')).toBe('changed before acknowledgment');
+  expect(settled.messages.filter((message) => message.role === 'user')).toHaveLength(1);
 });
 
 test('a tool turn appends journal segments whose size does not grow with the conversation', async () => {

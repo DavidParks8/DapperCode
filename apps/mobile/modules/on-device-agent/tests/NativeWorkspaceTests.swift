@@ -50,6 +50,7 @@ private func attemptWrite(_ store: WorkspaceStore, id: String, content: String, 
 }
 
 func runNativeGate() async throws {
+  try await runResumedRootGate()
   let store = WorkspaceStore()
   let primary = try await store.createWorkspace(name: "Primary")
   let secondary = try await store.createWorkspace(name: "Secondary")
@@ -270,6 +271,70 @@ func runNativeGate() async throws {
   try await runSizeGate(store)
   try await runLifecycleGate(store)
   print("NATIVE_WORKSPACE_PASS")
+}
+
+private func runResumedRootGate() async throws {
+  guard let argument = CommandLine.arguments.firstIndex(of: "--path-alias-root"),
+    CommandLine.arguments.indices.contains(argument + 1)
+  else {
+    throw GateError("The native workspace runner must supply its owned path-alias root.")
+  }
+  let directory = URL(
+    fileURLWithPath: CommandLine.arguments[argument + 1], isDirectory: true
+  ).appendingPathComponent("resumed-workspaces", isDirectory: true)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  let logical = directory.resolvingSymlinksInPath()
+  let original = WorkspaceStore(rootDirectory: logical)
+  let workspace = try await original.createWorkspace(name: "Saved session")
+  _ = try await original.writeFile(
+    workspace.id, path: "README.md", content: "RESUMED_ROOT\n", expectedRevision: nil)
+  _ = try await original.writeFile(
+    workspace.id, path: "src/child.txt", content: "RESUMED_CHILD\n", expectedRevision: nil)
+  let resumed = WorkspaceStore(rootDirectory: logical)
+  try check(
+    try await resumed.listWorkspaces().map(\.id) == [workspace.id],
+    "saved workspace identity reloads through the iOS-style storage alias")
+  for path in ["", "."] {
+    let listing = try await resumed.listFiles(workspace.id, path: path, limit: 10)
+    try check(
+      listing.entries.map(\.name) == ["README.md", "src"] && !listing.truncated,
+      "resumed workspace root lists through alias \(path.debugDescription)")
+  }
+  let nested = try await resumed.listFiles(workspace.id, path: "src", limit: 10)
+  try check(
+    nested.entries.map(\.name) == ["child.txt"],
+    "resumed nested directory enumeration preserves containment")
+  let read = try await resumed.readFile(workspace.id, path: "README.md", offset: 0, limit: 64)
+  try check(read.content == "RESUMED_ROOT\n", "resumed file reads preserve actual bytes")
+  let found = try await resumed.searchFiles(workspace.id, query: "RESUMED_")
+  try check(
+    found.matches.map(\.path).sorted() == ["README.md", "src/child.txt"],
+    "resumed search returns workspace-relative paths across storage aliases")
+  let size = try await resumed.workspaceSize(workspace.id)
+  try check(size.files == 2 && !size.truncated, "resumed workspace size measures aliased storage")
+  let outside = directory.deletingLastPathComponent().appendingPathComponent("outside-resumed.txt")
+  try Data("OUTSIDE_RESUMED_SECRET".utf8).write(to: outside)
+  let repository = try await resumed.resolve(workspace.id, path: "", allowRoot: true)
+  try FileManager.default.createSymbolicLink(
+    at: repository.appendingPathComponent("escape"), withDestinationURL: outside)
+  let links = try await resumed.listFiles(workspace.id, path: "", limit: 10)
+  try check(
+    links.entries.first(where: { $0.name == "escape" })?.kind == .symlink,
+    "aliased directory listings never resolve an entry's symlink target")
+  try await rejected("resumed symlink reads remain denied", code: .pathUnsupported) {
+    _ = try await resumed.readFile(workspace.id, path: "escape", offset: 0, limit: 64)
+  }
+  try await rejected("resumed traversal remains denied", code: .pathOutsideWorkspace) {
+    _ = try await resumed.listFiles(workspace.id, path: "../", limit: 10)
+  }
+  try await rejected("tilde never expands outside the selected workspace", code: .pathNotFound) {
+    _ = try await resumed.listFiles(workspace.id, path: "~", limit: 10)
+  }
+  try check(
+    try await resumed.searchFiles(workspace.id, query: "OUTSIDE_RESUMED_SECRET").matches.isEmpty,
+    "resumed search never follows an external entry symlink")
+  try await resumed.deleteWorkspace(workspace.id)
+  try FileManager.default.removeItem(at: outside)
 }
 
 private func runSizeGate(_ store: WorkspaceStore) async throws {

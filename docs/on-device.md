@@ -229,6 +229,10 @@ and that prompt is passed straight to completion.
   interpreters, test runners, downloaded executable plugins, and JIT workarounds are unavailable.
   SSH, submodule/LFS hydration, custom providers' private credentials, and force-push are out of scope.
 - The workspace root is the empty path `''` everywhere (`'.'` is accepted as an alias for listing).
+  `~` is a literal workspace-relative name, not a shortcut to the phone's home directory.
+  Directory listing, search, and size walks normalize the trusted storage root to its physical
+  filesystem path before checking containment, so iOS `/var` and `/private/var` aliases do not
+  break resumed workspaces. Entry symlinks are still never followed.
   The Files screen (from the Git screen or the workspace picker) creates files in the open folder,
   shows the total size of large read-only previews, renames (touch and hold) or deletes (swipe)
   entries, and refreshes when a native change token moves after agent edits.
@@ -301,6 +305,10 @@ and that prompt is passed straight to completion.
   never changed in place) by identity, so a save serializes only the messages it writes. The base
   is written first and the segments it contains are removed afterwards, so a crash at any point
   replays to the same conversation.
+- A failed native write may already have reached disk. Recovery writes an acknowledged corrective
+  segment even if memory returned to the cached state; it never clears a failure by skipping that
+  write. An unacknowledged base remains marked for replacement, and a recovered base advances past
+  any potentially written next segment, preventing a rejected model choice from reappearing later.
 - At startup, the contiguous segments after the base are replayed; segments the base already
   contains (an interrupted compaction) are discarded. A damaged, unreadable, or out-of-order segment
   ends the replay: it and every later segment are set aside with their bytes preserved, the
@@ -485,6 +493,22 @@ Before a chat exists, the capability-gated host extension `model/default/set` sa
 without creating a conversation or loading a model. Local new chats take the default from
 `model/list.isDefault`, including after a Settings change. Model choices are saved in order,
 and a failed preference write restores the previous choice rather than acknowledging success.
+While the device-model picker is open, it refreshes its catalog once a second so a background
+download appears as soon as verification completes; closing the picker stops that polling.
+Existing-chat choices also restore the chat model when either the thread or default write fails.
+The preference store publishes a model default only after its write succeeds, and serializes
+other preference saves from the latest confirmed state when their queued writes run. A concurrent
+workspace or author save cannot persist a rejected model choice or clear a persistence warning
+unless it has saved all current settings.
+Send, Retry, and competing model/workspace changes are rejected while a model choice is still
+saving. The composer also waits for its pending model configuration acknowledgment, so Send
+cannot overtake a newer queued choice. An unadmitted request keeps its draft and can be sent again
+after selection settles.
+An uncertain configuration response is read back before clearing the pending choice; a failed
+read-back keeps Send blocked with an explicit reselect instruction rather than inferring success
+or reverting to a potentially stale model. Profile/transport disposal fences late configuration
+and catalog callbacks from the next screen lifetime.
+Stopping an unadmitted model load does not carry that Stop request into the next submitted turn.
 `thread/create` falls back to the runtime's remembered workspace and
 model when the composer sends none or a desktop path.
 

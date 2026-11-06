@@ -4,6 +4,7 @@
     "types": ["node", "jest", "expo/types"]
   },
   "include": [
+    "./*.ts",
     "./*.tsx",
     "../../../expo-env.d.ts",
     "../../../src/shared/env.d.ts",

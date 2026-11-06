@@ -24,9 +24,10 @@ extension WorkspaceStore {
       root, entryLimit: Self.sizeEntryLimit, timeBudget: Self.sizeTimeBudget)
   }
 
-  static func measure(_ root: URL, entryLimit: Int, timeBudget: TimeInterval) throws
+  static func measure(_ directory: URL, entryLimit: Int, timeBudget: TimeInterval) throws
     -> NativeWorkspaceSize
   {
+    let root = try Self.enumerationDirectory(directory)
     let keys: [URLResourceKey] = [
       .isRegularFileKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey,
     ]

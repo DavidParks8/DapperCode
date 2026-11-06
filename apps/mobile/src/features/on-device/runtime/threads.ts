@@ -363,7 +363,10 @@ export class LocalThreadRepository {
     const previous = this.persisted.get(id);
     const running = thread.status === 'running';
     if (previous && !this.rebase.has(id)) {
-      const delta = localThreadDelta(previous.durable, thread, durable);
+      // An unacknowledged segment may exist even when memory returned to the cached state.
+      const delta =
+        localThreadDelta(previous.durable, thread, durable) ??
+        (this.failures.has(id) ? { set: {}, remove: [], messages: [] } : null);
       if (delta === null) {
         return;
       }
@@ -409,9 +412,12 @@ export class LocalThreadRepository {
     previous: PersistedThread | undefined,
   ): Promise<void> {
     const running = thread.status === 'running';
-    const sequence = previous?.sequence ?? 0;
+    // A recovered base must supersede any unacknowledged next segment.
+    const sequence = (previous?.sequence ?? 0) + (this.failures.has(id) ? 1 : 0);
     const skipped = previous?.skipped ?? [];
     const contents = encodeLocalThreadBase(thread, sequence, skipped);
+    // An unacknowledged base may already have replaced the old one.
+    this.rebase.add(id);
     await this.storage.writeRuntimeDocument(threadDocument(id), contents);
     this.rebase.delete(id);
     this.persisted.set(id, {

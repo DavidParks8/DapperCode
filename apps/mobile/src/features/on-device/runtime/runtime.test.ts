@@ -273,6 +273,71 @@ describe('persisted new-chat model selection', () => {
     });
   });
 
+  describe('persisted existing-chat model selection', () => {
+    it('serializes overlapping chat choices after a rejected write', async () => {
+      const h = harness();
+      await h.runtime.initialize();
+      const primary = 'bonsai-2-2b-q2-0';
+      await h.runtime.chooseModel(primary);
+      const thread = await h.runtime.threads.create('workspace-one', primary);
+      const started = deferred<void>();
+      let rejectWrite!: (error: Error) => void;
+      h.native.writeRuntimeDocument.mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectWrite = reject;
+            started.resolve();
+          }),
+      );
+      const older = h.runtime.chooseModel('qwen35-0.8b-q4-0', thread.id);
+      await started.promise;
+      const newer = h.runtime.chooseModel(primary, thread.id);
+      rejectWrite(new Error('Older chat choice failed.'));
+      await expect(older).rejects.toThrow('Older chat choice failed.');
+      await newer;
+      expect(h.runtime.threads.get(thread.id).modelId).toBe(primary);
+      expect(h.runtime.preferences().modelId).toBe(primary);
+      const restored = new OnDeviceRuntime(h.native);
+      await restored.initialize();
+      expect(restored.threads.get(thread.id).modelId).toBe(primary);
+      expect(restored.preferences().modelId).toBe(primary);
+      await restored.dispose();
+      await h.runtime.dispose();
+    });
+
+    it.each(['thread', 'default'])(
+      'restores a rejected %s write without changing the chat or default',
+      async (stage) => {
+        const h = harness();
+        await h.runtime.initialize();
+        const primary = 'bonsai-2-2b-q2-0';
+        const secondary = 'qwen35-0.8b-q4-0';
+        await h.runtime.chooseModel(primary);
+        const thread = await h.runtime.threads.create('workspace-one', primary);
+        const write = h.native.writeRuntimeDocument.getMockImplementation()!;
+        let failed = false;
+        h.native.writeRuntimeDocument.mockImplementation(async (name, contents) => {
+          if (!failed && (name === 'preferences.json') === (stage === 'default')) {
+            failed = true;
+            throw new Error(`Rejected ${stage} selection write.`);
+          }
+          await write(name, contents);
+        });
+        await expect(h.runtime.chooseModel(secondary, thread.id)).rejects.toThrow(
+          `Rejected ${stage}`,
+        );
+        expect(h.runtime.threads.get(thread.id).modelId).toBe(primary);
+        expect(h.runtime.preferences().modelId).toBe(primary);
+        const restored = new OnDeviceRuntime(h.native);
+        await restored.initialize();
+        expect(restored.threads.get(thread.id).modelId).toBe(primary);
+        expect(restored.preferences().modelId).toBe(primary);
+        await restored.dispose();
+        await h.runtime.dispose();
+      },
+    );
+  });
+
   it('does not revert a newer default when an older persistence request rejects', async () => {
     const h = harness();
     await h.runtime.initialize();

@@ -113,6 +113,77 @@ function legacyThread(title: string, messages: LocalMessage[]): LocalThread {
   };
 }
 
+test.each(['segment', 'base'])(
+  'rollback after an unacknowledged %s write replaces actual durable state',
+  async (kind) => {
+    const h = await open();
+    const original = await h.threads.create('workspace', 'model-a');
+    const write = h.port.writeRuntimeDocument.getMockImplementation()!;
+    h.port.writeRuntimeDocument.mockImplementationOnce(async (name, contents) => {
+      await write(name, contents);
+      throw new Error('Thread write acknowledgment failed.');
+    });
+    h.threads.change(original.id, (thread) => ({
+      ...thread,
+      modelId: 'model-b',
+      messages:
+        kind === 'base'
+          ? [userMessage('unconfirmed', 'x'.repeat(THREAD_SEGMENT_MAX_BYTES))]
+          : thread.messages,
+    }));
+    await expect(h.threads.save(original.id)).rejects.toThrow('acknowledgment failed');
+    expect(h.threads.persistenceFailures().has(original.id)).toBe(true);
+    const uncertain = h.port.writeRuntimeDocument.mock.calls.at(-1)!;
+    expect(uncertain[0]).toBe(
+      kind === 'base' ? threadDocument(original.id) : threadSegmentDocument(original.id, 1),
+    );
+    const writes = h.port.writeRuntimeDocument.mock.calls.length;
+    h.threads.change(original.id, () => original);
+    await h.threads.save(original.id);
+    expect(h.port.writeRuntimeDocument.mock.calls.length).toBeGreaterThan(writes);
+    expect(h.threads.persistenceFailures().size).toBe(0);
+    const restored = await open(new Map(h.documents));
+    expect(restored.threads.get(original.id)).toEqual(original);
+    h.threads.change(original.id, (thread) => ({ ...thread, title: 'After recovery' }));
+    await h.threads.save(original.id);
+    const later = await open(new Map(h.documents));
+    expect(later.threads.get(original.id)).toEqual({ ...original, title: 'After recovery' });
+  },
+);
+
+test.each(['segment', 'base'])(
+  'failed recovery of an uncertain %s remains visible until an actual repair succeeds',
+  async (kind) => {
+    const h = await open();
+    const original = await h.threads.create('workspace', 'model-a');
+    const write = h.port.writeRuntimeDocument.getMockImplementation()!;
+    h.port.writeRuntimeDocument
+      .mockImplementationOnce(async (name, contents) => {
+        await write(name, contents);
+        throw new Error('Uncertain thread write.');
+      })
+      .mockRejectedValueOnce(new Error('Recovery write failed.'));
+    h.threads.change(original.id, (thread) => ({
+      ...thread,
+      modelId: 'model-b',
+      messages:
+        kind === 'base'
+          ? [userMessage('unconfirmed', 'x'.repeat(THREAD_SEGMENT_MAX_BYTES))]
+          : thread.messages,
+    }));
+    await expect(h.threads.save(original.id)).rejects.toThrow('Uncertain thread write.');
+    h.threads.change(original.id, () => original);
+    await expect(h.threads.save(original.id)).rejects.toThrow('Recovery write failed.');
+    expect(h.threads.persistenceFailures().get(original.id)?.message).toBe(
+      'Recovery write failed.',
+    );
+    await h.threads.retryPersistence();
+    expect(h.threads.persistenceFailures().size).toBe(0);
+    const restored = await open(new Map(h.documents));
+    expect(restored.threads.get(original.id)).toEqual(original);
+  },
+);
+
 test('older whole-conversation documents are read as the base and positioned before any segment', async () => {
   const legacy = legacyThread('Legacy conversation', [
     userMessage('user-legacy', 'Hello from an older build'),

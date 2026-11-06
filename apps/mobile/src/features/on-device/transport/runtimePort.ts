@@ -62,6 +62,9 @@ export function createRuntimeAgentPort(runtime: OnDeviceRuntime): LocalAgentPort
     },
     createThread: (workspaceId, modelId) => runtime.threads.create(workspaceId, modelId),
     updateThread: async (id, patch) => {
+      if (patch.modelId !== undefined || patch.workspaceId !== undefined) {
+        runtime.requireModelSelectionSettled();
+      }
       const next = runtime.threads.change(id, (thread) => ({ ...thread, ...patch }));
       await runtime.threads.save(id);
       return next;

@@ -11,20 +11,25 @@ import {
   userInputDraftsAtom,
   userInputErrorAtom,
 } from '../state/turn';
-import { selectedCollaborationModeAtom, selectedEffortAtom } from '../state/models';
+import {
+  pendingAcpConfigByChatAtom,
+  selectedCollaborationModeAtom,
+  selectedEffortAtom,
+} from '../state/models';
 import { screenSetter } from '../state/registry';
 import { activityAtom, showDelayedGenericRunningActivityAtom } from '../state/composer';
 import { interruptedChatCreationAtom } from '@shell/state/chat/atoms';
-import { activeProfileIdAtom } from '@shell/state/bridge/atoms';
+import { activeProfileFeaturesAtom, activeProfileIdAtom } from '@shell/state/bridge/atoms';
 import {
   consumeInterruptedChatCreationAtom,
   replaceInterruptedChatSubmissionAtom,
 } from '@shell/state/chat/actions';
 import { interruptedCreationRetryId } from '@shell/session/interruptedChatCreation';
 import type { InterruptedChatCreation } from '@shell/session/interruptedChatCreation';
-import type { CollaborationMode, LocalImageInput, MentionInput } from '@bridge/types/types';
+import type { Chat, CollaborationMode, LocalImageInput, MentionInput } from '@bridge/types/types';
 import type { MainScreenSendMessageHandlerContext } from './sendMessageHandler';
 import { submissionScopeKey, type ComposerSubmission } from './controllers/submissionController';
+import { isChatLikelyRunning } from '../helpers/helpers';
 import {
   applyQueuedMessageResult,
   applyStartedTurnResult,
@@ -45,6 +50,26 @@ export interface SendMessageOptions {
   preservePlan?: boolean;
   suppressPlanModeAutoEnable?: boolean;
   submission?: ComposerSubmission;
+}
+
+function prepareDispatchRequest(
+  context: MainScreenSendMessageHandlerContext,
+  args: Parameters<typeof prepareSendMessageRequest>[0],
+) {
+  const request = prepareSendMessageRequest(args);
+  if (
+    request &&
+    context.store.get(activeProfileFeaturesAtom).modelLibrary &&
+    context.store.get(pendingAcpConfigByChatAtom)[request.targetChatId]?.['model']
+  ) {
+    context.store.set(
+      errorAtom,
+      context.store.get(errorAtom) ??
+        'Wait for the model selection to finish saving before sending.',
+    );
+    return null;
+  }
+  return request;
 }
 
 export type BeginSendMessageSubmissionArgs = {
@@ -162,7 +187,11 @@ function prepareSubmissionForDispatch(
   context: MainScreenSendMessageHandlerContext,
   submission: ComposerSubmission,
   shouldClearComposer: boolean,
+  previousChat: Chat | null,
 ): void {
+  if (!context.activeTurnIdRef.current && (!previousChat || !isChatLikelyRunning(previousChat))) {
+    context.stopRequestedRef.current = false;
+  }
   if (!shouldClearComposer) {
     return;
   }
@@ -368,7 +397,7 @@ export async function executeSendMessage(
     store,
     showDelayedGenericRunningActivityAtom,
   );
-  const request = prepareSendMessageRequest({
+  const request = prepareDispatchRequest(context, {
     rawContent,
     options,
     selectedChatId,
@@ -429,7 +458,7 @@ export async function executeSendMessage(
         bridgeProfileId,
       ),
     });
-  prepareSubmissionForDispatch(context, submission, shouldClearComposer);
+  prepareSubmissionForDispatch(context, submission, shouldClearComposer, targetChatAtStart);
   interruptedPendingChatId = await persistChangedInterruptedSubmission({
     context,
     interrupted: interruptedAtStart,

@@ -156,7 +156,14 @@ The workspace scenario compiles the production workspace actor with its file and
 containment, revisions, and search limits, it covers root listing with `''` and `"."`, typed error
 codes, total-size reads, change tokens, UI rename/delete, workspace rename/delete (no leftovers),
 non-repository status, `git init`, unborn-branch renaming, branch creation, staged counts, empty
-commit rejection, missing-origin rejection, and discard:
+commit rejection, missing-origin rejection, and discard.
+
+It also persists a workspace under an owned iOS-style `/var` storage alias, reopens it through a
+new store, and exercises root/nested listing, file reads, search-relative paths, and size. This
+reproduces the real-device `/var` versus `/private/var` enumeration mismatch. Physical-root
+normalization must preserve entry-symlink and traversal rejection; `~` must not expand to phone home.
+
+Run the native regression:
 
 ```bash
 node .agents/skills/local-e2e-validation/scripts/run.mjs \
@@ -211,6 +218,22 @@ lease; simulator state, logs, certificates, and app containers remain per-run.
 All fixture bundles disable `.env` loading and public environment
 overrides so they cannot inherit a user's configured bridge credentials.
 
+The product fixture uses its own Metro configuration, never the release Metro configuration, to
+route the fixed Exa MCP request through an owned loopback HTTPS transport. Approval, the production
+request/response parser, streamed body handling, query and destination checks all remain real; no
+workspace content or credentials are substituted. The scenario verifies zero requests before
+approval and exactly one after Allow. Live Exa quota failures remain recorded separately, rather
+than weakening a successful-search assertion or retrying them into passes.
+The bundle helper scopes `EXPO_OVERRIDE_METRO_CONFIG` to the fixture exporter child process and
+checks the adapter marker before starting Appium; Expo's embed exporter does not forward its
+legacy `--config` option to Metro. Production builds continue using the unmodified default config.
+
+Same-model transfer recovery copies this run's already verified genuine weights into its owned
+HTTPS range server before deletion. It slows only that fixture transfer so Resume/Cancel cannot
+race a nearly completed public CDN response, then explicitly enables fast transfer for the final
+retry. Native URLSession, pause/resume/cancel, actual bytes, pinned SHA verification, and model
+loading are unchanged. Initial model downloads still use the real catalog CDN.
+
 `native-model-management.mjs` reuses that bootstrap for two-model transitions: a downloaded but
 nonresident new-chat choice, matching Settings/default/header state, a Settings round trip,
 an existing chat's lazy model change, real inference after switching the resident context,
@@ -219,6 +242,28 @@ The secondary download also exercises real Pause, Resume, Cancel, and a fresh ve
 while preserving the resident primary model.
 Run it with each in-scope representative: secondary models cycle Qwen3.5 -> Bonsai 2 ->
 Gemma 4 -> Qwen3.5 so every family is exercised as both the deleted model and the surviving fallback.
+
+`native-model-transitions.mjs` specifically creates a Bonsai conversation before downloading
+Qwen3.5 0.8B through that chat's model-picker link. It returns through the original drawer row,
+asserts unchanged chat route keys and the retained draft, selects B, and immediately sends without
+Settings Load or a replacement conversation. Fresh file probes require actual native tool reads,
+not answers copied from earlier history. It then verifies independent conversation/default
+choices and lazy B-to-A-to-B replacements:
+
+```bash
+DAPPERCODE_NATIVE_TEST_MODEL=bonsai-2-2b-q2-0 \
+node .agents/skills/local-e2e-validation/scripts/run.mjs \
+  --evidence /absolute/path/to/new-model-transitions.jsonl \
+  apps/mobile/modules/on-device-agent/tests/native-model-transitions.mjs
+```
+
+`native-workspace-upgrade.mjs` compiles the production workspace/Git sources from release commit
+`179be2006dc1d352df47a5a6653fbf381fd076e4` into a standalone native writer. It persists files,
+literal-tilde paths, metadata and a Git commit, then installs the current native reader over the
+same owned app container without uninstalling or resetting data. This verifies authentic
+prior-production storage compatibility, not a physical-device OS upgrade or an old full app binary.
+The separate `native-workspaces.mjs` gate covers retained storage through `/var`/`/private/var`
+aliases and preserves containment, symlink and hard-link defenses.
 
 `native-sibling-branches.mjs` covers deliberate Git discard gestures (including staged-byte
 preservation), chat rename/delete confirmations and exact surviving history, and clone Stop/retry.

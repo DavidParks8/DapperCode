@@ -1,6 +1,9 @@
 import path from 'node:path';
 
-export async function bundleNativeReactApp(e2e, { entryFile, bundleId, name }) {
+export async function bundleNativeReactApp(
+  e2e,
+  { entryFile, bundleId, name, metroConfig = undefined },
+) {
   const mobile = path.join(e2e.worktree, 'apps/mobile');
   const app = e2e.copyIntoRun(
     path.join(
@@ -38,6 +41,7 @@ export async function bundleNativeReactApp(e2e, { entryFile, bundleId, name }) {
         ),
         EXPO_PUBLIC_GITHUB_CLIENT_ID: '',
         EXPO_NO_DOTENV: '1',
+        EXPO_OVERRIDE_METRO_CONFIG: metroConfig,
       },
     },
   );
