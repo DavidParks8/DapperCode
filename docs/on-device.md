@@ -141,7 +141,11 @@ support needed by Bonsai 2 Q2_0. This is a pre-release binding and requires a re
 (on-device ABI 6). Old binaries fail with a rebuild message rather than attempting unsupported
 inference through a JavaScript-only update.
 
-Compatibility uses physical RAM plus a fresh native app-memory-headroom measurement. Admission
+Compatibility uses physical RAM plus a fresh native app-memory-headroom measurement. A model's
+minimum device RAM is the marketed size (for example 8 GB for Gemma 4 E2B Q4_0). iOS reports
+physical memory somewhat below the marketed size because of GPU and system carve-outs, so the
+reported value is rounded up to the device's whole-GiB RAM class before that comparison; the raw
+value must still hold the model's estimate. Admission
 includes weights, an FP16 KV cache at the model's minimum context (4,096 tokens), working space, the
 prompt-state budget of hybrid/sliding-window models, and a 384 MiB reserve. When fresh headroom
 allows, a load doubles the context up to the catalog maximum (8,192 tokens for Qwen3; 16,384 for

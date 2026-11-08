@@ -27,12 +27,39 @@ test('the exact admission boundary is inclusive and one byte below is refused', 
 });
 
 test('physical RAM and app headroom are separate constraints', () => {
-  expect(
-    modelMemoryAdmission(model, { ...memory, physicalBytes: model.minimumDeviceBytes - 1 }).status,
-  ).toBe('unsupported');
-  expect(
-    modelMemoryAdmission(model, { ...memory, physicalBytes: model.minimumDeviceBytes }).status,
-  ).toBe('ready');
+  // The floor compares a device's advertised RAM class (whole GiB) with the catalog minimum.
+  const below = (Math.ceil(model.minimumDeviceBytes / 1024 ** 3) - 1) * 1024 ** 3;
+  expect(modelMemoryAdmission(model, { ...memory, physicalBytes: below }).status).toBe(
+    'unsupported',
+  );
+  expect(modelMemoryAdmission(model, { ...memory, physicalBytes: below + 1 }).status).toBe('ready');
+});
+
+// iOS reports physical memory below the advertised RAM (the GPU and system carve-outs), so a
+// marketed "8 GB" iPhone never reports a full 8 GiB.
+const GiB = 1024 ** 3;
+const ample = 64 * GiB;
+test.each([
+  ['gemma-4-e2b-q4-0', 'an 8 GB iPhone', Math.round(7.42 * GiB), 'ready'],
+  ['gemma-4-e2b-q4-0', 'an 8 GB iPhone', 8 * GiB - 1, 'ready'],
+  ['gemma-4-e2b-q8-0', 'a 12 GB iPhone', Math.round(11.16 * GiB), 'ready'],
+  ['gemma-4-e2b-q4-0', 'a 6 GB iPhone', Math.round(5.57 * GiB), 'unsupported'],
+  ['gemma-4-e2b-q8-0', 'an 8 GB iPhone', Math.round(7.42 * GiB), 'unsupported'],
+  ['bonsai-2-2b-q2-0', 'a 4 GB iPhone', Math.round(3.7 * GiB), 'ready'],
+])('%s on %s reporting reduced physical memory is %s', (id, _device, physicalBytes, status) => {
+  const candidate = localModelDefinition(id);
+  const device = { physicalBytes, availableBytes: ample, isSimulator: false };
+  expect(modelMemoryAdmission(candidate, device).status).toBe(status);
+});
+
+test('the advertised-class floor never admits a model the raw RAM cannot hold', () => {
+  const candidate = localModelDefinition('gemma-4-e2b-q4-0');
+  const tiny = {
+    physicalBytes: modelMemoryBytes(candidate) - 1,
+    availableBytes: ample,
+    isSimulator: false,
+  };
+  expect(modelMemoryAdmission(candidate, tiny).status).toBe('unsupported');
 });
 
 test.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(

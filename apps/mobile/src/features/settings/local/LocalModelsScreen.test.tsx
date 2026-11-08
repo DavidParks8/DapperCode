@@ -266,6 +266,24 @@ describe('Model family settings', () => {
     ).toBeTruthy();
   });
 
+  it('offers Gemma on an 8 GB iPhone that reports slightly less physical memory than advertised', () => {
+    const runtime = new FakeSettingsRuntime();
+    // iOS reports an 8 GB iPhone's physical memory below a full 8 GiB.
+    runtime.memory = {
+      physicalBytes: Math.round(7.42 * GiB),
+      availableBytes: 6 * GiB,
+      isSimulator: false,
+    };
+    openFamily(runtime, 'gemma-4');
+    const gemma = row('gemma-4-e2b-q4-0');
+    expect(
+      gemma.getByLabelText('Download Gemma 4 E2B Q4_0').props['accessibilityState'],
+    ).toMatchObject({ disabled: false });
+    expect(gemma.queryByText(/exceeds the conservative RAM budget/)).toBeNull();
+    fireEvent.press(gemma.getByLabelText('Download Gemma 4 E2B Q4_0'));
+    expect(runtime.downloadModel).toHaveBeenCalledWith('gemma-4-e2b-q4-0');
+  });
+
   it('names the Models page, not Settings, as the back destination', () => {
     openFamily(new FakeSettingsRuntime(), 'qwen3.5');
     expect(screen.getByLabelText('Back to Models')).toBeTruthy();

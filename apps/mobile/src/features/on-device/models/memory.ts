@@ -45,6 +45,17 @@ function validMemory(memory: DeviceMemory): boolean {
   );
 }
 
+const GIB = 1024 ** 3;
+
+/**
+ * The advertised RAM class of a device. iOS reports physical memory below the marketed size
+ * (GPU and system carve-outs), so an "8 GB" iPhone never reports a full 8 GiB; the catalog's
+ * `minimumDeviceBytes` floors are marketed sizes.
+ */
+function advertisedMemoryBytes(physicalBytes: number): number {
+  return Math.ceil(physicalBytes / GIB) * GIB;
+}
+
 export function modelMemoryAdmission(
   model: LocalModelDefinition,
   memory: DeviceMemory,
@@ -60,7 +71,10 @@ export function modelMemoryAdmission(
       message: 'iOS memory headroom is unavailable. Close other apps and refresh before loading.',
     };
   }
-  if (memory.physicalBytes < model.minimumDeviceBytes || memory.physicalBytes < requiredBytes) {
+  if (
+    advertisedMemoryBytes(memory.physicalBytes) < model.minimumDeviceBytes ||
+    memory.physicalBytes < requiredBytes
+  ) {
     return {
       status: 'unsupported',
       requiredBytes,
