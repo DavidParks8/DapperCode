@@ -19,7 +19,7 @@ test('every catalog family has measured research guidance', () => {
 test.each([
   ['qwen35-2b-q4-k-m', 'reminder'],
   ['gemma-4-e2b-q4-0', 'reminder'],
-  ['qwen3-1.7b-q4-k-m', 'direct'],
+  ['qwen3-1.7b-q4-k-m', 'access'],
   ['bonsai-2-2b-q2-0', 'direct'],
   ['retired-model', 'reminder'],
 ] as const)('%s gets the %s research guidance', (modelId, guidance) => {
@@ -33,17 +33,28 @@ test.each([
   }
 });
 
-test('reminder guidance follows the identity, and direct guidance is the last instruction', () => {
+test('reminder and access guidance follow the identity, and direct guidance is the last instruction', () => {
+  for (const [modelId, guidance] of [
+    ['qwen35-2b-q4-k-m', 'reminder'],
+    ['qwen3-1.7b-q4-k-m', 'access'],
+  ] as const) {
+    expect(
+      localAgentSystemPrompt(modelId, today).startsWith(
+        `${identity}${LOCAL_RESEARCH_GUIDANCE[guidance].text} Use the listed`,
+      ),
+    ).toBe(true);
+  }
   expect(
-    localAgentSystemPrompt('qwen35-2b-q4-k-m', today).startsWith(
-      `${identity}${LOCAL_RESEARCH_GUIDANCE.reminder.text} Use the listed`,
-    ),
-  ).toBe(true);
-  expect(
-    localAgentSystemPrompt('qwen3-1.7b-q4-k-m', today).endsWith(
+    localAgentSystemPrompt('bonsai-2-2b-q2-0', today).endsWith(
       `tool evidence. ${LOCAL_RESEARCH_GUIDANCE.direct.text}${date}`,
     ),
   ).toBe(true);
+});
+
+test('access guidance tells the model it has tools instead of claiming it lacks access', () => {
+  expect(LOCAL_RESEARCH_GUIDANCE.access.text).toMatch(
+    /^You can read this workspace and search the web with your tools, so never tell the user you lack access; call a tool instead\./,
+  );
 });
 
 test('each guidance tells the model to check with web_search before denying something exists', () => {
