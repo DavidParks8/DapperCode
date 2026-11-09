@@ -5,6 +5,9 @@ import type {
   LocalGitPullResult,
   LocalGitStatus,
   LocalSearchResult,
+  LocalSearchOptions,
+  LocalWorkspaceQueryResult,
+  LocalPatchResult,
   LocalWorkspace,
   LocalWorkspaceSize,
 } from '../workspaces/types';
@@ -15,7 +18,7 @@ import type {
   NativeModelVerificationProgress,
 } from '../models/downloadState';
 
-export const ON_DEVICE_NATIVE_API_VERSION = 9;
+export const ON_DEVICE_NATIVE_API_VERSION = 10;
 
 /** Native event carrying throttled clone, fetch, pull, and push progress (API 8). */
 export const GIT_TRANSFER_PROGRESS_EVENT = 'onGitTransferProgress';
@@ -105,6 +108,21 @@ export interface OnDeviceNativeServices {
   /** User-initiated delete for the Files UI; no revision precondition. Cannot remove the root. */
   removeWorkspaceEntry(id: string, path: string): Promise<void>;
   searchWorkspaceFiles(id: string, query: string): Promise<LocalSearchResult>;
+  beginWorkspaceOperation(token: string): void;
+  cancelWorkspaceOperation(token: string): void;
+  finishWorkspaceOperation(token: string): void;
+  queryWorkspaceFiles(
+    id: string,
+    query: string | null,
+    options: LocalSearchOptions,
+    token: string,
+  ): Promise<LocalWorkspaceQueryResult>;
+  applyWorkspacePatch(
+    id: string,
+    patch: string,
+    revisions: Record<string, string>,
+    token: string,
+  ): Promise<LocalPatchResult>;
   getModelFilePaths(id: string): Promise<LocalModelPaths>;
   getDownloadedModelFile(id: string): Promise<LocalModelFile | null>;
   finalizeModelDownload(id: string, sha256: string, bytes: number): Promise<LocalModelFile>;

@@ -65,10 +65,39 @@ export const FILE_TOOL_DEFINITIONS = [
   ),
   definition(
     'search_files',
-    'Find literal single-line text. Results report truncation, excluded files, and resource budgets.',
-    { query: { type: 'string' } },
+    'Search UTF-8 lines (literal by default). regex enables ICU regex with a time budget. path scopes a directory; include is a root-relative glob (*, **, ?); file_type is an extension without a dot. case_sensitive defaults true. offset/limit page matching lines (default 20, max 100). Results include line numbers, clipped previews, exclusions, budgets and truncation.',
+    {
+      query: { type: 'string' },
+      path,
+      include: path,
+      file_type: path,
+      regex: { type: 'boolean' },
+      case_sensitive: { type: 'boolean' },
+      offset: { type: 'integer' },
+      limit: { type: 'integer' },
+    },
     ['query'],
     { kind: 'search', approval: null },
+  ),
+  definition(
+    'glob_files',
+    'Discover files by root-relative glob (*, **, ?). pattern defaults to **/* (all files). path scopes a directory; file_type filters extension. offset/limit page results (offset max 10000; limit default 20, max 100). Git-ignored files and links are excluded. Results report budgets and truncation; only nextOffset permits paging.',
+    {
+      pattern: path,
+      path,
+      file_type: path,
+      offset: { type: 'integer' },
+      limit: { type: 'integer' },
+    },
+    [],
+    { kind: 'search', approval: null },
+  ),
+  definition(
+    'apply_patch',
+    'Coordinated UTF-8 add/update/delete/move, max 32 files and 4 MiB patch. Read every existing source in this turn first; revisions come from the runtime, never the model. Format: *** Begin Patch; *** Add File: path then +lines; *** Update File: path optionally *** Move to: destination then standard @@ -old,count +new,count @@ hunks with space context, -removed, +added lines; *** Delete File: path; *** End Patch. Use \\ No newline at end of file after a line lacking a newline. All paths/hunks/revisions validate before publication. Destinations must not exist; duplicate/ancestor paths reject.',
+    { patch: { type: 'string' } },
+    ['patch'],
+    { kind: 'edit', approval: null },
   ),
 ];
 

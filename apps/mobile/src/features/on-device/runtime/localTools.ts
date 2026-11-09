@@ -42,6 +42,20 @@ function forgetPathVersions(versions: Map<string, string>, path: string): void {
   }
 }
 
+function observePatchVersions(result: unknown, versions: Map<string, string> | undefined): void {
+  if (!versions || !isRecord(result) || !Array.isArray(result['files'])) {
+    return;
+  }
+  for (const file of result['files']) {
+    if (isRecord(file) && typeof file['path'] === 'string') {
+      forgetPathVersions(versions, file['path']);
+      if (typeof file['revision'] === 'string') {
+        versions.set(file['path'], file['revision']);
+      }
+    }
+  }
+}
+
 /**
  * Small local models otherwise treat an empty workspace search as proof that something is absent.
  * It deliberately does not say to search the web: that made models send this project's own symbols
@@ -51,7 +65,10 @@ export const EMPTY_WORKSPACE_SEARCH_NOTE =
   'No workspace matches. That only means this workspace does not mention it, not that it does not exist.';
 
 function withEmptySearchNote(result: unknown): unknown {
-  return isRecord(result) && Array.isArray(result['matches']) && result['matches'].length === 0
+  return isRecord(result) &&
+    result['truncated'] !== true &&
+    Array.isArray(result['matches']) &&
+    result['matches'].length === 0
     ? { ...result, note: EMPTY_WORKSPACE_SEARCH_NOTE }
     : result;
 }
@@ -91,31 +108,36 @@ export function localToolExecutor(
       const args = isRecord(input) ? input : null;
       const path = typeof args?.['path'] === 'string' ? args['path'] : null;
       const revision = path === null ? undefined : versions?.get(path);
-      return executeFileTool(workspace, name, input, native, revision).then((result) => {
-        if (name === 'search_files') {
-          return withEmptySearchNote(result);
-        }
-        if (!versions || path === null) {
-          return result;
-        }
-        if (isRecord(result) && typeof result['revision'] === 'string') {
-          versions.set(path, result['revision']);
-        }
-        if (name === 'rename_path' || name === 'delete_path') {
-          const destination =
-            name === 'rename_path' && typeof args?.['destination'] === 'string'
-              ? args['destination']
-              : null;
-          forgetPathVersions(versions, path);
-          if (destination !== null) {
-            forgetPathVersions(versions, destination);
-            if (revision !== undefined) {
-              versions.set(destination, revision);
+      return executeFileTool(workspace, name, input, native, revision, versions, signal).then(
+        (result) => {
+          if (name === 'apply_patch') {
+            observePatchVersions(result, versions);
+          }
+          if (name === 'search_files') {
+            return withEmptySearchNote(result);
+          }
+          if (!versions || path === null) {
+            return result;
+          }
+          if (isRecord(result) && typeof result['revision'] === 'string') {
+            versions.set(path, result['revision']);
+          }
+          if (name === 'rename_path' || name === 'delete_path') {
+            const destination =
+              name === 'rename_path' && typeof args?.['destination'] === 'string'
+                ? args['destination']
+                : null;
+            forgetPathVersions(versions, path);
+            if (destination !== null) {
+              forgetPathVersions(versions, destination);
+              if (revision !== undefined) {
+                versions.set(destination, revision);
+              }
             }
           }
-        }
-        return result;
-      });
+          return result;
+        },
+      );
     }
     if (isGitTool(name)) {
       return executeGitTool(workspace, name, input, native, author, credential);

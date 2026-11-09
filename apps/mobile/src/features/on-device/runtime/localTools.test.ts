@@ -79,8 +79,48 @@ function harness() {
     () => undefined,
   );
   const signal = new AbortController().signal;
-  return { execute, signal, read, edit, rename, remove, write };
+  return { execute, signal, read, edit, rename, remove, write, native };
 }
+
+test('apply_patch uses only turn-scoped observations and advances all changed path versions', async () => {
+  const h = harness();
+  const patch = jest.spyOn(h.native, 'applyWorkspacePatch').mockResolvedValue({
+    files: [
+      { path: 'source.txt', revision: null },
+      { path: 'moved.txt', revision: editedRevision },
+      { path: 'added.txt', revision: firstRevision },
+    ],
+  });
+  await h.execute('one', 'read_file', { path: 'source.txt' }, h.signal);
+  const input = '*** Begin Patch\n*** Delete File: source.txt\n*** End Patch';
+  await h.execute('two', 'apply_patch', { patch: input }, h.signal);
+  expect(patch).toHaveBeenLastCalledWith('two', input, {}, expect.any(String));
+  await h.execute('one', 'apply_patch', { patch: input }, h.signal);
+  expect(patch).toHaveBeenLastCalledWith(
+    'one',
+    input,
+    { 'source.txt': firstRevision },
+    expect.any(String),
+  );
+  await h.execute('one', 'delete_path', { path: 'moved.txt' }, h.signal);
+  expect(h.remove).toHaveBeenLastCalledWith('one', 'moved.txt', editedRevision);
+  await h.execute('one', 'write_file', { path: 'source.txt', content: 'new' }, h.signal);
+  expect(h.write).toHaveBeenLastCalledWith('one', 'source.txt', 'new', null);
+});
+
+test('failed patches do not change observed versions or silently reread sources', async () => {
+  const h = harness();
+  jest
+    .spyOn(h.native, 'applyWorkspacePatch')
+    .mockRejectedValue(new OnDeviceNativeError('FILE_REVISION_CONFLICT', 'Source changed.'));
+  await h.execute('one', 'read_file', { path: 'source.txt' }, h.signal);
+  await expect(h.execute('one', 'apply_patch', { patch: 'patch' }, h.signal)).rejects.toMatchObject(
+    { code: 'FILE_REVISION_CONFLICT' },
+  );
+  await h.execute('one', 'delete_path', { path: 'source.txt' }, h.signal);
+  expect(h.remove).toHaveBeenLastCalledWith('one', 'source.txt', firstRevision);
+  expect(h.read).toHaveBeenCalledTimes(1);
+});
 
 test('one turn reads, edits, renames and deletes with trusted latest revisions, not copied hashes', async () => {
   const h = harness();
@@ -224,4 +264,23 @@ test('directory renames invalidate observed child paths instead of reusing stale
   ).rejects.toThrow('revision');
   expect(h.edit).not.toHaveBeenCalled();
   expect(h.rename).toHaveBeenCalledWith('workspace', 'folder', 'moved', null);
+});
+
+test('an incomplete empty search is never described as no workspace matches', async () => {
+  const h = harness();
+  const result = {
+    matches: [],
+    files: [],
+    reason: 'bytes' as const,
+    nextOffset: null,
+    truncated: true,
+    skippedFiles: 3,
+    excludedEntries: 4,
+    visitedEntries: 300,
+    searchedBytes: 16 * 1024 * 1024,
+  };
+  jest.spyOn(h.native, 'queryWorkspaceFiles').mockResolvedValue(result);
+  await expect(h.execute('workspace', 'search_files', { query: 'x' }, h.signal)).resolves.toEqual(
+    result,
+  );
 });

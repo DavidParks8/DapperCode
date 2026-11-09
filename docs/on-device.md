@@ -57,6 +57,63 @@ local or desktop, is restored at startup. Builds that stored the old global "On 
 open the local profile instead. Switching to another profile settles local work and unloads its
 model.
 
+## Workspace search and coordinated patches
+
+The local model can call `glob_files` for file discovery and `search_files` for UTF-8 line
+search. Both accept a directory `path`, root-relative glob (`pattern` / `include`), `file_type`
+extension, and `offset` / `limit` (offset maximum 10,000; limit 20 by default, maximum 100). Globs support `*`, `**`, and `?`;
+other characters are literal. Search defaults to literal, case-sensitive text; `regex: true`
+uses ICU regex and `case_sensitive: false` ignores case. Matches include one-based line numbers
+and UTF-8-safe 512-byte previews with `previewTruncated`.
+
+Native scans never follow symbolic or hard links, never inspect `.git`, and honor libgit2's
+nested `.gitignore`, negation and `info/exclude` rules in Git workspaces. Non-Git workspaces
+have no Git ignore evaluation. A scan visits at most 2,000 entries, reads at most 16 MiB
+(1 MiB per file), and runs for at most two seconds with cooperative checkpoints. Pattern
+matching for regex/globs has a separate 25 ms progress-callback deadline per line/path.
+Invalid patterns, pathological regex and cancellation fail explicitly. Results report budgets,
+visited entries, searched bytes, skipped non-text/oversized/linked files, excluded entries/subtrees,
+and a truncation `reason`. Only a non-null `nextOffset` permits paging; an entry/byte/time-limited
+scan is incomplete, not evidence that remaining files contain no matches. Pages rescan sorted
+paths, so restart paging if files change.
+
+`apply_patch` coordinates up to 32 add/update/delete/move operations (4 MiB patch input,
+4 MiB per file, 16 MiB combined old/new data, 100,000 lines per patch/source, 4,096 hunks per
+update). Read every existing source in the current turn
+first; the runtime supplies those observed revisions, never model-provided hashes. New and moved
+destinations must be absent. Paths, exact byte context, numbered hunk counts, all revisions,
+duplicate/case-colliding paths and ancestor collisions validate before publication:
+
+```diff
+*** Begin Patch
+*** Add File: src/new.txt
++hello
+*** Update File: src/old.txt
+*** Move to: src/renamed.txt
+@@ -1,2 +1,2 @@
+ unchanged context
+-old
++new
+*** Delete File: obsolete.txt
+*** End Patch
+```
+
+Hunks use standard `@@ -oldStart,oldCount +newStart,newCount @@` headers (omitted count means
+one, zero counts permit insertion/deletion). Prefix context with a space, removal with `-`,
+addition with `+`; `\ No newline at end of file` marks the immediately preceding line.
+A move without hunks preserves bytes. Existing single-file tools remain available unchanged.
+
+The workspace actor serializes app operations. Descriptor-relative, no-follow access and exclusive
+renames prevent link traversal and overwriting a newly appeared destination. Originals are claimed
+and rechecked before any new contents publish; ordinary failures roll back prior publications.
+This is **not** an OS-wide atomic multi-file snapshot or a crash-atomic transaction: outside readers
+can observe intermediate names. Non-cooperating external writers can prevent rollback; the tool
+then fails with `PATCH_RECOVERY_REQUIRED` and retains originals plus a path manifest in the workspace
+container's `.patch-*` directory, outside the repository. Never delete that recovery directory
+until its originals have been reconciled. A process interruption can leave the same recovery data.
+Cancellation is honored through validation/source claiming; once publication starts it finishes
+or rolls back rather than abandoning half a patch. Rebuild iOS for native ABI 10.
+
 ## Web access
 
 Every local chat includes `web_search` and `web_fetch` by default, alongside the file and Git tools.

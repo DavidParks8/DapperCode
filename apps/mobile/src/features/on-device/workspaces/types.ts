@@ -47,11 +47,40 @@ export interface LocalDirectoryListing {
 }
 
 export interface LocalSearchResult {
-  matches: { path: string; line: number; content: string }[];
+  matches: { path: string; line: number; content: string; previewTruncated?: boolean }[];
   truncated: boolean;
   skippedFiles: number;
   visitedEntries: number;
   searchedBytes: number;
+}
+
+export interface LocalSearchOptions {
+  path: string;
+  include: string;
+  fileType: string;
+  regex: boolean;
+  caseSensitive: boolean;
+  offset: number;
+  limit: number;
+}
+
+export interface LocalWorkspaceQueryResult extends LocalSearchResult {
+  files: string[];
+  nextOffset: number | null;
+  excludedEntries: number;
+  reason: 'complete' | 'results' | 'entries' | 'bytes' | 'time';
+  budgets?: {
+    entries: number;
+    bytes: number;
+    fileBytes: number;
+    milliseconds: number;
+    patternMilliseconds: number;
+    previewBytes: number;
+  };
+}
+
+export interface LocalPatchResult {
+  files: { path: string; revision: string | null }[];
 }
 
 /** Bridge-compatible Git status plus the remote state the local Git UI needs. */
