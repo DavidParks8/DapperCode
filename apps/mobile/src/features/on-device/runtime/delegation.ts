@@ -2,6 +2,7 @@ import { randomUUID } from 'expo-crypto';
 import { argumentsRecord, integer, text } from './toolArguments';
 import { toolDefinition } from './toolDefinition';
 import type { LocalChild, LocalMessage, LocalThread } from './types';
+import type { LocalRunSnapshot } from './types';
 import type { LocalAgentRun, LocalToolApprovalPolicy, LocalToolCall } from './types';
 import type { LocalThreadRepository } from './threads';
 import type { ChatActivityContent } from '@bridge/types/types';
@@ -20,6 +21,7 @@ export const PARALLEL_READ_TOOLS = new Set([
   'read_file',
   'list_directory',
   'search_files',
+  'glob_files',
   'git_status',
   'git_diff',
   'git_history',
@@ -39,6 +41,64 @@ export const EXPLORE_TOOLS = new Set([
   'ask_user',
   'todo_write',
 ]);
+
+export function localChildInteractions(
+  snapshots: readonly LocalRunSnapshot[],
+  previous: LocalRunSnapshot,
+) {
+  const approvals = snapshots.flatMap((snapshot) => (snapshot.approval ? [snapshot.approval] : []));
+  const questions = snapshots.flatMap((snapshot) =>
+    snapshot.userInput ? [snapshot.userInput] : [],
+  );
+  return {
+    approval:
+      approvals.find((pending) => pending.callId === previous.approval?.callId) ?? approvals[0],
+    userInput:
+      questions.find((pending) => pending.requestId === previous.userInput?.requestId) ??
+      questions[0],
+  };
+}
+
+function keepVisibleApproval(
+  approval: NonNullable<LocalRunSnapshot['approval']>,
+  previous: LocalRunSnapshot,
+): boolean {
+  return previous.approval?.callId === approval.callId && !previous.userInput;
+}
+
+export function localRunSnapshot(
+  run: LocalAgentRun,
+  phase: LocalRunSnapshot['phase'],
+  toolName: string | null,
+  approval: LocalRunSnapshot['approval'],
+  previous: LocalRunSnapshot,
+  children: readonly LocalRunSnapshot[],
+): LocalRunSnapshot {
+  let userInput = !run.stopped ? (run.input?.request ?? null) : null;
+  if (!run.stopped && !approval) {
+    const selected = localChildInteractions(children, previous);
+    if (selected.approval) {
+      approval = { ...selected.approval, threadId: run.threadId, turnId: run.turnId };
+      phase = 'approval';
+      toolName = selected.approval.toolName;
+    }
+    if (!userInput && selected.userInput) {
+      userInput = { ...selected.userInput, threadId: run.threadId, turnId: run.turnId };
+    }
+  }
+  if (userInput && approval) {
+    if (keepVisibleApproval(approval, previous)) {
+      userInput = null;
+    } else {
+      approval = null;
+    }
+  }
+  if (userInput) {
+    phase = 'input';
+    toolName = 'ask_user';
+  }
+  return { phase, threadId: run.threadId, turnId: run.turnId, toolName, approval, userInput };
+}
 
 export function parallelLocalReads(
   calls: LocalToolCall[],
@@ -94,10 +154,7 @@ export function readChild(thread: LocalThread, input: unknown): object {
   const args = argumentsRecord(input, ['child_id', 'offset', 'limit']);
   const id = text(args, 'child_id', 36);
   const child = childEntries(thread).find(
-    (entry) =>
-      entry.id === id &&
-      entry.workspaceId === thread.workspaceId &&
-      entry.modelId === thread.modelId,
+    (entry) => entry.id === id && entry.workspaceId === thread.workspaceId,
   );
   if (!child) {
     throw new Error('This child ID is unavailable in this conversation or workspace.');

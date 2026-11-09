@@ -1735,6 +1735,30 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     const { tree, root, runtime, thread } = await renderTransitionChat();
     await submit(root, `An older large note: ${'x'.repeat(70_000)}`);
     const history = structuredClone(runtime.threads.get(thread.id).messages);
+    let summaries = 0;
+    const originalLoader = mockLlama.loader;
+    const loader = jest.spyOn(mockLlama, 'loader').mockImplementation(async (...args) => {
+      const context = await originalLoader(...args);
+      const completion = context.completion;
+      context.completion = async (params, update) => {
+        if (params.prompt?.includes('Maintain a concise rolling memory')) {
+          summaries += 1;
+          return {
+            content:
+              'Prior large note retained. Pending: read seed.txt. No tools have been replayed.',
+            reasoning_content: '',
+            tool_calls: [],
+            interrupted: false,
+            truncated: false,
+            stopped_limit: 0,
+            tokens_predicted: 20,
+            tokens_evaluated: 100,
+          };
+        }
+        return completion(params, update);
+      };
+      return context;
+    });
     mockNative.memory.availableBytes = modelMemoryBytes(localModelDefinition(TRANSITION_B));
     await press(root, 'Model, Bonsai 2 2B Q2_0');
     await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
@@ -1745,6 +1769,10 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     await submit(root, 'Read seed.txt using the smaller B context.');
     expect(mockLlama.executions.at(-1)).toBe(TRANSITION_B);
     expect(runtime.threads.get(thread.id).status).toBe('complete');
+    expect(summaries).toBeGreaterThan(1);
+    expect(runtime.threads.get(thread.id).contextSummary?.content).toContain(
+      'Pending: read seed.txt',
+    );
     expect(runtime.threads.get(thread.id).messages.slice(0, history.length)).toEqual(history);
     expect(runtime.threads.get(thread.id).messages.at(-1)?.content).toBe('B read alpha.');
     expect(runtime.models.snapshot().contextTokens).toBe(
@@ -1756,6 +1784,7 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     expect(labeled(root, 'Stop agent')).toBeUndefined();
     expect(composerText(root)).toBe('');
     act(() => tree.unmount());
+    loader.mockRestore();
   });
 
   it('excludes a lazy B Send from manual Files Save in both operation orders without replaying the save', async () => {

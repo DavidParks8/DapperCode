@@ -39,9 +39,10 @@ struct NativeSearchMatch: Sendable {
   let path: String
   let line: Int
   let content: String
+  var previewTruncated = false
 
   var payload: [String: Any] {
-    ["path": path, "line": line, "content": content]
+    ["path": path, "line": line, "content": content, "previewTruncated": previewTruncated]
   }
 }
 
@@ -301,7 +302,9 @@ extension WorkspaceStore {
         lineNumber += 1
         if line.range(of: query, options: .literal) != nil {
           matches.append(
-            NativeSearchMatch(path: relative, line: lineNumber, content: Self.clippedLine(line)))
+            NativeSearchMatch(
+              path: relative, line: lineNumber, content: Self.clippedLine(line),
+              previewTruncated: line.utf8.count > 512))
           if matches.count == 20 {
             reachedLimit = true
             stop = true
@@ -339,11 +342,11 @@ extension WorkspaceStore {
     return try Data(contentsOf: url)
   }
 
-  private func digest(_ data: Data) -> String {
+  func digest(_ data: Data) -> String {
     SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
   }
 
-  private static func clippedLine(_ line: String) -> String {
+  static func clippedLine(_ line: String) -> String {
     var bytes = Array(line.utf8.prefix(512))
     while String(bytes: bytes, encoding: .utf8) == nil, !bytes.isEmpty {
       bytes.removeLast()

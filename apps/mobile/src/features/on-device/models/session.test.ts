@@ -744,12 +744,32 @@ test('a newer load request supersedes an in-flight one instead of failing as bus
   expect(h.session.snapshot()).toMatchObject({ phase: 'ready', modelId: medium.id });
 });
 
+test('summary chunk candidates never split a Unicode code point', async () => {
+  const h = await summaryHarness();
+  h.transcript[2]!.content = JSON.stringify({ content: '🦙'.repeat(15000) });
+  h.initial.getFormattedChat.mockImplementation(async (chat) => {
+    for (const message of chat) {
+      if (typeof message.content !== 'string') {
+        throw new Error('Local summary candidates must contain text only.');
+      }
+      expect(
+        [...message.content].every((character) => {
+          const point = character.codePointAt(0) ?? 0;
+          return point < 0xd800 || point > 0xdfff;
+        }),
+      ).toBe(true);
+    }
+    return { ...formatted, prompt: JSON.stringify(chat) };
+  });
+  await h.session.generate(h.transcript, [], jest.fn(), { checkpoint: h.checkpoint });
+  expect(h.checkpoint.commit).toHaveBeenCalledTimes(1);
+});
+
 async function summaryHarness(transcriptCharacters = 5000) {
   const h = harness();
   await h.session.load(small.id);
   const contextTokens = h.session.snapshot().contextTokens!;
   const threshold = contextTokens - 2 * outputReserveTokens(contextTokens) - CONTEXT_SAFETY_TOKENS;
-  let committed = false;
   h.initial.getFormattedChat.mockImplementation(async (chat) => ({
     ...formatted,
     prompt: JSON.stringify(chat),
@@ -758,7 +778,7 @@ async function summaryHarness(transcriptCharacters = 5000) {
     tokens: new Array<number>(
       text.includes('Maintain a concise rolling memory')
         ? Math.ceil(text.length / 2)
-        : committed
+        : text.includes('Memory: ')
           ? 100
           : threshold + 1,
     ).fill(1),
@@ -766,13 +786,16 @@ async function summaryHarness(transcriptCharacters = 5000) {
   const checkpoint = {
     previous: 'Earlier decision: preserve user files.',
     started: jest.fn(),
-    commit: jest.fn((content: string) => {
-      committed = true;
-      return Promise.resolve([
-        { role: 'system' as const, content: `Memory: ${content}` },
-        { role: 'user' as const, content: 'Current user request must survive verbatim.' },
-      ]);
-    }),
+    commit: jest.fn(
+      async (content: string, validate: (messages: LocalModelMessage[]) => Promise<void>) => {
+        const messages: LocalModelMessage[] = [
+          { role: 'system' as const, content: `Memory: ${content}` },
+          { role: 'user' as const, content: 'Current user request must survive verbatim.' },
+        ];
+        await validate(messages);
+        return messages;
+      },
+    ),
   };
   h.initial.completion.mockResolvedValue({
     ...reply,

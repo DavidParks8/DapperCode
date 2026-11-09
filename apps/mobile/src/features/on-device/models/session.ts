@@ -45,8 +45,11 @@ export interface LocalModelUpdate {
 export interface LocalSummaryCheckpoint {
   previous: string | null;
   started(): void;
-  /** Persists a complete semantic summary before returning the new prompt. */
-  commit(content: string): Promise<LocalModelMessage[]>;
+  /** Validates the proposed prompt before persisting complete semantic memory. */
+  commit(
+    content: string,
+    validate: (messages: LocalModelMessage[]) => Promise<void>,
+  ): Promise<LocalModelMessage[]>;
 }
 
 export interface LocalGenerationOptions {
@@ -82,9 +85,7 @@ export class LocalModelInterrupted extends Error {
 
 export class LocalContextFull extends Error {
   constructor() {
-    super(
-      'This turn no longer fits in the local context window, even after omitting earlier turns and tool output. Start a new conversation or ask for a smaller step.',
-    );
+    super('The request exceeds local context. History is preserved; ask for a smaller step.');
     this.name = 'LocalContextFull';
   }
 }
@@ -412,12 +413,17 @@ export class LocalModelSession {
       checkpoint.started();
       const summary = await this.summarize(generation, messages.slice(1), checkpoint.previous);
       this.checkGeneration(generation);
-      const compacted = await checkpoint.commit(summary);
+      let prepared: PreparedPrompt | undefined;
+      await checkpoint.commit(summary, async (compacted) => {
+        prepared = await this.formatPrompt(generation, compacted, tools);
+        this.checkGeneration(generation);
+        if (!promptFits(prepared.tokens, contextTokens)) {
+          throw new LocalContextFull();
+        }
+      });
       this.checkGeneration(generation);
-      const prepared = await this.formatPrompt(generation, compacted, tools);
-      if (!promptFits(prepared.tokens, contextTokens)) {
-        // Never silently discard evidence or the current request after semantic compaction.
-        throw new LocalContextFull();
+      if (!prepared) {
+        throw new Error('The summary checkpoint did not validate its compacted prompt.');
       }
       return prepared;
     }

@@ -23,7 +23,14 @@ assert.equal(sandbox.module.exports.default.sys, undefined);
 assert.equal(typeof sandbox.module.exports.default.createLanguageService, 'function');
 
 const bundle = buildSync({
-  entryPoints: [path.join(root, 'src/features/on-device/code-intelligence/tools.ts')],
+  stdin: {
+    contents:
+      'export {executeCodeTool} from "./tools"; export {formatAfterFileEdit} from "./formatAfterFileEdit";',
+    resolveDir: path.join(root, 'src/features/on-device/code-intelligence'),
+    sourcefile: 'local-code-tools-check.ts',
+    loader: 'ts',
+  },
+  tsconfig: path.join(root, 'tsconfig.json'),
   bundle: true,
   platform: 'browser',
   format: 'cjs',
@@ -95,6 +102,21 @@ void (async () => {
   const json = await execute('isolated', 'format_file', { path: 'data.json' }, native);
   assert.equal(json.changed, true);
   assert.equal(writes, 3);
+  files.set('automatic.ts', 'const n:number=1');
+  const automatic = await sandbox.module.exports.formatAfterFileEdit(native, 'isolated', {
+    path: 'automatic.ts',
+    revision: files.get('automatic.ts'),
+  });
+  assert.equal(automatic.formatting.status, 'formatted');
+  assert.equal(files.get('automatic.ts'), 'const n: number = 1;\n');
+  files.set('broken.ts', 'const = ;');
+  const failed = await sandbox.module.exports.formatAfterFileEdit(native, 'isolated', {
+    path: 'broken.ts',
+    revision: files.get('broken.ts'),
+  });
+  assert.equal(failed.formatting.code, 'CODE_FORMAT_PARSE');
+  assert.equal(files.get('broken.ts'), 'const = ;');
+  assert.equal(writes, 4);
   console.log(
     'PASS: real compiler + Prettier in browser sandbox; no Node runtime, dynamic code generation, network, or filesystem.',
   );

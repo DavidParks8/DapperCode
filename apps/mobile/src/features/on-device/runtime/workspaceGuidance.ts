@@ -4,6 +4,7 @@ import { LocalModelInterrupted } from '../models/session';
 import { isOnDeviceNativeError } from '../native/services.errors';
 import type { OnDeviceNativeServices } from '../native/services.types';
 import { joinWorkspacePath, parentWorkspacePath } from '../workspaces/types';
+import { workspacePatchPaths } from '../workspaces/fileTools';
 import { argumentsRecord, LocalToolInputError, text } from './toolArguments';
 import { toolDefinition } from './toolDefinition';
 import { utf8Bytes } from './threadJournal';
@@ -94,10 +95,14 @@ export function guidanceDirectories(
     if (name === 'rename_path' && typeof input['destination'] === 'string') {
       paths.push(parentWorkspacePath(safePath(input['destination'])));
     }
-  } else if (name === 'list_directory') {
+  } else if (['list_directory', 'search_files', 'glob_files'].includes(name)) {
     paths.push(safePath(typeof input['path'] === 'string' ? input['path'] : '', true));
-  } else if (name === 'skill' && typeof input['id'] === 'string') {
-    paths.push(safePath(input['id']));
+  } else if (name === 'apply_patch') {
+    for (const path of workspacePatchPaths(text(input, 'patch', 4 * 1024 * 1024))) {
+      paths.push(parentWorkspacePath(safePath(path)));
+    }
+  } else if (name === 'skill') {
+    paths.push(safePath(text(input, 'id')));
   }
   for (const path of paths) {
     const parts = path ? path.split('/') : [];

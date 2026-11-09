@@ -4,7 +4,7 @@ import type { LocalModelMessage } from '../models/engine';
 import { loadNativeModelContext } from '../models/engine';
 import { LocalModelSession } from '../models/session';
 import { LocalAgentLoop, type LocalRunSnapshot } from './agentLoop';
-import { childEntries, childThreadPort, CHILD_ROUNDS } from './delegation';
+import { childEntries, childThreadPort, readChild, CHILD_ROUNDS } from './delegation';
 import { LOCAL_TOOL_DEFINITIONS, localToolApproval, localToolExecutor } from './localTools';
 import { LocalThreadRepository } from './threads';
 import {
@@ -207,14 +207,14 @@ test('child summary checkpoints survive parent reload and resume without inherit
     port,
     childId,
     'pending',
-    'child system',
+    (memory) => 'child system' + memory,
     () => undefined,
     () => undefined,
   );
   if (!context.options.checkpoint) {
     throw new Error('Child summary checkpoint is required.');
   }
-  await context.options.checkpoint.commit('CHILD-ONLY-MEMORY');
+  await context.options.checkpoint.commit('CHILD-ONLY-MEMORY', async () => undefined);
   await h.threads.flush();
   const reloaded = new LocalThreadRepository(h.native, jest.fn(), 0);
   await reloaded.initialize();
@@ -321,6 +321,60 @@ test('parallel children queue real user questions, preserve the visible request 
       (child) => child.tasks?.[0]?.status === 'completed',
     ),
   ).toBe(true);
+  await h.close();
+});
+
+test('a child question and sibling approval expose only one interaction until it settles', async () => {
+  const h = await harness((messages) => {
+    const request = user(messages);
+    const turn = messages.slice(messages.map((message) => message.role).lastIndexOf('user'));
+    if (request === 'parent private request') {
+      return results(turn).length
+        ? { content: 'Parent complete.' }
+        : tasks(['question', 'network']);
+    }
+    if (results(turn).length) {
+      return { content: 'Child complete.' };
+    }
+    return request === 'network'
+      ? tool('web_fetch', { url: 'https://example.com/' })
+      : tool('ask_user', {
+          questions: [
+            {
+              id: 'pick',
+              header: 'Choice',
+              question: 'Choose',
+              options: [{ value: 'yes', label: 'Yes' }],
+            },
+          ],
+        });
+  });
+  const pending = h.start();
+  await until(
+    () =>
+      childEntries(h.current()).length === 2 &&
+      childEntries(h.current()).every((child) =>
+        child.messages.some(
+          (message) => message.tool?.name === 'ask_user' || message.tool?.name === 'web_fetch',
+        ),
+      ),
+  );
+  const first = h.loop.snapshot();
+  expect(Number(Boolean(first.userInput)) + Number(Boolean(first.approval))).toBe(1);
+  if (first.userInput) {
+    h.loop.resolveUserInput(first.userInput.requestId, { answers: { pick: 'yes' } });
+    await until(() => Boolean(h.loop.snapshot().approval));
+    expect(h.loop.snapshot().userInput).toBeFalsy();
+    h.loop.resolveApproval(h.loop.snapshot().approval!.callId, false);
+  } else {
+    h.loop.resolveApproval(first.approval!.callId, false);
+    await until(() => Boolean(h.loop.snapshot().userInput));
+    expect(h.loop.snapshot().approval).toBeNull();
+    h.loop.resolveUserInput(h.loop.snapshot().userInput!.requestId, { answers: { pick: 'yes' } });
+  }
+  await pending;
+  expect(h.loop.snapshot().phase).toBe('idle');
+  expect(childEntries(h.current()).every((child) => child.status === 'complete')).toBe(true);
   await h.close();
 });
 
@@ -965,6 +1019,11 @@ test('read_child retrieves paged saved evidence but rejects stale IDs after work
   }
   const fullResult = JSON.parse(stored) as { content: string };
   expect(fullResult.content).toContain(answer);
+  const historical = readChild(
+    { ...h.current(), modelId: 'another-model' },
+    { child_id: childId, limit: 8192 },
+  );
+  expect(historical).toHaveProperty('content', expect.stringContaining(answer));
   h.threads.change(h.thread.id, (thread) => ({ ...thread, workspaceId: 'other-workspace' }));
   await h.loop.send(h.thread.id, 'retrieve forbidden evidence', randomUUID());
   const latest = h

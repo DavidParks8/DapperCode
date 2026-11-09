@@ -119,20 +119,42 @@ Workspace `tsconfig.json`, package metadata, installed package types, automatic 
 and Node/DOM/React ambient types are **not loaded**. Unresolved imports/types appear as diagnostics;
 an empty diagnostic list is not proof that the project's normal build or tests pass.
 
-Call `format_file` explicitly after edits (including patches) to format **one** file. It uses
-bundled Prettier 3 standalone with its TypeScript/Babel/ESTree plugins for the source extensions
-above and a distinct JSON parser for `.json`. No workspace configuration, plugins, or embedded
-language formatting are executed. This is intentionally not an automatic write/patch hook.
-Other languages reject explicitly. Syntax errors reject without writes; already-formatted files
-are not rewritten. Formatting uses the read revision for native compare-and-swap and, within a
-turn, also checks the runtime's previously observed revision. Conflicts require a fresh read;
-formatting never silently retries over a user's concurrent edit.
+Successful `write_file` and `edit_file` calls **automatically format** the source extensions above
+and `.json`; `apply_patch` does the same for each applicable changed destination.
+The shared `formatAfterFileEdit(native, workspace, {path, revision}, signal?)` hook uses the
+successful native mutation's revision, only touches that file, and returns the latest post-format
+revision. Patch formatting happens after the coordinated native transaction: formatting errors
+do not roll back the applied patch, and each affected file reports its formatting status.
+Rename/delete/read calls do not trigger formatting.
+`format_file` remains available to explicitly format an existing file.
+When formatting changes content, the result asks the model to re-read before another exact-text
+edit or patch rather than assuming its unformatted input still matches the file.
+
+Formatting uses bundled Prettier 3 standalone with its TypeScript/Babel/ESTree plugins and a distinct
+JSON parser. No workspace configuration, plugins, or embedded language formatting are executed.
+Already-formatted files are not rewritten. Each successful edit returns `formatting.status`:
+`formatted`, `unchanged`, `unsupported`, `failed`, or `cancelled`. Unsupported languages keep the
+successful edit and report that formatting was skipped. Parse/budget/native formatting failures
+include bounded code/message data (parse failures also include source location); they do **not**
+pretend that the preceding edit failed or erase it. The edit's revision remains observed so a
+subsequent repair can be checked safely. A failed original mutation propagates unchanged and never
+invokes the formatter. Explicit formatting rejects unsupported languages and syntax errors without
+writes. Only genuine Prettier `SyntaxError`s with source locations become parse errors; unexpected
+runtime/initialization exceptions retain their identity/message for explicit calls and are reported
+separately after successful edits. Conflicts require a fresh read; formatting never silently retries
+over a user's concurrent edit.
 
 Source limits are 64 KiB per UTF-8 file, 64 source files/512 KiB total, 512 visited directory
 entries, 12 directory levels, and 256-character relative paths. Symbolic links are never followed;
 `.git`, `node_modules`, `.expo`, `dist`, `build`, and `Pods` directories are excluded. Exceeding a
 project budget is an error, not a misleading partial-project success. Results are capped at 40
 entries/8,192 serialized characters with `truncated`; diagnostic messages are individually bounded.
+
+Production native APIs accept directory limits `1...1000` and read limits `1...65536`; code tools
+use 512/65536 directly, within those limits. The lower 200/16384 values belong to model file-tool
+schemas, not the native APIs. Strict native-port fixtures and the native simulator gate cover this
+distinction rather than relying on unconstrained mocks.
+
 Formatting also caps output at 64 KiB UTF-8, so a successful format stays within the next read's
 budget. A five-second **cooperative** deadline and the run's
 abort signal are checked between native calls and compiler checkpoints. Stop/background cancellation
@@ -148,7 +170,7 @@ memory-only language-service host. The generated compiler is about **4.04 MB of 
 before Hermes bytecode/package compression, plus Prettier and its three parser/printer plugins.
 These are real runtime dependencies, not free native OS services; they increase download size and
 first-use/transient AST memory costs. Compiler/parser modules are evaluated lazily on the first
-code-tool call. Generated code is ignored, reproduced at install/start/build/test,
+applicable edit or code-tool call. Generated code is ignored, reproduced at install/start/build/test,
 and does not replace or modify vendor files.
 
 Validation commands:
@@ -157,6 +179,9 @@ Validation commands:
 pnpm --filter @dappercode/mobile run intelligence:check
 pnpm --filter @dappercode/mobile exec jest --runInBand src/features/on-device/code-intelligence/tools.test.ts src/features/on-device/runtime/localTools.test.ts
 pnpm --filter @dappercode/mobile run build --max-workers 2
+pnpm --filter @dappercode/mobile run typecheck:native
+mkdir -p .e2e/native-code-runtime
+TMPDIR="$PWD/.e2e/native-code-runtime" node .agents/skills/local-e2e-validation/scripts/run.mjs --evidence "$PWD/.e2e/new-native-code-evidence.jsonl" apps/mobile/modules/on-device-agent/tests/native-code-intelligence.mjs
 ```
 
 The first (also run by the mobile test/coverage preflight) runs actual compiler/formatter operations
@@ -164,8 +189,10 @@ in a browser sandbox without Node globals,
 filesystem/network imports, or dynamic code generation. Native-memory regression fixtures cover
 cross-file lookup, edits and fresh diagnostics, parser errors, formatting idempotence/conflicts,
 containment, resource budgets, cancellation, and registry routing. Expo export additionally compiles
-the production iOS/Android bundles with Hermes; this is not a claim of simulator/device performance
-measurement.
+the production iOS/Android bundles with Hermes. The native gate requires the worktree-local Release
+simulator app described in the native module README; it executes the real compiler, automatic
+formatter, native containment/revisions, and native list/read bounds on an isolated simulator.
+This proves runtime compatibility, not physical-device performance or memory admission.
 
 ## Questions and persistent tasks
 
@@ -176,6 +203,7 @@ when tool approvals are disabled. **Cancel** and **Decline** return an explicit 
 let generation continue; **Stop** interrupts the turn instead. Backgrounding, leaving the local
 profile, deleting the conversation, or reloading settles pending calls without replaying them.
 Answers to an old request cannot resolve a later one.
+Choices and reply actions keep the platform's minimum touch target size.
 
 `todo_read` and `todo_write` manage up to 64 conversation-owned tasks. Each task has a stable
 alphanumeric id (hyphens/underscores allowed), nonblank text (maximum 500 characters), and
@@ -186,6 +214,63 @@ show readable task results. Completing every task does **not** finish the user's
 Tasks are acknowledged only after saving in the app-private conversation journal, never in the
 Git workspace. They survive context trimming, retry, and reload; deleting a conversation deletes
 its tasks. Persistence failures remain visible and retryable rather than being reported as success.
+
+## Workspace search and coordinated patches
+
+The local model can call `glob_files` for file discovery and `search_files` for UTF-8 line
+search. Both accept a directory `path`, root-relative glob (`pattern` / `include`), `file_type`
+extension, and `offset` / `limit` (offset maximum 10,000; limit 20 by default, maximum 100). Globs support `*`, `**`, and `?`;
+other characters are literal. Search defaults to literal, case-sensitive text; `regex: true`
+uses ICU regex and `case_sensitive: false` ignores case. Matches include one-based line numbers
+and UTF-8-safe 512-byte previews with `previewTruncated`.
+
+Native scans never follow symbolic or hard links, never inspect `.git`, and honor libgit2's
+nested `.gitignore`, negation and `info/exclude` rules in Git workspaces. Non-Git workspaces
+have no Git ignore evaluation. A scan visits at most 2,000 entries, reads at most 16 MiB
+(1 MiB per file), and runs for at most two seconds with cooperative checkpoints. Pattern
+matching for regex/globs has a separate 25 ms progress-callback deadline per line/path.
+Invalid patterns, pathological regex and cancellation fail explicitly. Results report budgets,
+visited entries, searched bytes, skipped non-text/oversized/linked files, excluded entries/subtrees,
+and a truncation `reason`. Only a non-null `nextOffset` permits paging; an entry/byte/time-limited
+scan is incomplete, not evidence that remaining files contain no matches. Pages rescan sorted
+paths, so restart paging if files change.
+
+`apply_patch` coordinates up to 32 add/update/delete/move operations (4 MiB patch input,
+4 MiB per file, 16 MiB combined old/new data, 100,000 lines per patch/source, 4,096 hunks per
+update). Read every existing source in the current turn
+first; the runtime supplies those observed revisions, never model-provided hashes. New and moved
+destinations must be absent. Paths, exact byte context, numbered hunk counts, all revisions,
+duplicate/case-colliding paths and ancestor collisions validate before publication:
+
+```diff
+*** Begin Patch
+*** Add File: src/new.txt
++hello
+*** Update File: src/old.txt
+*** Move to: src/renamed.txt
+@@ -1,2 +1,2 @@
+ unchanged context
+-old
++new
+*** Delete File: obsolete.txt
+*** End Patch
+```
+
+Hunks use standard `@@ -oldStart,oldCount +newStart,newCount @@` headers (omitted count means
+one, zero counts permit insertion/deletion). Prefix context with a space, removal with `-`,
+addition with `+`; `\ No newline at end of file` marks the immediately preceding line.
+A move without hunks preserves bytes. Existing single-file tools remain available unchanged.
+
+The workspace actor serializes app operations. Descriptor-relative, no-follow access and exclusive
+renames prevent link traversal and overwriting a newly appeared destination. Originals are claimed
+and rechecked before any new contents publish; ordinary failures roll back prior publications.
+This is **not** an OS-wide atomic multi-file snapshot or a crash-atomic transaction: outside readers
+can observe intermediate names. Non-cooperating external writers can prevent rollback; the tool
+then fails with `PATCH_RECOVERY_REQUIRED` and retains originals plus a path manifest in the workspace
+container's `.patch-*` directory, outside the repository. Never delete that recovery directory
+until its originals have been reconciled. A process interruption can leave the same recovery data.
+Cancellation is honored through validation/source claiming; once publication starts it finishes
+or rolls back rather than abandoning half a patch. Rebuild iOS for native ABI 10.
 
 ## Web access
 
@@ -392,7 +477,10 @@ Original messages/tool intent remain intact: semantic memory is **not** journal-
 “Summarizing conversation” activity remains stoppable. Stop, background/memory interruption,
 inference errors and truncated/empty summaries cannot publish partial memory or erase history.
 If the summary plus current request/tools still cannot fit, the run fails explicitly rather than
-silently dropping evidence. Physical-iPhone inference quality/performance still require device
+silently dropping evidence. The proposed prompt is measured before the checkpoint is saved, so
+a rejected summary cannot poison future turns; the previous memory and original history remain.
+Workspace rules, persistent tasks and rolling memory preserve each family's research-cue placement
+and the authoritative date footer. Physical-iPhone inference quality/performance still require device
 validation; deterministic tests use the real JavaScript loop/session/repository with scripted
 inference and isolated filesystem persistence.
 
@@ -878,22 +966,26 @@ Independent workspace-read calls also fan out, at most three at once; mutations 
 across children. File-version observations belong to each child's own run. Competing edits
 still use native compare-and-swap, so one child's observation cannot authorize a sibling's edit.
 Network and push approvals retain the global policy; waiting children have individually addressable
-approval requests.
+approval requests. Questions and approvals share one stable visible interaction at a time;
+answering it reveals the next pending request instead of stacking native sheets.
 
 Limits are six child admissions per parent turn, eight rounds/tools and at most 512 generated
 tokens per child round, 8,192 characters per child tool result, and 2,048 characters per returned
 summary. A conversation retains at most 24 children; resumptions stop admitting work once a child's
 history reaches 128 messages. `task` returns explicit child status, errors, and a resumable
 `child_id`. Supply that ID with the same agent and a new prompt to continue without replaying old
-tools. `read_child` pages saved evidence from this parent conversation only; IDs are also bound to
-the original workspace and model. Child progress uses the existing tool/subagent activity cards,
+tools. Resuming requires the original workspace and model, while `read_child` can inspect historical
+evidence after a model switch in the same workspace. Child progress uses existing tool/subagent activity cards,
 not independent chats.
 
 Stop and backgrounding cancel every child and queued generation. The parent stays busy, including
 its Stop/composer controls, until all admitted children and in-flight native tools settle.
 Identity, history, status, and tool intent are journaled inside the parent's app-owned runtime
-document. Restart marks active children interrupted without replaying tools; deleting the parent
-also deletes its embedded children and cannot resurrect them.
+document. Each child has its own persistent tasks and summary checkpoint, never the parent's
+private conversation memory. Large child results use the parent's private artifact namespace;
+`read_tool_output` and `search_tool_output` accept the child's `child_id` with its artifact ID.
+Restart marks active children interrupted without replaying tools; deleting the parent also deletes
+its embedded children and their saved outputs and cannot resurrect them.
 
 ## Ownership and testing
 

@@ -1,17 +1,15 @@
 import { randomUUID } from 'expo-crypto';
 import type { ApprovalPolicy, ChatToolKind } from '@bridge/types/types';
-import type { LocalModelReply } from '../models/engine';
 import { LocalModelInterrupted } from '../models/session';
 import type { LocalModelSession } from '../models/session';
 import { recoverLocalThread } from './threadCodec';
-import { emptyLocalAnswer, retryableLocalMessages } from './modelHistory';
+import { retryableLocalMessages } from './modelHistory';
 import type {
   LocalMessage,
   LocalThread,
   LocalToolCall,
   LocalAgentRun as Run,
   LocalRunSnapshot,
-  LocalToolApproval,
   LocalToolExecutor,
   LocalToolApprovalPolicy,
 } from './types';
@@ -24,8 +22,7 @@ import {
   CHILD_OUTPUT_TOKENS,
   CHILD_ROUNDS,
   EXPLORE_TOOLS,
-  LOCAL_FANOUT,
-  parallelLocalReads,
+  localRunSnapshot,
   delegateLocalChildren,
   readChild,
   type LocalThreadPort,
@@ -33,11 +30,9 @@ import {
 import { IDLE_LOCAL_RUN as IDLE } from './types';
 import {
   localConversationTitle,
-  REPEATED_TOOL_CALL_LIMIT,
   LocalStepLimit,
-  requireLocalAnswer,
   interruptLocalRun,
-  localReplyToolCalls,
+  runLocalRounds,
 } from './agentPolicy';
 
 export { retryableLocalMessages } from './modelHistory';
@@ -310,27 +305,14 @@ export class LocalAgentLoop {
   }
 
   private async rounds(run: Run): Promise<void> {
-    let steps = 0;
-    let lastCall = '';
-    let repeats = 0;
-    const limit = this.childAgent ? CHILD_ROUNDS : 32;
-    for (let round = 0; round < limit; round += 1) {
-      this.checkStopped(run);
-      const assistant: LocalMessage = {
-        id: randomUUID(),
-        role: 'assistant',
-        content: '',
-        createdAt: new Date().toISOString(),
-      };
-      this.threads.change(run.threadId, (thread) => ({
-        ...thread,
-        messages: [...thread.messages, assistant],
-      }));
-      this.publish(run, 'generating');
-      let reply: LocalModelReply;
-      try {
-        const context = await interruptLocalRun(run, this.modelContext(run, assistant.id));
-        reply = await this.scheduler.generate(
+    return runLocalRounds(this.threads, run, this.childAgent ? CHILD_ROUNDS : 32, {
+      check: () => this.checkStopped(run),
+      tool: (call, repeated) => this.tool(run, call, repeated),
+      approval: this.approval,
+      generate: async (assistantId) => {
+        this.publish(run, 'generating');
+        const context = await interruptLocalRun(run, this.modelContext(run, assistantId));
+        return this.scheduler.generate(
           run.controller.signal,
           context.messages,
           this.definitions,
@@ -338,7 +320,7 @@ export class LocalAgentLoop {
             if (this.active !== run || run.stopped) {
               return;
             }
-            this.message(run.threadId, assistant.id, (message) => ({
+            this.message(run.threadId, assistantId, (message) => ({
               ...message,
               content: update.content,
               reasoning: update.reasoning,
@@ -346,74 +328,8 @@ export class LocalAgentLoop {
           },
           { ...context.options, ...(this.childAgent ? { outputTokens: CHILD_OUTPUT_TOKENS } : {}) },
         );
-      } catch (error) {
-        this.threads.change(run.threadId, (thread) => ({
-          ...thread,
-          messages: thread.messages.filter(
-            (message) => message.id !== assistant.id || !emptyLocalAnswer(message),
-          ),
-        }));
-        throw error;
-      }
-      this.checkStopped(run);
-      const calls = localReplyToolCalls(reply);
-      this.message(run.threadId, assistant.id, (message) => ({
-        ...message,
-        content: reply.content ?? '',
-        reasoning: reply.reasoning_content ?? '',
-        toolCalls: calls,
-      }));
-      await this.threads.save(run.threadId);
-      if (calls.length === 0) {
-        requireLocalAnswer(reply);
-        return;
-      }
-      for (let index = 0; index < calls.length; index += 1) {
-        const call = calls[index];
-        if (!call) {
-          throw new Error('The local tool call is unavailable.');
-        }
-        this.checkStopped(run);
-        if (steps === limit) {
-          throw new LocalStepLimit(
-            'The local tool limit was reached. Review the workspace before continuing.',
-          );
-        }
-        // Only independent, non-mutating workspace reads fan out here. Network approvals are
-        // serialized within each child; separate child workflows may wait for them concurrently.
-        const reads = parallelLocalReads(
-          calls.slice(index, index + Math.min(LOCAL_FANOUT, limit - steps)),
-          this.approval,
-        );
-        if (reads.length > 1) {
-          steps += reads.length;
-          const results = await Promise.allSettled(
-            reads.map((entry) => this.tool(run, entry, false)),
-          );
-          const failure = results.find((result) => result.status === 'rejected');
-          if (failure?.status === 'rejected') {
-            throw failure.reason;
-          }
-          index += reads.length - 1;
-          lastCall = '';
-          repeats = 0;
-          continue;
-        }
-        steps += 1;
-        const key = `${call.function.name} ${call.function.arguments}`;
-        repeats = key === lastCall ? repeats + 1 : 1;
-        lastCall = key;
-        if (repeats > REPEATED_TOOL_CALL_LIMIT) {
-          throw new LocalStepLimit(
-            `The local model kept repeating the same ${call.function.name} call. Review the conversation, then continue or rephrase the request.`,
-          );
-        }
-        await this.tool(run, call, repeats === REPEATED_TOOL_CALL_LIMIT);
-      }
-    }
-    throw new LocalStepLimit(
-      'The local tool limit was reached. Review the workspace before continuing.',
-    );
+      },
+    });
   }
 
   private tool(run: Run, call: LocalToolCall, repeated: boolean): Promise<void> {
@@ -549,17 +465,16 @@ export class LocalAgentLoop {
       run.controller.signal,
     );
     this.checkStopped(run);
-    const system = localAgentSystemPrompt(run.modelId, this.today(), this.childAgent);
+    const today = this.today();
     const tasks = this.threads.get(run.threadId).tasks ?? [];
-    const content =
-      system +
-      (guidance?.content ? `\n\n${guidance.content}` : '') +
+    const context =
+      (guidance?.content ?? '') +
       localTaskPrompt(tasks, this.model.snapshot().contextTokens ?? 8192);
     return localConversationContext(
       this.threads,
       run.threadId,
       pendingAssistantId,
-      content,
+      (memory) => localAgentSystemPrompt(run.modelId, today, this.childAgent, context + memory),
       () => this.checkStopped(run),
       (phase) => this.publish(run, phase),
     );
@@ -608,41 +523,14 @@ export class LocalAgentLoop {
     toolName: string | null = null,
     approval: LocalRunSnapshot['approval'] = null,
   ): void {
-    let userInput = !run.stopped ? (run.input?.request ?? null) : null;
-    if (!run.stopped && !approval) {
-      const snapshots = [...this.children].map((child) => child.snapshot());
-      const approvals = snapshots.flatMap((snapshot) =>
-        snapshot.approval ? [snapshot.approval] : [],
-      );
-      const childApproval =
-        approvals.find((pending) => pending.callId === this.value.approval?.callId) ?? approvals[0];
-      if (childApproval) {
-        approval = { ...childApproval, threadId: run.threadId, turnId: run.turnId };
-        phase = 'approval';
-        toolName = childApproval.toolName;
-      }
-      const questions = snapshots.flatMap((snapshot) =>
-        snapshot.userInput ? [snapshot.userInput] : [],
-      );
-      const childInput =
-        questions.find((pending) => pending.requestId === this.value.userInput?.requestId) ??
-        questions[0];
-      if (!userInput && childInput) {
-        userInput = { ...childInput, threadId: run.threadId, turnId: run.turnId };
-      }
-    }
-    if (userInput) {
-      phase = 'input';
-      toolName = 'ask_user';
-    }
-    this.value = {
+    this.value = localRunSnapshot(
+      run,
       phase,
-      threadId: run.threadId,
-      turnId: run.turnId,
       toolName,
       approval,
-      userInput,
-    };
+      this.value,
+      [...this.children].map((child) => child.snapshot()),
+    );
     this.changed(this.value);
   }
 

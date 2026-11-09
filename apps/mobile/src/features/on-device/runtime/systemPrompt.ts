@@ -74,16 +74,18 @@ export function localAgentSystemPrompt(
   modelId: string,
   today: Date,
   childAgent?: 'explore' | 'general',
+  context = '',
 ): string {
   const { placement, text } = LOCAL_RESEARCH_GUIDANCE[localResearchGuidance(modelId)];
-  const body =
-    placement === 'lead'
-      ? `${IDENTITY} ${text} ${INSTRUCTIONS}`
-      : `${IDENTITY} ${INSTRUCTIONS} ${text}`;
   const child = childAgent
     ? ` You are a ${childAgent} child. Do only the delegated task. ` +
       (childAgent === 'explore' ? 'Read-only: never mutate files or Git. ' : '') +
       'No child delegation. Return a concise evidence-based summary within 2048 characters.'
     : '';
-  return `${body}${child} Today's date: ${today.toDateString()}.`;
+  const extra = context ? `\n\n${context}\n\n` : '';
+  const body =
+    placement === 'lead'
+      ? `${IDENTITY} ${text} ${INSTRUCTIONS}${child}${extra}`
+      : `${IDENTITY} ${INSTRUCTIONS}${child}${extra} ${text}`;
+  return `${body} Today's date: ${today.toDateString()}.`;
 }

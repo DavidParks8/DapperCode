@@ -11,7 +11,7 @@ public class OnDeviceAgentModule: Module {
   public func definition() -> ModuleDefinition {
     Name("OnDeviceAgent")
 
-    Function("getAPIVersion") { 9 }
+    Function("getAPIVersion") { 10 }
 
     // Clone, fetch, pull, and push progress is pushed as throttled events (API 8); the snapshot
     // function stays for a single read when a listener attaches mid-transfer.
@@ -119,6 +119,26 @@ public class OnDeviceAgentModule: Module {
     AsyncFunction("searchWorkspaceFiles") { (id: String, query: String) in
       let result = try await self.workspaces.searchFiles(id, query: query)
       return result.payload
+    }
+
+    Function("beginWorkspaceOperation") { (token: String) in
+      try WorkspaceOperation.shared.begin(token)
+    }
+    Function("cancelWorkspaceOperation") { (token: String) in
+      WorkspaceOperation.shared.cancel(token)
+    }
+    Function("finishWorkspaceOperation") { (token: String) in
+      WorkspaceOperation.shared.finish(token)
+    }
+    AsyncFunction("queryWorkspaceFiles") {
+      (id: String, query: String?, options: [String: Any], token: String) in
+      let request = try WorkspaceSearchOptions(options)
+      return try await self.workspaces.queryFiles(id, query: query, options: request, token: token).payload
+    }
+    AsyncFunction("applyWorkspacePatch") {
+      (id: String, patch: String, revisions: [String: String], token: String) in
+      let files = try await self.workspaces.applyPatch(id, patch: patch, revisions: revisions, token: token)
+      return ["files": files]
     }
 
     AsyncFunction("getModelFilePaths") { (id: String) in

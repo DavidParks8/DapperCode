@@ -41,7 +41,7 @@ export const CODE_TOOL_DEFINITIONS = [
   ),
   toolDefinition(
     'format_file',
-    'Format one JS/JSX/TS/TSX/mjs/cjs/mts/cts/JSON file using bundled Prettier, offline. Explicitly call after edits. Fixed defaults, no workspace config/plugins. Maximum 64 KiB input; syntax errors reject without writes. Revision-checked; unchanged files are not rewritten.',
+    'Format one JS/JSX/TS/TSX/mjs/cjs/mts/cts/JSON file using bundled Prettier, offline. write_file/edit_file already format these languages automatically and report formatting status; use this tool to format an existing file explicitly. Fixed defaults, no workspace config/plugins. Maximum 64 KiB input; syntax errors reject without writes. Revision-checked; unchanged files are not rewritten.',
     { path },
     ['path'],
     { kind: 'edit', approval: null },

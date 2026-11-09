@@ -551,6 +551,13 @@ function childSnapshotTools(parentId: string, message: LocalMessage): RawAcpSnap
 }
 
 /** Full ACP-style snapshot used by `thread/read` with history. */
+const localSnapshotPlan = (tasks: LocalThread['tasks']): RawAcpSnapshot['plan'] =>
+  (tasks ?? []).map((task) => ({
+    content: task.content,
+    priority: 'medium',
+    status: task.status,
+  }));
+
 export function localThreadSnapshot(
   thread: LocalThread,
   context: LocalThreadProjectionContext,
@@ -607,8 +614,7 @@ export function localThreadSnapshot(
     }
   }
   // The ACP snapshot's active run only exists once the turn has started.
-  const running = thread.status === 'running' && thread.activeTurnId !== null;
-  const turnId = running ? thread.activeTurnId : null;
+  const turnId = thread.status === 'running' ? thread.activeTurnId : null;
   return {
     ...localThreadSummary(thread, context),
     ...(liveTurn(thread, context.run) ?? failedTurn(thread)),
@@ -617,11 +623,7 @@ export function localThreadSnapshot(
       timeline,
       messages,
       tools,
-      plan: (thread.tasks ?? []).map((task) => ({
-        content: task.content,
-        priority: 'medium',
-        status: task.status,
-      })),
+      plan: localSnapshotPlan(thread.tasks),
       usage: { used: null, size: contextSize(thread.modelId), cost: null },
       tokenTotals: null,
       mode: null,
@@ -638,11 +640,12 @@ export function localThreadSnapshot(
         runId: turnId ? localRunId(thread.id, turnId) : null,
         sourceTurnId: turnId,
         generation: null,
-        toolIds: running
-          ? tools
-              .filter((tool) => tool.status === 'pending' || tool.status === 'in_progress')
-              .map((tool) => tool.id)
-          : [],
+        toolIds:
+          turnId !== null
+            ? tools
+                .filter((tool) => tool.status === 'pending' || tool.status === 'in_progress')
+                .map((tool) => tool.id)
+            : [],
       },
     },
   };

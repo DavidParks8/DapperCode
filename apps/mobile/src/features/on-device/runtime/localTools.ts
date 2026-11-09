@@ -16,6 +16,8 @@ import type * as CodeTools from '../code-intelligence/tools';
 import { PARALLEL_READ_TOOLS, READ_CHILD_TOOL, TASK_TOOL } from './delegation';
 import { ARTIFACT_TOOL_DEFINITIONS } from './toolArtifacts';
 import { INTERACTION_TOOL_DEFINITIONS } from './interactionTools';
+import { formatAfterFileEdit } from '../code-intelligence/formatAfterFileEdit';
+import { isFormattable } from '../code-intelligence/workspace';
 
 const LOCAL_TOOLS = [
   ...FILE_TOOL_DEFINITIONS,
@@ -55,6 +57,41 @@ function forgetPathVersions(versions: Map<string, string>, path: string): void {
   }
 }
 
+function workspaceVersions(
+  observed: WeakMap<AbortSignal, Map<string, Map<string, string>>>,
+  workspace: string,
+  signal?: AbortSignal,
+): Map<string, string> | undefined {
+  if (!signal) {
+    return undefined;
+  }
+  let workspaces = observed.get(signal);
+  if (!workspaces) {
+    workspaces = new Map();
+    observed.set(signal, workspaces);
+  }
+  let versions = workspaces.get(workspace);
+  if (!versions) {
+    versions = new Map();
+    workspaces.set(workspace, versions);
+  }
+  return versions;
+}
+
+function observePatchVersions(result: unknown, versions: Map<string, string> | undefined): void {
+  if (!versions || !isRecord(result) || !Array.isArray(result['files'])) {
+    return;
+  }
+  for (const file of result['files']) {
+    if (isRecord(file) && typeof file['path'] === 'string') {
+      forgetPathVersions(versions, file['path']);
+      if (typeof file['revision'] === 'string') {
+        versions.set(file['path'], file['revision']);
+      }
+    }
+  }
+}
+
 /**
  * Small local models otherwise treat an empty workspace search as proof that something is absent.
  * It deliberately does not say to search the web: that made models send this project's own symbols
@@ -64,7 +101,10 @@ export const EMPTY_WORKSPACE_SEARCH_NOTE =
   'No workspace matches. That only means this workspace does not mention it, not that it does not exist.';
 
 function withEmptySearchNote(result: unknown): unknown {
-  return isRecord(result) && Array.isArray(result['matches']) && result['matches'].length === 0
+  return isRecord(result) &&
+    result['truncated'] !== true &&
+    Array.isArray(result['matches']) &&
+    result['matches'].length === 0
     ? { ...result, note: EMPTY_WORKSPACE_SEARCH_NOTE }
     : result;
 }
@@ -111,19 +151,7 @@ export function localToolExecutor(
       return executeWebSearch(input, signal, undefined, offload);
     }
     if (isFileTool(name) || isCodeTool(name)) {
-      let versions: Map<string, string> | undefined;
-      if (signal) {
-        let workspaces = observed.get(signal);
-        if (!workspaces) {
-          workspaces = new Map();
-          observed.set(signal, workspaces);
-        }
-        versions = workspaces.get(workspace);
-        if (!versions) {
-          versions = new Map();
-          workspaces.set(workspace, versions);
-        }
-      }
+      const versions = workspaceVersions(observed, workspace, signal);
       const args = isRecord(input) ? input : null;
       const path = typeof args?.['path'] === 'string' ? args['path'] : null;
       const revision = path === null ? undefined : versions?.get(path);
@@ -134,9 +162,59 @@ export function localToolExecutor(
           const code = require('../code-intelligence/tools') as typeof CodeTools;
           resultPromise = code.executeCodeTool(workspace, name, input, native, signal, revision);
         } else {
-          resultPromise = executeFileTool(workspace, name, input, native, revision);
+          resultPromise = executeFileTool(
+            workspace,
+            name,
+            input,
+            native,
+            revision,
+            versions,
+            signal,
+          ).then(async (result) => {
+            if (name === 'write_file' || name === 'edit_file') {
+              if (
+                !isRecord(result) ||
+                typeof result['path'] !== 'string' ||
+                typeof result['revision'] !== 'string'
+              ) {
+                throw new Error(
+                  'The completed file edit returned invalid metadata. Inspect the file; do not replay the edit.',
+                );
+              }
+              const edit = { path: result['path'], revision: result['revision'] };
+              versions?.set(edit.path, edit.revision);
+              return formatAfterFileEdit(native, workspace, edit, signal);
+            }
+            if (name === 'apply_patch' && isRecord(result) && Array.isArray(result['files'])) {
+              const files: unknown[] = [];
+              for (const file of result['files']) {
+                if (
+                  isRecord(file) &&
+                  typeof file['path'] === 'string' &&
+                  typeof file['revision'] === 'string' &&
+                  isFormattable(file['path'])
+                ) {
+                  files.push(
+                    await formatAfterFileEdit(
+                      native,
+                      workspace,
+                      { path: file['path'], revision: file['revision'] },
+                      signal,
+                    ),
+                  );
+                } else {
+                  files.push(file);
+                }
+              }
+              return { ...result, files };
+            }
+            return result;
+          });
         }
         return resultPromise.then((result) => {
+          if (name === 'apply_patch') {
+            observePatchVersions(result, versions);
+          }
           if (name === 'search_files') {
             return withEmptySearchNote(result);
           }

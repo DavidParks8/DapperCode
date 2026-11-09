@@ -112,6 +112,25 @@ function preview(content: string): string {
   return content.slice(0, 512);
 }
 
+function artifactContent(
+  stored: unknown,
+  threadId: string,
+  workspaceId: string,
+  artifactId: string,
+): string {
+  if (
+    !isRecord(stored) ||
+    stored['version'] !== 1 ||
+    stored['threadId'] !== threadId ||
+    stored['workspaceId'] !== workspaceId ||
+    stored['artifactId'] !== artifactId ||
+    typeof stored['content'] !== 'string'
+  ) {
+    throw new Error('The saved tool output identity or content is invalid.');
+  }
+  return stored['content'];
+}
+
 /** The operation already ran; a storage failure must never be reported as "not run". */
 export class LocalArtifactStorageError extends Error {
   readonly result: object;
@@ -264,18 +283,7 @@ export class LocalToolArtifacts {
     if (raw === null) {
       throw new Error('This saved tool output is unavailable in this conversation.');
     }
-    const stored: unknown = JSON.parse(raw);
-    if (
-      !isRecord(stored) ||
-      stored['version'] !== 1 ||
-      stored['threadId'] !== threadId ||
-      stored['workspaceId'] !== workspaceId ||
-      stored['artifactId'] !== artifactId ||
-      typeof stored['content'] !== 'string'
-    ) {
-      throw new Error('The saved tool output identity or content is invalid.');
-    }
-    const content = stored['content'];
+    const content = artifactContent(JSON.parse(raw), threadId, workspaceId, artifactId);
     const offset = integer(args, 'offset', 0, 0, content.length);
     if (!search) {
       const limit = integer(args, 'limit', 2048, 1, 4096);

@@ -36,6 +36,33 @@ function answer(content: string, name?: string, args: object = {}): LocalModelRe
   };
 }
 
+test('a summary that cannot fit is not committed and a smaller next turn can recover', async () => {
+  const h = await setup();
+  h.threads.change(h.thread.id, (thread) => ({
+    ...thread,
+    messages: [
+      {
+        id: uuid(),
+        role: 'user',
+        content: 'x'.repeat(8000),
+        createdAt: new Date().toISOString(),
+      },
+    ],
+  }));
+  h.control.summaryContent = 'M'.repeat(12000);
+  await expect(h.loop.send(h.thread.id, 'Continue', uuid())).rejects.toThrow('context');
+  expect(h.threads.get(h.thread.id).contextSummary).toBeUndefined();
+  expect(h.threads.get(h.thread.id).messages[0]?.content).toBe('x'.repeat(8000));
+  expect(h.execute).not.toHaveBeenCalled();
+  h.control.summaryContent = '';
+  await h.loop.send(h.thread.id, 'Continue with a small step', uuid());
+  expect(h.threads.get(h.thread.id).status).toBe('complete');
+  expect(h.threads.get(h.thread.id).contextSummary?.content).toContain(
+    'Pending: inspect tail evidence',
+  );
+  expect(h.execute).not.toHaveBeenCalled();
+});
+
 async function setup() {
   const root = path.join(
     process.env['ON_DEVICE_CONTEXT_TEST_ROOT'] ?? path.join(process.cwd(), '.context-test-data'),
@@ -80,7 +107,12 @@ async function setup() {
   const summaries: string[] = [];
   const normalReplies: LocalModelReply[] = [];
   let releaseSummary: (() => void) | null = null;
-  const control = { holdSummary: false, failSummary: false, release: () => releaseSummary?.() };
+  const control = {
+    holdSummary: false,
+    failSummary: false,
+    summaryContent: '',
+    release: () => releaseSummary?.(),
+  };
   const context: LocalModelContext = {
     getFormattedChat: (messages) =>
       Promise.resolve({ type: 'jinja', prompt: JSON.stringify(messages), has_media: false }),
@@ -108,9 +140,11 @@ async function setup() {
                 .artifactId,
           );
         return answer(
-          `Request: continue verification. Decision: preserve files. Completed write_file; do not replay. Observed revision ${'a'.repeat(64)}; artifactId ${refs.join(',')}; producer truncated=true. Pending: inspect tail evidence.`,
+          control.summaryContent ||
+            `Request: continue verification. Decision: preserve files. Completed write_file; do not replay. Observed revision ${'a'.repeat(64)}; artifactId ${refs.join(',')}; producer truncated=true. Pending: inspect tail evidence.`,
         );
       }
+
       return normalReplies.shift() ?? answer('Verified; no mutation replayed.');
     },
     stopCompletion: () => {

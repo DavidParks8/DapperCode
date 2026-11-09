@@ -1,6 +1,112 @@
 import type { LocalModelReply } from '../models/engine';
 import { randomUUID } from 'expo-crypto';
 import type { LocalAgentRun, LocalToolCall } from './types';
+import type { LocalMessage, LocalToolApprovalPolicy } from './types';
+import { emptyLocalAnswer } from './modelHistory';
+import { parallelLocalReads, LOCAL_FANOUT, type LocalThreadPort } from './delegation';
+
+export async function runLocalRounds(
+  threads: LocalThreadPort,
+  run: LocalAgentRun,
+  limit: number,
+  bindings: {
+    check(): void;
+    generate(assistantId: string): Promise<LocalModelReply>;
+    tool(call: LocalToolCall, repeated: boolean): Promise<void>;
+    approval: LocalToolApprovalPolicy;
+  },
+): Promise<void> {
+  let steps = 0;
+  let lastCall = '';
+  let repeats = 0;
+  for (let round = 0; round < limit; round += 1) {
+    bindings.check();
+    const assistant: LocalMessage = {
+      id: randomUUID(),
+      role: 'assistant',
+      content: '',
+      createdAt: new Date().toISOString(),
+    };
+    threads.change(run.threadId, (thread) => ({
+      ...thread,
+      messages: [...thread.messages, assistant],
+    }));
+    let reply: LocalModelReply;
+    try {
+      reply = await bindings.generate(assistant.id);
+    } catch (error) {
+      threads.change(run.threadId, (thread) => ({
+        ...thread,
+        messages: thread.messages.filter(
+          (message) => message.id !== assistant.id || !emptyLocalAnswer(message),
+        ),
+      }));
+      throw error;
+    }
+    bindings.check();
+    const calls = localReplyToolCalls(reply);
+    threads.change(run.threadId, (thread) => ({
+      ...thread,
+      updatedAt: new Date().toISOString(),
+      messages: thread.messages.map((message) =>
+        message.id === assistant.id
+          ? {
+              ...message,
+              content: reply.content ?? '',
+              reasoning: reply.reasoning_content ?? '',
+              toolCalls: calls,
+            }
+          : message,
+      ),
+    }));
+    await threads.save(run.threadId);
+    if (!calls.length) {
+      requireLocalAnswer(reply);
+      return;
+    }
+    for (let index = 0; index < calls.length; index += 1) {
+      const call = calls[index];
+      if (!call) {
+        throw new Error('The local tool call is unavailable.');
+      }
+      bindings.check();
+      if (steps === limit) {
+        throw new LocalStepLimit(
+          'The local tool limit was reached. Review the workspace before continuing.',
+        );
+      }
+      const reads = parallelLocalReads(
+        calls.slice(index, index + Math.min(LOCAL_FANOUT, limit - steps)),
+        bindings.approval,
+      );
+      if (reads.length > 1) {
+        steps += reads.length;
+        const results = await Promise.allSettled(reads.map((entry) => bindings.tool(entry, false)));
+        const failure = results.find((result) => result.status === 'rejected');
+        if (failure?.status === 'rejected') {
+          throw failure.reason;
+        }
+        index += reads.length - 1;
+        lastCall = '';
+        repeats = 0;
+        continue;
+      }
+      steps += 1;
+      const key = `${call.function.name} ${call.function.arguments}`;
+      repeats = key === lastCall ? repeats + 1 : 1;
+      lastCall = key;
+      if (repeats > REPEATED_TOOL_CALL_LIMIT) {
+        throw new LocalStepLimit(
+          `The local model kept repeating the same ${call.function.name} call. Review the conversation, then continue or rephrase the request.`,
+        );
+      }
+      await bindings.tool(call, repeats === REPEATED_TOOL_CALL_LIMIT);
+    }
+  }
+  throw new LocalStepLimit(
+    'The local tool limit was reached. Review the workspace before continuing.',
+  );
+}
 
 export class LocalStepLimit extends Error {}
 

@@ -11,6 +11,7 @@ export async function buildNativeWorkspaceApp(
     bundleId = 'dev.dappercode.native-workspaces',
     fixture = 'NativeWorkspaceTests.swift',
     sourceRevision = '',
+    buildTimeoutMs = 60_000,
   } = {},
 ) {
   const module = path.join(e2e.worktree, 'apps/mobile/modules/on-device-agent');
@@ -26,6 +27,14 @@ export async function buildNativeWorkspaceApp(
     'NativeGitRemote.swift',
     'WorkspaceStore.swift',
     'WorkspaceFileTools.swift',
+    ...(!sourceRevision
+      ? [
+          'WorkspaceOperation.swift',
+          'WorkspaceSecureFiles.swift',
+          'WorkspaceSearch.swift',
+          'WorkspacePatch.swift',
+        ]
+      : []),
     'WorkspaceSize.swift',
     'WorkspaceGitTools.swift',
   ];
@@ -94,7 +103,7 @@ export async function buildNativeWorkspaceApp(
       '-o',
       path.join(app, appName),
     ],
-    { timeoutMs: 60_000, env: { SDKROOT: sdk.stdout.trim() } },
+    { timeoutMs: buildTimeoutMs, env: { SDKROOT: sdk.stdout.trim() } },
   );
   await e2e.run('codesign', ['--force', '--sign', '-', app]);
   return app;

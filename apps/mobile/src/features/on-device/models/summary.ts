@@ -28,7 +28,21 @@ export async function rollingSummary<T extends { tokens: number }>(
     let selected: { prompt: T; length: number } | null = null;
     // Chunks use the resident model's template/tokenizer, never a character/token estimate.
     while (low <= high) {
-      const length = Math.floor((low + high) / 2);
+      const middle = Math.floor((low + high) / 2);
+      let length = middle;
+      const end = offset + length;
+      if (
+        transcript.charCodeAt(end - 1) >= 0xd800 &&
+        transcript.charCodeAt(end - 1) <= 0xdbff &&
+        transcript.charCodeAt(end) >= 0xdc00 &&
+        transcript.charCodeAt(end) <= 0xdfff
+      ) {
+        length -= 1;
+      }
+      if (!length) {
+        low = middle + 1;
+        continue;
+      }
       const prompt = await format([
         { role: 'system', content: INSTRUCTIONS },
         {
@@ -38,9 +52,9 @@ export async function rollingSummary<T extends { tokens: number }>(
       ]);
       if (promptFits(prompt.tokens, contextTokens)) {
         selected = { prompt, length };
-        low = length + 1;
+        low = middle + 1;
       } else {
-        high = length - 1;
+        high = middle - 1;
       }
     }
     if (!selected) {

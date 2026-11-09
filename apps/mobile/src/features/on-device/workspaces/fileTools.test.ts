@@ -1,4 +1,4 @@
-import { executeFileTool, isFileTool, type FileToolPort } from './fileTools';
+import { executeFileTool, isFileTool, workspacePatchPaths, type FileToolPort } from './fileTools';
 import { FILE_TOOL_DEFINITIONS } from './fileToolDefinitions';
 
 const revision = 'a'.repeat(64);
@@ -28,6 +28,21 @@ function port() {
     editWorkspaceFile: jest.fn(async () => revision),
     renameWorkspacePath: jest.fn(async () => undefined),
     removeWorkspacePath: jest.fn(async () => undefined),
+    beginWorkspaceOperation: jest.fn(),
+    cancelWorkspaceOperation: jest.fn(),
+    finishWorkspaceOperation: jest.fn(),
+    applyWorkspacePatch: jest.fn(async () => ({ files: [] })),
+    queryWorkspaceFiles: jest.fn(async () => ({
+      matches: [],
+      files: [],
+      nextOffset: null,
+      reason: 'complete' as const,
+      truncated: false,
+      skippedFiles: 0,
+      excludedEntries: 0,
+      visitedEntries: 0,
+      searchedBytes: 0,
+    })),
     searchWorkspaceFiles: jest.fn(async () => ({
       matches: [],
       truncated: false,
@@ -59,6 +74,121 @@ test('file tools bind the trusted workspace and return the native JSON result', 
     nextOffset: null,
     totalBytes: 8,
   });
+});
+
+test('model discovery and filtered regex calls pass every control to the native owner', async () => {
+  const native = port();
+  await executeFileTool(
+    'trusted',
+    'glob_files',
+    {
+      pattern: 'src/**/*.t?',
+      path: 'src',
+      file_type: 'ts',
+      offset: 20,
+      limit: 7,
+    },
+    native,
+  );
+  expect(native.queryWorkspaceFiles).toHaveBeenLastCalledWith(
+    'trusted',
+    null,
+    {
+      path: 'src',
+      include: 'src/**/*.t?',
+      fileType: 'ts',
+      regex: false,
+      caseSensitive: true,
+      offset: 20,
+      limit: 7,
+    },
+    expect.any(String),
+  );
+  await executeFileTool(
+    'trusted',
+    'search_files',
+    {
+      query: '^café\\d+$',
+      regex: true,
+      case_sensitive: false,
+      include: '**/*.ts',
+      path: 'src',
+      file_type: 'ts',
+      limit: 3,
+      offset: 1,
+    },
+    native,
+  );
+  expect(native.queryWorkspaceFiles).toHaveBeenLastCalledWith(
+    'trusted',
+    '^café\\d+$',
+    {
+      path: 'src',
+      include: '**/*.ts',
+      fileType: 'ts',
+      regex: true,
+      caseSensitive: false,
+      offset: 1,
+      limit: 3,
+    },
+    expect.any(String),
+  );
+});
+
+test.each([
+  ['glob_files', { offset: -1 }],
+  ['glob_files', { limit: 101 }],
+  ['search_files', { query: 'x', regex: 'true' }],
+  ['search_files', { query: 'x', case_sensitive: 1 }],
+  ['apply_patch', { patch: 'x', revisions: { 'file.txt': revision } }],
+])('invalid advanced %s arguments never cross the boundary', async (name, args) => {
+  const native = port();
+  await expect(executeFileTool('trusted', name, args, native)).rejects.toThrow();
+  expect(native.queryWorkspaceFiles).not.toHaveBeenCalled();
+  expect(native.applyWorkspacePatch).not.toHaveBeenCalled();
+});
+
+test('cancellation reaches native synchronously and always releases the operation token', async () => {
+  const native = port();
+  const signal = new AbortController();
+  let release: (() => void) | undefined;
+  native.queryWorkspaceFiles.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = () =>
+          resolve({
+            matches: [],
+            files: [],
+            nextOffset: null,
+            reason: 'complete',
+            truncated: false,
+            skippedFiles: 0,
+            excludedEntries: 0,
+            visitedEntries: 0,
+            searchedBytes: 0,
+          });
+      }),
+  );
+  const work = executeFileTool(
+    'trusted',
+    'glob_files',
+    {},
+    native,
+    undefined,
+    undefined,
+    signal.signal,
+  );
+  signal.abort();
+  expect(native.cancelWorkspaceOperation).toHaveBeenCalledWith(
+    native.beginWorkspaceOperation.mock.calls[0]?.[0],
+  );
+  release?.();
+  await work;
+  expect(native.finishWorkspaceOperation).toHaveBeenCalledTimes(1);
+  await expect(
+    executeFileTool('trusted', 'glob_files', {}, native, undefined, undefined, signal.signal),
+  ).rejects.toThrow('cancelled');
+  expect(native.beginWorkspaceOperation).toHaveBeenCalledTimes(1);
 });
 
 test('model reads are bounded to chunks that fit small local contexts', async () => {
@@ -182,4 +312,59 @@ test('directory listing defaults and mutation results are explicit', async () =>
       native,
     ),
   ).resolves.toEqual({ path: 'new.txt', removed: true });
+});
+
+test('patch scope extraction includes all sources/destinations but never hunk content', async () => {
+  const native = port();
+  const patch = [
+    '*** Begin Patch',
+    '*** Add File: src/new.txt',
+    '+new',
+    '*** Update File: src/🙂.txt',
+    '*** Move to: moved/🙂.txt',
+    '@@ -1 +1 @@',
+    '-old',
+    '+*** Delete File: not-a-path',
+    '*** Delete File: obsolete.txt',
+    '*** End Patch',
+  ].join('\n');
+  expect(workspacePatchPaths(patch)).toEqual([
+    'src/new.txt',
+    'src/🙂.txt',
+    'moved/🙂.txt',
+    'obsolete.txt',
+  ]);
+  await executeFileTool(
+    'trusted',
+    'apply_patch',
+    { patch },
+    native,
+    undefined,
+    new Map([
+      ['src/🙂.txt', revision],
+      ['obsolete.txt', revision],
+      ['unrelated.txt', revision],
+    ]),
+  );
+  expect(native.applyWorkspacePatch).toHaveBeenCalledWith(
+    'trusted',
+    patch,
+    {
+      'src/🙂.txt': revision,
+      'obsolete.txt': revision,
+    },
+    expect.any(String),
+  );
+});
+
+test('rule-loading patch paths are bounded without normalizing away native validation', () => {
+  expect(workspacePatchPaths('*** Delete File: ../outside\n*** Delete File: .git/config')).toEqual([
+    '../outside',
+    '.git/config',
+  ]);
+  expect(() =>
+    workspacePatchPaths(
+      Array.from({ length: 65 }, (_, index) => `*** Add File: file-${index}`).join('\n'),
+    ),
+  ).toThrow('64');
 });

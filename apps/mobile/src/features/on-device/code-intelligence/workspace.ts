@@ -22,6 +22,7 @@ export class LocalCodeError extends Error {
     readonly code:
       'CODE_BUDGET' | 'CODE_CANCELLED' | 'CODE_WORKSPACE_CHANGED' | 'CODE_FORMAT_PARSE',
     message: string,
+    readonly location?: { path: string; line: number; column: number },
   ) {
     super(message);
     this.name = 'LocalCodeError';
@@ -68,6 +69,10 @@ export function codePath(path: string): string {
 
 export function isScript(path: string): boolean {
   return /\.(?:[cm]?[jt]s|[jt]sx)$/u.test(path);
+}
+
+export function isFormattable(path: string): boolean {
+  return isScript(path) || path.endsWith('.json');
 }
 
 export async function readCodeFile(
