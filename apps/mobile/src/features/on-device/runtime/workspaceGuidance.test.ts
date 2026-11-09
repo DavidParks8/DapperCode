@@ -2,9 +2,16 @@ import { randomUUID } from 'expo-crypto';
 import { loadNativeModelContext } from '../models/engine';
 import { LocalModelSession } from '../models/session';
 import { OnDeviceNativeError } from '../native/services.errors';
+import { LocalAgentLoop } from './agentLoop';
+import { LOCAL_TOOL_DEFINITIONS, localToolApproval } from './localTools';
 import { OnDeviceRuntime } from './runtime';
 import { createFakeOnDeviceNative, FakeLlama } from './testing';
-import { GUIDANCE_FILE_BYTES, SKILL_DIRECTORY_LIMIT } from './workspaceGuidance';
+import { toolDefinition } from './toolDefinition';
+import {
+  GUIDANCE_FILE_BYTES,
+  LocalWorkspaceGuidance,
+  SKILL_DIRECTORY_LIMIT,
+} from './workspaceGuidance';
 
 jest.mock('expo-crypto', () => ({ randomUUID: jest.fn() }));
 jest.mock('../models/engine', () => ({ loadNativeModelContext: jest.fn() }));
@@ -77,6 +84,109 @@ test('real model rounds load root then relevant nested rules before a path tool 
   expect(
     h.calls.filter((call) => call === 'readWorkspaceFile:["ws-one","src/deep/file.txt"]'),
   ).toHaveLength(1);
+  await h.runtime.dispose();
+});
+
+test.each([
+  'code_diagnostics',
+  'code_definitions',
+  'code_references',
+  'code_symbols',
+  'format_file',
+])('code path scopes fence %s until ancestor rules have been supplied', async (name) => {
+  const h = await harness({
+    'ws-one:AGENTS.md': 'ROOT RULE',
+    'ws-one:src/AGENTS.md': 'SRC RULE',
+    'ws-one:src/deep/AGENTS.md': 'DEEP RULE',
+  });
+  const guidance = new LocalWorkspaceGuidance(h.native);
+  const state = { directories: new Set(['']), rules: '' };
+  const signal = new AbortController().signal;
+  await guidance.prompt('ws-one', state, 8192, signal);
+  await expect(
+    guidance.beforeTool('ws-one', state, name, { path: 'src/deep/file.ts' }, signal),
+  ).rejects.toThrow('Not run');
+  const refreshed = await guidance.prompt('ws-one', state, 8192, signal);
+  expect(refreshed.content.indexOf('ROOT RULE')).toBeLessThan(
+    refreshed.content.indexOf('SRC RULE'),
+  );
+  expect(refreshed.content.indexOf('SRC RULE')).toBeLessThan(
+    refreshed.content.indexOf('DEEP RULE'),
+  );
+  await expect(
+    guidance.beforeTool('ws-one', state, name, { path: 'src/deep/file.ts' }, signal),
+  ).resolves.toBeUndefined();
+  await h.runtime.dispose();
+});
+
+test('format mutation cannot run until the real loop supplies deeper rules to a subsequent model round', async () => {
+  const path = 'src/deep/file.ts';
+  const h = await harness({
+    'ws-one:AGENTS.md': 'ROOT FORMATTING RULE',
+    'ws-one:src/AGENTS.md': 'SRC FORMATTING RULE',
+    'ws-one:src/deep/AGENTS.md': 'DEEP FORMATTING RULE: use two spaces.',
+    [`ws-one:${path}`]: 'const value=1;',
+  });
+  const write = jest.spyOn(h.native, 'writeWorkspaceFile');
+  const execute = jest.fn(async (workspace: string, name: string, input: unknown) => {
+    expect(name).toBe('format_file');
+    expect(input).toEqual({ path });
+    expect(h.generate).toHaveBeenCalledTimes(2);
+    expect(h.prompt(1)).toContain('DEEP FORMATTING RULE: use two spaces.');
+    const observed = await h.native.readWorkspaceFile(workspace, path, 0, 1024);
+    const revision = await h.native.writeWorkspaceFile(
+      workspace,
+      path,
+      'const value = 1;\n',
+      observed.revision,
+    );
+    return { path, revision };
+  });
+  const definition = toolDefinition(
+    'format_file',
+    'Format a workspace file.',
+    { path: { type: 'string' } },
+    ['path'],
+    { kind: 'edit', approval: null },
+  );
+  const loop = new LocalAgentLoop(
+    h.runtime.threads,
+    h.runtime.models,
+    [...LOCAL_TOOL_DEFINITIONS, definition.definition],
+    execute,
+    jest.fn(),
+    (name, input) => (name === 'format_file' ? null : localToolApproval(name, input)),
+    undefined,
+    new LocalWorkspaceGuidance(h.native),
+  );
+  const generate = LocalModelSession.prototype.generate.bind(h.runtime.models);
+  h.generate.mockImplementation(async (...args) => {
+    if (h.generate.mock.calls.length <= 2) {
+      expect(write).not.toHaveBeenCalled();
+      expect(h.files.get(`ws-one:${path}`)).toBe('const value=1;');
+    }
+    return generate(...args);
+  });
+  const call = { name: 'format_file', arguments: { path } };
+  h.llama.reply({ toolCalls: [call] }, { toolCalls: [call] }, { content: 'Formatted.' });
+  const result = await loop.send(h.thread.id, 'Format src/deep/file.ts.', 'format-scope');
+  expect(result.status).toBe('complete');
+  expect(h.prompt(0)).not.toContain('DEEP FORMATTING RULE');
+  const refreshed = h.prompt(1);
+  expect(refreshed.indexOf('ROOT FORMATTING RULE')).toBeLessThan(
+    refreshed.indexOf('SRC FORMATTING RULE'),
+  );
+  expect(refreshed.indexOf('SRC FORMATTING RULE')).toBeLessThan(
+    refreshed.indexOf('DEEP FORMATTING RULE'),
+  );
+  expect(result.messages.filter((entry) => entry.tool).map((entry) => entry.tool?.status)).toEqual([
+    'failed',
+    'completed',
+  ]);
+  expect(result.messages.find((entry) => entry.tool)?.content).toContain('Not run');
+  expect(execute).toHaveBeenCalledTimes(1);
+  expect(write).toHaveBeenCalledTimes(1);
+  expect(h.files.get(`ws-one:${path}`)).toBe('const value = 1;\n');
   await h.runtime.dispose();
 });
 

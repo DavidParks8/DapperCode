@@ -74,9 +74,19 @@ export function guidanceDirectories(
   }
   const paths: string[] = [];
   if (
-    ['read_file', 'write_file', 'edit_file', 'delete_path', 'rename_path', 'git_stage'].includes(
-      name,
-    )
+    [
+      'read_file',
+      'write_file',
+      'edit_file',
+      'delete_path',
+      'rename_path',
+      'git_stage',
+      'code_diagnostics',
+      'code_definitions',
+      'code_references',
+      'code_symbols',
+      'format_file',
+    ].includes(name)
   ) {
     if (typeof input['path'] === 'string') {
       paths.push(parentWorkspacePath(safePath(input['path'])));

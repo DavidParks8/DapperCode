@@ -67,6 +67,8 @@ Before a tool runs, changed or newly applicable rules return an explicit **Not r
 next model round can review them before retrying. Rename checks both source and destination
 parents; directory rename/delete also includes the source directory's own rules. Scopes are
 turn-local, including retries; they never cross workspaces.
+When registered, `code_diagnostics`, `code_definitions`, `code_references`, `code_symbols`, and
+`format_file` use the same path scopes, so formatting cannot bypass previously unseen nested rules.
 
 Rules and skill catalogs are re-read for every model round, including after agent edits. Only
 expected `PATH_NOT_FOUND` errors are optional; unreadable, invalid UTF-8, symlink/hard-link,
