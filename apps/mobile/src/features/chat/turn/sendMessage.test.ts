@@ -1,4 +1,7 @@
 import { createTestStore } from '@shell/state/testing';
+import { executeSlashCommand } from '../composer/slashCommand';
+import type { MainScreenSlashCommandHandlerContext } from '../composer/slashCommandHandler';
+import { errorAtom } from '../state/turn';
 import { executeSendMessage } from './sendMessage';
 import type { MainScreenSendMessageHandlerContext } from './sendMessageHandler';
 import {
@@ -89,6 +92,29 @@ describe('Slash commands never consume a composer submission', () => {
     );
 
     expect(beginSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends an agent-advertised command to the agent as unchanged text', async () => {
+    const { beginSpy, context } = createHarness({ slashHandled: false });
+    const slashContext = {
+      selectedChatId: 'thread-1',
+      selectedChat: {
+        id: 'thread-1',
+        acpCommands: [{ name: 'review', description: 'Review changes', hint: '[focus]' }],
+      },
+      supportsReview: false,
+      activeSlashCommands: [],
+      store: context.store,
+    } as unknown as MainScreenSlashCommandHandlerContext;
+    const handled = executeSlashCommand.bind(null, slashContext);
+
+    await executeSendMessage({ ...context, handleSlashCommand: handled }, '/review src/app focus', {
+      allowSlashCommands: true,
+    }).catch(() => undefined);
+
+    expect(beginSpy).toHaveBeenCalledTimes(1);
+    expect(beginSpy.mock.calls[0]?.[0].value).toBe('/review src/app focus');
+    expect(context.store.get(errorAtom)).toBeNull();
   });
 
   it('does not consult the slash handler when slash commands are disabled', async () => {

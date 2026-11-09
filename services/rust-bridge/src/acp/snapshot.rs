@@ -2023,6 +2023,7 @@ fn bound_config_option(mut entry: ConfigOptionValue) -> ConfigOptionValue {
 fn bound_command(mut entry: CommandEntry) -> CommandEntry {
     entry.name = bound(entry.name, MAX_TEXT_BYTES);
     entry.description = bound(entry.description, MAX_TEXT_BYTES);
+    entry.hint = entry.hint.map(|value| bound(value, MAX_TEXT_BYTES));
     entry
 }
 fn bound(mut value: String, max: usize) -> String {
@@ -3463,10 +3464,18 @@ mod tests {
             category: Some("model".to_string()),
             options: Vec::new(),
         }];
-        snapshot.commands = vec![CommandEntry {
-            name: "test".to_string(),
-            description: "Run tests".to_string(),
-        }];
+        snapshot.commands = vec![
+            CommandEntry {
+                name: "test".to_string(),
+                description: "Run tests".to_string(),
+                hint: Some("[filter]".to_string()),
+            },
+            CommandEntry {
+                name: "compact".to_string(),
+                description: "Compact the conversation".to_string(),
+                hint: None,
+            },
+        ];
         snapshot.active_run_id = Some("run-7".to_string());
         snapshot.active_source_turn_id = Some("turn-7".to_string());
         snapshot.active_generation = Some(7);
@@ -4049,6 +4058,7 @@ mod tests {
                 CommandEntry {
                     name: oversized.clone(),
                     description: oversized.clone(),
+                    hint: Some(oversized.clone()),
                 };
                 MAX_ENTRIES + 1
             ],
@@ -4071,6 +4081,10 @@ mod tests {
         assert_eq!(snapshot.plan[0].content.len(), MAX_TEXT_BYTES);
         assert_eq!(snapshot.config[0].id.len(), MAX_TEXT_BYTES);
         assert_eq!(snapshot.commands[0].name.len(), MAX_TEXT_BYTES);
+        assert_eq!(
+            snapshot.commands[0].hint.as_deref().map(str::len),
+            Some(MAX_TEXT_BYTES)
+        );
         assert_eq!(snapshot.usage_used, Some(3));
         assert_eq!(snapshot.usage_size, Some(10));
         assert_eq!(

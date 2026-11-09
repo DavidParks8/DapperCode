@@ -2,46 +2,42 @@ import { toolDefinition } from '../runtime/toolDefinition';
 
 const path = { type: 'string' } as const;
 const position = { path, line: { type: 'integer' }, column: { type: 'integer' } } as const;
-const scope =
-  'Local TypeScript LanguageService, not an external LSP. JS/JSX/TS/TSX, including mjs/cjs/mts/cts. ' +
-  'ES2022, strict checks, relative workspace imports only; no tsconfig, installed package types, or Node/React ambient types. ' +
-  'Budget: 64 files, 64 KiB/file, 512 KiB/project, 512 directory entries, 5 seconds cooperative; results capped at 40/8192 characters. ';
+// Budget errors are explicit at runtime, so descriptions carry only what changes interpretation.
+const scope = 'Local TypeScript service for JS/TS files (not an external LSP). ';
 
 export const CODE_TOOL_DEFINITIONS = [
   toolDefinition(
     'code_diagnostics',
     scope +
-      'Get syntax and type diagnostics for one file. Empty results mean no issues under these settings, not a full project build.',
+      'Syntax/type diagnostics for one file: strict ES2022, relative workspace imports only, no tsconfig, package, Node or React types, max 64 files. Empty means no issues under these settings, not a full build.',
     { path },
     ['path'],
     { kind: 'read', approval: null },
   ),
   toolDefinition(
     'code_definitions',
-    scope +
-      'Resolve the symbol at 1-based line/column to definitions across workspace files. Columns count UTF-16 code units.',
+    scope + 'Definitions of the symbol at 1-based line and UTF-16 column, across workspace files.',
     position,
     ['path', 'line', 'column'],
     { kind: 'read', approval: null },
   ),
   toolDefinition(
     'code_references',
-    scope +
-      'Find real symbol references across workspace files at 1-based line/UTF-16 column; includes declarations.',
+    scope + 'References, including declarations, to the symbol at 1-based line and UTF-16 column.',
     position,
     ['path', 'line', 'column'],
     { kind: 'read', approval: null },
   ),
   toolDefinition(
     'code_symbols',
-    scope + 'List declared symbols in one file with 1-based source locations.',
+    scope + 'Declared symbols in one file with 1-based locations.',
     { path },
     ['path'],
     { kind: 'read', approval: null },
   ),
   toolDefinition(
     'format_file',
-    'Format one JS/JSX/TS/TSX/mjs/cjs/mts/cts/JSON file using bundled Prettier, offline. write_file/edit_file already format these languages automatically and report formatting status; use this tool to format an existing file explicitly. Fixed defaults, no workspace config/plugins. Maximum 64 KiB input; syntax errors reject without writes. Revision-checked; unchanged files are not rewritten.',
+    'Format one JS/TS/JSON file with bundled Prettier defaults (max 64 KiB); write_file/edit_file already do this. Syntax errors reject without writing.',
     { path },
     ['path'],
     { kind: 'edit', approval: null },

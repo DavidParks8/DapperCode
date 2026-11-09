@@ -72,40 +72,197 @@ When registered, `code_diagnostics`, `code_definitions`, `code_references`, `cod
 Parallel read preparations retain the union of entered scopes and enforce the directory limit
 against that merged set; source errors and cancellation do not discard previously entered scopes.
 
-Rules and skill catalogs are re-read for every model round, including after agent edits. Only
-expected `PATH_NOT_FOUND` errors are optional; unreadable, invalid UTF-8, symlink/hard-link,
-oversized, and other native failures remain visible. All reads use the native selected-workspace
-boundary: no parent traversal, absolute paths, Git metadata, phone-home directories, global skills,
-or remote instruction imports. Rules do not override runtime safety or user requests.
+Rules are re-read for every model round, including after agent edits. Only expected
+`PATH_NOT_FOUND` errors are optional; unreadable, invalid UTF-8, symlink/hard-link, oversized, and
+other native failures remain visible. All reads use the native selected-workspace boundary: no
+parent traversal, absolute paths, Git metadata, phone-home directories, or remote instruction
+imports. Rules do not override runtime safety or user requests. Rule files must fit entirely in
+8,192 bytes, and at most 24 rule directories and 12 path components are entered.
 
-Skills are discovered one directory below `.agents/skills`, `.opencode/skills`, and `.claude/skills`,
-in that precedence order. A definition is `skill-name/SKILL.md` with YAML frontmatter containing
-`name` (matching its directory, up to 64 lowercase letters/digits with single hyphens) and
-`description` (non-empty, up to 1,024 characters). YAML block scalars and quoted values work.
-Duplicate YAML keys, aliases, invalid metadata, and oversized definitions fail explicitly rather
-than silently disappearing. Duplicate skill names use the first root, with an explicit notice.
-Other [Agent Skills](https://agentskills.io/specification) metadata is informational;
-`allowed-tools` grants nothing.
+### Agent Skills
 
-The model initially receives only IDs and concise descriptions. The `skill` tool loads the full
-selected local definition on demand plus bounded workspace-relative text-resource paths from the
-skill directory, `references`, and `assets`. Resources are read separately with `read_file`;
-scripts, plugins, and remote documents are never loaded or executed as capabilities. No Node,
-shell, package manager, or extra permissions are introduced.
+On this iPhone supports [Agent Skills](https://agentskills.io/specification) as the union of
+GitHub Copilot's and OpenCode's behavior. A skill is either a directory containing `SKILL.md`
+(every other file there is bundled with it) or, OpenCode-style, a flat `<id>.md` file at a source
+root (no bundled files).
 
-Discovery is bounded: at most 16 entries per skill root (an overflowing root is explicitly omitted,
-not partially enumerated), 12 advertised skills, 160 description characters per entry, 16 returned
-resource paths, 24 entered rule directories, and 12 path components. Rule and skill files must fit
-entirely in 8,192 bytes; instructions are never silently truncated. Automatic guidance uses at most
-one quarter of the loaded context window, capped at 8,192 UTF-8 bytes; oversized rule sets fail
-with guidance to shorten them or use a larger context. Catalog omissions are explicit. Full skill
-tool output also passes the existing exact template/token-budget checks and context elision;
-an elided result must be loaded again if needed. No custom agent profiles are loaded.
+**Sources**, highest precedence first. Skills are selected by ID; a lower source's duplicate is
+reported as shadowed.
+
+| Source                  | Where                                                         | Notes                                                            |
+| ----------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Explicit config sources | `skills` in `opencode.json(c)` / `.opencode/opencode.json(c)` | Workspace paths and downloaded HTTPS catalogs; later entries win |
+| `.opencode/skills`      | Workspace                                                     |                                                                  |
+| `.github/skills`        | Workspace                                                     | Copilot                                                          |
+| `.agents/skills`        | Workspace                                                     | Copilot and OpenCode                                             |
+| `.claude/skills`        | Workspace                                                     | Copilot and OpenCode                                             |
+| Personal catalogs       | App-owned (Settings)                                          | OpenCode's global `skills` URLs                                  |
+| Personal skills         | App-owned (imported)                                          | Copilot's `~/.copilot/skills` equivalent                         |
+
+A project source always beats a personal one, as in Copilot. (OpenCode lets global
+`~/.config/opencode/skills` beat project `.claude`/`.agents` skills; the iPhone has no home directory,
+so personal skills stay last.)
+
+**Layout.** Each source root may hold flat `<id>.md` files at its top level and `SKILL.md`
+directories nested in grouping directories up to six levels below it: `skills/teams/release/SKILL.md`
+is the skill `release`. A directory containing `SKILL.md` is one skill and is not searched further.
+Hidden entries and `node_modules` are skipped, links are never followed, and a source stops after
+256 directories, 1,000 entries per directory, or 128 skills.
+
+**IDs and names.** The ID comes from the path (the directory holding `SKILL.md`, or the flat file's
+stem). It is exact and case-sensitive, and may use 1-64 letters, digits, `.`, `_`, or `-`. Only
+lowercase kebab-case IDs can be slash commands or personal imports. A frontmatter `name` that differs
+from the ID is a display name (OpenCode) instead of skipping the skill (Copilot); Settings shows a
+portability warning, because Copilot would skip it.
+
+**Frontmatter** is optional. Without a `description` a skill is registered and loadable by the user,
+but never advertised to the model (with a warning). Fields: `name`, `description` (longer than 1,024
+characters works, with a portability warning), `license`, `compatibility` (up to 500 characters),
+`metadata` (text, true/false, or number values), `allowed-tools` (space-separated, or a YAML list),
+`argument-hint`, `user-invocable` (default `true`), `disable-model-invocation` (default `false`),
+`metadata.opencode/autoinvoke`, and `context: fork`. Unknown fields are ignored. YAML block scalars
+and quoted values work; duplicate keys, aliases, and malformed known fields skip the skill. One bad,
+oversized, linked, or duplicate skill never fails a turn or hides the others; the runtime's skill list
+reports each skipped or shadowed skill (severity `skipped`) and each warning (severity `warning`).
+
+The model first sees only IDs (with any display name) and descriptions of advertised skills, as many
+as fit the guidance budget (one quarter of the loaded context window, at most 8,192 UTF-8 bytes,
+shared with rules); the prompt says how many were omitted, and `skill` without a name lists them all,
+in pages. `skill` with a name returns the whole `SKILL.md` in 8 KiB pages (follow `nextOffset`) plus
+every bundled file path; `skill` with `resource` reads one bundled file by path relative to the skill
+directory, also paged. Skill results are never offloaded to saved-output artifacts. Bundled files are
+UTF-8 text only; binary files fail with an explicit error.
+
+- **Slash commands and mentions.** A message that starts with `/<id>` (optionally followed by
+  arguments), and up to three `@<id>` mentions anywhere in it (at a word boundary, exact ID), load
+  those skills before the first model round. Only permitted, user-invocable skills activate. The chat
+  shows each load as a completed `skill` call, and the message is kept verbatim. Retry and recovery
+  never repeat them. Unknown `/name` and `@name` stay plain text. A mentioned `context: fork` skill
+  gets the whole message as its request. The chat's slash menu lists permitted user-invocable skills
+  with slash-compatible IDs, with `argument-hint` as the hint.
+- **Hidden skills.** `disable-model-invocation: true`, `metadata.opencode/autoinvoke: false`, or a
+  missing description keeps a skill out of the model's list and refuses model loads, unless the user
+  named it with `/id` or `@id` in the current turn (then its pages and files can be read). When both
+  flags are set, `opencode/autoinvoke` wins, so `autoinvoke: true` advertises the skill again.
+- **`user-invocable: false`** removes the skill from slash commands and mentions; the model can still
+  load it.
+- **`context: fork`** runs the skill in a fresh `general` child given `SKILL.md` and your arguments
+  (or the model's `prompt`). Only the child's final result returns. Children count against the
+  usual child limits and stop with **Stop**. Inside a child, a fork skill loads inline. Because the
+  `general` agent runs it, its rules apply too: when `general` denies the skill or has
+  `tools.skill: false`, the load is refused with an explicit result (it never falls back to loading
+  inline), and when `general` asks, a model load waits for approval (a `/id` or `@id` load counts
+  as consent). The request a skill call carries is at most 32,768 characters; a longer `/id`
+  message is truncated there with a note, while the full message stays in the conversation.
+- **`allowed-tools`** pre-approves tools once the skill is loaded, for the rest of that run (or that
+  fork child) only; the next run asks again. Entries match local tool names, plus common aliases
+  such as `fetch`/`webfetch` → `web_fetch` and `websearch` → `web_search`. `shell`, `bash`,
+  `skill` (skill loads follow skill permissions), argument-scoped entries such as
+  `web_fetch(domain:x)`, and unknown tools are ignored and reported in the skill result next to the
+  pre-approved tools. A skill never grants a tool its agent lacks (an `explore` child stays
+  read-only) and never bypasses workspace or revision checks.
+
+> **Only use skills you have reviewed.** A skill's instructions steer the model, and its
+> `allowed-tools` remove confirmations: pre-approving `web_fetch` lets it send requests without
+> asking, and pre-approving `git_push` lets it push without asking.
+
+**Project config.** The runtime reads `opencode.json`, `opencode.jsonc`, `.opencode/opencode.json`,
+and `.opencode/opencode.jsonc` at the workspace root, in that order (each at most 64 KiB; JSONC
+comments and trailing commas work). Each file contributes; a bad file is skipped with a warning.
+
+- `skills`: relative paths are workspace-relative source roots and must stay inside the workspace;
+  `https://` URLs are HTTP catalogs. `~/` and absolute paths (no home or host filesystem on iPhone),
+  `http://`, and other schemes are reported and ignored.
+- `permission.skill` (V1: one effect, or an ordered map of patterns to effects) and `permissions`
+  (V2: `{ "action": "skill", "resource": "<pattern>", "effect": "..." }` entries; `action` may be a
+  wildcard) set skill rules.
+- Per-agent rules apply to OpenCode's built-in agent IDs: `build` (the conversation), `general`, and
+  `explore` (its children). Use V1 `agent.<id>.permission.skill` or V2 `agents.<id>.permissions`.
+  V1 `agent.<id>.tools.skill: false` removes the `skill` tool and the skill list for that agent (V2
+  documents no equivalent).
+
+**Permissions.** Rules match the exact skill ID with `*` (any run) and `?` (one character); the last
+matching rule wins and no match allows. Order: project rules (files in load order), the agent's
+project rules, then the device owner's rules (Settings), so the device owner always wins. `deny` hides
+a skill from the model, slash commands, and mentions, and rejects loads. `ask` advertises it, but each
+model load waits for the usual approval prompt (as kind `other`, so the **On request** policy still
+asks; only **Never ask** skips it); a `/id` or `@id` load counts as consent, and an approved skill's
+files can then be read without asking again in that run. Loads that ask never run in a parallel
+read batch, so several `ask` loads in one reply are approved one at a time. The per-skill switch (Copilot's
+`/skills` enable/disable) is a final device-owner `deny`; turning it back on adds an exact `allow`
+only when the device owner's own rules still deny the ID. A global switch turns every skill off: no
+list, no `skill` tool, no slash commands or mentions.
+
+**HTTPS catalogs.** A catalog is a base URL with `index.json`:
+`{ "skills": [{ "name": "git-release", "version": "3", "files": ["SKILL.md", "references/x.md"] }] }`.
+Files download from `<base>/<name>/<file>` and must be safe, relative, and same-origin; redirects are
+not followed. The entry file is `SKILL.md` or `<name>.md`, and the ID is the entry `name` (lowercase
+kebab-case, because it names an app-owned document). Consent adaptation: OpenCode downloads catalogs
+automatically; on this iPhone only an explicit **Download/Update** action in Settings uses the
+network, never the agent, and the agent reads only cached copies. Downloads require HTTPS and
+connectivity, time out after 15 seconds per request, and are bounded to 64 skills, 64 files per skill,
+1 MiB per file, and 4 MiB per skill. Cached copies are keyed by catalog URL, skill, and version, and
+are replaced only when `version` changes; skills that leave the index are removed, and a failed skill
+keeps its previous copy. Workspace catalogs rank with the explicit config sources; personal catalogs
+rank just above personal skills. Removing a personal catalog deletes its cached copies.
+
+Not available on this iPhone: running bundled scripts (there is no shell; they are readable text),
+`~` and absolute skill paths, `#file:` references to a home directory, OpenCode's built-in skills,
+OpenCode Console skill sharing, custom agent profiles (agent-frontmatter permissions), and plugins
+or skill marketplaces.
+
+Limits: an 8,192-byte frontmatter prefix, 160 description characters per prompt entry, 64 listed
+bundled files at most 6 directories deep, up to 64 personal skills of at most 128 files and 4 MiB
+each, 16 personal catalogs, 32 config sources, and 256 rules per list. Project skills and config are
+cached until the workspace changes; personal and catalog skills until one is imported, removed, or
+downloaded.
+
+**Runtime API for Settings** (`runtime.skills`, announced through the `skills` slice):
+`list(workspaceId)` returns each skill with `id`, `displayName`, `sourceKind`
+(`project-root` | `config-path` | `catalog` | `personal`), `sourceRoot`, `layout` (`directory` |
+`flat`), `permission` (`effect` plus the matching `rule` and its `origin`, or null for the default),
+`enabled`, and `advertised`, plus diagnostics with `severity`. `rules()`/`setRules(rules)` edit the
+device owner's rules, `setEnabled(id, on)` is the per-skill switch, and `skillsEnabled()`/
+`setSkillsEnabled(on)` is the global switch. `catalogs(workspaceId | null)` lists workspace-configured
+and personal catalogs with `state` (`not-downloaded` | `cached` | `failed`), cached skill versions,
+and the last error; `addPersonalCatalog(url)`, `removePersonalCatalog(url)`, and
+`downloadCatalog(workspaceId | null, url)` (null for a personal catalog; returns per-skill
+`downloaded` | `unchanged` | `failed` results) manage them.
+
+**Managing skills.** Settings › On this iPhone › Skills shows a workspace's project, catalog, and
+personal skills exactly as the agent sees them (the new-chat workspace by default; choose another
+under Workspace). **Use skills** turns every skill off or on: off, the agent gets no skill list, no
+`skill` tool, and no slash commands, and your skills, choices, and rules are kept. Each skill shows
+its display name (and ID when they differ), description, source and location, slash command and
+`argument-hint`, whether it is shown to the model (and why not), `context: fork`, single-file
+layout, any pre-approved tools (with a warning that they skip confirmation), and its effective
+permission with the rule that decided it (no rule, your choice, your pattern rule, or the
+`opencode.json` key). Its **Allow / Ask / Deny** control applies to that ID in every workspace:
+Allow and Ask are saved as exact-ID rules after your others, Deny is the `/skills` off switch and
+always wins, and **Follow rules** removes your choice. Ask means the model asks before loading the
+skill; running `/id` or `@id` yourself counts as consent. **Details** adds the ID, display name,
+source kind and root, layout, license, `compatibility`, the start of `SKILL.md`, and the bundled
+files, so a skill can be reviewed before it is allowed. **Skipped** lists skills the agent cannot
+use and **Warnings** lists ones that still load (for example, no description or a display name
+that differs from the ID), each with its location and reason. **Add personal skill** imports from
+any workspace: tap a discovered project skill, or browse to any folder that contains `SKILL.md`,
+such as `skills/<name>` in a cloned skills repository (the replacement for `gh skill install`). The
+copied and skipped files, or the reason it failed, appear beside what you added; adding the same
+ID again replaces the copy, and **Remove** asks first.
+
+Under **Manage**, **Permission rules** lists your ordered rules (`*` and `?` wildcards over skill
+IDs; the last match wins, and yours apply after the workspace's `opencode.json` rules), adds a
+pattern with an effect, deletes rules, and lists denied skills with **Remove denial**.
+**Catalogs** lists the workspace's `opencode.json` catalogs and your personal ones with their state
+(not downloaded, cached versions, or the last failure). Adding a personal `https://` catalog URL
+downloads nothing; **Download** or **Update** is the only time this iPhone contacts a catalog, and
+shows each skill's result beside the catalog. Removing a personal catalog asks first and deletes its
+downloaded skills.
 
 ## Local formatting and code intelligence
 
-The local model can call `code_diagnostics`, `code_definitions`, `code_references`, and
-`code_symbols` for JavaScript/JSX and TypeScript/TSX (`.js`, `.jsx`, `.ts`, `.tsx`, `.mjs`,
+With a 16,384-token context, the local model can call `code_diagnostics`, `code_definitions`,
+`code_references`, and `code_symbols` for JavaScript/JSX and TypeScript/TSX (`.js`, `.jsx`, `.ts`, `.tsx`, `.mjs`,
 `.cjs`, `.mts`, `.cts`, including declaration files). These use the **real TypeScript 6
 LanguageService in-process**, not text matching, a remote service, or an LSP protocol/server.
 iOS does not launch arbitrary external language-server subprocesses.
@@ -196,7 +353,7 @@ This proves runtime compatibility, not physical-device performance or memory adm
 
 ## Questions and persistent tasks
 
-The local model can call `ask_user` to wait for 1–8 structured questions in the existing
+With at least an 8,192-token context, the local model can call `ask_user` to wait for 1–8 structured questions in the existing
 **Clarification needed** sheet. Questions support single-choice, multiple-choice, and custom text
 answers (up to 12 choices per question). Nothing is preselected or answered automatically, even
 when tool approvals are disabled. **Cancel** and **Decline** return an explicit tool error and
@@ -274,7 +431,8 @@ or rolls back rather than abandoning half a patch. Rebuild iOS for native ABI 10
 
 ## Web access
 
-Every local chat includes `web_search` and `web_fetch` by default, alongside the file and Git tools.
+Every local chat with at least an 8,192-token context includes `web_search` and `web_fetch` by
+default, alongside the file and Git tools (see [Advertised tools by context size](#advertised-tools-by-context-size)).
 There is no toggle, MCP configuration, account, or API key to set up.
 
 Ask the agent to **search the web** with a normal query. `web_search` uses
@@ -416,8 +574,8 @@ Only one local context and one local turn run at a time. Each round measures the
 model's real chat template and tokenizer, then lets generation use all remaining context (minus a
 small safety margin) rather than a fixed output cap, so long `write_file`/`edit_file` payloads are
 not cut off. A round starts only if at least a quarter of the context (up to 2,048 tokens) remains
-free. Low-level model callers without a conversation checkpoint retain this fallback (normal chats
-use the semantic memory described below), while saved conversation history stays unchanged:
+free. Low-level model callers without a conversation checkpoint use this elision path directly; normal
+chats use it whenever semantic memory (below) is skipped or fails. Saved history stays unchanged:
 
 1. Earlier turns' tool output is replaced by a short `{"elided": true, ...}` marker that keeps
    identifying fields such as `path`, `revision`, and `error`, and long earlier tool arguments and
@@ -428,6 +586,37 @@ use the semantic memory described below), while saved conversation history stays
 The current user message is never removed. If a single turn cannot fit even then, it fails with a
 clear message and the next conversation turn can continue. File reads default to 3 KiB chunks (16 KiB
 maximum) and directory listings to 64 entries (200 maximum).
+
+### Advertised tools by context size
+
+Tool schemas and the system prompt are a fixed prefix in every round, so the advertised tools depend
+on the loaded context. Advertisement only narrows the registered set; every advertised tool has a
+dispatcher, and saved-output retrieval is always advertised.
+
+- **4,096 tokens** (low-memory fallback): `list_directory`, `read_file`, `write_file`, `edit_file`,
+  `search_files`, `git_status`, `git_diff`, `skill`, `read_tool_output`, `search_tool_output`, and
+  `todo_read`.
+- **8,192 tokens** (the Qwen3 maximum) adds `rename_path`, `delete_path`, `glob_files`,
+  `apply_patch`, `git_history`, `git_stage`, `git_commit`, `git_push`, `web_fetch`, `web_search`,
+  `ask_user`, and `todo_write`.
+- **16,384 tokens** adds code intelligence, `format_file`, `task`, and `read_child` (all 30 tools).
+
+Without web tools, the system prompt omits web rules and the family research cue rather than naming
+absent tools. Tool descriptions keep only behavior-critical constraints (paging, size caps, read
+before mutate, protected paths, untrusted web text); the dispatcher still enforces every bound.
+Measured with the Qwen3 tokenizer and Hermes tool template (system prompt plus tool section, compact
+JSON schema characters), the fixed prefix shrank from 15,920 schema characters (4,957 tokens, all 30
+tools at every size) to:
+
+| Context | Tools | Schema characters | Fixed prefix tokens                    | Room left with one generation reserve |
+| ------- | ----- | ----------------- | -------------------------------------- | ------------------------------------- |
+| 4,096   | 11    | 4,452             | 1,604 (was 4,957: no turn could start) | 1,436                                 |
+| 8,192   | 23    | 9,638             | 3,101 (was 4,957)                      | 3,011 (was 1,155)                     |
+| 16,384  | 30    | 12,671            | 3,903 (was 4,957)                      | 10,401 (was 9,347)                    |
+
+Qwen3.5 measures about 30 tokens less. Real counts vary by family and skill catalog; tests assert
+these tiers and their room with a conservative 3.5-characters-per-token approximation (measured
+Qwen3 prefixes have more characters per token).
 
 After earlier tool activity, model input labels the latest request as current and older workspace
 observations as historical snapshots. This encourages fresh reads instead of stale answers after
@@ -463,22 +652,39 @@ and memory checkpoint, and startup finishes interrupted deletions without resurr
 Artifacts associated with quarantined damaged conversations are preserved.
 
 Before each generation, the resident model's real chat template/tokenizer measures the entire
-prompt, including tool definitions. When fewer than **two generation reserves** remain (each a
-quarter of context, capped at 2,048 tokens, plus the 32-token safety margin), the same model generates
-a rolling semantic summary with no tools. Oversized transcripts are processed in token-sized
-chunks, at most 64 rounds, reserving normal generation headroom and allowing at most 1,024 generated
-tokens per summary round. The complete summary is capped at 12,000 characters and durably journaled
-with its covered message ID, model ID, and timestamp before answering resumes.
+prompt, including tool definitions. Memory only ever covers turns **before** the latest user
+request: the current turn (request, tool calls and results) always stays verbatim, apart from the
+elision of its older tool results when nothing else fits. The fixed prefix (system prompt and tool
+schemas) and the current turn are measured separately, so only the conversation counts. With
+_room_ = context − fixed prefix − one generation reserve − 32, a summary is generated only when all
+of these hold:
 
-The summary prompt retains the current request, decisions/constraints, pending work, completed
-mutations, uncertainties and observed evidence. The latest user request is also retained verbatim
-outside the summary; saved artifact references are included independently of model wording.
-Original messages/tool intent remain intact: semantic memory is **not** journal-file compaction.
-“Summarizing conversation” activity remains stoppable. Stop, background/memory interruption,
-inference errors and truncated/empty summaries cannot publish partial memory or erase history.
-If the summary plus current request/tools still cannot fit, the run fails explicitly rather than
-silently dropping evidence. The proposed prompt is measured before the checkpoint is saved, so
-a rejected summary cannot poison future turns; the previous memory and original history remain.
+- fewer than **two generation reserves** remain (each a quarter of context, capped at 2,048 tokens,
+  plus the 32-token safety margin), and the conversation leaves less headroom in _room_ than one
+  reserve (or half of _room_ when smaller);
+- earlier turns exist and fill more than half of _room_, so a large fixed prefix or a large current
+  turn alone never forces it;
+- the current turn still fits beside a full-size memory.
+
+The same model then generates a rolling semantic summary with no tools. Oversized transcripts are
+processed in token-sized chunks, at most 64 rounds. Each round may generate at most
+min(1,024, a quarter of context, a quarter of _room_) tokens, so memory at least halves earlier
+history; the model is told the memory size derived from that cap (1.5 characters per token: about
+1,130 characters at 8,192 tokens with that tier's tools, so even hash- and ID-dense memory finishes
+within the cap). A summary that stops at the cap is rejected rather than kept partial. The summary is
+durably journaled with the last message before the current request, model ID, and timestamp before
+answering resumes.
+
+The summary prompt retains user requests, decisions/constraints, pending work, completed mutations,
+uncertainties and observed evidence; saved artifact references are included independently of model
+wording. Original messages/tool intent remain intact: semantic memory is **not** journal-file
+compaction. “Summarizing conversation” activity remains stoppable, and stop or background/memory
+interruption fails the turn as before. A summary that fails, is empty, truncated, stops at its cap,
+or whose proposed prompt does not fit, and a checkpoint that cannot be saved, are **not committed**:
+the round falls back to the elision path above with history unchanged and the previous checkpoint
+retained, and the status returns from summarizing to generating. The same earlier history is not
+summarized again in that turn; a later turn tries again. Low iOS memory headroom still fails the
+turn.
 Workspace rules, persistent tasks and rolling memory preserve each family's research-cue placement
 and the authoritative date footer. Physical-iPhone inference quality/performance still require device
 validation; deterministic tests use the real JavaScript loop/session/repository with scripted
@@ -954,7 +1160,7 @@ The shared screens serve the local profile through the transport; nothing branch
 
 ## Delegation and parallel work
 
-The model can call `task` with one to three independent prompts. Built-in `explore` children are
+With a 16,384-token context, the model can call `task` with one to three independent prompts. Built-in `explore` children are
 runtime-enforced read-only (workspace reads, Git inspection, and approved web access); `general`
 children can use the normal tools for explicitly requested work. Children cannot delegate or read
 other children. No custom agent configuration, shell, executable, or additional model is involved.
@@ -983,7 +1189,9 @@ its Stop/composer controls, until all admitted children and in-flight native too
 Identity, history, status, and tool intent are journaled inside the parent's app-owned runtime
 document. Each child has its own persistent tasks and summary checkpoint, never the parent's
 private conversation memory. Large child results use the parent's private artifact namespace;
-`read_tool_output` and `search_tool_output` accept the child's `child_id` with its artifact ID.
+`read_tool_output` and `search_tool_output` accept the child's `child_id` with its artifact ID; a
+child reads its own outputs with or without its own `child_id`, never a sibling's. Quota checks use
+the stored byte size encoded in each artifact's document name, never re-reading saved evidence.
 Restart marks active children interrupted without replaying tools; deleting the parent also deletes
 its embedded children and their saved outputs and cannot resurrect them.
 

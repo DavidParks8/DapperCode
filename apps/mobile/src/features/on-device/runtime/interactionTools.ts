@@ -41,45 +41,38 @@ export function localTaskPrompt(tasks: readonly LocalTask[], contextTokens: numb
 }
 
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/u;
-const identifier = { type: 'string', pattern: ID.source, maxLength: 64 };
+// Grammars stay structural; the dispatcher enforces id syntax and every count and length bound.
+const textField = { type: 'string' };
 const taskProperties = {
-  id: identifier,
-  content: { type: 'string', minLength: 1, maxLength: 500 },
+  id: textField,
+  content: textField,
   status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
 };
 
 export const INTERACTION_TOOL_DEFINITIONS = [
   toolDefinition(
     'ask_user',
-    'Ask the user 1-8 questions and wait for their reply. No answer is assumed. Use options for choices, multiSelect for multiple choices, and allowFreeText for a custom answer. Cancellation returns an error; do not retry unless asked.',
+    'Ask the user 1-8 questions and wait. options offer choices (multiSelect for several, allowFreeText for a custom answer). ids and option values use letters, digits, _ or -. Cancellation returns an error; do not retry unless asked.',
     {
       questions: {
         type: 'array',
-        minItems: 1,
-        maxItems: 8,
         items: {
           type: 'object',
           additionalProperties: false,
           required: ['id', 'header', 'question'],
           properties: {
-            id: identifier,
-            header: { type: 'string', minLength: 1, maxLength: 100 },
-            question: { type: 'string', minLength: 1, maxLength: 2000 },
+            id: textField,
+            header: textField,
+            question: textField,
             multiSelect: { type: 'boolean' },
             allowFreeText: { type: 'boolean' },
             options: {
               type: 'array',
-              minItems: 1,
-              maxItems: 12,
               items: {
                 type: 'object',
                 additionalProperties: false,
                 required: ['value', 'label'],
-                properties: {
-                  value: identifier,
-                  label: { type: 'string', minLength: 1, maxLength: 100 },
-                  description: { type: 'string', maxLength: 500 },
-                },
+                properties: { value: textField, label: textField, description: textField },
               },
             },
           },
@@ -91,18 +84,17 @@ export const INTERACTION_TOOL_DEFINITIONS = [
   ),
   toolDefinition(
     'todo_read',
-    'Read this conversation’s persistent task list, independent of model context. Task completion is not proof the user’s request is finished.',
+    'Read this conversation’s persistent task list. Completed tasks do not prove the request is done.',
     {},
     [],
     { kind: 'think', approval: null },
   ),
   toolDefinition(
     'todo_write',
-    'Upsert tasks by stable id (id, content, status); omitted tasks are preserved. Reusing an id updates it, never duplicates it. Remove only explicitly listed ids. Maximum 64 tasks. This does not finish the user’s request.',
+    'Upsert up to 64 tasks by stable id (letters, digits, _ or -); omitted tasks are kept and remove deletes listed ids. This does not finish the user’s request.',
     {
       todos: {
         type: 'array',
-        maxItems: 64,
         items: {
           type: 'object',
           properties: taskProperties,
@@ -110,7 +102,7 @@ export const INTERACTION_TOOL_DEFINITIONS = [
           additionalProperties: false,
         },
       },
-      remove: { type: 'array', maxItems: 64, items: identifier },
+      remove: { type: 'array', items: textField },
     },
     ['todos'],
     { kind: 'think', approval: null },

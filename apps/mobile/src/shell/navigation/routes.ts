@@ -74,6 +74,33 @@ export const routes = {
   settingsGitHub(profileId: string): Href {
     return { pathname: '/profiles/[profileId]/settings/github', params: { profileId } };
   },
+  /** On this iPhone: a workspace's project skills plus personal skills, as the agent sees them. */
+  settingsSkills(profileId: string): Href {
+    return { pathname: '/profiles/[profileId]/settings/skills', params: { profileId } };
+  },
+  /** One skill's details. Under `info/` so a skill named `add` cannot shadow the add page. */
+  settingsSkill(profileId: string, name: string, workspaceId: string): Href {
+    return {
+      pathname: '/profiles/[profileId]/settings/skills/info/[name]',
+      params: { profileId, name, workspaceId },
+    };
+  },
+  settingsSkillImport(profileId: string, workspaceId: string): Href {
+    return {
+      pathname: '/profiles/[profileId]/settings/skills/add',
+      params: { profileId, workspaceId },
+    };
+  },
+  settingsSkillRules(profileId: string): Href {
+    return { pathname: '/profiles/[profileId]/settings/skills/rules', params: { profileId } };
+  },
+  /** Project catalogs come from the workspace's opencode.json; personal ones need none. */
+  settingsSkillCatalogs(profileId: string, workspaceId: string | null): Href {
+    return {
+      pathname: '/profiles/[profileId]/settings/skills/catalogs',
+      params: workspaceId === null ? { profileId } : { profileId, workspaceId },
+    };
+  },
   connection(profileId: string, chatId: string, mode: ConnectionMode): Href {
     return {
       pathname: '/profiles/[profileId]/chats/[chatId]/connection',

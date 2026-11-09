@@ -845,6 +845,36 @@ describe('chatMapping', () => {
     ).toBe('idle');
   });
 
+  it('maps advertised command hints and ignores malformed ones', () => {
+    const manifest = JSON.parse(
+      readFileSync(
+        path.resolve(__dirname, '../../../../../contracts/bridge-rpc/v2/manifest.json'),
+        'utf8',
+      ),
+    ) as { fixtures: { threadSnapshot: { acpSnapshot: Record<string, unknown> } } };
+    const fixture = manifest.fixtures.threadSnapshot;
+    const chat = mapChat(
+      toRawThread({
+        ...fixture,
+        acpSnapshot: {
+          ...fixture.acpSnapshot,
+          commands: [
+            { name: 'skill-review', description: 'Review with a skill', hint: '<path>' },
+            { name: 'blank', description: 'Blank hint', hint: ' ' },
+            { name: 'numeric', description: 'Numeric hint', hint: 42 },
+            { description: 'Missing name', hint: '<arg>' },
+          ],
+        },
+      }),
+    );
+
+    expect(chat.acpCommands).toEqual([
+      { name: 'skill-review', description: 'Review with a skill', hint: '<path>' },
+      { name: 'blank', description: 'Blank hint' },
+      { name: 'numeric', description: 'Numeric hint' },
+    ]);
+  });
+
   it('maps the checked Rust ACP snapshot fixture without legacy turns', () => {
     const manifest = JSON.parse(
       readFileSync(
@@ -894,7 +924,10 @@ describe('chatMapping', () => {
       acpUsage: { used: 120, size: 4096, cost: '$0.01' },
       acpMode: 'plan',
       acpConfig: [{ id: 'model', value: 'example-model' }],
-      acpCommands: [{ name: 'test', description: 'Run tests' }],
+      acpCommands: [
+        { name: 'test', description: 'Run tests', hint: '[filter]' },
+        { name: 'compact', description: 'Compact the conversation' },
+      ],
       acpActive: { runId: 'run-7', generation: 7, toolIds: ['tool-live'] },
     });
     expect(raw.acpSnapshot?.messages).toEqual(
@@ -923,7 +956,10 @@ describe('chatMapping', () => {
       usage: { used: 120, size: 4096, cost: '$0.01' },
       mode: 'plan',
       config: [{ id: 'model', value: 'example-model' }],
-      commands: [{ name: 'test', description: 'Run tests' }],
+      commands: [
+        { name: 'test', description: 'Run tests', hint: '[filter]' },
+        { name: 'compact', description: 'Compact the conversation' },
+      ],
       active: { runId: 'run-7', generation: 7, toolIds: ['tool-live'] },
     });
   });

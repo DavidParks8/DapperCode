@@ -7,11 +7,8 @@ import { LOCAL_TOOL_DEFINITIONS, localToolApproval } from './localTools';
 import { OnDeviceRuntime } from './runtime';
 import { createFakeOnDeviceNative, FakeLlama } from './testing';
 import { toolDefinition } from './toolDefinition';
-import {
-  GUIDANCE_FILE_BYTES,
-  LocalWorkspaceGuidance,
-  SKILL_DIRECTORY_LIMIT,
-} from './workspaceGuidance';
+import { GUIDANCE_FILE_BYTES, LocalWorkspaceGuidance } from './workspaceGuidance';
+import { LocalSkills } from './skills';
 
 jest.mock('expo-crypto', () => ({ randomUUID: jest.fn() }));
 jest.mock('../models/engine', () => ({ loadNativeModelContext: jest.fn() }));
@@ -111,7 +108,7 @@ test.each([
     'ws-one:src/AGENTS.md': 'SRC RULE',
     'ws-one:src/deep/AGENTS.md': 'DEEP RULE',
   });
-  const guidance = new LocalWorkspaceGuidance(h.native);
+  const guidance = new LocalWorkspaceGuidance(h.native, new LocalSkills(h.native));
   const state = { directories: new Set(['']), rules: '' };
   const signal = new AbortController().signal;
   await guidance.prompt('ws-one', state, 8192, signal);
@@ -146,7 +143,7 @@ test.each([
       'ws-one:alpha/file.txt': 'alpha contents',
       'ws-one:beta/file.txt': 'beta contents',
     });
-    const guidance = new LocalWorkspaceGuidance(h.native);
+    const guidance = new LocalWorkspaceGuidance(h.native, new LocalSkills(h.native));
     const initial = ['', ...Array.from({ length: seeded }, (_, index) => `seed-${String(index)}`)];
     const state = { directories: new Set(initial), rules: '' };
     const signal = new AbortController().signal;
@@ -217,7 +214,7 @@ test.each(['error', 'cancel'])(
       'ws-one:alpha/AGENTS.md': 'ALPHA SURVIVES',
       'ws-one:beta/AGENTS.md': 'BETA MUST NOT ENTER',
     });
-    const guidance = new LocalWorkspaceGuidance(h.native);
+    const guidance = new LocalWorkspaceGuidance(h.native, new LocalSkills(h.native));
     const state = { directories: new Set(['']), rules: '' };
     const controller = new AbortController();
     await guidance.prompt('ws-one', state, 8192, controller.signal);
@@ -310,7 +307,7 @@ test('format mutation cannot run until the real loop supplies deeper rules to a 
     jest.fn(),
     (name, input) => (name === 'format_file' ? null : localToolApproval(name, input)),
     undefined,
-    new LocalWorkspaceGuidance(h.native),
+    new LocalWorkspaceGuidance(h.native, new LocalSkills(h.native)),
   );
   const generate = LocalModelSession.prototype.generate.bind(h.runtime.models);
   h.generate.mockImplementation(async (...args) => {
@@ -484,48 +481,76 @@ test('native symlink rejection is not treated as an optional missing rule', asyn
 });
 
 test.each([
-  ['no YAML', 'frontmatter'],
-  [skill('Other'), 'name must match'],
   [skill('review', '{}'), 'description must be'],
   [skill('review', '42'), 'description must be'],
   [skill('review', 'false'), 'description must be'],
   ['---\nname: review\nname: review\ndescription: fine\n---\nBody', 'invalid YAML'],
   ['---\nname: review\ndescription: &d description\nlicense: *d\n---\nBody', 'aliases'],
   ['---\nname: review\ndescription: fine\nmetadata: [bad]\n---\nBody', 'metadata must'],
-  [skill('review', 'fine', 'x'.repeat(GUIDANCE_FILE_BYTES)), '8192 bytes'],
+  ['---\nname: review\ndescription: fine\nuser-invocable: yes\n---\nBody', 'true or false'],
+  ['---\nname: review\ndescription: fine\ncontext: thread\n---\nBody', 'context must'],
+  [`---\nname: review\ndescription: ${'x'.repeat(GUIDANCE_FILE_BYTES)}\n---\nBody`, 'frontmatter'],
 ])(
-  'invalid skill definitions fail explicitly before model generation (%s)',
+  'an invalid skill is skipped with a diagnostic while the turn and other skills work (%s)',
   async (definition, error) => {
-    const h = await harness({ [`ws-one:${skillId}/SKILL.md`]: definition });
-    await expect(h.runtime.loop.send(h.thread.id, 'Review.', 'invalid-skill')).rejects.toThrow(
-      error,
+    const h = await harness({
+      [`ws-one:${skillId}/SKILL.md`]: definition,
+      'ws-one:.agents/skills/lint/SKILL.md': skill('lint', 'Lint the code.', 'LINT BODY'),
+    });
+    h.llama.reply(
+      { toolCalls: [{ name: 'skill', arguments: { name: 'lint' } }] },
+      { content: 'Linted.' },
     );
-    expect(h.generate).not.toHaveBeenCalled();
-    expect(h.runtime.threads.get(h.thread.id).status).toBe('failed');
+    const result = await h.runtime.loop.send(h.thread.id, 'Review.', 'invalid-skill');
+    expect(result.status).toBe('complete');
+    expect(h.prompt(0)).toContain('- lint: Lint the code.');
+    expect(h.prompt(0)).not.toContain('- review:');
+    expect(result.messages.find((entry) => entry.tool)?.content).toContain('LINT BODY');
+    const listing = await h.runtime.skills.list('ws-one');
+    expect(listing.skills.map((entry) => entry.name)).toEqual(['lint']);
+    expect(listing.diagnostics).toEqual([
+      {
+        source: 'project',
+        location: skillId,
+        message: expect.stringContaining(error),
+        severity: 'skipped',
+      },
+    ]);
     await h.runtime.dispose();
   },
 );
 
-test('catalog is bounded, deterministic and explicit about omitted skill roots and duplicates', async () => {
+test('large and many-skill roots stay deterministic and duplicates are shadowed by precedence', async () => {
   const files: Record<string, string> = {};
-  for (let index = 0; index < SKILL_DIRECTORY_LIMIT + 1; index += 1) {
-    const name = `entry-${String(index)}`;
+  for (let index = 0; index < 40; index += 1) {
+    const name = `entry-${String(index).padStart(2, '0')}`;
     files[`ws-one:.agents/skills/${name}/SKILL.md`] = skill(name);
   }
-  files['ws-one:.opencode/skills/review/SKILL.md'] = skill('review', 'Preferred review');
+  files['ws-one:.agents/skills/review/SKILL.md'] = skill('review', 'Preferred review');
   files['ws-one:.claude/skills/review/SKILL.md'] = skill('review', 'Shadowed review');
   const h = await harness(files);
-  h.llama.reply({ toolCalls: [{ name: 'skill', arguments: { id: '.claude/skills/review' } }] });
+  h.llama.reply({ toolCalls: [{ name: 'skill', arguments: { name: 'review' } }] });
   const result = await h.runtime.loop.send(h.thread.id, 'Review.', 'bounded');
-  expect(h.prompt(0)).toContain('.agents/skills: omitted; more than 16 entries');
-  expect(h.prompt(0)).toContain('Duplicate skill review');
-  expect(h.prompt(0)).toContain('Preferred review');
+  expect(h.prompt(0)).toContain('- entry-39: Review local changes.');
+  expect(h.prompt(0)).toContain('- review: Preferred review');
   expect(h.prompt(0)).not.toContain('Shadowed review');
-  expect(result.messages.find((entry) => entry.tool)?.content).toContain('shadowed');
+  expect(result.messages.find((entry) => entry.tool)?.content).toContain(
+    '"location":".agents/skills/review"',
+  );
+  const listing = await h.runtime.skills.list('ws-one');
+  expect(listing.skills).toHaveLength(41);
+  expect(listing.diagnostics).toEqual([
+    {
+      source: 'project',
+      location: '.claude/skills/review',
+      message: 'Shadowed by the project skill .agents/skills/review.',
+      severity: 'skipped',
+    },
+  ]);
   await h.runtime.dispose();
 });
 
-test('model sees only concise metadata until the real skill tool loads full YAML/Markdown and safe references', async () => {
+test('model sees only concise metadata until the real skill tool loads full YAML/Markdown and every bundled file', async () => {
   const definition = skill(
     'review',
     '>\n  Review local changes\n  when requested.',
@@ -535,15 +560,15 @@ test('model sees only concise metadata until the real skill tool loads full YAML
     [`ws-one:${skillId}/SKILL.md`]: definition,
     [`ws-one:${skillId}/references/checklist.md`]: 'Local checklist',
     [`ws-one:${skillId}/assets/example.json`]: '{}',
-    [`ws-one:${skillId}/scripts/run.js`]: 'Do not execute',
-    [`ws-one:${skillId}/run.sh`]: 'Do not execute',
+    [`ws-one:${skillId}/scripts/run.js`]: 'console.log(1)',
+    [`ws-one:${skillId}/run.sh`]: 'echo hi',
   });
   h.llama.reply(
-    { toolCalls: [{ name: 'skill', arguments: { id: skillId } }] },
+    { toolCalls: [{ name: 'skill', arguments: { name: 'review' } }] },
     { content: 'Loaded.' },
   );
   const result = await h.runtime.loop.send(h.thread.id, 'Review changes.', 'load-skill');
-  expect(h.prompt(0)).toContain('Review local changes when requested.');
+  expect(h.prompt(0)).toContain('- review: Review local changes when requested.');
   expect(h.prompt(0)).not.toContain('FULL INSTRUCTIONS');
   expect(h.generate.mock.calls[0]?.[1]).toContainEqual(
     expect.objectContaining({ function: expect.objectContaining({ name: 'skill' }) }),
@@ -552,9 +577,14 @@ test('model sees only concise metadata until the real skill tool loads full YAML
   expect(tool?.tool?.status).toBe('completed');
   const output: unknown = JSON.parse(tool?.content ?? '{}');
   expect(output).toMatchObject({
-    definition,
-    resources: [`${skillId}/assets/example.json`, `${skillId}/references/checklist.md`],
-    resourcesTruncated: false,
+    name: 'review',
+    source: 'project',
+    location: skillId,
+    content: definition,
+    nextOffset: null,
+    files: ['run.sh', 'assets/example.json', 'references/checklist.md', 'scripts/run.js'],
+    filesTruncated: false,
+    note: expect.stringContaining('scripts cannot run'),
   });
   expect(h.generate.mock.calls[1]?.[0].find((entry) => entry.role === 'tool')?.content).toContain(
     'FULL INSTRUCTIONS',
@@ -574,7 +604,7 @@ test('an edit refreshes rules in the very next round, and subsequent turns disco
   expect(h.prompt(2)).toContain('NEW RULE');
   expect(h.prompt(2)).not.toContain('OLD RULE');
   h.files.set(`ws-one:${skillId}/SKILL.md`, skill('review', 'Fresh catalog', 'Fresh body'));
-  h.llama.reply({ toolCalls: [{ name: 'skill', arguments: { id: skillId } }] });
+  h.llama.reply({ toolCalls: [{ name: 'skill', arguments: { name: 'review' } }] });
   const next = await h.runtime.loop.send(h.thread.id, 'Review now.', 'fresh-turn');
   expect(h.prompt(3)).toContain('Fresh catalog');
   expect(next.messages.at(-2)?.content).toContain('Fresh body');
@@ -603,18 +633,30 @@ test('rules edited during inference fence a pending mutation until a refreshed m
   await h.runtime.dispose();
 });
 
-test('catalog caps advertised IDs and rejects rule files exceeding file or context bounds, without truncating instructions', async () => {
+test('the catalog advertises as many skills as fit the context, says how many were omitted, and rejects oversized rules', async () => {
   const files: Record<string, string> = {};
-  for (let index = 0; index < 15; index += 1) {
-    const name = `skill-${String(index)}`;
+  for (let index = 0; index < 150; index += 1) {
+    const name = `skill-${String(index).padStart(3, '0')}`;
     files[`ws-one:.agents/skills/${name}/SKILL.md`] = skill(name, 'Short.');
   }
   const h = await harness(files);
   await h.runtime.loop.send(h.thread.id, 'Hello', 'catalog-count');
-  const advertised = (h.prompt(0).match(/"\.agents\/skills\/skill-/gu) ?? []).length;
-  expect(advertised).toBeLessThanOrEqual(12);
-  expect(advertised).toBeGreaterThan(0);
-  expect(h.prompt(0)).toMatch(/Advertised \d+ of 15/);
+  const advertised = (h.prompt(0).match(/^- skill-\d+: Short\.$/gmu) ?? []).length;
+  expect(advertised).toBeGreaterThan(12);
+  expect(advertised).toBeLessThan(128);
+  expect(h.prompt(0)).toContain(
+    `${String(128 - advertised)} more skills omitted for context; call skill without a name to list them.`,
+  );
+  const listing = await h.runtime.skills.list('ws-one');
+  expect(listing.skills).toHaveLength(128);
+  expect(listing.diagnostics).toEqual([
+    {
+      source: 'project',
+      location: '.agents/skills',
+      message: 'Skipped 22 skills beyond 128 per root.',
+      severity: 'skipped',
+    },
+  ]);
   h.files.set('ws-one:AGENTS.md', 'x'.repeat(GUIDANCE_FILE_BYTES + 1));
   await expect(h.runtime.loop.send(h.thread.id, 'Again', 'too-large')).rejects.toThrow(
     '8192 bytes',
@@ -663,39 +705,34 @@ test('Stop during a pending guidance read settles promptly and late completion c
   await h.runtime.dispose();
 });
 
-test.each([
-  '../review',
-  '.agents/skills/../review',
-  '.git/skills/review',
-  'https://example.com/skill',
-])(
-  'the skill tool rejects non-workspace and traversal IDs without fetching them: %s',
-  async (id) => {
-    const h = await harness();
-    h.llama.reply({ toolCalls: [{ name: 'skill', arguments: { id } }] });
-    const result = await h.runtime.loop.send(h.thread.id, 'Load that skill.', 'bad-skill-id');
-    expect(result.messages.find((entry) => entry.tool)?.tool?.status).toBe('failed');
-    expect(h.calls.some((call) => call.includes(JSON.stringify(id)))).toBe(false);
+test.each(['../review', 'a/../../outside', '.git/config', '/phone/home', 'a\\b'])(
+  'skill resources cannot leave the skill directory: %s',
+  async (resource) => {
+    const h = await harness({ [`ws-one:${skillId}/SKILL.md`]: skill() });
+    h.llama.reply({ toolCalls: [{ name: 'skill', arguments: { name: 'review', resource } }] });
+    const result = await h.runtime.loop.send(h.thread.id, 'Load that file.', 'bad-resource');
+    expect(result.messages.find((entry) => entry.tool)).toMatchObject({
+      tool: { status: 'failed' },
+      content: expect.stringContaining('inside the workspace'),
+    });
+    const reads = h.calls.filter((call) => call.startsWith('readWorkspaceFile'));
+    expect(
+      reads.every((call) => /((SKILL|AGENTS|CLAUDE)\.md|opencode\.jsonc?)"\]$/u.test(call)),
+    ).toBe(true);
     await h.runtime.dispose();
   },
 );
 
-test('symlink skill directories fail explicitly and resource symlinks are never advertised or read', async () => {
+test('symlinked skill directories are skipped with a diagnostic and resource links are never listed or read', async () => {
   const h = await harness({ [`ws-one:${skillId}/SKILL.md`]: skill() });
   const original = h.native.listWorkspaceFiles;
-  const list = jest.spyOn(h.native, 'listWorkspaceFiles').mockImplementation((id, path, limit) => {
+  jest.spyOn(h.native, 'listWorkspaceFiles').mockImplementation((id, path, limit) => {
     if (path === '.agents/skills') {
-      return Promise.resolve({
-        entries: [{ name: 'linked', kind: 'symlink', bytes: 0 }],
-        truncated: false,
-      });
+      return original(id, path, limit).then((listing) => ({
+        ...listing,
+        entries: [...listing.entries, { name: 'linked', kind: 'symlink', bytes: 0 }],
+      }));
     }
-    return original(id, path, limit);
-  });
-  await expect(h.runtime.loop.send(h.thread.id, 'Review.', 'linked-catalog')).rejects.toThrow(
-    'does not follow links',
-  );
-  list.mockImplementation((id, path, limit) => {
     if (path === `${skillId}/references`) {
       return Promise.resolve({
         entries: [
@@ -705,18 +742,40 @@ test('symlink skill directories fail explicitly and resource symlinks are never 
         truncated: false,
       });
     }
+    if (path === skillId) {
+      return Promise.resolve({
+        entries: [
+          { name: 'SKILL.md', kind: 'file', bytes: 10 },
+          { name: 'references', kind: 'directory', bytes: 0 },
+        ],
+        truncated: false,
+      });
+    }
     return original(id, path, limit);
   });
-  h.llama.reply({ toolCalls: [{ name: 'skill', arguments: { id: skillId } }] });
-  const result = await h.runtime.loop.retry(h.thread.id);
-  const output = result.messages.find((entry) => entry.tool)?.content ?? '';
-  expect(output).toContain('safe.md');
-  expect(output).not.toContain('outside.md');
+  h.llama.reply({ toolCalls: [{ name: 'skill', arguments: { name: 'review' } }] });
+  const result = await h.runtime.loop.send(h.thread.id, 'Review.', 'linked-catalog');
+  expect(result.status).toBe('complete');
+  const output: unknown = JSON.parse(result.messages.find((entry) => entry.tool)?.content ?? '');
+  expect(output).toMatchObject({
+    files: ['references/safe.md'],
+    skippedFiles: [
+      { path: 'references/outside.md', reason: 'Links and special files are not supported.' },
+    ],
+  });
   expect(h.calls.some((call) => call.includes('outside.md'))).toBe(false);
+  expect((await h.runtime.skills.list('ws-one')).diagnostics).toEqual([
+    {
+      source: 'project',
+      location: '.agents/skills/linked',
+      message: 'Skipped: discovery does not follow links.',
+      severity: 'skipped',
+    },
+  ]);
   await h.runtime.dispose();
 });
 
-test('a skill changed after advertisement loads fresh contents, and unreadable on-demand definitions stay tool errors', async () => {
+test('a skill changed after advertisement loads fresh contents, and an unreadable definition is a tool error, not a failed turn', async () => {
   const h = await harness({ [`ws-one:${skillId}/SKILL.md`]: skill() });
   const generate = LocalModelSession.prototype.generate.bind(h.runtime.models);
   h.generate.mockImplementationOnce(async (...args) => {
@@ -727,7 +786,7 @@ test('a skill changed after advertisement loads fresh contents, and unreadable o
     );
     return result;
   });
-  h.llama.reply({ toolCalls: [{ name: 'skill', arguments: { id: skillId } }] });
+  h.llama.reply({ toolCalls: [{ name: 'skill', arguments: { name: 'review' } }] });
   const result = await h.runtime.loop.send(h.thread.id, 'Review.', 'fresh-demand');
   expect(h.prompt(0)).toContain('Review local changes.');
   expect(result.messages.find((entry) => entry.tool)?.content).toContain('FRESH ON DEMAND');
@@ -744,10 +803,9 @@ test('a skill changed after advertisement loads fresh contents, and unreadable o
       );
     return response;
   });
-  h.llama.reply({ toolCalls: [{ name: 'skill', arguments: { id: skillId } }] });
-  await expect(
-    h.runtime.loop.send(h.thread.id, 'Review again.', 'unreadable-demand'),
-  ).rejects.toThrow('Skill became unreadable');
+  h.llama.reply({ toolCalls: [{ name: 'skill', arguments: { name: 'review' } }] });
+  const settled = await h.runtime.loop.send(h.thread.id, 'Review again.', 'unreadable-demand');
+  expect(settled.status).toBe('complete');
   const tool = h.runtime.threads
     .get(h.thread.id)
     .messages.filter((entry) => entry.tool)
@@ -778,7 +836,7 @@ test('Stop during on-demand skill loading preserves interruption and generates n
     }
     return read(id, path, offset, limit);
   });
-  h.llama.reply({ toolCalls: [{ name: 'skill', arguments: { id: skillId } }] });
+  h.llama.reply({ toolCalls: [{ name: 'skill', arguments: { name: 'review' } }] });
   const running = h.runtime.loop.send(h.thread.id, 'Review.', 'stop-skill');
   await started;
   const stopping = h.runtime.loop.stop();

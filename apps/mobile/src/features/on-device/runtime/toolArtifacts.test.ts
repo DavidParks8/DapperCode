@@ -7,8 +7,8 @@ import {
   executeWithToolOutput,
 } from './toolArtifacts';
 import type { LocalDocumentPort } from './threads';
-import { newLocalChild } from './delegation';
-import type { LocalMessage } from './types';
+import { childThreadPort, newLocalChild } from './delegation';
+import type { LocalMessage, LocalThread } from './types';
 
 jest.mock('expo-crypto', () => ({ randomUUID: jest.fn() }));
 const thread = '00000000-0000-4000-8000-000000000001';
@@ -169,7 +169,8 @@ test('per-conversation, total-byte and document-count quotas survive reload and 
   await expect(h.artifacts.offload(thread, 'one', 'read_file', large)).rejects.toThrow('32 MiB');
   h.documents.clear();
   for (let index = 0; index < TOOL_ARTIFACT_MAX_COUNT - 1; index += 1) {
-    h.documents.set(`toolartifact-unused-${index}`, '{}');
+    const id = `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+    h.documents.set(`toolartifact-${other}-${id}-2.json`, '{}');
   }
   const concurrent = await Promise.allSettled([
     h.artifacts.offload(thread, 'one', 'read_file', large),
@@ -182,6 +183,47 @@ test('per-conversation, total-byte and document-count quotas survive reload and 
   }
   expect(failure.reason).toBeInstanceOf(LocalArtifactStorageError);
   expect(h.documents.size).toBe(TOOL_ARTIFACT_MAX_COUNT);
+  expect(h.port.readRuntimeDocument).not.toHaveBeenCalled();
+});
+
+test('quota accounting never reads saved evidence and enforces every cap from names after reload', async () => {
+  const h = harness();
+  const large = { content: 'x'.repeat(1024 * 1024) };
+  const owner = (index: number) =>
+    `00000000-0000-4000-8000-${String(900 + index).padStart(12, '0')}`;
+  for (let index = 0; index < 4; index += 1) {
+    for (let count = 0; count < 7; count += 1) {
+      await h.artifacts.offload(owner(index), 'one', 'read_file', large);
+    }
+    // Only this conversation is near its cap; the 8 MiB rule, not the total, rejects it.
+    await expect(
+      new LocalToolArtifacts(h.port).offload(owner(index), 'one', 'read_file', large),
+    ).rejects.toThrow('8 MiB/conversation');
+  }
+  const reloaded = new LocalToolArtifacts(h.port);
+  for (let count = 0; count < 3; count += 1) {
+    await reloaded.offload(owner(4), 'one', 'read_file', large);
+  }
+  // owner(4) holds ~3 MiB, so only the ~32 MiB total can reject this one.
+  await expect(
+    new LocalToolArtifacts(h.port).offload(owner(4), 'one', 'read_file', large),
+  ).rejects.toThrow('32 MiB total');
+  expect(h.documents.size).toBe(31);
+  expect([...h.documents.keys()].every((name) => /-\d+\.json$/u.test(name))).toBe(true);
+
+  h.documents.clear();
+  for (let count = 0; count < TOOL_ARTIFACT_MAX_COUNT; count += 1) {
+    await new LocalToolArtifacts(h.port).offload(owner(count % 4), 'one', 'read_file', {
+      content: 'x'.repeat(5000),
+    });
+  }
+  await expect(
+    new LocalToolArtifacts(h.port).offload(owner(5), 'one', 'read_file', {
+      content: 'x'.repeat(5000),
+    }),
+  ).rejects.toThrow('128-output');
+  expect(h.documents.size).toBe(TOOL_ARTIFACT_MAX_COUNT);
+  expect(h.port.readRuntimeDocument).not.toHaveBeenCalled();
 });
 
 test('orphan cleanup finishes interrupted deletions but preserves quarantine evidence', async () => {
@@ -243,4 +285,97 @@ test('child outputs retain parent storage ownership across reload and require th
   await expect(read(other)).rejects.toThrow('unavailable');
   await reloaded.removeThread(thread);
   expect(h.documents.size).toBe(0);
+});
+
+test('a child reads its own evidence with or without its child_id; others never can', async () => {
+  const h = harness();
+  const child = newLocalChild('explore', 'one', 'model');
+  const sibling = newLocalChild('explore', 'one', 'model');
+  const createdAt = new Date().toISOString();
+  const parent: LocalThread = {
+    version: 1,
+    id: thread,
+    title: 'Parent',
+    workspaceId: 'one',
+    modelId: 'model',
+    createdAt,
+    updatedAt: createdAt,
+    status: 'running',
+    activeTurnId: null,
+    lastSubmissionId: null,
+    lastError: null,
+    messages: [
+      { id: 'children', role: 'assistant', content: '', createdAt, children: [child, sibling] },
+    ],
+  };
+  // The exact view a running child receives from the production child port.
+  const childView = (artifacts: LocalToolArtifacts, id: string) =>
+    childThreadPort(
+      { artifacts, get: () => parent, change: jest.fn(), save: jest.fn(), flush: jest.fn() },
+      thread,
+      id,
+      'one',
+      'model',
+    ).get(id);
+  const run = (
+    artifacts: LocalToolArtifacts,
+    scope: Parameters<typeof executeWithToolOutput>[1],
+    name: string,
+    input: Record<string, unknown>,
+  ) =>
+    executeWithToolOutput(artifacts, scope, name, input, new AbortController().signal, () =>
+      Promise.resolve({ content: `${'x'.repeat(8000)}TAIL-CHILD-EVIDENCE` }),
+    );
+  const saved = JSON.parse(
+    await run(h.artifacts, childView(h.artifacts, child.id), 'read_file', {}),
+  ) as {
+    artifactId: string;
+    child_id: string;
+  };
+  expect(saved.child_id).toBe(child.id);
+  const foreign = (await h.artifacts.offload(other, 'one', 'read_file', {
+    content: 'foreign'.repeat(1000),
+  })) as { artifactId: string };
+  const page = { artifactId: saved.artifactId, offset: 7900, limit: 4096 };
+  const tail = async (pending: Promise<string>) =>
+    expect((JSON.parse(await pending) as { content: string }).content).toContain(
+      'TAIL-CHILD-EVIDENCE',
+    );
+  for (const artifacts of [h.artifacts, new LocalToolArtifacts(h.port)]) {
+    const own = childView(artifacts, child.id);
+    await tail(run(artifacts, own, 'read_tool_output', page));
+    await tail(run(artifacts, own, 'read_tool_output', { ...page, child_id: child.id }));
+    await expect(
+      run(artifacts, own, 'search_tool_output', {
+        artifactId: saved.artifactId,
+        child_id: child.id,
+        query: 'TAIL-CHILD',
+      }),
+    ).resolves.toContain('TAIL-CHILD-EVIDENCE');
+    await tail(run(artifacts, parent, 'read_tool_output', { ...page, child_id: child.id }));
+    await expect(run(artifacts, parent, 'read_tool_output', page)).rejects.toThrow('identity');
+    const peer = childView(artifacts, sibling.id);
+    await expect(
+      run(artifacts, peer, 'read_tool_output', { ...page, child_id: child.id }),
+    ).rejects.toThrow('child output is unavailable');
+    await expect(run(artifacts, peer, 'read_tool_output', page)).rejects.toThrow('identity');
+    await expect(
+      run(artifacts, peer, 'read_tool_output', { ...page, child_id: sibling.id }),
+    ).rejects.toThrow('identity');
+    await expect(
+      run(artifacts, own, 'read_tool_output', { ...page, child_id: thread }),
+    ).rejects.toThrow('child output is unavailable');
+    await expect(
+      run(artifacts, own, 'read_tool_output', {
+        artifactId: foreign.artifactId,
+        child_id: child.id,
+      }),
+    ).rejects.toThrow('saved tool output is unavailable');
+    await expect(
+      run(artifacts, { ...parent, id: other, messages: [] }, 'read_tool_output', {
+        ...page,
+        child_id: child.id,
+      }),
+    ).rejects.toThrow('child output is unavailable');
+  }
 });

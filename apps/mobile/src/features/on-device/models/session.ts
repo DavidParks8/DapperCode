@@ -9,7 +9,7 @@ import { localModelDefinition, requireLocalModelRuntime } from './catalog';
 import {
   generationTokenBudget,
   iteratePromptCandidates,
-  outputReserveTokens,
+  LocalContextFull,
   promptFits,
 } from './contextWindow';
 import type {
@@ -25,7 +25,9 @@ import {
   type ResidentModel,
 } from './memory';
 import type { LocalModelDefinition } from './types';
-import { rollingSummary } from './summary';
+import { compactEarlierTurns } from './summary';
+
+export { LocalContextFull };
 
 export interface LocalModelSessionSnapshot {
   phase: 'empty' | 'loading' | 'ready' | 'running' | 'stopping' | 'error';
@@ -43,8 +45,12 @@ export interface LocalModelUpdate {
 }
 
 export interface LocalSummaryCheckpoint {
+  /** Identifies the earlier history to summarize; a failed summary of it is not retried. */
+  key: string;
   previous: string | null;
   started(): void;
+  /** The summary failed; history and the previous checkpoint stay and elision is used instead. */
+  failed(): void;
   /** Validates the proposed prompt before persisting complete semantic memory. */
   commit(
     content: string,
@@ -83,13 +89,6 @@ export class LocalModelInterrupted extends Error {
   }
 }
 
-export class LocalContextFull extends Error {
-  constructor() {
-    super('The request exceeds local context. History is preserved; ask for a smaller step.');
-    this.name = 'LocalContextFull';
-  }
-}
-
 export class LocalModelSession {
   private current: LoadedModel | null = null;
   private loading: Promise<void> | null = null;
@@ -97,6 +96,7 @@ export class LocalModelSession {
   private loadingEpoch = 0;
   private loadEpoch = 0;
   private generation: Generation | null = null;
+  private failedCheckpoint: string | null = null;
   private unloading = false;
   private disposed = false;
   private value: LocalModelSessionSnapshot = {
@@ -395,7 +395,7 @@ export class LocalModelSession {
   /**
    * Formats with the real chat template and tokenizer, compacting earlier context only when the
    * prompt would not leave room to generate. The chosen formatted prompt is passed straight to
-   * completion so the template is rendered once per attempt.
+   * completion so the template is rendered once per attempt. Stored history is never modified.
    */
   private async preparePrompt(
     generation: Generation,
@@ -403,51 +403,46 @@ export class LocalModelSession {
     tools: object[],
     checkpoint?: LocalSummaryCheckpoint,
   ): Promise<PreparedPrompt> {
-    const { context, contextTokens } = generation.model;
-    if (checkpoint) {
-      const original = await this.formatPrompt(generation, messages, tools);
-      // Start before overflow, leaving two normal generation reserves for the next tool round.
-      if (promptFits(original.tokens, contextTokens, 2)) {
-        return original;
-      }
-      checkpoint.started();
-      const summary = await this.summarize(generation, messages.slice(1), checkpoint.previous);
-      this.checkGeneration(generation);
-      let prepared: PreparedPrompt | undefined;
-      await checkpoint.commit(summary, async (compacted) => {
-        prepared = await this.formatPrompt(generation, compacted, tools);
-        this.checkGeneration(generation);
-        if (!promptFits(prepared.tokens, contextTokens)) {
-          throw new LocalContextFull();
-        }
+    const { contextTokens } = generation.model;
+    const original = await this.formatPrompt(generation, messages, tools);
+    // Two free generation reserves always leave room for the next tool round. A summary that
+    // failed for this earlier history is not retried; elision runs instead.
+    if (
+      checkpoint &&
+      checkpoint.key !== this.failedCheckpoint &&
+      !promptFits(original.tokens, contextTokens, 2)
+    ) {
+      const compacted = await compactEarlierTurns(messages, original, contextTokens, checkpoint, {
+        format: (chat, withTools) => this.formatPrompt(generation, chat, withTools ? tools : []),
+        complete: (prompt, outputTokens) => this.summaryReply(generation, prompt, outputTokens),
+        failed: (error) => {
+          this.checkGeneration(generation);
+          if (error instanceof LocalModelInterrupted) {
+            throw error;
+          }
+          this.requireExecutionMemory();
+          this.failedCheckpoint = checkpoint.key;
+        },
       });
-      this.checkGeneration(generation);
-      if (!prepared) {
-        throw new Error('The summary checkpoint did not validate its compacted prompt.');
+      if (compacted) {
+        return compacted;
       }
-      return prepared;
     }
     let fallback: PreparedPrompt | null = null;
     // A history candidate that fits is preferred to eliding the current turn's own output.
     for (const candidate of iteratePromptCandidates(messages, () => fallback !== null)) {
-      if (generation.interrupted) {
-        throw new LocalModelInterrupted();
-      }
-      const formatted = await context.getFormattedChat(candidate.messages, null, {
-        tools,
-        tool_choice: 'auto',
-        enable_thinking: false,
-        reasoning_format: 'auto',
-      });
-      const tokens = (await context.tokenize(formatted.prompt)).tokens.length;
-      if (!promptFits(tokens, contextTokens)) {
+      const prepared =
+        candidate.scope === 'original'
+          ? original
+          : await this.formatPrompt(generation, candidate.messages, tools);
+      if (!promptFits(prepared.tokens, contextTokens)) {
         continue;
       }
       // Once compaction is needed, free extra room so the next rounds keep a stable prefix.
-      if (candidate.scope !== 'history' || promptFits(tokens, contextTokens, 2)) {
-        return { formatted, tokens };
+      if (candidate.scope !== 'history' || promptFits(prepared.tokens, contextTokens, 2)) {
+        return prepared;
       }
-      fallback ??= { formatted, tokens };
+      fallback ??= prepared;
     }
     if (fallback) {
       return fallback;
@@ -481,30 +476,21 @@ export class LocalModelSession {
     return { formatted, tokens };
   }
 
-  private async summarize(
+  private async summaryReply(
     generation: Generation,
-    messages: LocalModelMessage[],
-    previous: string | null,
-  ): Promise<string> {
-    const { context, contextTokens } = generation.model;
-    return rollingSummary(
-      messages,
-      previous,
-      contextTokens,
-      (chat) => this.formatPrompt(generation, chat, []),
-      async (prompt) => {
-        this.requireExecutionMemory();
-        this.checkGeneration(generation);
-        const reply = await context.completion(
-          completionParams(prompt.formatted, Math.min(1024, outputReserveTokens(contextTokens))),
-        );
-        this.checkGeneration(generation);
-        if (reply.interrupted) {
-          throw new LocalModelInterrupted();
-        }
-        return reply;
-      },
+    prompt: PreparedPrompt,
+    outputTokens: number,
+  ): Promise<LocalModelReply> {
+    this.requireExecutionMemory();
+    this.checkGeneration(generation);
+    const reply = await generation.model.context.completion(
+      completionParams(prompt.formatted, outputTokens),
     );
+    this.checkGeneration(generation);
+    if (reply.interrupted) {
+      throw new LocalModelInterrupted();
+    }
+    return reply;
   }
 
   private partial(

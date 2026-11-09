@@ -6,7 +6,9 @@ import type { LocalModelSessionSnapshot } from '../../on-device/models/session';
 import type { DeviceMemory } from '../../on-device/models/types';
 import type { LocalPreferences } from '../../on-device/runtime/preferences';
 import type { OnDeviceRuntime } from '../../on-device/runtime/runtime';
+import type { LocalSkillListing } from '../../on-device/runtime/skills';
 import type { OnDeviceIssue, OnDeviceRuntimeSlice } from '../../on-device/runtime/types';
+import type { LocalWorkspace } from '../../on-device/workspaces/types';
 
 const GiB = 1024 ** 3;
 
@@ -119,6 +121,18 @@ export class FakeSettingsRuntime {
         this.pendingSignIn = { present, resolve, reject };
       }),
   );
+
+  workspaceList: LocalWorkspace[] = [];
+  workspaces = () => this.workspaceList;
+  skillListing: LocalSkillListing = { skills: [], diagnostics: [] };
+  readonly skills = {
+    list: jest.fn(async (workspaceId: string) => {
+      void workspaceId;
+      return this.skillListing;
+    }),
+    enabled: (name: string) => !this.preferenceValue.disabledSkills?.includes(name),
+    skillsEnabled: () => this.preferenceValue.skillsEnabled !== false,
+  };
 
   authConfigured = () => this.configured;
   preferences = () => this.preferenceValue;

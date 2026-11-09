@@ -565,7 +565,10 @@
             "options": []
           }
         ],
-        "commands": [{ "name": "test", "description": "Run tests" }],
+        "commands": [
+          { "name": "test", "description": "Run tests", "hint": "[filter]" },
+          { "name": "compact", "description": "Compact the conversation" }
+        ],
         "session": {
           "agentId": "agent-alpha",
           "threadId": "agent-alpha:thread-snapshot",

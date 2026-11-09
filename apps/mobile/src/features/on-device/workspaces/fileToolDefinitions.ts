@@ -22,7 +22,7 @@ export const FILE_TOOL_DEFINITIONS = [
   ),
   definition(
     'read_file',
-    `Read a UTF-8 file chunk. Returns path, content, revision, and nextOffset. offset/limit are bytes; limit defaults to ${READ_FILE_DEFAULT_BYTES} (max ${READ_FILE_MAX_BYTES}).`,
+    `Read a UTF-8 file chunk. offset/limit are bytes (limit default ${READ_FILE_DEFAULT_BYTES}, max ${READ_FILE_MAX_BYTES}); follow nextOffset for more.`,
     {
       path,
       offset: { type: 'integer' },
@@ -33,14 +33,14 @@ export const FILE_TOOL_DEFINITIONS = [
   ),
   definition(
     'write_file',
-    'Create or replace UTF-8 text, at most 4 MiB. Read an existing file first. The runtime checks its observed version so external changes cannot be overwritten. JS/TS/JSON are automatically formatted afterward; the result reports formatting status/errors separately from the successful edit.',
+    'Create or replace a UTF-8 file (max 4 MiB); read an existing file first. JS/TS/JSON are then auto-formatted; a formatting error does not undo the write.',
     { path, content: { type: 'string' } },
     ['path', 'content'],
     { kind: 'edit', approval: null },
   ),
   definition(
     'edit_file',
-    'Replace exactly one literal occurrence in a UTF-8 file previously read or written in this turn. The runtime checks and updates its observed version. JS/TS/JSON are automatically formatted afterward; the result reports formatting status/errors separately from the successful edit.',
+    'Replace exactly one literal occurrence of old_text in a UTF-8 file read or written in this turn. JS/TS/JSON are then auto-formatted; a formatting error does not undo the edit.',
     {
       path,
       old_text: { type: 'string' },
@@ -51,21 +51,21 @@ export const FILE_TOOL_DEFINITIONS = [
   ),
   definition(
     'rename_path',
-    'Move an existing source path to a destination that must not exist. Read or write a source file in this turn first; its version is checked by the runtime. Never create or read the destination first. Git staging is not needed.',
+    'Move a path to a destination that must not exist. Read or write a source file in this turn first; never create or read the destination. No Git staging needed.',
     { path, destination: path },
     ['path', 'destination'],
     { kind: 'move', approval: null },
   ),
   definition(
     'delete_path',
-    'Remove a workspace path. Read or write a file in this turn first; the runtime checks its observed version. Repository roots and Git metadata are protected.',
+    'Remove a workspace path; read or write a file in this turn first. Repository roots and Git metadata are protected.',
     { path },
     ['path'],
     { kind: 'delete', approval: null },
   ),
   definition(
     'search_files',
-    'Search UTF-8 lines (literal by default). regex enables ICU regex with a time budget. path scopes a directory; include is a root-relative glob (*, **, ?); file_type is an extension without a dot. case_sensitive defaults true. offset/limit page matching lines (default 20, max 100). Results include line numbers, clipped previews, exclusions, budgets and truncation.',
+    'Search file lines for literal text, or ICU regex if regex. Optional path directory, include root-relative glob, file_type extension without a dot; case-sensitive by default. offset/limit page matches (limit default 20, max 100).',
     {
       query: { type: 'string' },
       path,
@@ -81,7 +81,7 @@ export const FILE_TOOL_DEFINITIONS = [
   ),
   definition(
     'glob_files',
-    'Discover files by root-relative glob (*, **, ?). pattern defaults to **/* (all files). path scopes a directory; file_type filters extension. offset/limit page results (offset max 10000; limit default 20, max 100). Git-ignored files and links are excluded. Results report budgets and truncation; only nextOffset permits paging.',
+    'Find files by root-relative glob (*, **, ?); pattern defaults to **/*. path scopes a directory; file_type filters extension. offset/limit page results (limit default 20, max 100); page only with nextOffset. Git-ignored files are excluded.',
     {
       pattern: path,
       path,
@@ -94,7 +94,7 @@ export const FILE_TOOL_DEFINITIONS = [
   ),
   definition(
     'apply_patch',
-    'Coordinated UTF-8 add/update/delete/move, max 32 files and 4 MiB patch. Read every existing source in this turn first; revisions come from the runtime, never the model. Format: *** Begin Patch; *** Add File: path then +lines; *** Update File: path optionally *** Move to: destination then standard @@ -old,count +new,count @@ hunks with space context, -removed, +added lines; *** Delete File: path; *** End Patch. Use \\ No newline at end of file after a line lacking a newline. All paths/hunks/revisions validate before publication. Destinations must not exist; duplicate/ancestor paths reject.',
+    'Atomically add/update/delete/move up to 32 UTF-8 files; read every existing source in this turn first. Format: *** Begin Patch; *** Add File: path then +lines; *** Update File: path, optional *** Move to: destination, then @@ -old,count +new,count @@ hunks of space-context, -removed and +added lines; *** Delete File: path; *** End Patch. Destinations must not exist.',
     { patch: { type: 'string' } },
     ['patch'],
     { kind: 'edit', approval: null },

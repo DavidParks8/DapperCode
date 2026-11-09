@@ -1,5 +1,6 @@
 import type { LocalToolPermission } from './toolDefinition';
 import type { LocalGuidanceState } from './workspaceGuidance';
+import type { LocalSkillRun } from './skillTool';
 import type { LocalTask, LocalInteractionRun } from './interactionTools';
 import type { PendingUserInputRequest } from '@bridge/types/types';
 
@@ -68,7 +69,15 @@ export interface LocalThread {
 
 /** Independently subscribable parts of the on-device runtime. */
 export type OnDeviceRuntimeSlice =
-  'threads' | 'loop' | 'models' | 'downloads' | 'preferences' | 'workspaces' | 'issues' | 'network';
+  | 'threads'
+  | 'loop'
+  | 'models'
+  | 'downloads'
+  | 'preferences'
+  | 'workspaces'
+  | 'issues'
+  | 'network'
+  | 'skills';
 
 export const ON_DEVICE_RUNTIME_SLICES: readonly OnDeviceRuntimeSlice[] = [
   'threads',
@@ -79,6 +88,7 @@ export const ON_DEVICE_RUNTIME_SLICES: readonly OnDeviceRuntimeSlice[] = [
   'workspaces',
   'issues',
   'network',
+  'skills',
 ];
 
 /**
@@ -159,4 +169,5 @@ export interface LocalAgentRun {
   guidance: LocalGuidanceState;
   childAdmissions: number;
   input: LocalInteractionRun['input'];
+  skills: LocalSkillRun;
 }

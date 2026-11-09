@@ -7,6 +7,7 @@ import type { ModelStorageSnapshot } from '../../on-device/models/downloads';
 import { LOCAL_MODEL_CATALOG, localModelName } from '../../on-device/models/catalog';
 import { useOnDeviceSelector } from '../../on-device/runtime/OnDeviceProvider';
 import type { OnDeviceRuntime } from '../../on-device/runtime/runtime';
+import type { LocalSkillListing } from '../../on-device/runtime/skills';
 import type { OnDeviceRuntimeSlice } from '../../on-device/runtime/types';
 import { describeTransfer, modelResidency } from './modelPresentation';
 
@@ -14,6 +15,8 @@ const PREFERENCE_SLICES: readonly OnDeviceRuntimeSlice[] = ['preferences'];
 const DOWNLOAD_SLICES: readonly OnDeviceRuntimeSlice[] = ['downloads'];
 const MODEL_SLICES: readonly OnDeviceRuntimeSlice[] = ['models'];
 const ANNOUNCEMENT_SLICES: readonly OnDeviceRuntimeSlice[] = ['downloads', 'models'];
+const SKILL_SLICES: readonly OnDeviceRuntimeSlice[] = ['skills'];
+const SKILL_WORKSPACE_SLICES: readonly OnDeviceRuntimeSlice[] = ['workspaces', 'preferences'];
 export const MEMORY_REFRESH_MS = 5_000;
 
 /** The runtime without subscribing to its frequently changing slices. */
@@ -183,4 +186,88 @@ export function useModelAnnouncements(): void {
       }
     }
   }, [key, runtime]);
+}
+
+export function failureMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+/**
+ * The workspace whose project skills Settings shows: the one picked on the page while it exists,
+ * else the workspace new chats use, else the first one.
+ */
+export function useSkillWorkspace(initial?: string): [string | null, (id: string) => void] {
+  const [chosen, choose] = useState<string | null>(initial ?? null);
+  const workspaceId = useOnDeviceSelector((runtime) => {
+    const ids = runtime.workspaces().map((workspace) => workspace.id);
+    const preferred = [chosen, runtime.preferences().workspaceId].find(
+      (id): id is string => id !== null && ids.includes(id),
+    );
+    return preferred ?? ids[0] ?? null;
+  }, SKILL_WORKSPACE_SLICES);
+  return [workspaceId, choose];
+}
+
+/**
+ * Skills data for a workspace (null when there is none), reloaded whenever the runtime announces
+ * a skills change. `load` must be stable (module scope); returning null loads nothing.
+ */
+export function useSkillsQuery<T>(
+  workspaceId: string | null,
+  load: (runtime: OnDeviceRuntime, workspaceId: string | null) => Promise<T> | null,
+  failure: string,
+): { value: T | null; error: string | null; reload: () => void } {
+  const runtime = useLocalRuntime();
+  const version = useOnDeviceSelector((current) => current.version(SKILL_SLICES), SKILL_SLICES);
+  const [attempt, setAttempt] = useState(0);
+  const [result, setResult] = useState<{
+    workspaceId: string | null;
+    value: T | null;
+    error: string | null;
+  } | null>(null);
+  useEffect(() => {
+    const pending = load(runtime, workspaceId);
+    if (!pending) {
+      return;
+    }
+    let current = true;
+    void pending.then(
+      (value) => {
+        if (current) {
+          setResult({ workspaceId, value, error: null });
+        }
+      },
+      (error: unknown) => {
+        if (current) {
+          setResult({ workspaceId, value: null, error: failureMessage(error, failure) });
+        }
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [attempt, failure, load, runtime, version, workspaceId]);
+  const reload = useCallback(() => {
+    setResult(null);
+    setAttempt((value) => value + 1);
+  }, []);
+  const own = result?.workspaceId === workspaceId ? result : null;
+  return { value: own?.value ?? null, error: own?.error ?? null, reload };
+}
+
+const listSkills = (runtime: OnDeviceRuntime, workspaceId: string | null) =>
+  workspaceId === null ? null : runtime.skills.list(workspaceId);
+
+/** A workspace's merged skill listing, as the agent sees it. */
+export function useSkillListing(workspaceId: string | null): {
+  listing: LocalSkillListing | null;
+  error: string | null;
+  reload: () => void;
+} {
+  const { value, error, reload } = useSkillsQuery(
+    workspaceId,
+    listSkills,
+    'Skills could not be read.',
+  );
+  return { listing: value, error, reload };
 }

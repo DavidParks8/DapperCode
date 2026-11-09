@@ -1,9 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { Provider, createStore } from 'jotai';
 
 import { router } from 'expo-router';
 import { resetRouterMock } from '@shared/testing/expoRouterMock';
 import { localRuntimeAtom } from '@shell/state/local/atoms';
+import type { LocalSkillListing } from '../on-device/runtime/skills';
 import { LocalProfileSection } from './LocalProfileSection';
 import { FakeSettingsRuntime } from './local/testing';
 
@@ -44,4 +45,74 @@ test('On this iPhone settings open the Models and Git & GitHub pages and summari
   });
   expect(router.push).not.toHaveBeenCalledWith('/on-device/models');
   expect(router.push).not.toHaveBeenCalledWith('/on-device/account');
+});
+
+/** The summary counts only `enabled`; the rest of the listing entry is irrelevant here. */
+function skillEntry(name: string, enabled: boolean): LocalSkillListing['skills'][number] {
+  return { name, enabled } as LocalSkillListing['skills'][number];
+}
+
+function renderSection(runtime: FakeSettingsRuntime) {
+  const store = createStore();
+  store.set(localRuntimeAtom, runtime.asRuntime());
+  render(
+    <Provider store={store}>
+      <LocalProfileSection />
+    </Provider>,
+  );
+}
+
+test('the Skills row counts enabled skills in the new-chat workspace and opens the Skills page', async () => {
+  const runtime = new FakeSettingsRuntime();
+  runtime.workspaceList = [
+    { id: 'ws-one', name: 'App', isRepository: true },
+    { id: 'ws-two', name: 'Skills', isRepository: true },
+  ];
+  runtime.setPreferences({ workspaceId: 'ws-two' });
+  runtime.skillListing = {
+    skills: [skillEntry('review', true), skillEntry('plan', false), skillEntry('notes', true)],
+    diagnostics: [],
+  };
+  renderSection(runtime);
+
+  fireEvent.press(await screen.findByLabelText('Skills, 2 enabled'));
+  expect(runtime.skills.list).toHaveBeenLastCalledWith('ws-two');
+  expect(router.push).toHaveBeenLastCalledWith({
+    pathname: '/profiles/[profileId]/settings/skills',
+    params: { profileId: 'on-device' },
+  });
+
+  // A skills change announced by the runtime refreshes the summary.
+  runtime.skillListing = {
+    skills: runtime.skillListing.skills.map((skill) => ({ ...skill, enabled: true })),
+    diagnostics: [],
+  };
+  act(() => runtime.emit('skills'));
+  expect(await screen.findByLabelText('Skills, 3 enabled')).toBeTruthy();
+});
+
+test('the Skills row says None without workspaces or skills', async () => {
+  const runtime = new FakeSettingsRuntime();
+  renderSection(runtime);
+  expect(screen.getByLabelText('Skills, None')).toBeTruthy();
+  expect(runtime.skills.list).not.toHaveBeenCalled();
+
+  act(() => {
+    runtime.workspaceList = [{ id: 'ws-one', name: 'App', isRepository: true }];
+    runtime.emit('workspaces');
+  });
+  expect(await screen.findByLabelText('Skills, None')).toBeTruthy();
+  expect(runtime.skills.list).toHaveBeenCalledWith('ws-one');
+});
+
+test('the Skills row says Off when every skill is turned off', async () => {
+  const runtime = new FakeSettingsRuntime();
+  runtime.workspaceList = [{ id: 'ws-one', name: 'App', isRepository: true }];
+  runtime.skillListing = { skills: [skillEntry('review', true)], diagnostics: [] };
+  runtime.setPreferences({ skillsEnabled: false });
+  renderSection(runtime);
+  expect(await screen.findByLabelText('Skills, Off')).toBeTruthy();
+
+  act(() => runtime.setPreferences({ skillsEnabled: true }));
+  expect(await screen.findByLabelText('Skills, 1 enabled')).toBeTruthy();
 });

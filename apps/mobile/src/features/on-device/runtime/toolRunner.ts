@@ -5,7 +5,13 @@ import { repeatedToolCallError } from './agentPolicy';
 import { LocalArtifactStorageError } from './toolArtifacts';
 import type { LocalThreadPort } from './delegation';
 import type { LocalToolPermission } from './toolDefinition';
-import type { LocalAgentRun, LocalMessage, LocalToolApprovalPolicy, LocalToolCall } from './types';
+import type {
+  LocalAgentRun,
+  LocalMessage,
+  LocalToolApproval,
+  LocalToolApprovalPolicy,
+  LocalToolCall,
+} from './types';
 
 export function updateLocalToolStatus(
   threads: LocalThreadPort,
@@ -63,7 +69,8 @@ export async function performLocalTool(
   repeated: boolean,
   bindings: {
     permission: LocalToolApprovalPolicy;
-    allows: (kind: ChatToolKind) => boolean;
+    /** Policy or a run-scoped skill pre-approval (`allowed-tools`) skips the prompt. */
+    allows: (kind: ChatToolKind, name: string) => boolean;
     approve: (messageId: string, permission: LocalToolPermission) => Promise<boolean>;
     validate: (name: string) => void;
     execute: (name: string, args: unknown, messageId: string) => Promise<unknown>;
@@ -106,7 +113,7 @@ export async function performLocalTool(
     const permission = bindings.permission(call.function.name, args);
     if (
       permission &&
-      !bindings.allows(permission.kind) &&
+      !bindings.allows(permission.kind, call.function.name) &&
       !(await bindings.approve(id, permission))
     ) {
       updateLocalToolStatus(
@@ -130,7 +137,8 @@ export async function performLocalTool(
       run.threadId,
       id,
       'completed',
-      resultJson(result, bindings.outputLimit),
+      // Skill pages are already bounded and must reach the model whole.
+      resultJson(result, call.function.name === 'skill' ? undefined : bindings.outputLimit),
     );
   } catch (error) {
     if (error instanceof LocalArtifactStorageError) {
@@ -154,4 +162,53 @@ export async function performLocalTool(
     }
   }
   await threads.save(run.threadId);
+}
+
+/** Waits for the user's decision, re-checking policy changes; a stop marks the call interrupted. */
+export async function awaitLocalApproval(
+  threads: LocalThreadPort,
+  run: LocalAgentRun,
+  call: LocalToolCall,
+  messageId: string,
+  permission: LocalToolPermission,
+  bindings: {
+    automatic: () => boolean;
+    publish: (approval: LocalToolApproval) => void;
+    check: () => void;
+  },
+): Promise<boolean> {
+  try {
+    while (true) {
+      if (bindings.automatic()) {
+        return true;
+      }
+      const decision = new Promise<boolean | 'policy'>((resolve) => {
+        run.approval = { callId: call.id, resolve };
+      });
+      bindings.publish({
+        threadId: run.threadId,
+        turnId: run.turnId,
+        callId: call.id,
+        toolName: call.function.name,
+        ...permission,
+      });
+      const approved = await Promise.race([decision, run.interrupt]);
+      bindings.check();
+      if (approved !== 'policy') {
+        return approved;
+      }
+    }
+  } catch (error) {
+    updateLocalToolStatus(
+      threads,
+      run.threadId,
+      messageId,
+      'interrupted',
+      JSON.stringify({ error: 'Stopped before the user approved this request. It did not run.' }),
+    );
+    await threads.save(run.threadId);
+    throw error;
+  } finally {
+    run.approval = null;
+  }
 }

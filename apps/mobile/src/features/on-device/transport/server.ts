@@ -1,8 +1,4 @@
-import type {
-  BridgeThreadQueueState,
-  FileSystemListResponse,
-  WorkspaceListResponse,
-} from '@bridge/types/types';
+import type { BridgeThreadQueueState } from '@bridge/types/types';
 import type { LocalThread } from '../runtime/types';
 import { failure, LOCAL_RPC_ERROR, LocalRpcError } from './errors';
 import { MODEL_HOST_METHODS } from '@shared/hostModels';
@@ -14,6 +10,7 @@ import { localModelListEntries } from './modelOptions';
 import { LOCAL_TURN_RETRY_METHOD, startLocalRetry } from './retry';
 import { startLocalTurn } from './turnStart';
 import { createLocalWorkspaceHandlers, LOCAL_WORKSPACE_METHODS } from './workspaceHandlers';
+import { localFilesystemList, localWorkspaceList } from './listings';
 import {
   readApprovalPolicy,
   readParam,
@@ -29,7 +26,6 @@ import {
   localFallbackWorkspaceId,
   localRunActivity,
   localWorkspaceIdForPath,
-  localWorkspacePaths,
   localThreadSnapshot,
   localThreadSummary,
   type LocalThreadProjectionContext,
@@ -181,7 +177,11 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
   }
 
   private context(): LocalThreadProjectionContext {
-    return { workspaces: this.port.workspaces(), models: this.port.availableModels() };
+    return {
+      workspaces: this.port.workspaces(),
+      models: this.port.availableModels(),
+      commands: (workspaceId, refresh) => this.port.commands?.(workspaceId, refresh) ?? [],
+    };
   }
 
   private flush(): void {
@@ -230,7 +230,12 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
     return thread;
   }
 
+  /** Every presented chat also gets its skill commands as a live event, then on each change. */
   private snapshot(thread: LocalThread) {
+    if (this.port.commands) {
+      const commands = this.projector.openCommands(thread);
+      void Promise.resolve().then(() => this.publish(commands));
+    }
     return localThreadSnapshot(this.port.thread(thread.id) ?? thread, {
       ...this.context(),
       run: this.port.run(),
@@ -352,47 +357,6 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
     if (model && model !== thread.modelId) {
       await this.port.updateThread(thread.id, { modelId: model });
     }
-  }
-
-  private workspaceList(): WorkspaceListResponse {
-    const threads = this.port.threads();
-    return {
-      bridgeRoot: LOCAL_WORKSPACE_ROOT,
-      allowOutsideRootCwd: false,
-      workspaces: [...localWorkspacePaths(this.port.workspaces())].map(([id, path]) => {
-        const owned = threads.filter((thread) => thread.workspaceId === id);
-        return {
-          path,
-          chatCount: owned.length,
-          ...(owned[0] ? { updatedAt: owned[0].updatedAt } : {}),
-        };
-      }),
-    };
-  }
-
-  private filesystemList(path: string | null): FileSystemListResponse {
-    const atRoot = !path || path === LOCAL_WORKSPACE_ROOT;
-    const workspaces = this.port.workspaces();
-    const entries = atRoot
-      ? [...localWorkspacePaths(workspaces)].map(([id, entryPath]) => ({
-          name: entryPath.slice(LOCAL_WORKSPACE_ROOT.length + 1),
-          path: entryPath,
-          kind: 'directory',
-          hidden: false,
-          selectable: true,
-          isGitRepo: workspaces.find((workspace) => workspace.id === id)?.isRepository === true,
-        }))
-      : [];
-    return {
-      bridgeRoot: LOCAL_WORKSPACE_ROOT,
-      path: atRoot ? LOCAL_WORKSPACE_ROOT : path,
-      parentPath: atRoot ? null : LOCAL_WORKSPACE_ROOT,
-      entries,
-      truncated: false,
-      totalEntries: entries.length,
-      omittedEntries: 0,
-      maxEntries: entries.length,
-    };
   }
 
   private createHandlers(): Record<string, Handler> {
@@ -576,11 +540,11 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
       }),
       'bridge/workspaces/list': async () => {
         await port.refreshWorkspaces();
-        return this.workspaceList();
+        return localWorkspaceList(port.workspaces(), port.threads());
       },
       'bridge/fs/list': async (params) => {
         await port.refreshWorkspaces();
-        return this.filesystemList(readParam(params, 'path'));
+        return localFilesystemList(port.workspaces(), readParam(params, 'path'));
       },
       'bridge/approvals/list': () => this.approvals.list(),
       'bridge/approvals/resolve': (params) => this.approvals.resolve(params),

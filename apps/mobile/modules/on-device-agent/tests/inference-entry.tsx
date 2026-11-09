@@ -8,6 +8,10 @@ import { getOnDeviceNativeServices } from '../../../src/features/on-device/nativ
 import { LOCAL_TOOL_DEFINITIONS } from '../../../src/features/on-device/runtime/localTools';
 import { localAgentSystemPrompt } from '../../../src/features/on-device/runtime/systemPrompt';
 import { localModelHistory } from '../../../src/features/on-device/runtime/modelHistory';
+import {
+  advertisedLocalTools,
+  localToolAdvertised,
+} from '../../../src/features/on-device/runtime/toolDefinition';
 import type { LocalMessage } from '../../../src/features/on-device/runtime/types';
 import { executeFileTool } from '../../../src/features/on-device/workspaces/fileTools';
 import { localModelDefinition } from '../../../src/features/on-device/models/catalog';
@@ -57,12 +61,60 @@ async function withModel(
   }
 }
 
+/** The tools and system prompt a production round advertises at this context size. */
+function productionPrefix(modelId: string, contextTokens: number) {
+  return {
+    tools: advertisedLocalTools(LOCAL_TOOL_DEFINITIONS, contextTokens),
+    system: localAgentSystemPrompt(
+      modelId,
+      new Date(),
+      undefined,
+      '',
+      localToolAdvertised('web_search', contextTokens),
+    ),
+  };
+}
+
+/** Real-tokenizer prompt sizes for every context tier, independent of the loaded context. */
+async function measureToolTiers(modelId: string, context: LlamaContext) {
+  const user = { role: 'user', content: 'Read hello.txt.' };
+  const measure = async (system: string, tools: object[]) => {
+    const formatted = await context.getFormattedChat(
+      [{ role: 'system', content: system }, user],
+      null,
+      {
+        tools,
+        tool_choice: 'auto',
+        enable_thinking: false,
+        reasoning_format: 'auto',
+      },
+    );
+    return (await context.tokenize(formatted.prompt)).tokens.length;
+  };
+  metrics['allToolsPromptTokens'] = await measure(
+    localAgentSystemPrompt(modelId, new Date()),
+    LOCAL_TOOL_DEFINITIONS,
+  );
+  for (const tier of [4096, 8192, 16_384]) {
+    const { system, tools } = productionPrefix(modelId, tier);
+    metrics[`toolCount${tier}`] = tools.length;
+    metrics[`promptTokens${tier}`] = await measure(system, tools);
+  }
+  // A default 3 KiB file read must still fit beside the smallest context's fixed prompt.
+  check(
+    promptFits((metrics['promptTokens4096'] ?? Infinity) + 1024, 4096),
+    'smallContextLeavesRoom',
+    JSON.stringify(metrics),
+  );
+}
+
 async function checkPostCancellationContinuation(
   modelId: string,
   context: LlamaContext,
   contextTokens: number,
   result: string,
 ) {
+  const { tools, system } = productionPrefix(modelId, contextTokens);
   const at = new Date().toISOString();
   const history: LocalMessage[] = [
     {
@@ -130,12 +182,12 @@ async function checkPostCancellationContinuation(
     },
   ];
   const messages: LocalModelMessage[] = [
-    { role: 'system', content: localAgentSystemPrompt(modelId, new Date()) },
+    { role: 'system', content: system },
     ...localModelHistory(history, 'pending-answer'),
   ];
   const format = (input: LocalModelMessage[]) =>
     context.getFormattedChat(input, null, {
-      tools: LOCAL_TOOL_DEFINITIONS,
+      tools,
       tool_choice: 'auto',
       enable_thinking: false,
       reasoning_format: 'auto',
@@ -173,20 +225,18 @@ async function exerciseInference() {
   check(verified.bytes === model.bytes && verified.sha256 === model.sha256, 'verifiedModelFile');
   const workspace = await native.createWorkspace('Native tool fixture');
   await native.writeWorkspaceFile(workspace.id, 'hello.txt', 'OFFLINE_TOOL_OK', null);
-  const messages = [
-    {
-      role: 'system',
-      content: localAgentSystemPrompt(model.id, new Date()),
-    },
-    {
-      role: 'user',
-      content: 'Call read_file with the exact path hello.txt. Do not guess its contents.',
-    },
-  ];
-  const tools = LOCAL_TOOL_DEFINITIONS;
   await withModel(model, verified, async (context, contextTokens) => {
     check(Number.isFinite(context.id), 'nativeModelLoaded');
     metrics['contextTokens'] = contextTokens;
+    await measureToolTiers(model.id, context);
+    const { tools, system } = productionPrefix(model.id, contextTokens);
+    const messages = [
+      { role: 'system', content: system },
+      {
+        role: 'user',
+        content: 'Call read_file with the exact path hello.txt. Do not guess its contents.',
+      },
+    ];
     // Production rounds format once and complete from that formatted prompt.
     const fullPrompt = await context.getFormattedChat(messages, null, {
       tools,

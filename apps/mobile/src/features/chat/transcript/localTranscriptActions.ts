@@ -5,7 +5,7 @@ import {
   countUserMessages,
   reconcileChatWithPendingOptimisticMessages,
   parseSlashQuery,
-  filterSlashCommands,
+  filterSlashSuggestions,
 } from '../helpers/helpers';
 import type {
   MainScreenChatSessionStateContext,
@@ -33,7 +33,9 @@ export function useMainScreenLocalTranscriptActions(
 
   const slashQuery = parseSlashQuery(draft);
   const slashSuggestions =
-    slashQuery !== null ? filterSlashCommands(slashQuery, activeSlashCommands) : [];
+    slashQuery !== null
+      ? filterSlashSuggestions(slashQuery, activeSlashCommands, selectedChat?.acpCommands)
+      : [];
   const slashSuggestionsMaxHeight = Math.max(148, Math.min(300, Math.floor(windowHeight * 0.34)));
 
   const queueOptimisticUserMessage = useCallback(

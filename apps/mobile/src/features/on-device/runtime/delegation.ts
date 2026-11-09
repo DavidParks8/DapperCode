@@ -122,7 +122,7 @@ export function parallelLocalReads(
 
 export const TASK_TOOL = toolDefinition(
   'task',
-  'Delegate independent work concurrently to at most 3 children. Each gets only your prompt and the same workspace/model, not this conversation. explore is read-only; general may make explicitly requested edits. Give concrete scope and expected evidence. Inference is serialized; tools can overlap. Results include status, summary and child_id. To continue a child, supply its child_id and same agent with a new prompt. Children cannot delegate.',
+  'Delegate independent bounded work to at most 3 children. explore is read-only; general makes explicitly requested edits. Children see only your prompt, not this conversation, so give complete scope and expected evidence. Results include status, summary and child_id; pass child_id with the same agent to continue one. Check child evidence before claiming success.',
   {
     tasks: {
       type: 'array',
@@ -144,7 +144,7 @@ export const TASK_TOOL = toolDefinition(
 
 export const READ_CHILD_TOOL = toolDefinition(
   'read_child',
-  'Read saved child evidence from this conversation only. child_id comes from task. Pages are character offsets into the child history JSON; follow nextOffset for more.',
+  "Read a task child's saved history by child_id in character pages; follow nextOffset.",
   { child_id: { type: 'string' }, offset: { type: 'integer' }, limit: { type: 'integer' } },
   ['child_id'],
   { kind: 'read', approval: null },
@@ -171,36 +171,30 @@ export function readChild(thread: LocalThread, input: unknown): object {
   };
 }
 
-export function delegationRequests(input: unknown): {
+export interface LocalDelegationRequest {
   agent: LocalChild['agent'];
   prompt: string;
   childId?: string;
-}[] {
+}
+
+export function delegationRequests(input: unknown): LocalDelegationRequest[] {
   const args = argumentsRecord(input, ['tasks']);
   const tasks = args['tasks'];
   if (!Array.isArray(tasks) || tasks.length < 1 || tasks.length > LOCAL_FANOUT) {
     throw new Error(`task requires 1-${String(LOCAL_FANOUT)} independent tasks.`);
   }
-  const requests = tasks.map(
-    (
-      task,
-    ): {
-      agent: LocalChild['agent'];
-      prompt: string;
-      childId?: string;
-    } => {
-      const item = argumentsRecord(task, ['agent', 'prompt', 'child_id']);
-      const agent = item['agent'];
-      if (agent !== 'explore' && agent !== 'general') {
-        throw new Error('Choose the built-in explore or general agent.');
-      }
-      return {
-        agent,
-        prompt: text(item, 'prompt', 4096),
-        ...(item['child_id'] === undefined ? {} : { childId: text(item, 'child_id', 36) }),
-      };
-    },
-  );
+  const requests = tasks.map((task): LocalDelegationRequest => {
+    const item = argumentsRecord(task, ['agent', 'prompt', 'child_id']);
+    const agent = item['agent'];
+    if (agent !== 'explore' && agent !== 'general') {
+      throw new Error('Choose the built-in explore or general agent.');
+    }
+    return {
+      agent,
+      prompt: text(item, 'prompt', 4096),
+      ...(item['child_id'] === undefined ? {} : { childId: text(item, 'child_id', 36) }),
+    };
+  });
   const ids = requests.flatMap((request) => (request.childId ? [request.childId] : []));
   if (new Set(ids).size !== ids.length) {
     throw new Error('A child may only run once in a batch.');
@@ -340,10 +334,9 @@ export async function delegateLocalChildren(
   threads: LocalThreadPort,
   scope: LocalAgentRun,
   messageId: string,
-  input: unknown,
+  requests: LocalDelegationRequest[],
   execute: (child: LocalChild, prompt: string, port: LocalThreadPort) => Promise<LocalThread>,
-): Promise<object> {
-  const requests = delegationRequests(input);
+): Promise<{ children: object[] }> {
   if (scope.childAdmissions + requests.length > 6) {
     throw new Error('At most 6 child admissions are allowed per parent turn.');
   }

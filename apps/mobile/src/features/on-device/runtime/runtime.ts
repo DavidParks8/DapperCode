@@ -19,10 +19,10 @@ import {
   throwFirstRejection,
   persistenceFailures,
 } from './issues';
-import { LocalPreferencesStore } from './preferences';
+import { LocalPreferencesStore, type LocalPreferences } from './preferences';
 import { ModelResidency } from './residency';
 import { LocalModelSelection } from './modelSelection';
-import type { LocalPreferences } from './preferences';
+import { LocalSkills } from './skills';
 import { LocalThreadRepository } from './threads';
 import type {
   LocalThread,
@@ -56,6 +56,11 @@ export class OnDeviceRuntime {
   private readonly networkMonitor: NetworkMonitor;
   private readonly settings: LocalPreferencesStore;
   readonly workspaceAdmin: LocalWorkspaceAdmin;
+  /**
+   * Copilot + OpenCode Agent Skills: listing, personal import/remove, permissions and the global
+   * switch, HTTPS catalogs (downloaded only on request), and slash commands.
+   */
+  readonly skills: LocalSkills;
   private readonly issueLog: RuntimeIssueLog;
   private workspaceValues: LocalWorkspace[] = [];
   private initialization: Promise<void> | null = null;
@@ -89,6 +94,7 @@ export class OnDeviceRuntime {
       kind === 'value' ? this.emitter.emit('preferences') : this.issueLog.invalidate(),
     );
     this.workspaceAdmin = new LocalWorkspaceAdmin(this, this.settings);
+    this.skills = new LocalSkills(native, this.settings, () => this.emitter.emit('skills'), this);
     this.threads = new LocalThreadRepository(
       native,
       (change) => {
@@ -129,7 +135,7 @@ export class OnDeviceRuntime {
       () => this.emitter.emit('loop'),
       localTools.localToolApproval,
       undefined,
-      new localTools.LocalWorkspaceGuidance(native),
+      new localTools.LocalWorkspaceGuidance(native, this.skills),
     );
     this.residency = new ModelResidency({
       models: this.models,
@@ -245,23 +251,22 @@ export class OnDeviceRuntime {
     submissionId: string,
     accepted: () => void,
   ): Promise<LocalThread> {
-    await this.residency.settled();
-    this.requireModelSelectionSettled();
-    await this.requireModelPresent(this.threads.find(id)?.modelId);
-    if (this.workspaceOperation || this.suspension || this.disposal) {
-      throw new Error('Wait for on-device operations to settle before sending.');
-    }
+    await this.admitTurn(id, 'sending');
     return this.loop.send(id, text, submissionId, accepted);
   }
 
   async retryTurn(id: string): Promise<LocalThread> {
+    await this.admitTurn(id, 'retrying');
+    return this.loop.retry(id);
+  }
+
+  private async admitTurn(id: string, action: string): Promise<void> {
     await this.residency.settled();
     this.requireModelSelectionSettled();
     await this.requireModelPresent(this.threads.find(id)?.modelId);
     if (this.workspaceOperation || this.suspension || this.disposal) {
-      throw new Error('Wait for on-device operations to settle before retrying.');
+      throw new Error(`Wait for on-device operations to settle before ${action}.`);
     }
-    return this.loop.retry(id);
   }
 
   initialize(): Promise<void> {

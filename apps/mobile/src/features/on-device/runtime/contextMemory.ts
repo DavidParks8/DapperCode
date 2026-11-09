@@ -27,7 +27,19 @@ function savedEvidence(messages: readonly LocalMessage[]): string {
   return JSON.stringify(references);
 }
 
-/** Builds model-only memory views; original chat and tool intent are never rewritten. */
+/** The newest message before the latest user request: the most a checkpoint may summarize. */
+function historyEnd(thread: LocalThread, assistantId: string): LocalMessage | undefined {
+  const turn = thread.messages.map((message) => message.role).lastIndexOf('user');
+  return thread.messages
+    .slice(0, Math.max(0, turn))
+    .filter((message) => message.id !== assistantId && !emptyLocalAnswer(message))
+    .at(-1);
+}
+
+/**
+ * Builds model-only memory views; original chat and tool intent are never rewritten. Memory only
+ * covers turns before the latest user request, so the current turn always stays verbatim.
+ */
 export function localConversationContext(
   threads: Pick<LocalThreadRepository, 'get' | 'change' | 'save'>,
   threadId: string,
@@ -64,22 +76,22 @@ export function localConversationContext(
     messages: messages(),
     options: {
       checkpoint: {
+        key: historyEnd(threads.get(threadId), assistantId)?.id ?? '',
         previous: threads.get(threadId).contextSummary?.content ?? null,
         started: () => phase('compacting'),
+        failed: () => phase('generating'),
         commit: async (content, validate) => {
           check();
           const thread = threads.get(threadId);
-          const through = thread.messages
-            .filter((message) => message.id !== assistantId && !emptyLocalAnswer(message))
-            .at(-1);
-          if (!through) {
-            throw new Error('There is no conversation evidence to summarize.');
+          const end = historyEnd(thread, assistantId);
+          if (!end) {
+            throw new Error('There is no earlier conversation to summarize.');
           }
 
           const previous = thread.contextSummary;
           const next = {
             content,
-            throughMessageId: through.id,
+            throughMessageId: end.id,
             modelId: thread.modelId,
             createdAt: new Date().toISOString(),
           };

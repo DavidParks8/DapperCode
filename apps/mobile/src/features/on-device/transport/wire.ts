@@ -134,9 +134,7 @@ export function localWorkspaceIdForPath(
   if (!normalized?.startsWith(`${LOCAL_WORKSPACE_ROOT}/`)) {
     return null;
   }
-  const exact = [...localWorkspacePaths(workspaces)].filter(([, candidate]) => {
-    return candidate === normalized;
-  });
+  const exact = [...localWorkspacePaths(workspaces)].filter(([, entry]) => entry === normalized);
   if (exact.length > 0) {
     return exact.length === 1 ? (exact[0]?.[0] ?? null) : null;
   }
@@ -198,6 +196,7 @@ const TOOL_VERBS: Record<
   ask_user: { kind: 'think', verb: 'Ask user', activity: 'Waiting for answers' },
   todo_read: { kind: 'think', verb: 'Todo read', activity: 'Reading tasks' },
   todo_write: { kind: 'think', verb: 'Todo write', activity: 'Updating tasks' },
+  skill: { kind: 'read', verb: 'Use skill', activity: 'Loading skill', pathKey: 'name' },
 };
 
 /**
@@ -404,6 +403,8 @@ export interface LocalThreadProjectionContext {
   models: readonly LocalModelDefinition[];
   /** The active run, so a turn that is still loading its model can be found and stopped. */
   run?: Pick<LocalRunSnapshot, 'phase' | 'threadId' | 'turnId'>;
+  /** Cached skill slash commands for a workspace; see `LocalAgentPort.commands`. */
+  commands: (workspaceId: string, refresh?: boolean) => Readonly<RawAcpSnapshot['commands']>;
 }
 
 export function localThreadPath(
@@ -628,7 +629,7 @@ export function localThreadSnapshot(
       tokenTotals: null,
       mode: null,
       config: [modelConfig(thread, context.models)],
-      commands: [],
+      commands: [...context.commands(thread.workspaceId)],
       session: {
         agentId: LOCAL_AGENT_ID,
         threadId: thread.id,

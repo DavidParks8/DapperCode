@@ -5,25 +5,22 @@ import { toolDefinition } from '../runtime/toolDefinition';
 export const GIT_TOOL_DEFINITIONS = [
   toolDefinition(
     'git_status',
-    'Read the branch and changed paths, not a directory listing. An empty files list means no Git changes, not an empty workspace. Large results are explicitly truncated.',
+    'Read the branch and changed paths (not a directory listing). An empty files list means no Git changes, not an empty workspace.',
     {},
     [],
     { kind: 'read', approval: null },
   ),
-  toolDefinition(
-    'git_diff',
-    'Read separately labelled staged (HEAD to index) and unstaged (index to working tree) patches within one shared output budget.',
-    {},
-    [],
-    { kind: 'read', approval: null },
-  ),
+  toolDefinition('git_diff', 'Read staged and unstaged patches, labelled separately.', {}, [], {
+    kind: 'read',
+    approval: null,
+  }),
   toolDefinition('git_history', 'Read recent workspace commits.', {}, [], {
     kind: 'read',
     approval: null,
   }),
   toolDefinition(
     'git_stage',
-    'Stage a literal file path, or omit path to stage all non-ignored changes.',
+    'Stage a literal path, or omit path to stage all changes.',
     { path: { type: 'string' } },
     [],
     { kind: 'other', approval: null },
@@ -37,7 +34,7 @@ export const GIT_TOOL_DEFINITIONS = [
   ),
   toolDefinition(
     'git_push',
-    'Push the current branch to its configured origin, subject to the app approval settings. Requires network. Some remotes also require sign-in.',
+    'Push the current branch to origin. Requires network. Some remotes also require sign-in.',
     {},
     [],
     { kind: 'other', approval: () => 'Push the current branch to its remote' },

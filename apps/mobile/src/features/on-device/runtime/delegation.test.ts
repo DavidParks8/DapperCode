@@ -22,6 +22,7 @@ import { LocalEventProjector } from '../transport/events';
 import { localThreadSnapshot } from '../transport/wire';
 import { localModelDefinition } from '../models/catalog';
 import { LocalWorkspaceGuidance } from './workspaceGuidance';
+import { LocalSkills } from './skills';
 import { localConversationContext } from './contextMemory';
 
 jest.mock('expo-crypto', () => ({ randomUUID: jest.fn() }));
@@ -115,7 +116,7 @@ async function harness(script: (messages: LocalModelMessage[]) => ScriptedReply,
     (event) => events.push(event),
     localToolApproval,
     undefined,
-    guidance ? new LocalWorkspaceGuidance(fake.native) : undefined,
+    guidance ? new LocalWorkspaceGuidance(fake.native, new LocalSkills(fake.native)) : undefined,
   );
   const current = () => threads.get(thread.id);
   const start = () => loop.send(thread.id, 'parent private request', randomUUID());
@@ -203,6 +204,19 @@ test('child summary checkpoints survive parent reload and resume without inherit
     h.thread.modelId,
   );
   expect(port.get(childId).contextSummary).toBeUndefined();
+  // Memory only covers turns before the latest request, so the child's next turn has begun.
+  port.change(childId, (child) => ({
+    ...child,
+    messages: [
+      ...child.messages,
+      {
+        id: 'child-next',
+        role: 'user',
+        content: 'child next',
+        createdAt: new Date().toISOString(),
+      },
+    ],
+  }));
   const context = localConversationContext(
     port,
     childId,
@@ -392,6 +406,7 @@ test('parallel delegation admits two fresh children, overlaps real executor read
   const projectionContext = () => ({
     workspaces: [{ id: 'ws-one', name: 'Demo', isRepository: true }],
     models: [localModelDefinition(h.thread.modelId)],
+    commands: () => [],
   });
   const projector = new LocalEventProjector(projectionContext);
   projector.prime([h.current()]);

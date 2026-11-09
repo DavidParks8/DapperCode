@@ -13,10 +13,12 @@ import type {
   LocalToolExecutor,
   LocalToolApprovalPolicy,
 } from './types';
-import type { LocalToolPermission } from './toolDefinition';
+import { advertisedLocalTools, localToolAdvertised, toolDefinitionName } from './toolDefinition';
 import { localAgentSystemPrompt } from './systemPrompt';
 import type { LocalWorkspaceGuidance } from './workspaceGuidance';
-import { performLocalTool, updateLocalToolStatus } from './toolRunner';
+import { awaitLocalApproval, performLocalTool } from './toolRunner';
+import * as skillTool from './skillTool';
+import type { LocalSkillRun } from './skillTool';
 import { LocalInferenceScheduler } from './inferenceScheduler';
 import {
   CHILD_OUTPUT_TOKENS,
@@ -24,7 +26,9 @@ import {
   EXPLORE_TOOLS,
   localRunSnapshot,
   delegateLocalChildren,
+  delegationRequests,
   readChild,
+  type LocalDelegationRequest,
   type LocalThreadPort,
 } from './delegation';
 import { IDLE_LOCAL_RUN as IDLE } from './types';
@@ -64,6 +68,7 @@ export class LocalAgentLoop {
   private approvalPolicy: ApprovalPolicy = 'untrusted';
   private readonly scheduler: LocalInferenceScheduler;
   private readonly children = new Set<LocalAgentLoop>();
+  private readonly skills: skillTool.LocalSkillBinding;
 
   constructor(
     private readonly threads: LocalThreadPort,
@@ -78,6 +83,7 @@ export class LocalAgentLoop {
     scheduler?: LocalInferenceScheduler,
   ) {
     this.scheduler = scheduler ?? new LocalInferenceScheduler(model);
+    this.skills = new skillTool.LocalSkillBinding(guidance?.skills, childAgent ?? 'build');
   }
 
   snapshot(): LocalRunSnapshot {
@@ -111,6 +117,7 @@ export class LocalAgentLoop {
     input: string,
     submissionId: string,
     accepted?: () => void,
+    skills?: LocalSkillRun,
   ): Promise<LocalThread> {
     const thread = this.threads.get(id);
     const active = this.active;
@@ -132,7 +139,7 @@ export class LocalAgentLoop {
     if (!input.trim() || input.length > 100_000 || !submissionId) {
       return Promise.reject(new Error('Enter a message of at most 100000 characters.'));
     }
-    const run = this.createRun(thread, submissionId);
+    const run = this.createRun(thread, submissionId, skills);
     run.promise = this.perform(run, async () => {
       const now = new Date().toISOString();
       this.threads.change(run.threadId, (current) => ({
@@ -150,6 +157,9 @@ export class LocalAgentLoop {
       }));
       await this.threads.save(run.threadId);
       accepted?.();
+      if (!this.childAgent) {
+        await this.skills.activate(this.threads, run, input, (call) => this.tool(run, call, false));
+      }
     });
     return run.promise;
   }
@@ -165,7 +175,7 @@ export class LocalAgentLoop {
     if (!retryableLocalMessages(thread)) {
       return Promise.reject(new Error('This conversation has no failed or stopped turn to retry.'));
     }
-    const run = this.createRun(thread, null);
+    const run = this.createRun(thread, null, skillTool.userActivatedSkills(thread));
     run.promise = this.perform(run, async () => {
       this.threads.change(run.threadId, (current) => ({
         ...current,
@@ -229,7 +239,7 @@ export class LocalAgentLoop {
     }
   }
 
-  private createRun(thread: LocalThread, submissionId: string | null): Run {
+  private createRun(thread: LocalThread, submissionId: string | null, skills?: LocalSkillRun): Run {
     let signalStop: () => void = () => undefined;
     const interrupt = new Promise<never>((_resolve, reject) => {
       signalStop = () => reject(new LocalModelInterrupted());
@@ -250,6 +260,7 @@ export class LocalAgentLoop {
       guidance: { directories: new Set(['']), rules: '' },
       childAdmissions: 0,
       input: null,
+      skills: skills ?? { preApproved: new Set(), userSkills: new Set() },
     };
     this.active = run;
     return run;
@@ -308,14 +319,18 @@ export class LocalAgentLoop {
     return runLocalRounds(this.threads, run, this.childAgent ? CHILD_ROUNDS : 32, {
       check: () => this.checkStopped(run),
       tool: (call, repeated) => this.tool(run, call, repeated),
-      approval: this.approval,
+      approval: this.skills.policy(this.approval, run),
       generate: async (assistantId) => {
         this.publish(run, 'generating');
-        const context = await interruptLocalRun(run, this.modelContext(run, assistantId));
+        const contextTokens = this.contextTokens();
+        const web = localToolAdvertised('web_search', contextTokens);
+        const context = await interruptLocalRun(run, this.modelContext(run, assistantId, web));
+        const definitions = this.skills.tools(this.definitions, run.workspaceId);
+        const tools = advertisedLocalTools(definitions, contextTokens);
         return this.scheduler.generate(
           run.controller.signal,
           context.messages,
-          this.definitions,
+          tools,
           (update) => {
             if (this.active !== run || run.stopped) {
               return;
@@ -334,9 +349,14 @@ export class LocalAgentLoop {
 
   private tool(run: Run, call: LocalToolCall, repeated: boolean): Promise<void> {
     return performLocalTool(this.threads, run, call, repeated, {
-      permission: this.approval,
-      allows: (kind) => this.automaticallyApproves(kind),
-      approve: (id, permission) => this.approved(run, call, id, permission),
+      permission: this.skills.approval(this.approval, run, call.id),
+      allows: (kind, name) => this.automaticallyApproves(kind) || run.skills.preApproved.has(name),
+      approve: (id, permission) =>
+        awaitLocalApproval(this.threads, run, call, id, permission, {
+          automatic: () => this.automaticallyApproves(permission.kind),
+          publish: (approval) => this.publish(run, 'approval', call.function.name, approval),
+          check: () => this.checkStopped(run),
+        }),
       validate: (name) => {
         if (
           this.childAgent &&
@@ -361,13 +381,18 @@ export class LocalAgentLoop {
     id: string,
     callId: string,
   ): Promise<unknown> {
-    if (this.guidance) {
+    // The user's /name runs before any model round, so there are no reviewed rules to fence.
+    if (this.guidance && !skillTool.isUserSkillCall(callId)) {
       await interruptLocalRun(
         run,
         this.guidance.beforeTool(run.workspaceId, run.guidance, name, args, run.controller.signal),
       );
       this.checkStopped(run);
     }
+    const fork = this.childAgent
+      ? null
+      : (prompt: string, seed: LocalSkillRun) =>
+          this.delegate(run, id, [{ agent: 'general', prompt }], seed);
     const dispatch: LocalToolExecutor = async (workspace, tool, input, signal, offload) => {
       if (isInteractionTool(tool)) {
         return executeInteractionTool(
@@ -392,8 +417,10 @@ export class LocalAgentLoop {
           input,
         );
       }
-      if (tool === 'task') {
-        const result = await this.delegate(run, id, input);
+      if (tool === 'task' || (tool === 'skill' && this.guidance)) {
+        const result = await (tool === 'skill'
+          ? this.skills.execute(run, input, callId, this.definitions.map(toolDefinitionName), fork)
+          : this.delegate(run, id, delegationRequests(input)));
         this.checkStopped(run);
         return result;
       }
@@ -412,69 +439,32 @@ export class LocalAgentLoop {
     return result;
   }
 
-  private async approved(
-    run: Run,
-    call: LocalToolCall,
-    messageId: string,
-    permission: LocalToolPermission,
-  ): Promise<boolean> {
-    try {
-      while (true) {
-        if (this.automaticallyApproves(permission.kind)) {
-          return true;
-        }
-        const decision = new Promise<boolean | 'policy'>((resolve) => {
-          run.approval = { callId: call.id, resolve };
-        });
-        this.publish(run, 'approval', call.function.name, {
-          threadId: run.threadId,
-          turnId: run.turnId,
-          callId: call.id,
-          toolName: call.function.name,
-          ...permission,
-        });
-        const approved = await Promise.race([decision, run.interrupt]);
-        this.checkStopped(run);
-        if (approved !== 'policy') {
-          return approved;
-        }
-      }
-    } catch (error) {
-      updateLocalToolStatus(
-        this.threads,
-        run.threadId,
-        messageId,
-        'interrupted',
-        JSON.stringify({ error: 'Stopped before the user approved this request. It did not run.' }),
-      );
-      await this.threads.save(run.threadId);
-      throw error;
-    } finally {
-      run.approval = null;
-    }
+  private contextTokens(): number {
+    return this.model.snapshot().contextTokens ?? 8192;
   }
 
   private async modelContext(
     run: Run,
     pendingAssistantId: string,
+    web: boolean,
   ): Promise<ReturnType<typeof localConversationContext>> {
     const guidance = await this.guidance?.prompt(
       run.workspaceId,
       run.guidance,
-      this.model.snapshot().contextTokens ?? 8192,
+      this.contextTokens(),
       run.controller.signal,
+      this.skills.agent,
     );
     this.checkStopped(run);
     const today = this.today();
     const tasks = this.threads.get(run.threadId).tasks ?? [];
-    const context =
-      (guidance?.content ?? '') +
-      localTaskPrompt(tasks, this.model.snapshot().contextTokens ?? 8192);
+    const context = (guidance?.content ?? '') + localTaskPrompt(tasks, this.contextTokens());
     return localConversationContext(
       this.threads,
       run.threadId,
       pendingAssistantId,
-      (memory) => localAgentSystemPrompt(run.modelId, today, this.childAgent, context + memory),
+      (memory) =>
+        localAgentSystemPrompt(run.modelId, today, this.childAgent, context + memory, web),
       () => this.checkStopped(run),
       (phase) => this.publish(run, phase),
     );
@@ -534,15 +524,20 @@ export class LocalAgentLoop {
     this.changed(this.value);
   }
 
-  private delegate(run: Run, messageId: string, input: unknown): Promise<object> {
+  private delegate(
+    run: Run,
+    messageId: string,
+    requests: LocalDelegationRequest[],
+    skills?: LocalSkillRun,
+  ): Promise<{ children: object[] }> {
     return delegateLocalChildren(
       this.threads,
       run,
       messageId,
-      input,
+      requests,
       async (child, prompt, port) => {
         const definitions = this.definitions.filter((definition) => {
-          const name = (definition as { function: { name: string } }).function.name;
+          const name = toolDefinitionName(definition);
           return (
             name !== 'task' &&
             name !== 'read_child' &&
@@ -568,7 +563,7 @@ export class LocalAgentLoop {
         loop.setApprovalPolicy(this.approvalPolicy);
         this.children.add(loop);
         try {
-          return await loop.send(child.id, prompt, randomUUID());
+          return await loop.send(child.id, prompt, randomUUID(), undefined, skills);
         } finally {
           this.children.delete(loop);
         }

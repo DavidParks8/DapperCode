@@ -15,6 +15,7 @@ const TRANSPORT_SLICES: readonly OnDeviceRuntimeSlice[] = [
   'loop',
   'models',
   'workspaces',
+  'skills',
 ];
 
 function availableModels(runtime: OnDeviceRuntime) {
@@ -81,6 +82,7 @@ export function createRuntimeAgentPort(runtime: OnDeviceRuntime): LocalAgentPort
     resolveApproval: (callId, approved) => runtime.loop.resolveApproval(callId, approved),
     resolveUserInput: (requestId, reply) => runtime.loop.resolveUserInput(requestId, reply),
     setApprovalPolicy: (policy) => runtime.loop.setApprovalPolicy(policy),
+    commands: (workspaceId, refresh) => runtime.skills.commands(workspaceId, refresh),
     git: {
       status: (id) => native.getWorkspaceGitStatus(id),
       diff: (id) => native.getWorkspaceGitDiff(id, null),

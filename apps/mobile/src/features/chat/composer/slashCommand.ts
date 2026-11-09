@@ -7,6 +7,7 @@ import {
   formatCollaborationModeLabel,
   parseSlashCommand,
   findSlashCommandDefinition,
+  isAgentSlashCommand,
   isSlashCommandAvailable,
 } from '../helpers/helpers';
 import type { MainScreenSlashCommandHandlerContext } from './slashCommandHandler';
@@ -54,6 +55,18 @@ export async function executeSlashCommand(
     return false;
   }
 
+  const availability = {
+    hasOpenChat: Boolean(selectedChatId),
+    supportsGoal,
+    supportsPlanMode,
+    supportsReview,
+  };
+  const available = isSlashCommandAvailable(commandDef, availability);
+  // A built-in this chat cannot run never shadows a command the chat's agent advertises.
+  if (!available && isAgentSlashCommand(selectedChat?.acpCommands, rawName)) {
+    return false;
+  }
+
   if (!commandDef.mobileSupported) {
     setError(commandDef.availabilityNote ?? `/${name} is not supported on mobile.`);
     return true;
@@ -64,14 +77,7 @@ export async function executeSlashCommand(
     return true;
   }
 
-  if (
-    !isSlashCommandAvailable(commandDef, {
-      hasOpenChat: Boolean(selectedChatId),
-      supportsGoal,
-      supportsPlanMode,
-      supportsReview,
-    })
-  ) {
+  if (!available) {
     setError(`/${name} is not supported for ${activeAgentLabel} chats.`);
     return true;
   }

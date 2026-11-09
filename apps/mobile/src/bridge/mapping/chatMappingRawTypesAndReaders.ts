@@ -1,4 +1,5 @@
 import type {
+  AgentCommand,
   ChatAgentMessageMeta,
   MessageTokenUsage,
   SessionTokenTotals,
@@ -111,7 +112,7 @@ export interface RawAcpSnapshot {
     category?: string;
     options?: Array<{ value: string; name: string; description?: string }>;
   }>;
-  commands: Array<{ name: string; description: string }>;
+  commands: AgentCommand[];
   session: {
     agentId: string;
     threadId: string;

@@ -7,8 +7,11 @@ import {
   localToolKind,
 } from './localTools';
 import { createFakeOnDeviceNative, FakeLlama } from './testing';
-import { toolDefinition } from './toolDefinition';
+import { advertisedLocalTools, toolDefinition, toolDefinitionName } from './toolDefinition';
 import { isRecord } from '@shared/records';
+import { isInteractionTool } from './interactionTools';
+import { isArtifactTool } from './toolArtifacts';
+import { localAgentSystemPrompt } from './systemPrompt';
 
 const firstRevision = 'a'.repeat(64);
 const editedRevision = 'b'.repeat(64);
@@ -284,3 +287,112 @@ test('an incomplete empty search is never described as no workspace matches', as
     result,
   );
 });
+
+const CORE_TOOLS = [
+  'list_directory',
+  'read_file',
+  'write_file',
+  'edit_file',
+  'search_files',
+  'git_status',
+  'git_diff',
+  'skill',
+  'read_tool_output',
+  'search_tool_output',
+  'todo_read',
+];
+const TIER_TOOLS: Readonly<Record<number, readonly string[]>> = {
+  4096: CORE_TOOLS,
+  8192: [
+    'list_directory',
+    'read_file',
+    'write_file',
+    'edit_file',
+    'rename_path',
+    'delete_path',
+    'search_files',
+    'glob_files',
+    'apply_patch',
+    'git_status',
+    'git_diff',
+    'git_history',
+    'git_stage',
+    'git_commit',
+    'git_push',
+    'web_fetch',
+    'web_search',
+    'skill',
+    'read_tool_output',
+    'search_tool_output',
+    'ask_user',
+    'todo_read',
+    'todo_write',
+  ],
+  16_384: LOCAL_TOOL_DEFINITIONS.map(toolDefinitionName),
+};
+// The loop, not the workspace executor, dispatches these by name.
+const LOOP_TOOLS = new Set(['skill', 'task', 'read_child']);
+
+test.each([4096, 8192, 16_384])(
+  'the %i-token context advertises a deterministic subset of dispatchable tools',
+  async (contextTokens) => {
+    const names = advertisedLocalTools(LOCAL_TOOL_DEFINITIONS, contextTokens).map(
+      toolDefinitionName,
+    );
+    expect(names).toEqual(TIER_TOOLS[contextTokens]);
+    expect(
+      advertisedLocalTools(LOCAL_TOOL_DEFINITIONS, contextTokens + 1).map(toolDefinitionName),
+    ).toEqual(names);
+    expect(names).toEqual(expect.arrayContaining(['read_tool_output', 'search_tool_output']));
+    const h = harness();
+    const inputs: Readonly<Record<string, unknown>> = {
+      web_fetch: { url: 'https://example.com/' },
+      web_search: { query: 'Public docs' },
+    };
+    for (const name of names) {
+      expect(() => localToolApproval(name, inputs[name])).not.toThrow();
+      if (isInteractionTool(name) || isArtifactTool(name) || LOOP_TOOLS.has(name)) {
+        continue;
+      }
+      const failure = await h.execute('workspace', name, {}, h.signal).then(
+        () => '',
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      );
+      expect(failure).not.toMatch(/not available/u);
+    }
+  },
+);
+
+test('larger contexts only add tools, and unknown registered tools are never hidden', () => {
+  const custom = toolDefinition('custom_tool', 'A custom tool.', {}, [], {
+    kind: 'think',
+    approval: null,
+  }).definition;
+  expect(advertisedLocalTools([custom], 4096)).toEqual([custom]);
+  expect(TIER_TOOLS[8192]).toEqual(expect.arrayContaining([...TIER_TOOLS[4096]!]));
+  expect(TIER_TOOLS[16_384]).toEqual(expect.arrayContaining([...TIER_TOOLS[8192]!]));
+});
+
+test.each([
+  [4096, 1300],
+  [8192, 2700],
+  [16_384, 10_000],
+])(
+  'the %i-token fixed system/tool prefix leaves at least %i tokens of conversation room',
+  (contextTokens, room) => {
+    const tools = advertisedLocalTools(LOCAL_TOOL_DEFINITIONS, contextTokens);
+    const system = localAgentSystemPrompt(
+      'qwen3-1.7b-q4-k-m',
+      new Date(2026, 10, 8),
+      undefined,
+      '',
+      tools.some((tool) => toolDefinitionName(tool) === 'web_search'),
+    );
+    // About 3.5 characters per token: slightly denser than the measured Qwen3 tokenizer.
+    const fixed = Math.ceil(
+      (JSON.stringify([{ role: 'system', content: system }]) + JSON.stringify(tools)).length / 3.5,
+    );
+    const reserve = Math.min(2048, Math.floor(contextTokens / 4));
+    expect(contextTokens - reserve - 32 - fixed).toBeGreaterThanOrEqual(room);
+  },
+);

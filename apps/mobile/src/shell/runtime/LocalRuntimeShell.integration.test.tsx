@@ -2102,15 +2102,24 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     expect(composerText(root)).toBe('');
     const next = transcript(root).indexOf(request);
     expect(transcript(root).slice(0, next)).not.toContain('Turn stopped by user.');
+    const skillConfig = /\["ws-one","(?:\.opencode\/)?opencode\.jsonc?"\]$/u;
     expect(
       mockNative.calls.filter(
         (value) =>
           value.startsWith('readWorkspaceFile:') &&
-          !/\["ws-one","(?:AGENTS|CLAUDE)\.md"\]$/u.test(value),
+          !/\["ws-one","(?:AGENTS|CLAUDE)\.md"\]$/u.test(value) &&
+          !skillConfig.test(value),
       ),
     ).toEqual([
       'readWorkspaceFile:["ws-one","seed.txt"]',
       'readWorkspaceFile:["ws-one","seed.txt"]',
+    ]);
+    // Skill config is cached by the workspace change token: one read per file, not per round.
+    expect(mockNative.calls.filter((value) => skillConfig.test(value))).toEqual([
+      'readWorkspaceFile:["ws-one","opencode.json"]',
+      'readWorkspaceFile:["ws-one","opencode.jsonc"]',
+      'readWorkspaceFile:["ws-one",".opencode/opencode.json"]',
+      'readWorkspaceFile:["ws-one",".opencode/opencode.jsonc"]',
     ]);
     act(() => tree.unmount());
   });

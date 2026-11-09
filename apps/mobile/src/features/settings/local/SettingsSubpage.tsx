@@ -69,6 +69,8 @@ export function SettingsSubpage({
           backLabel={backLabel}
         />
         <ScrollView
+          // Keeps a focused field (catalog URL, rule pattern, Git author) above the keyboard.
+          automaticallyAdjustKeyboardInsets
           contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"

@@ -312,6 +312,9 @@ pub struct ConfigOptionValue {
 pub struct CommandEntry {
     pub name: String,
     pub description: String,
+    /// ACP's unstructured input hint, shown until the user types the command's arguments.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

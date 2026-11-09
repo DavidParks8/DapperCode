@@ -394,7 +394,9 @@ export function createFakeOnDeviceNative(llama: FakeLlama, options: FakeNativeOp
     deleteWorkspace: async (id) => {
       workspaces = workspaces.filter((entry) => entry.id !== id);
     },
-    getWorkspaceChangeToken: async (id) => `token-${id}-${String(files.size)}`,
+    // Any path or content change yields a new token, as native app-initiated changes do.
+    getWorkspaceChangeToken: async (id) =>
+      `token-${id}-${String(files.size)}-${JSON.stringify([...files].filter(([key]) => key.startsWith(`${id}:`)))}`,
     getWorkspaceSize: async (id) => {
       record('getWorkspaceSize', id);
       const contents = [...files].filter(([key]) => key.startsWith(`${id}:`));

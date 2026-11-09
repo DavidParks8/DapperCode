@@ -9,6 +9,7 @@ import type { LocalModelDefinition } from '../models/types';
 import type { LocalRunSnapshot } from '../runtime/agentLoop';
 import type { LocalThread } from '../runtime/types';
 import type { LocalInputReply } from '../runtime/interactionTools';
+import type { LocalSkillCommand } from '../runtime/skills';
 import type {
   LocalDirectoryListing,
   LocalFileRead,
@@ -65,6 +66,12 @@ export interface LocalAgentPort {
   resolveApproval(callId: string, approved: boolean): void;
   resolveUserInput(requestId: string, reply: LocalInputReply): void;
   setApprovalPolicy(policy: ApprovalPolicy): void;
+  /**
+   * Cached slash commands for a workspace's enabled user-invocable skills, stable until they
+   * change. `refresh` re-checks the workspace in the background; a change notifies `subscribe`.
+   * Ports without skills omit it.
+   */
+  commands?(workspaceId: string, refresh?: boolean): readonly LocalSkillCommand[];
   git: LocalGitPort;
   workspaceAdmin: LocalWorkspaceAdminPort;
   files: LocalFilesPort;

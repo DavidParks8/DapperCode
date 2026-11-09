@@ -78,6 +78,45 @@ describe('mainScreenHelpers', () => {
     expect(permissions && helpers.isSlashCommandAvailable(permissions, availability)).toBe(false);
   });
 
+  it('suggests agent-advertised commands after built-ins, with built-ins winning by name', () => {
+    const builtIns = helpers.SLASH_COMMANDS.filter((command) =>
+      helpers.isSlashCommandAvailable(command, availability),
+    );
+    const agentCommands = [
+      { name: 'new', description: 'Agent new' },
+      { name: 'review-pr', description: 'Review a pull request', hint: '<number>' },
+      { name: 'Compact', description: 'Compact the conversation' },
+      { name: 'review-pr', description: 'Duplicate' },
+    ];
+
+    const all = helpers.filterSlashSuggestions('', builtIns, agentCommands);
+    expect(all.map((command) => command.name)).toEqual([
+      ...builtIns.map((command) => command.name),
+      'review-pr',
+      'Compact',
+    ]);
+    expect(all.find((command) => command.name === 'new')?.summary).toBe('Start a new conversation');
+    expect(helpers.filterSlashSuggestions('pull', builtIns, agentCommands)).toEqual([
+      {
+        name: 'review-pr',
+        summary: 'Review a pull request',
+        argsHint: '<number>',
+        mobileSupported: true,
+      },
+    ]);
+    expect(
+      helpers.filterSlashSuggestions('compact', builtIns, agentCommands).map((item) => item.name),
+    ).toEqual(['Compact']);
+    expect(helpers.filterSlashSuggestions('', builtIns, undefined)).toEqual(builtIns);
+  });
+
+  it('recognizes agent-advertised command names case-insensitively', () => {
+    const commands = [{ name: 'Review-PR', description: 'Review a pull request' }];
+    expect(helpers.isAgentSlashCommand(commands, ' review-pr ')).toBe(true);
+    expect(helpers.isAgentSlashCommand(commands, 'review')).toBe(false);
+    expect(helpers.isAgentSlashCommand(undefined, 'review-pr')).toBe(false);
+  });
+
   it('keeps transient revalidation failures behind a hydrated chat snapshot', () => {
     expect(helpers.shouldSurfaceChatLoadError(true, 'thread-1', 'thread-1', 3)).toBe(false);
     expect(helpers.shouldSurfaceChatLoadError(false, 'thread-1', 'thread-1', 3)).toBe(true);

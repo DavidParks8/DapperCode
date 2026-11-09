@@ -16,7 +16,7 @@ const MAX_OFFSET = 256 * 1024;
 export const WEB_TOOL_DEFINITIONS = [
   toolDefinition(
     'web_fetch',
-    'GET an HTTPS URL. Read web pages, documentation, or search URLs; returns raw text/HTML, not a rendered browser. No cookies, credentials, or workspace files are attached. Redirects require a separate request. offset and limit count text characters; limit defaults to 4096 (max 16384).',
+    'GET an HTTPS URL as raw text/HTML, without cookies or credentials; follow a redirect with a new request. offset/limit count characters (limit default 4096, max 16384).',
     { url: { type: 'string' }, offset: { type: 'integer' }, limit: { type: 'integer' } },
     ['url'],
     { kind: 'fetch', approval: webFetchApproval },

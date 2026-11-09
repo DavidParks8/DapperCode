@@ -353,6 +353,26 @@ export function isSlashCommandAvailable(
   return true;
 }
 
+/** Built-ins come first so they win name dedupe over the chat agent's advertised commands. */
+export function filterSlashSuggestions(
+  query: string,
+  builtIns: SlashCommandDefinition[],
+  agentCommands: Chat['acpCommands'],
+): SlashCommandDefinition[] {
+  const advertised = (agentCommands ?? []).map(({ name, description, hint }) => ({
+    name,
+    summary: description,
+    argsHint: hint,
+    mobileSupported: true,
+  }));
+  return filterSlashCommands(query, [...builtIns, ...advertised]);
+}
+
+export function isAgentSlashCommand(commands: Chat['acpCommands'], name: string): boolean {
+  const normalized = name.trim().toLowerCase();
+  return commands?.some((command) => command.name.toLowerCase() === normalized) ?? false;
+}
+
 export function dedupeSlashCommandsByName(
   commands: SlashCommandDefinition[],
 ): SlashCommandDefinition[] {

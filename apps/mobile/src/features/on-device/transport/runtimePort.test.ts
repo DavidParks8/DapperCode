@@ -357,7 +357,9 @@ describe('the local transport over the real on-device runtime', () => {
       fake.calls.filter(
         (call) =>
           call.startsWith('readWorkspaceFile') &&
-          !/\["ws-one","(?:AGENTS|CLAUDE)\.md"\]$/u.test(call),
+          !/\["ws-one","(?:AGENTS\.md|CLAUDE\.md|(?:\.opencode\/)?opencode\.jsonc?)"\]$/u.test(
+            call,
+          ),
       ),
     ).toEqual(['readWorkspaceFile:["ws-one","README.md"]']);
     expect(mockLlama.loads).toHaveLength(1);

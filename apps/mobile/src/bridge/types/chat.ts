@@ -177,6 +177,13 @@ export interface SessionTokenTotals {
   totalTokens: number;
 }
 
+/** A slash command the agent advertises; `hint` describes its free-text arguments. */
+export interface AgentCommand {
+  name: string;
+  description: string;
+  hint?: string;
+}
+
 export interface Chat extends ChatSummary {
   messages: ChatMessage[];
   /** Local-only recovery metadata for a new chat whose create acknowledgement was interrupted. */
@@ -207,7 +214,7 @@ export interface Chat extends ChatSummary {
   tokenTotals?: SessionTokenTotals | null;
   acpMode?: string | null;
   acpConfig?: AcpConfigOption[];
-  acpCommands?: Array<{ name: string; description: string }>;
+  acpCommands?: AgentCommand[];
   acpActive?: {
     runId: string | null;
     sourceTurnId: string | null;

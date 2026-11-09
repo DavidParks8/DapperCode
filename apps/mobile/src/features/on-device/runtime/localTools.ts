@@ -9,7 +9,7 @@ import { executeWebFetch, WEB_TOOL_DEFINITIONS } from './webFetch';
 import { executeWebSearch, SEARCH_TOOL_DEFINITIONS } from './webSearch';
 import { LocalToolInputError } from './toolArguments';
 import { isRecord } from '@shared/records';
-import { LocalWorkspaceGuidance, SKILL_TOOL_DEFINITIONS } from './workspaceGuidance';
+import { SKILL_TOOL_DEFINITIONS } from './skillTool';
 export { LocalWorkspaceGuidance } from './workspaceGuidance';
 import { CODE_TOOL_DEFINITIONS, isCodeTool } from '../code-intelligence/definitions';
 import type * as CodeTools from '../code-intelligence/tools';
@@ -116,7 +116,6 @@ export function localToolExecutor(
   credential: (workspaceId: string) => Promise<string | null>,
   requireNetwork: (action: string) => void,
 ): LocalToolExecutor {
-  const guidance = new LocalWorkspaceGuidance(native);
   // Each run owns its signal, so observations cannot leak across turns or workspaces.
   const observed = new WeakMap<AbortSignal, Map<string, Map<string, string>>>();
   let mutationTail: Promise<unknown> = Promise.resolve();
@@ -138,9 +137,6 @@ export function localToolExecutor(
   return (workspace, name, input, signal, offload) => {
     if (signal?.aborted) {
       return Promise.reject(new Error('Local tool work was stopped before execution.'));
-    }
-    if (name === 'skill') {
-      return guidance.load(workspace, input, signal);
     }
     if (name === 'web_fetch') {
       requireNetwork('fetch web pages');

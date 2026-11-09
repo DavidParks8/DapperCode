@@ -36,23 +36,28 @@ function answer(content: string, name?: string, args: object = {}): LocalModelRe
   };
 }
 
-test('a summary that cannot fit is not committed and a smaller next turn can recover', async () => {
+test('an oversized summary is not committed; the turn falls back to elision and a later turn commits memory', async () => {
   const h = await setup();
-  h.threads.change(h.thread.id, (thread) => ({
-    ...thread,
-    messages: [
-      {
-        id: uuid(),
-        role: 'user',
-        content: 'x'.repeat(8000),
-        createdAt: new Date().toISOString(),
-      },
-    ],
-  }));
+  const earlier = {
+    id: uuid(),
+    role: 'user' as const,
+    content: 'x'.repeat(8000),
+    createdAt: new Date().toISOString(),
+  };
+  h.threads.change(h.thread.id, (thread) => ({ ...thread, messages: [earlier] }));
   h.control.summaryContent = 'M'.repeat(12000);
-  await expect(h.loop.send(h.thread.id, 'Continue', uuid())).rejects.toThrow('context');
-  expect(h.threads.get(h.thread.id).contextSummary).toBeUndefined();
-  expect(h.threads.get(h.thread.id).messages[0]?.content).toBe('x'.repeat(8000));
+  const fallback = await h.loop.send(h.thread.id, 'Continue', uuid());
+  expect(fallback).toMatchObject({ status: 'complete', lastError: null });
+  expect(fallback.contextSummary).toBeUndefined();
+  expect(fallback.messages[0]).toEqual(earlier);
+  expect(h.summaries).toHaveLength(1);
+  const answer = h.prompts.at(-1)!;
+  // The pre-memory prompt still fits with one generation reserve, so it runs unchanged.
+  expect(answer[0]?.content).not.toContain('Rolling conversation memory');
+  expect(answer.slice(1).map((message) => message.content)).toEqual([earlier.content, 'Continue']);
+  expect(h.events.map((event) => event.phase)).toEqual(
+    expect.arrayContaining(['compacting', 'generating']),
+  );
   expect(h.execute).not.toHaveBeenCalled();
   h.control.summaryContent = '';
   await h.loop.send(h.thread.id, 'Continue with a small step', uuid());
@@ -301,7 +306,7 @@ test('real loop/model/repository preserve evidence across multi-round summary, r
   expect(readdirSync(h.root)).toEqual([]);
 });
 
-test('checkpoint write failure preserves previous durable memory and original history', async () => {
+test('checkpoint write failure preserves previous durable memory and original history; the turn falls back to elision', async () => {
   const h = await setup();
   await h.loop.send(h.thread.id, 'Start.', 'first');
   const previous = {
@@ -319,11 +324,15 @@ test('checkpoint write failure preserves previous durable memory and original hi
     value.includes('Observed revision')
       ? Promise.reject(new Error('checkpoint disk full'))
       : write(name, value);
-  await expect(h.loop.send(h.thread.id, 'Continue.', 'second')).rejects.toThrow(
-    'checkpoint disk full',
-  );
+  await expect(h.loop.send(h.thread.id, 'Continue.', 'second')).resolves.toMatchObject({
+    status: 'complete',
+    lastError: null,
+  });
+  expect(h.summaries).not.toHaveLength(0);
+  expect(h.prompts.at(-1)?.at(-1)?.content).toBe('Continue.');
   expect(h.threads.get(h.thread.id).contextSummary).toEqual(previous);
   expect(h.threads.get(h.thread.id).messages.slice(0, original.length)).toEqual(original);
+  await h.threads.flush();
   h.threads.close();
   const restored = new LocalThreadRepository(h.storage, jest.fn());
   await restored.initialize();
@@ -332,59 +341,73 @@ test('checkpoint write failure preserves previous durable memory and original hi
     return Promise.resolve();
   });
   expect(restored.get(h.thread.id).contextSummary).toEqual(previous);
-  expect(restored.get(h.thread.id).status).toBe('failed');
+  expect(restored.get(h.thread.id).status).toBe('complete');
 });
 
-test.each(['stop', 'error'] as const)(
-  'summary %s preserves history and settled controls; retry never replays a completed mutation',
-  async (failure) => {
-    const h = await setup();
-    h.normalReplies.push(
-      answer('', 'write_file', { path: 'file.ts', content: 'requested change' }),
-      answer('Edit completed.'),
-    );
-    await h.loop.send(h.thread.id, 'Make the change.', 'first');
-    h.growHistory();
-    const original = [...h.threads.get(h.thread.id).messages];
-    h.control.holdSummary = true;
-    h.control.failSummary = failure === 'error';
-    const running = h.loop.send(h.thread.id, 'Continue verification.', 'second');
-    const outcome = running.catch((error: unknown) => error);
-    await until(() => h.loop.snapshot().phase === 'compacting');
-    expect(
-      localAgentStatus({
-        run: h.loop.snapshot(),
-        model: h.model.snapshot(),
-        thread: h.threads.get(h.thread.id),
-        modelId: h.thread.modelId,
-        download: { phase: 'ready', bytesWritten: 0 },
-      }),
-    ).toMatchObject({ kind: 'busy', label: 'Summarizing conversation on this iPhone' });
-    if (failure === 'stop') {
-      await h.loop.stop();
-    } else {
-      h.control.release();
-      expect(await outcome).toBeInstanceOf(Error);
-    }
-    await outcome;
-    const settled = h.threads.get(h.thread.id);
-    expect(settled.status).toBe(failure === 'stop' ? 'interrupted' : 'failed');
-    expect(settled.activeTurnId).toBeNull();
-    expect(settled.contextSummary).toBeUndefined();
-    expect(settled.messages.slice(0, original.length)).toEqual(original);
-    expect(settled.messages.at(-1)?.content).toBe('Continue verification.');
-    expect(h.loop.snapshot()).toMatchObject({ phase: 'idle', approval: null, toolName: null });
-    h.control.holdSummary = false;
-    h.control.failSummary = false;
-    const retried = await h.loop.retry(h.thread.id);
-    expect(retried.status).toBe('complete');
-    expect(retried.contextSummary).toBeDefined();
-    expect(
-      retried.messages.filter(
-        (message) => message.role === 'user' && message.content === 'Continue verification.',
-      ),
-    ).toHaveLength(1);
-    expect(h.execute).toHaveBeenCalledTimes(1);
-    await h.threads.flush();
-  },
-);
+test('summary stop preserves history and settled controls; retry never replays a completed mutation', async () => {
+  const h = await setup();
+  h.normalReplies.push(
+    answer('', 'write_file', { path: 'file.ts', content: 'requested change' }),
+    answer('Edit completed.'),
+  );
+  await h.loop.send(h.thread.id, 'Make the change.', 'first');
+  h.growHistory();
+  const original = [...h.threads.get(h.thread.id).messages];
+  h.control.holdSummary = true;
+  const running = h.loop.send(h.thread.id, 'Continue verification.', 'second');
+  const outcome = running.catch((error: unknown) => error);
+  await until(() => h.loop.snapshot().phase === 'compacting');
+  expect(
+    localAgentStatus({
+      run: h.loop.snapshot(),
+      model: h.model.snapshot(),
+      thread: h.threads.get(h.thread.id),
+      modelId: h.thread.modelId,
+      download: { phase: 'ready', bytesWritten: 0 },
+    }),
+  ).toMatchObject({ kind: 'busy', label: 'Summarizing conversation on this iPhone' });
+  await h.loop.stop();
+  await outcome;
+  const settled = h.threads.get(h.thread.id);
+  expect(settled.status).toBe('interrupted');
+  expect(settled.activeTurnId).toBeNull();
+  expect(settled.contextSummary).toBeUndefined();
+  expect(settled.messages.slice(0, original.length)).toEqual(original);
+  expect(settled.messages.at(-1)?.content).toBe('Continue verification.');
+  expect(h.loop.snapshot()).toMatchObject({ phase: 'idle', approval: null, toolName: null });
+  h.control.holdSummary = false;
+  const retried = await h.loop.retry(h.thread.id);
+  expect(retried.status).toBe('complete');
+  expect(retried.contextSummary).toBeDefined();
+  expect(
+    retried.messages.filter(
+      (message) => message.role === 'user' && message.content === 'Continue verification.',
+    ),
+  ).toHaveLength(1);
+  expect(h.execute).toHaveBeenCalledTimes(1);
+  await h.threads.flush();
+});
+
+test('a summary inference error falls back to elision without memory; the next turn summarizes and never replays a mutation', async () => {
+  const h = await setup();
+  h.normalReplies.push(
+    answer('', 'write_file', { path: 'file.ts', content: 'requested change' }),
+    answer('Edit completed.'),
+  );
+  await h.loop.send(h.thread.id, 'Make the change.', 'first');
+  h.growHistory();
+  const original = [...h.threads.get(h.thread.id).messages];
+  h.control.failSummary = true;
+  const fallback = await h.loop.send(h.thread.id, 'Continue verification.', 'second');
+  expect(fallback).toMatchObject({ status: 'complete', lastError: null, activeTurnId: null });
+  expect(fallback.contextSummary).toBeUndefined();
+  expect(fallback.messages.slice(0, original.length)).toEqual(original);
+  expect(h.prompts.at(-1)?.at(-1)?.content).toContain('Continue verification.');
+  expect(h.loop.snapshot()).toMatchObject({ phase: 'idle', approval: null, toolName: null });
+  h.control.failSummary = false;
+  const next = await h.loop.send(h.thread.id, 'Continue once more.', 'third');
+  expect(next.status).toBe('complete');
+  expect(next.contextSummary).toBeDefined();
+  expect(h.execute).toHaveBeenCalledTimes(1);
+  await h.threads.flush();
+});

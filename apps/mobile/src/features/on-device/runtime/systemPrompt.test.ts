@@ -86,3 +86,16 @@ test('child roles, instructions, task data and rolling memory preserve measured 
   ).toBe(true);
   expect(reminder.endsWith(date)).toBe(true);
 });
+
+test('without advertised web tools, the prompt omits web rules and research guidance but keeps the shared rules', () => {
+  for (const model of LOCAL_MODEL_CATALOG) {
+    const prompt = localAgentSystemPrompt(model.id, today, undefined, '', false);
+    expect(prompt).not.toContain('web_search');
+    expect(prompt).not.toContain('web_fetch');
+    expect(prompt.startsWith(`${identity}Use the listed`)).toBe(true);
+    expect(prompt).toContain('Never emulate unavailable commands');
+    expect(
+      prompt.endsWith(`Do not guess file contents or report success without tool evidence.${date}`),
+    ).toBe(true);
+  }
+});

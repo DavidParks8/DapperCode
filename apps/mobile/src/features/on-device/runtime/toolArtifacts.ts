@@ -36,20 +36,26 @@ export async function executeWithToolOutput(
   let retrievalInput = input;
   if (isArtifactTool(name) && isRecord(input) && input['child_id'] !== undefined) {
     const childId = text(input, 'child_id', 36);
-    const child = thread.messages
-      ?.flatMap((message) => message.children ?? [])
-      .find((entry) => entry.id === childId && entry.workspaceId === thread.workspaceId);
-    if (!child) {
+    // A child's own offload stubs carry its child_id; that names its own scope, not a nested child.
+    if (
+      childId !== thread.id &&
+      !thread.messages
+        ?.flatMap((message) => message.children ?? [])
+        .some((entry) => entry.id === childId && entry.workspaceId === thread.workspaceId)
+    ) {
       throw new Error('This child output is unavailable in this conversation.');
     }
-    scope = child.id;
+    scope = childId;
     const args = { ...input };
     delete args['child_id'];
     retrievalInput = args;
   }
   const result = isArtifactTool(name)
     ? await artifacts.retrieve(scope, thread.workspaceId, name, retrievalInput, owner)
-    : await capture(await execute(thread.workspaceId, name, input, signal, capture));
+    : await execute(thread.workspaceId, name, input, signal, capture).then((value) =>
+        // Skill pages are bounded and must reach the model whole, never as an artifact preview.
+        name === 'skill' ? value : capture(value),
+      );
   const content = JSON.stringify(result);
   if (content === undefined) {
     throw new Error('The local tool returned no JSON result.');
@@ -63,7 +69,8 @@ export const TOOL_ARTIFACT_THREAD_BYTES = 8 * 1024 * 1024;
 export const TOOL_ARTIFACT_TOTAL_BYTES = 32 * 1024 * 1024;
 export const TOOL_ARTIFACT_MAX_COUNT = 128;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
-const NAME = /^toolartifact-([a-f0-9-]{36})-([a-f0-9-]{36})\.json$/u;
+// owner, artifact, stored UTF-8 bytes. Names without a size are charged the per-output maximum.
+const NAME = /^toolartifact-([a-f0-9-]{36})-([a-f0-9-]{36})(?:-(\d{1,7}))?\.json$/u;
 
 export const ARTIFACT_TOOL_DEFINITIONS = [
   toolDefinition(
@@ -105,7 +112,11 @@ function document(threadId: string, id: string): string {
   if (!UUID.test(id)) {
     throw new Error('Use an artifactId returned by a tool in this conversation.');
   }
-  return `${prefix(threadId)}${id}.json`;
+  return `${prefix(threadId)}${id}`;
+}
+
+function storedBytes(name: string): number {
+  return Number(NAME.exec(name)?.[3] ?? TOOL_ARTIFACT_MAX_BYTES);
 }
 
 function preview(content: string): string {
@@ -193,13 +204,14 @@ export class LocalToolArtifacts {
           'The 128-output storage cap was reached. Delete old conversations to free space.',
         );
       }
+      // Sizes come from atomically written names; never read multi-MiB evidence for accounting.
+      const owned = prefix(ownerThreadId);
       let total = bytes;
       let thread = bytes;
       for (const existing of names) {
-        const stored = await this.storage.readRuntimeDocument(existing);
-        const size = stored === null ? 0 : utf8Bytes(stored);
+        const size = storedBytes(existing);
         total += size;
-        if (existing.startsWith(prefix(ownerThreadId))) {
+        if (existing.startsWith(owned)) {
           thread += size;
         }
       }
@@ -208,7 +220,7 @@ export class LocalToolArtifacts {
           'The 8 MiB/conversation or 32 MiB total output cap was reached. Delete old conversations to free space.',
         );
       }
-      await this.storage.writeRuntimeDocument(name, raw);
+      await this.storage.writeRuntimeDocument(`${name}-${bytes}.json`, raw);
       // Copy small identifying fields, including upstream truncation/pagination, honestly.
       const metadata = isRecord(result)
         ? Object.fromEntries(
@@ -279,7 +291,11 @@ export class LocalToolArtifacts {
       search ? ['artifactId', 'query', 'offset'] : ['artifactId', 'offset', 'limit'],
     );
     const artifactId = text(args, 'artifactId', 36);
-    const raw = await this.storage.readRuntimeDocument(document(ownerThreadId, artifactId));
+    const base = document(ownerThreadId, artifactId);
+    const stored = (await this.storage.listRuntimeDocuments(base)).find(
+      (entry) => NAME.exec(entry)?.[2] === artifactId,
+    );
+    const raw = stored === undefined ? null : await this.storage.readRuntimeDocument(stored);
     if (raw === null) {
       throw new Error('This saved tool output is unavailable in this conversation.');
     }
