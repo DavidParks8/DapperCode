@@ -243,6 +243,87 @@ test('child summary checkpoints survive parent reload and resume without inherit
   await h.close();
 });
 
+test('parallel children queue real user questions, preserve the visible request and persist scoped tasks', async () => {
+  const h = await harness((messages) => {
+    const request = user(messages);
+    const turn = messages.slice(messages.map((message) => message.role).lastIndexOf('user'));
+    if (request === 'parent private request') {
+      return results(turn).length ? { content: 'Parent complete.' } : tasks();
+    }
+    if (!results(turn).length) {
+      return tool('ask_user', {
+        questions: [
+          {
+            id: 'pick',
+            header: request,
+            question: `Choose for ${request}`,
+            options: [
+              { value: 'yes', label: 'Yes' },
+              { value: 'no', label: 'No' },
+            ],
+          },
+        ],
+      });
+    }
+    if (!results(turn).some((message) => message.name === 'todo_write')) {
+      return tool('todo_write', {
+        todos: [{ id: 'decision', content: request, status: 'completed' }],
+      });
+    }
+    return { content: 'Child complete.' };
+  });
+  h.loop.setApprovalPolicy('never');
+  const pending = h.start();
+  await until(
+    () =>
+      childEntries(h.current()).length === 2 &&
+      childEntries(h.current()).every((child) =>
+        child.messages.some(
+          (message) => message.tool?.name === 'ask_user' && message.tool.status === 'running',
+        ),
+      ),
+  );
+  const first = h.loop.snapshot().userInput;
+  if (!first) {
+    throw new Error('The first child question must be visible.');
+  }
+  expect(first.threadId).toBe(h.thread.id);
+  expect(h.loop.snapshot().phase).toBe('input');
+  expect(h.current().status).toBe('running');
+  expect(() =>
+    h.loop.resolveUserInput(first.requestId, { answers: { pick: ['invalid'] } }),
+  ).toThrow();
+  expect(h.loop.snapshot().userInput?.requestId).toBe(first.requestId);
+  h.loop.resolveUserInput(first.requestId, { answers: { pick: 'yes' } });
+  await until(() =>
+    Boolean(
+      h.loop.snapshot().userInput && h.loop.snapshot().userInput?.requestId !== first.requestId,
+    ),
+  );
+  const second = h.loop.snapshot().userInput!;
+  expect(second.threadId).toBe(h.thread.id);
+  expect(h.current().status).toBe('running');
+  h.loop.resolveUserInput(second.requestId, { answers: { pick: 'no' } });
+  await pending;
+  expect(h.loop.snapshot().phase).toBe('idle');
+  expect(h.loop.snapshot().userInput).toBeFalsy();
+  expect(h.current().tasks).toBeUndefined();
+  expect(
+    childEntries(h.current()).every(
+      (child) => child.status === 'complete' && child.tasks?.[0]?.status === 'completed',
+    ),
+  ).toBe(true);
+  await h.threads.flush();
+  const reloaded = new LocalThreadRepository(h.native, jest.fn(), 0);
+  await reloaded.initialize();
+  expect(
+    childEntries(reloaded.get(h.thread.id)).every(
+      (child) => child.tasks?.[0]?.status === 'completed',
+    ),
+  ).toBe(true);
+  await h.close();
+});
+
 test('parallel delegation admits two fresh children, overlaps real executor reads and serializes native inference', async () => {
   const h = await harness((messages) => {
     if (user(messages) === 'parent private request') {

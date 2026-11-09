@@ -1,5 +1,6 @@
 import { isRecord } from '@shared/records';
 import type { LocalChild, LocalMessage, LocalThread, LocalToolCall } from './types';
+import { parseLocalTasks } from './interactionTools';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu;
 
@@ -109,6 +110,7 @@ function parseChild(value: unknown): LocalChild {
     updatedAt: text(child['updatedAt']),
     lastError: nullableText(child['lastError']),
     messages: child['messages'].map((entry) => message(entry, true)),
+    ...(child['tasks'] === undefined ? {} : { tasks: parseLocalTasks(child['tasks']) }),
     ...(child['contextSummary'] === undefined
       ? {}
       : {
@@ -145,6 +147,7 @@ export const LOCAL_THREAD_HEADER_KEYS = [
   'lastSubmissionId',
   'lastError',
   'contextSummary',
+  'tasks',
 ] as const;
 
 export type LocalThreadHeaderKey = (typeof LOCAL_THREAD_HEADER_KEYS)[number];
@@ -185,6 +188,8 @@ export function parseLocalThreadField(
         createdAt: text(summary['createdAt']),
       };
     }
+    case 'tasks':
+      return value === undefined ? undefined : parseLocalTasks(value);
     case 'status':
       return status(value);
     case 'activeTurnId':
@@ -276,6 +281,7 @@ export function parseLocalThreadBase(raw: string, expectedId: string): LocalThre
               item['contextSummary'],
             ) as LocalThread['contextSummary'],
           }),
+      ...(item['tasks'] === undefined ? {} : { tasks: parseLocalTasks(item['tasks']) }),
     },
   };
 }

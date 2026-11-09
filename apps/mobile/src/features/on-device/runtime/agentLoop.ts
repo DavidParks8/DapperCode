@@ -56,6 +56,13 @@ import { executeWithToolOutput } from './toolArtifacts';
 import { localConversationContext } from './contextMemory';
 type ModelPort = Pick<LocalModelSession, 'snapshot' | 'load' | 'generate' | 'stop'>;
 
+import {
+  executeInteractionTool,
+  isInteractionTool,
+  resolveLocalInput,
+  localTaskPrompt,
+  type LocalInputReply,
+} from './interactionTools';
 export class LocalAgentLoop {
   private active: Run | null = null;
   private value: LocalRunSnapshot = IDLE;
@@ -193,6 +200,21 @@ export class LocalAgentLoop {
     pending.resolve(approved);
   }
 
+  resolveUserInput(requestId: string, reply: LocalInputReply): void {
+    for (const child of this.children) {
+      if (child.snapshot().userInput?.requestId === requestId) {
+        child.resolveUserInput(requestId, reply);
+        return;
+      }
+    }
+    const run = this.active;
+    resolveLocalInput(run, requestId, reply, () => {
+      if (run) {
+        this.publish(run, 'tool', 'ask_user');
+      }
+    });
+  }
+
   async stop(): Promise<void> {
     const run = this.active;
     if (!run) {
@@ -232,6 +254,7 @@ export class LocalAgentLoop {
       approval: null,
       guidance: { directories: new Set(['']), rules: '' },
       childAdmissions: 0,
+      input: null,
     };
     this.active = run;
     return run;
@@ -408,14 +431,20 @@ export class LocalAgentLoop {
           throw new Error('Not run: this child is read-only or requested recursive delegation.');
         }
       },
-      execute: (name, args, id) => this.executeTool(run, name, args, id),
+      execute: (name, args, id) => this.executeTool(run, name, args, id, call.id),
       started: () => this.publish(run, 'tool', call.function.name),
       check: () => this.checkStopped(run),
       outputLimit: this.childAgent ? 8192 : undefined,
     });
   }
 
-  private async executeTool(run: Run, name: string, args: unknown, id: string): Promise<unknown> {
+  private async executeTool(
+    run: Run,
+    name: string,
+    args: unknown,
+    id: string,
+    callId: string,
+  ): Promise<unknown> {
     if (this.guidance) {
       await interruptLocalRun(
         run,
@@ -424,6 +453,19 @@ export class LocalAgentLoop {
       this.checkStopped(run);
     }
     const dispatch: LocalToolExecutor = async (workspace, tool, input, signal, offload) => {
+      if (isInteractionTool(tool)) {
+        return executeInteractionTool(
+          this.threads,
+          run,
+          {
+            id: callId,
+            type: 'function',
+            function: { name: tool, arguments: JSON.stringify(input) },
+          },
+          input,
+          () => this.publish(run, 'input', tool),
+        );
+      }
       if (tool === 'read_child') {
         return readChild(
           {
@@ -508,7 +550,11 @@ export class LocalAgentLoop {
     );
     this.checkStopped(run);
     const system = localAgentSystemPrompt(run.modelId, this.today(), this.childAgent);
-    const content = guidance?.content ? `${system}\n\n${guidance.content}` : system;
+    const tasks = this.threads.get(run.threadId).tasks ?? [];
+    const content =
+      system +
+      (guidance?.content ? `\n\n${guidance.content}` : '') +
+      localTaskPrompt(tasks, this.model.snapshot().contextTokens ?? 8192);
     return localConversationContext(
       this.threads,
       run.threadId,
@@ -560,19 +606,43 @@ export class LocalAgentLoop {
     run: Run,
     phase: LocalRunSnapshot['phase'],
     toolName: string | null = null,
-    approval: LocalToolApproval | null = null,
+    approval: LocalRunSnapshot['approval'] = null,
   ): void {
+    let userInput = !run.stopped ? (run.input?.request ?? null) : null;
     if (!run.stopped && !approval) {
-      const childApproval = [...this.children]
-        .map((child) => child.snapshot().approval)
-        .find((pending) => pending !== null);
+      const snapshots = [...this.children].map((child) => child.snapshot());
+      const approvals = snapshots.flatMap((snapshot) =>
+        snapshot.approval ? [snapshot.approval] : [],
+      );
+      const childApproval =
+        approvals.find((pending) => pending.callId === this.value.approval?.callId) ?? approvals[0];
       if (childApproval) {
         approval = { ...childApproval, threadId: run.threadId, turnId: run.turnId };
         phase = 'approval';
         toolName = childApproval.toolName;
       }
+      const questions = snapshots.flatMap((snapshot) =>
+        snapshot.userInput ? [snapshot.userInput] : [],
+      );
+      const childInput =
+        questions.find((pending) => pending.requestId === this.value.userInput?.requestId) ??
+        questions[0];
+      if (!userInput && childInput) {
+        userInput = { ...childInput, threadId: run.threadId, turnId: run.turnId };
+      }
     }
-    this.value = { phase, threadId: run.threadId, turnId: run.turnId, toolName, approval };
+    if (userInput) {
+      phase = 'input';
+      toolName = 'ask_user';
+    }
+    this.value = {
+      phase,
+      threadId: run.threadId,
+      turnId: run.turnId,
+      toolName,
+      approval,
+      userInput,
+    };
     this.changed(this.value);
   }
 

@@ -6,7 +6,10 @@ import type { LocalAgentRun, LocalToolApprovalPolicy, LocalToolCall } from './ty
 import type { LocalThreadRepository } from './threads';
 import type { ChatActivityContent } from '@bridge/types/types';
 
-export type LocalThreadPort = Pick<LocalThreadRepository, 'get' | 'change' | 'save' | 'artifacts'>;
+export type LocalThreadPort = Pick<
+  LocalThreadRepository,
+  'get' | 'change' | 'save' | 'flush' | 'artifacts'
+>;
 export const LOCAL_FANOUT = 3;
 export const CHILD_ROUNDS = 8;
 export const CHILD_OUTPUT_TOKENS = 512;
@@ -27,8 +30,15 @@ export const PARALLEL_READ_TOOLS = new Set([
   'code_symbols',
   'read_tool_output',
   'search_tool_output',
+  'todo_read',
 ]);
-export const EXPLORE_TOOLS = new Set([...PARALLEL_READ_TOOLS, 'web_fetch', 'web_search']);
+export const EXPLORE_TOOLS = new Set([
+  ...PARALLEL_READ_TOOLS,
+  'web_fetch',
+  'web_search',
+  'ask_user',
+  'todo_write',
+]);
 
 export function parallelLocalReads(
   calls: LocalToolCall[],
@@ -225,6 +235,7 @@ export function childThreadPort(
       ...child,
       parentThreadId: parentId,
       contextSummary: child.contextSummary,
+      tasks: child.tasks,
       workspaceId,
       modelId,
       activeTurnId: child.status === 'running' ? child.id : null,
@@ -232,6 +243,7 @@ export function childThreadPort(
   };
   return {
     artifacts: threads.artifacts,
+    flush: () => threads.flush(),
     get,
     save: async (id) => {
       get(id);
@@ -255,6 +267,7 @@ export function childThreadPort(
                         lastError: next.lastError,
                         messages: next.messages,
                         contextSummary: next.contextSummary,
+                        tasks: next.tasks,
                       },
                 ),
               }

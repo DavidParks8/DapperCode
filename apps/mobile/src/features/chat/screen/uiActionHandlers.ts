@@ -128,6 +128,7 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
     sendMessage,
     uploadingAttachment,
     ws,
+    store,
   } = context;
   const sending = useAtomValue(sendingAtom);
   const creating = useAtomValue(creatingAtom);
@@ -156,14 +157,28 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
       setResolvingUserInput(true);
       try {
         await approvalController.dismissUserInput(pendingUserInputRequest, action);
+        if (
+          store.get(pendingUserInputRequestAtom)?.requestId !== pendingUserInputRequest.requestId
+        ) {
+          return;
+        }
         cacheThreadPendingUserInputRequest(pendingUserInputRequest.threadId, null);
+        setResolvingUserInput(false);
         setPendingUserInputRequest(null);
         setUserInputDrafts({});
         setUserInputError(null);
       } catch (err) {
-        setUserInputError((err as Error).message);
+        if (
+          store.get(pendingUserInputRequestAtom)?.requestId === pendingUserInputRequest.requestId
+        ) {
+          setUserInputError((err as Error).message);
+        }
       } finally {
-        setResolvingUserInput(false);
+        if (
+          store.get(pendingUserInputRequestAtom)?.requestId === pendingUserInputRequest.requestId
+        ) {
+          setResolvingUserInput(false);
+        }
       }
     },
     [
@@ -175,6 +190,7 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
       setResolvingUserInput,
       setUserInputDrafts,
       setUserInputError,
+      store,
     ],
   );
 

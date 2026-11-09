@@ -11,6 +11,7 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { AppSheet } from '@shared/ui/AppSheet';
 import { BridgeUiModal } from './BridgeUiSurface';
 import { controlAccessibilityState } from '@shared/accessibility';
+import { normalizeQuestionAnswers } from '../helpers/inlineChoices';
 import type {
   MainScreenPanelCollapseCoordinatorContext,
   MainScreenPanelCollapseCoordinatorResult,
@@ -62,32 +63,51 @@ export function MainScreenApprovalAndBridgePrompts({ context }: { context: Conte
                 <Text style={styles.userInputQuestionText}>{question.question}</Text>
                 {hasPresetOptions ? (
                   <View style={styles.userInputOptionsColumn}>
-                    {question.options?.map((option, index) => (
-                      <Pressable
-                        key={`${question.id}-${String(index)}-${option.value}`}
-                        style={({ pressed }) => [
-                          styles.userInputOptionButton,
-                          answer.trim() === option.value.trim() &&
-                            styles.userInputOptionButtonSelected,
-                          pressed && styles.userInputOptionButtonPressed,
-                        ]}
-                        onPress={() => setUserInputDraft(question.id, option.value)}
-                        accessibilityRole="radio"
-                        accessibilityState={{ checked: answer.trim() === option.value.trim() }}
-                        accessibilityLabel={option.label}
-                        accessibilityHint={option.description || undefined}
-                      >
-                        <View style={styles.userInputOptionHeaderRow}>
-                          <Text style={styles.userInputOptionIndex}>{`${String(index + 1)}.`}</Text>
-                          <Text style={styles.userInputOptionLabel}>{option.label}</Text>
-                        </View>
-                        {option.description.trim() ? (
-                          <Text style={styles.userInputOptionDescription}>
-                            {option.description}
-                          </Text>
-                        ) : null}
-                      </Pressable>
-                    ))}
+                    {question.options?.map((option, index) => {
+                      const multiple = question.fieldType === 'string-array';
+                      const values = normalizeQuestionAnswers(answer);
+                      const selected = multiple
+                        ? values.includes(option.value)
+                        : answer.trim() === option.value.trim();
+                      return (
+                        <Pressable
+                          key={`${question.id}-${String(index)}-${option.value}`}
+                          style={({ pressed }) => [
+                            styles.userInputOptionButton,
+                            selected && styles.userInputOptionButtonSelected,
+                            pressed && styles.userInputOptionButtonPressed,
+                          ]}
+                          onPress={() =>
+                            setUserInputDraft(
+                              question.id,
+                              multiple
+                                ? (selected
+                                    ? values.filter((value) => value !== option.value)
+                                    : [...values, option.value]
+                                  ).join('\n')
+                                : option.value,
+                            )
+                          }
+                          disabled={resolvingUserInput}
+                          accessibilityRole={multiple ? 'checkbox' : 'radio'}
+                          accessibilityState={{ checked: selected, disabled: resolvingUserInput }}
+                          accessibilityLabel={option.label}
+                          accessibilityHint={option.description || undefined}
+                        >
+                          <View style={styles.userInputOptionHeaderRow}>
+                            <Text
+                              style={styles.userInputOptionIndex}
+                            >{`${String(index + 1)}.`}</Text>
+                            <Text style={styles.userInputOptionLabel}>{option.label}</Text>
+                          </View>
+                          {option.description.trim() ? (
+                            <Text style={styles.userInputOptionDescription}>
+                              {option.description}
+                            </Text>
+                          ) : null}
+                        </Pressable>
+                      );
+                    })}
                   </View>
                 ) : null}
                 {needsFreeformInput ? (
@@ -131,6 +151,14 @@ export function MainScreenApprovalAndBridgePrompts({ context }: { context: Conte
         ) : null}
         <View style={styles.userInputModalActions}>
           <Pressable
+            onPress={() => context.handleStopTurn()}
+            style={styles.userInputSecondaryButton}
+            accessibilityRole="button"
+            accessibilityLabel="Stop request"
+          >
+            <Text style={styles.userInputSecondaryButtonText}>Stop</Text>
+          </Pressable>
+          <Pressable
             onPress={() => void dismissUserInputRequest('cancel')}
             style={({ pressed }) => [
               styles.userInputSecondaryButton,
@@ -156,6 +184,7 @@ export function MainScreenApprovalAndBridgePrompts({ context }: { context: Conte
           </Pressable>
           <Pressable
             onPress={() => void submitUserInputRequest()}
+            accessibilityLabel="Submit answers"
             style={({ pressed }) => [
               styles.userInputSubmitButton,
               pressed && styles.userInputSubmitButtonPressed,

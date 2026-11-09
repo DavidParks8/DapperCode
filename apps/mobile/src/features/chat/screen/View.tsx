@@ -150,6 +150,7 @@ const StableAttachmentModals = memoizeContextSurface(MainScreenAttachmentModals,
 ]);
 
 const StableApprovalAndBridgePrompts = memoizeContextSurface(MainScreenApprovalAndBridgePrompts, [
+  'handleStopTurn',
   'setUserInputDraft',
   'dismissUserInputRequest',
   'submitUserInputRequest',

@@ -1,6 +1,8 @@
 import type { LocalModelMessage } from '../models/engine';
 import type { LocalMessage, LocalThread } from './types';
 
+export { localConversationTitle } from './agentPolicy';
+
 export function emptyLocalAnswer(message: LocalMessage): boolean {
   return message.role === 'assistant' && !message.content.trim() && !message.toolCalls?.length;
 }

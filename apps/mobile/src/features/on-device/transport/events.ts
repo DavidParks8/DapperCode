@@ -162,6 +162,17 @@ export class LocalEventProjector {
     thread: LocalThread,
     out: LocalNotification[],
   ): void {
+    if (previous?.tasks !== thread.tasks && thread.tasks) {
+      out.push({
+        method: 'turn/plan/updated',
+        params: {
+          threadId: thread.id,
+          turnId: thread.activeTurnId ?? `tasks-${thread.id}`,
+          explanation: 'Conversation tasks',
+          plan: thread.tasks.map((task) => ({ step: task.content, status: task.status })),
+        },
+      });
+    }
     if (!previous) {
       out.push({
         method: 'thread/started',

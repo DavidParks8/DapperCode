@@ -1,5 +1,7 @@
 import type { LocalToolPermission } from './toolDefinition';
 import type { LocalGuidanceState } from './workspaceGuidance';
+import type { LocalTask, LocalInteractionRun } from './interactionTools';
+import type { PendingUserInputRequest } from '@bridge/types/types';
 
 export interface LocalToolCall {
   id: string;
@@ -35,6 +37,7 @@ export interface LocalChild {
   lastError: string | null;
   messages: LocalMessage[];
   contextSummary?: LocalThread['contextSummary'];
+  tasks?: LocalTask[];
 }
 
 export interface LocalThread {
@@ -59,6 +62,8 @@ export interface LocalThread {
     modelId: string;
     createdAt: string;
   } | null;
+  /** Durable conversation state, never reconstructed from compacted model history. */
+  tasks?: LocalTask[];
 }
 
 /** Independently subscribable parts of the on-device runtime. */
@@ -110,12 +115,14 @@ export interface LocalRunSnapshot {
     | 'compacting'
     | 'tool'
     | 'approval'
+    | 'input'
     | 'stopping'
     | 'persisting';
   threadId: string | null;
   turnId: string | null;
   toolName: string | null;
   approval: LocalToolApproval | null;
+  userInput?: PendingUserInputRequest | null;
 }
 
 export const IDLE_LOCAL_RUN: LocalRunSnapshot = {
@@ -125,6 +132,7 @@ export const IDLE_LOCAL_RUN: LocalRunSnapshot = {
   toolName: null,
   approval: null,
 };
+export const LOCAL_IDLE_RUN = IDLE_LOCAL_RUN;
 
 export type LocalToolExecutor = (
   workspaceId: string,
@@ -150,4 +158,5 @@ export interface LocalAgentRun {
   approval: { callId: string; resolve: (approved: boolean | 'policy') => void } | null;
   guidance: LocalGuidanceState;
   childAdmissions: number;
+  input: LocalInteractionRun['input'];
 }

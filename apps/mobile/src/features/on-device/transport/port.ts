@@ -8,6 +8,7 @@ import type { LocalModelSessionSnapshot } from '../models/session';
 import type { LocalModelDefinition } from '../models/types';
 import type { LocalRunSnapshot } from '../runtime/agentLoop';
 import type { LocalThread } from '../runtime/types';
+import type { LocalInputReply } from '../runtime/interactionTools';
 import type {
   LocalDirectoryListing,
   LocalFileRead,
@@ -62,6 +63,7 @@ export interface LocalAgentPort {
   modelSession(): Pick<LocalModelSessionSnapshot, 'phase' | 'modelId' | 'progress' | 'error'>;
   /** Answers the pending tool approval in `run().approval`. */
   resolveApproval(callId: string, approved: boolean): void;
+  resolveUserInput(requestId: string, reply: LocalInputReply): void;
   setApprovalPolicy(policy: ApprovalPolicy): void;
   git: LocalGitPort;
   workspaceAdmin: LocalWorkspaceAdminPort;

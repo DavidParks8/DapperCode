@@ -15,6 +15,7 @@ import { CODE_TOOL_DEFINITIONS, isCodeTool } from '../code-intelligence/definiti
 import type * as CodeTools from '../code-intelligence/tools';
 import { PARALLEL_READ_TOOLS, READ_CHILD_TOOL, TASK_TOOL } from './delegation';
 import { ARTIFACT_TOOL_DEFINITIONS } from './toolArtifacts';
+import { INTERACTION_TOOL_DEFINITIONS } from './interactionTools';
 
 const LOCAL_TOOLS = [
   ...FILE_TOOL_DEFINITIONS,
@@ -26,6 +27,7 @@ const LOCAL_TOOLS = [
   TASK_TOOL,
   READ_CHILD_TOOL,
   ...ARTIFACT_TOOL_DEFINITIONS,
+  ...INTERACTION_TOOL_DEFINITIONS,
 ];
 const TOOL_REGISTRY = new Map<string, (typeof LOCAL_TOOLS)[number]>(
   LOCAL_TOOLS.map((tool) => [tool.definition.function.name, tool]),

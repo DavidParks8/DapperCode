@@ -195,6 +195,9 @@ const TOOL_VERBS: Record<
   git_push: { kind: 'other', verb: 'Git push', activity: 'Pushing' },
   web_fetch: { kind: 'fetch', verb: 'Fetch', activity: 'Fetching', pathKey: 'url' },
   web_search: { kind: 'search', verb: 'Search web', activity: 'Searching web', pathKey: 'query' },
+  ask_user: { kind: 'think', verb: 'Ask user', activity: 'Waiting for answers' },
+  todo_read: { kind: 'think', verb: 'Todo read', activity: 'Reading tasks' },
+  todo_write: { kind: 'think', verb: 'Todo write', activity: 'Updating tasks' },
 };
 
 /**
@@ -614,7 +617,11 @@ export function localThreadSnapshot(
       timeline,
       messages,
       tools,
-      plan: [],
+      plan: (thread.tasks ?? []).map((task) => ({
+        content: task.content,
+        priority: 'medium',
+        status: task.status,
+      })),
       usage: { used: null, size: contextSize(thread.modelId), cost: null },
       tokenTotals: null,
       mode: null,
