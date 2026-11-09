@@ -11,6 +11,7 @@ import { LocalToolInputError } from './toolArguments';
 import { isRecord } from '@shared/records';
 import { CODE_TOOL_DEFINITIONS, isCodeTool } from '../code-intelligence/definitions';
 import type * as CodeTools from '../code-intelligence/tools';
+import type * as AutomaticFormatting from '../code-intelligence/formatAfterFileEdit';
 
 const LOCAL_TOOLS = [
   ...FILE_TOOL_DEFINITIONS,
@@ -101,7 +102,26 @@ export function localToolExecutor(
         const code = require('../code-intelligence/tools') as typeof CodeTools;
         resultPromise = code.executeCodeTool(workspace, name, input, native, signal, revision);
       } else {
-        resultPromise = executeFileTool(workspace, name, input, native, revision);
+        resultPromise = executeFileTool(workspace, name, input, native, revision).then(
+          async (result) => {
+            if (name !== 'write_file' && name !== 'edit_file') {
+              return result;
+            }
+            if (
+              !isRecord(result) ||
+              typeof result['path'] !== 'string' ||
+              typeof result['revision'] !== 'string'
+            ) {
+              return result;
+            }
+            const edit = { path: result['path'], revision: result['revision'] };
+            versions?.set(edit.path, edit.revision);
+            const formatting =
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              require('../code-intelligence/formatAfterFileEdit') as typeof AutomaticFormatting;
+            return formatting.formatAfterFileEdit(native, workspace, edit, signal);
+          },
+        );
       }
       return resultPromise.then((result) => {
         if (name === 'search_files') {

@@ -74,20 +74,40 @@ Workspace `tsconfig.json`, package metadata, installed package types, automatic 
 and Node/DOM/React ambient types are **not loaded**. Unresolved imports/types appear as diagnostics;
 an empty diagnostic list is not proof that the project's normal build or tests pass.
 
-Call `format_file` explicitly after edits (including patches) to format **one** file. It uses
-bundled Prettier 3 standalone with its TypeScript/Babel/ESTree plugins for the source extensions
-above and a distinct JSON parser for `.json`. No workspace configuration, plugins, or embedded
-language formatting are executed. This is intentionally not an automatic write/patch hook.
-Other languages reject explicitly. Syntax errors reject without writes; already-formatted files
-are not rewritten. Formatting uses the read revision for native compare-and-swap and, within a
-turn, also checks the runtime's previously observed revision. Conflicts require a fresh read;
-formatting never silently retries over a user's concurrent edit.
+Successful `write_file` and `edit_file` calls **automatically format** the source extensions above
+and `.json`. The shared `formatAfterFileEdit(native, workspace, {path, revision}, signal?)` hook
+uses the successful native mutation's revision, only touches that file, and returns the latest
+post-format revision. It is reusable for each changed file in future patch integration; this branch
+does not depend on an unmerged patch schema. Rename/delete/read calls do not trigger formatting.
+`format_file` remains available to explicitly format an existing file.
+When formatting changes content, the result asks the model to re-read before another exact-text
+edit or patch rather than assuming its unformatted input still matches the file.
+
+Formatting uses bundled Prettier 3 standalone with its TypeScript/Babel/ESTree plugins and a distinct
+JSON parser. No workspace configuration, plugins, or embedded language formatting are executed.
+Already-formatted files are not rewritten. Each successful edit returns `formatting.status`:
+`formatted`, `unchanged`, `unsupported`, `failed`, or `cancelled`. Unsupported languages keep the
+successful edit and report that formatting was skipped. Parse/budget/native formatting failures
+include bounded code/message data (parse failures also include source location); they do **not**
+pretend that the preceding edit failed or erase it. The edit's revision remains observed so a
+subsequent repair can be checked safely. A failed original mutation propagates unchanged and never
+invokes the formatter. Explicit formatting rejects unsupported languages and syntax errors without
+writes. Only genuine Prettier `SyntaxError`s with source locations become parse errors; unexpected
+runtime/initialization exceptions retain their identity/message for explicit calls and are reported
+separately after successful edits. Conflicts require a fresh read; formatting never silently retries
+over a user's concurrent edit.
 
 Source limits are 64 KiB per UTF-8 file, 64 source files/512 KiB total, 512 visited directory
 entries, 12 directory levels, and 256-character relative paths. Symbolic links are never followed;
 `.git`, `node_modules`, `.expo`, `dist`, `build`, and `Pods` directories are excluded. Exceeding a
 project budget is an error, not a misleading partial-project success. Results are capped at 40
 entries/8,192 serialized characters with `truncated`; diagnostic messages are individually bounded.
+
+Production native APIs accept directory limits `1...1000` and read limits `1...65536`; code tools
+use 512/65536 directly, within those limits. The lower 200/16384 values belong to model file-tool
+schemas, not the native APIs. Strict native-port fixtures and the native simulator gate cover this
+distinction rather than relying on unconstrained mocks.
+
 Formatting also caps output at 64 KiB UTF-8, so a successful format stays within the next read's
 budget. A five-second **cooperative** deadline and the run's
 abort signal are checked between native calls and compiler checkpoints. Stop/background cancellation
@@ -103,7 +123,7 @@ memory-only language-service host. The generated compiler is about **4.04 MB of 
 before Hermes bytecode/package compression, plus Prettier and its three parser/printer plugins.
 These are real runtime dependencies, not free native OS services; they increase download size and
 first-use/transient AST memory costs. Compiler/parser modules are evaluated lazily on the first
-code-tool call. Generated code is ignored, reproduced at install/start/build/test,
+applicable edit or code-tool call. Generated code is ignored, reproduced at install/start/build/test,
 and does not replace or modify vendor files.
 
 Validation commands:
@@ -112,6 +132,9 @@ Validation commands:
 pnpm --filter @dappercode/mobile run intelligence:check
 pnpm --filter @dappercode/mobile exec jest --runInBand src/features/on-device/code-intelligence/tools.test.ts src/features/on-device/runtime/localTools.test.ts
 pnpm --filter @dappercode/mobile run build --max-workers 2
+pnpm --filter @dappercode/mobile run typecheck:native
+mkdir -p .e2e/native-code-runtime
+TMPDIR="$PWD/.e2e/native-code-runtime" node .agents/skills/local-e2e-validation/scripts/run.mjs --evidence "$PWD/.e2e/new-native-code-evidence.jsonl" apps/mobile/modules/on-device-agent/tests/native-code-intelligence.mjs
 ```
 
 The first (also run by the mobile test/coverage preflight) runs actual compiler/formatter operations
@@ -119,8 +142,10 @@ in a browser sandbox without Node globals,
 filesystem/network imports, or dynamic code generation. Native-memory regression fixtures cover
 cross-file lookup, edits and fresh diagnostics, parser errors, formatting idempotence/conflicts,
 containment, resource budgets, cancellation, and registry routing. Expo export additionally compiles
-the production iOS/Android bundles with Hermes; this is not a claim of simulator/device performance
-measurement.
+the production iOS/Android bundles with Hermes. The native gate requires the worktree-local Release
+simulator app described in the native module README; it executes the real compiler, automatic
+formatter, native containment/revisions, and native list/read bounds on an isolated simulator.
+This proves runtime compatibility, not physical-device performance or memory admission.
 
 ## Web access
 

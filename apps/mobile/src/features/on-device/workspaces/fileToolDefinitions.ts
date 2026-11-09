@@ -33,14 +33,14 @@ export const FILE_TOOL_DEFINITIONS = [
   ),
   definition(
     'write_file',
-    'Create or replace UTF-8 text, at most 4 MiB. Read an existing file first. The runtime checks its observed version so external changes cannot be overwritten.',
+    'Create or replace UTF-8 text, at most 4 MiB. Read an existing file first. The runtime checks its observed version so external changes cannot be overwritten. JS/TS/JSON are automatically formatted afterward; the result reports formatting status/errors separately from the successful edit.',
     { path, content: { type: 'string' } },
     ['path', 'content'],
     { kind: 'edit', approval: null },
   ),
   definition(
     'edit_file',
-    'Replace exactly one literal occurrence in a UTF-8 file previously read or written in this turn. The runtime checks and updates its observed version.',
+    'Replace exactly one literal occurrence in a UTF-8 file previously read or written in this turn. The runtime checks and updates its observed version. JS/TS/JSON are automatically formatted afterward; the result reports formatting status/errors separately from the successful edit.',
     {
       path,
       old_text: { type: 'string' },

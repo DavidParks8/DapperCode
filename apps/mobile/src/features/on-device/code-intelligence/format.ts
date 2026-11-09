@@ -8,11 +8,36 @@ import {
   CODE_LIMITS,
   codeOperation,
   codePath,
-  isScript,
+  isFormattable,
   LocalCodeError,
   readCodeFile,
 } from './workspace';
 import type { CodeWorkspacePort } from './workspace';
+import { isRecord } from '@shared/records';
+
+function parserFailure(error: unknown, path: string): LocalCodeError | null {
+  if (!(error instanceof SyntaxError) || !isRecord(error)) {
+    return null;
+  }
+  const loc = isRecord(error['loc']) ? error['loc'] : null;
+  const start = isRecord(loc?.['start']) ? loc['start'] : null;
+  const line = start?.['line'];
+  const column = start?.['column'];
+  if (
+    typeof line !== 'number' ||
+    typeof column !== 'number' ||
+    !Number.isSafeInteger(line) ||
+    !Number.isSafeInteger(column) ||
+    Math.min(line, column) < 1
+  ) {
+    return null;
+  }
+  return new LocalCodeError(
+    'CODE_FORMAT_PARSE',
+    `${path}:${line}:${column}: ${error.message.split('\n')[0]?.slice(0, 240) ?? 'Invalid syntax.'}`,
+    { path, line, column },
+  );
+}
 
 function checkFormattedSize(content: string): void {
   let bytes = 0;
@@ -31,9 +56,9 @@ export async function formatCodeFile(
   path: string,
   signal?: AbortSignal,
   observedRevision?: string,
-): Promise<object> {
+): Promise<{ path: string; revision: string; changed: boolean }> {
   codePath(path);
-  if (!isScript(path) && !path.endsWith('.json')) {
+  if (!isFormattable(path)) {
     throw new LocalToolInputError(
       'Formatting supports only JS/JSX/TS/TSX/mjs/cjs/mts/cts and JSON.',
     );
@@ -55,11 +80,8 @@ export async function formatCodeFile(
       embeddedLanguageFormatting: 'off',
       endOfLine: 'lf',
     });
-  } catch {
-    throw new LocalCodeError(
-      'CODE_FORMAT_PARSE',
-      'Prettier could not parse this file. Fix its syntax before formatting.',
-    );
+  } catch (error) {
+    throw parserFailure(error, path) ?? error;
   }
   await operation.yield();
   checkFormattedSize(content);
