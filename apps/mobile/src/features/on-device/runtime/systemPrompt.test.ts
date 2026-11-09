@@ -75,7 +75,7 @@ test('the prompt prefix stays identical across days', () => {
 
 test('child roles, instructions, task data and rolling memory preserve measured research placement', () => {
   const context = 'Scoped instructions.\nPersistent tasks.\nRolling conversation memory.';
-  const direct = localAgentSystemPrompt('qwen3-1.7b-q4-k-m', today, 'explore', context);
+  const direct = localAgentSystemPrompt('bonsai-2-2b-q2-0', today, 'explore', context);
   expect(direct).toContain('Read-only: never mutate files or Git.');
   expect(direct).toContain(context);
   expect(direct.endsWith(` ${LOCAL_RESEARCH_GUIDANCE.direct.text}${date}`)).toBe(true);
