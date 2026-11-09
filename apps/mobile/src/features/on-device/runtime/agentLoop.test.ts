@@ -125,7 +125,7 @@ test('every round tells the running model to verify unfamiliar things, worded fo
     { role: 'system', content: localAgentSystemPrompt('qwen3-1.7b-q4-k-m', today) },
     { role: 'system', content: localAgentSystemPrompt('qwen35-2b-q4-k-m', today) },
   ]);
-  expect(prompts[0]?.content).toContain(LOCAL_RESEARCH_GUIDANCE.direct.text);
+  expect(prompts[0]?.content).toContain(LOCAL_RESEARCH_GUIDANCE.access.text);
   expect(prompts[2]?.content).toContain(LOCAL_RESEARCH_GUIDANCE.reminder.text);
   for (const prompt of prompts) {
     expect(prompt?.content.endsWith("Today's date: Sun Nov 08 2026.")).toBe(true);

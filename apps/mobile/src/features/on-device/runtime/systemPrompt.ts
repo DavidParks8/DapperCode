@@ -33,8 +33,20 @@ export const LOCAL_RESEARCH_GUIDANCE = {
     text: 'Your training data may be outdated, so verify libraries, packages, APIs, products, and versions with web_search before explaining them or saying they do not exist.',
   },
   /**
-   * For models that otherwise answer from memory or read an empty workspace search as proof of
-   * absence. It works only as the last instruction.
+   * For models that act like a chat assistant without tools: they tell the user they cannot access
+   * the project or the web, or answer from memory. Stating their tool access first fixed Qwen3, but
+   * made Bonsai 2 worse.
+   */
+  access: {
+    placement: 'lead',
+    text:
+      'You can read this workspace and search the web with your tools, so never tell the user you lack access; call a tool instead. ' +
+      'Your knowledge of libraries, packages, APIs, products, and devices is out of date. Before explaining how to install, configure, or use one, or saying something does not exist, call web_search to check current documentation. ' +
+      "Use the workspace tools, never web_search, for this project's own files, code, and symbols.",
+  },
+  /**
+   * For models that otherwise answer from memory or say they cannot browse. It works only as the
+   * last instruction.
    */
   direct: {
     placement: 'end',
@@ -51,7 +63,7 @@ export const LOCAL_FAMILY_RESEARCH_GUIDANCE: Readonly<Record<string, LocalResear
   'bonsai-2': 'direct',
   'qwen3.5': 'reminder',
   'gemma-4': 'reminder',
-  qwen3: 'direct',
+  qwen3: 'access',
 };
 
 export function localResearchGuidance(modelId: string): LocalResearchGuidance {

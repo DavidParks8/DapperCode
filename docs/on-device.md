@@ -99,18 +99,22 @@ something does not exist. Like OpenCode, the agent searches without being asked:
   words push small models in opposite directions, so `runtime/systemPrompt.ts` maps each catalog
   family to the wording and position that measured best for it. Unknown models get the reminder.
 
-| Family   | Guidance | Position                      | Why                                                                                                   |
-| -------- | -------- | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Qwen3.5  | reminder | After the identity sentence   | Already searches readily; firmer or final rules made it search the web for workspace code and thrash. |
-| Gemma 4  | reminder | After the identity sentence   | Already research-eager.                                                                               |
-| Qwen3    | direct   | Last instruction, before date | Otherwise denied that real products and packages existed after an empty workspace search.             |
-| Bonsai 2 | direct   | Last instruction, before date | Otherwise said it could not browse; the guidance only took effect as the final instruction.           |
+| Family   | Guidance | Position                      | Why                                                                                                    |
+| -------- | -------- | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Qwen3.5  | reminder | After the identity sentence   | Already searches readily; firmer or final rules made it search the web for workspace code and thrash.  |
+| Gemma 4  | reminder | After the identity sentence   | Already research-eager.                                                                                |
+| Qwen3    | access   | After the identity sentence   | Otherwise told the user it had no access to the project or the web, and answered from memory.          |
+| Bonsai 2 | direct   | Last instruction, before date | Otherwise said it could not browse; this took effect only as the final instruction, and `access` hurt. |
 
-The direct guidance also says to use workspace tools, never `web_search`, for this project's own
-files and symbols. These choices came from running the production agent loop, tools, and
-persistence against each family's model over several seeds. Re-measure on real models before changing
-the wording or position: a one-sentence change can flip a family from never searching to leaking
-workspace code. Small models still sometimes explain configuration from memory without searching.
+The access guidance first tells the model that its tools can read the workspace and search the web,
+so it must call one instead of claiming it lacks access. The access and direct guidance also say to
+use workspace tools, never `web_search`, for this project's own files and symbols. These choices
+came from running the production `LocalModelSession`, agent loop, tools, and persistence against
+each catalog GGUF in `llama.node`, which shares `llama.rn`'s llama.cpp completion core, over several
+seeds. Re-measure on real models before changing the wording or position: a one-sentence change can
+flip a family from never searching to leaking workspace code. Small models still sometimes explain
+configuration from memory without searching, and Gemma 4 tends to ask for code rather than read the
+workspace.
 
 The read-only, curl-like `web_fetch` tool reads the resulting HTTPS pages or documentation URLs.
 When approvals are required, each request

@@ -1490,7 +1490,7 @@ test('after an empty workspace search, the next round says it is not proof of ab
   const followUp = inputs[1]!;
   expect(followUp[0]).toEqual({
     role: 'system',
-    content: expect.stringContaining(LOCAL_RESEARCH_GUIDANCE.direct.text),
+    content: expect.stringContaining(LOCAL_RESEARCH_GUIDANCE.access.text),
   });
   expect(followUp.filter((message) => message.role === 'tool')).toEqual([
     expect.objectContaining({ content: expect.stringContaining(EMPTY_WORKSPACE_SEARCH_NOTE) }),
