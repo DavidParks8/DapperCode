@@ -1,6 +1,9 @@
 import type { AgUiEventEnvelope } from '@bridge/agui/agUi';
+import type { Chat } from '@bridge/types/types';
 import { EventType } from '@ag-ui/core';
-import { coalesceAgUiTextContentEvents } from './agUiRunEvents';
+import { createTestStore } from '@shell/state/testing';
+import { coalesceAgUiTextContentEvents, processAgUiRunEvents } from './agUiRunEvents';
+import type { MainScreenWsEventRouterContext } from './wsEventRouter';
 
 function textEvent(
   delta: string,
@@ -36,5 +39,52 @@ describe('coalesceAgUiTextContentEvents', () => {
     });
     expect(coalesced[1]?.event).toMatchObject({ messageId: 'other', delta: 'Other' });
     expect(coalesced[2]).toMatchObject({ threadId: 'child' });
+  });
+});
+
+describe('agent command metadata', () => {
+  function receiveCommands(threadId: string, value: unknown, selectedChat: Chat): Chat | null {
+    let next: Chat | null = selectedChat;
+    const setSelectedChat = jest.fn((update: (previous: Chat | null) => Chat | null) => {
+      next = update(next);
+    });
+    processAgUiRunEvents(
+      { store: createTestStore(), setSelectedChat } as unknown as MainScreenWsEventRouterContext,
+      {
+        method: 'bridge/agui.event',
+        params: {
+          threadId,
+          runId: `${threadId}::session`,
+          event: { type: EventType.CUSTOM, name: 'dappercode.dev/commands', value },
+        },
+      },
+      selectedChat.id,
+    );
+    return next;
+  }
+
+  const chat = { id: 'thread', acpCommands: [] } as unknown as Chat;
+
+  it('replaces the open chat commands with parsed hints, dropping malformed ones', () => {
+    const value = {
+      commands: [
+        { name: 'review', description: 'Review changes', hint: '[focus]' },
+        { name: 'compact', description: 'Compact', hint: '' },
+        { name: 'skill', description: 'Run a skill', hint: { text: 'bad' } },
+        { description: 'Missing name' },
+      ],
+    };
+
+    expect(receiveCommands('thread', value, chat)?.acpCommands).toEqual([
+      { name: 'review', description: 'Review changes', hint: '[focus]' },
+      { name: 'compact', description: 'Compact' },
+      { name: 'skill', description: 'Run a skill' },
+    ]);
+  });
+
+  it('leaves the open chat alone when another thread advertises commands', () => {
+    const value = { commands: [{ name: 'review', description: 'Review changes' }] };
+
+    expect(receiveCommands('other', value, chat)).toBe(chat);
   });
 });

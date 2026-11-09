@@ -2,6 +2,7 @@ import { isRecord } from '@shared/records';
 import type { GitAccount } from '../auth/strategy';
 import type { LocalGitIdentity } from '../git/gitTools';
 import { quarantineDocument } from './quarantine';
+import { validSkillRule, type LocalSkillRule } from './skillConfig';
 import type { LocalDocumentPort } from './threads';
 
 export interface LocalPreferences {
@@ -10,6 +11,17 @@ export interface LocalPreferences {
   modelId: string | null;
   account: GitAccount | null;
   author: LocalGitIdentity | null;
+  /**
+   * Skill IDs turned off with the Copilot CLI-style `/skills` disable: user `deny` rules applied
+   * after `skillRules`, so the per-skill switch always wins. Absent means none.
+   */
+  disabledSkills?: string[];
+  /** Device-owner OpenCode `skill` rules, after project rules (last match wins). */
+  skillRules?: LocalSkillRule[];
+  /** `false` turns every skill off: no catalog, tool, slash commands, or mentions. */
+  skillsEnabled?: boolean;
+  /** Personal HTTPS skill catalogs, OpenCode's global `skills` URLs. */
+  skillCatalogs?: string[];
 }
 
 /** Preferences plus drafts saved inline by builds that predate per-conversation draft documents. */
@@ -61,6 +73,26 @@ function account(value: unknown): GitAccount | null {
   return { providerId: 'github', host: 'github.com', id, login, credentialRef };
 }
 
+function skillPreferences(value: Record<string, unknown>): Partial<LocalPreferences> {
+  const { disabledSkills, skillRules, skillsEnabled, skillCatalogs } = value;
+  const texts = (list: unknown) =>
+    list === undefined || (Array.isArray(list) && list.every((name) => typeof name === 'string'));
+  if (
+    !texts(disabledSkills) ||
+    !texts(skillCatalogs) ||
+    (skillRules !== undefined &&
+      (!Array.isArray(skillRules) || !skillRules.every(validSkillRule))) ||
+    (skillsEnabled !== undefined && typeof skillsEnabled !== 'boolean')
+  ) {
+    throw new Error('Local skill preferences are invalid.');
+  }
+  return Object.fromEntries(
+    Object.entries({ disabledSkills, skillRules, skillsEnabled, skillCatalogs }).filter(
+      ([, entry]) => entry !== undefined,
+    ),
+  );
+}
+
 function author(value: unknown): LocalGitIdentity | null {
   if (value === null) {
     return null;
@@ -109,6 +141,7 @@ export function parseStoredLocalPreferences(raw: string | null): StoredLocalPref
       modelId: nullable(value['modelId']),
       account: account(value['account']),
       author: author(value['author']),
+      ...skillPreferences(value),
     },
     legacyDrafts: drafts,
   };

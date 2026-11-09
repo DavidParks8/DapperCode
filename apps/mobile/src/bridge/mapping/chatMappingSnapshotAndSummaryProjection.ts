@@ -25,6 +25,7 @@ import {
   toPreview,
   unixSecondsToIso,
 } from '@bridge/mapping/chatMappingRawTypesAndReaders';
+import { parseAgentCommands } from '@bridge/agentCommands';
 import { parseAgentMessageMeta } from '@bridge/messages';
 
 function parseSnapshotMessages(snapshot: Record<string, unknown>): RawAcpSnapshot['messages'] {
@@ -154,17 +155,6 @@ function parseSnapshotConfig(snapshot: Record<string, unknown>): RawAcpSnapshot[
         .filter((option) => option.value && option.name),
     }))
     .filter((entry) => entry.id);
-}
-
-function parseSnapshotCommands(snapshot: Record<string, unknown>): RawAcpSnapshot['commands'] {
-  return (Array.isArray(snapshot['commands']) ? snapshot['commands'] : [])
-    .map(toRecord)
-    .filter((entry): entry is Record<string, unknown> => entry !== null)
-    .map((entry) => ({
-      name: readString(entry['name']) ?? '',
-      description: readString(entry['description']) ?? '',
-    }))
-    .filter((entry) => entry.name);
 }
 
 function parseSnapshotUsage(usageValue: unknown): RawAcpSnapshot['usage'] {
@@ -299,7 +289,7 @@ export function toRawAcpSnapshot(value: unknown): RawAcpSnapshot | undefined {
     tokenTotals: parseSnapshotTokenTotals(snapshot['tokenTotals'] ?? snapshot['token_totals']),
     mode: readString(snapshot['mode']),
     config: parseSnapshotConfig(snapshot),
-    commands: parseSnapshotCommands(snapshot),
+    commands: parseAgentCommands(snapshot),
     session: parseSnapshotSessionInfo(session),
     active: parseSnapshotActiveInfo(active),
   };

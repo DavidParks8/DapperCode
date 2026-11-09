@@ -22,7 +22,7 @@ export const FILE_TOOL_DEFINITIONS = [
   ),
   definition(
     'read_file',
-    `Read a UTF-8 file chunk. Returns path, content, revision, and nextOffset. offset/limit are bytes; limit defaults to ${READ_FILE_DEFAULT_BYTES} (max ${READ_FILE_MAX_BYTES}).`,
+    `Read a UTF-8 file chunk. offset/limit are bytes (limit default ${READ_FILE_DEFAULT_BYTES}, max ${READ_FILE_MAX_BYTES}); follow nextOffset for more.`,
     {
       path,
       offset: { type: 'integer' },
@@ -33,14 +33,14 @@ export const FILE_TOOL_DEFINITIONS = [
   ),
   definition(
     'write_file',
-    'Create or replace UTF-8 text, at most 4 MiB. Read an existing file first. The runtime checks its observed version so external changes cannot be overwritten.',
+    'Create or replace a UTF-8 file (max 4 MiB); read an existing file first. JS/TS/JSON are then auto-formatted; a formatting error does not undo the write.',
     { path, content: { type: 'string' } },
     ['path', 'content'],
     { kind: 'edit', approval: null },
   ),
   definition(
     'edit_file',
-    'Replace exactly one literal occurrence in a UTF-8 file previously read or written in this turn. The runtime checks and updates its observed version.',
+    'Replace exactly one literal occurrence of old_text in a UTF-8 file read or written in this turn. JS/TS/JSON are then auto-formatted; a formatting error does not undo the edit.',
     {
       path,
       old_text: { type: 'string' },
@@ -51,24 +51,53 @@ export const FILE_TOOL_DEFINITIONS = [
   ),
   definition(
     'rename_path',
-    'Move an existing source path to a destination that must not exist. Read or write a source file in this turn first; its version is checked by the runtime. Never create or read the destination first. Git staging is not needed.',
+    'Move a path to a destination that must not exist. Read or write a source file in this turn first; never create or read the destination. No Git staging needed.',
     { path, destination: path },
     ['path', 'destination'],
     { kind: 'move', approval: null },
   ),
   definition(
     'delete_path',
-    'Remove a workspace path. Read or write a file in this turn first; the runtime checks its observed version. Repository roots and Git metadata are protected.',
+    'Remove a workspace path; read or write a file in this turn first. Repository roots and Git metadata are protected.',
     { path },
     ['path'],
     { kind: 'delete', approval: null },
   ),
   definition(
     'search_files',
-    'Find literal single-line text. Results report truncation, excluded files, and resource budgets.',
-    { query: { type: 'string' } },
+    'Search file lines for literal text, or ICU regex if regex. Optional path directory, include root-relative glob, file_type extension without a dot; case-sensitive by default. offset/limit page matches (limit default 20, max 100).',
+    {
+      query: { type: 'string' },
+      path,
+      include: path,
+      file_type: path,
+      regex: { type: 'boolean' },
+      case_sensitive: { type: 'boolean' },
+      offset: { type: 'integer' },
+      limit: { type: 'integer' },
+    },
     ['query'],
     { kind: 'search', approval: null },
+  ),
+  definition(
+    'glob_files',
+    'Find files by root-relative glob (*, **, ?); pattern defaults to **/*. path scopes a directory; file_type filters extension. offset/limit page results (limit default 20, max 100); page only with nextOffset. Git-ignored files are excluded.',
+    {
+      pattern: path,
+      path,
+      file_type: path,
+      offset: { type: 'integer' },
+      limit: { type: 'integer' },
+    },
+    [],
+    { kind: 'search', approval: null },
+  ),
+  definition(
+    'apply_patch',
+    'Atomically add/update/delete/move up to 32 UTF-8 files; read every existing source in this turn first. Format: *** Begin Patch; *** Add File: path then +lines; *** Update File: path, optional *** Move to: destination, then @@ -old,count +new,count @@ hunks of space-context, -removed and +added lines; *** Delete File: path; *** End Patch. Destinations must not exist.',
+    { patch: { type: 'string' } },
+    ['patch'],
+    { kind: 'edit', approval: null },
   ),
 ];
 

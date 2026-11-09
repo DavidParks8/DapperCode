@@ -21,7 +21,7 @@ export function LocalSettingsRoute({ children }: { children: ReactNode }) {
       {!local ? (
         <RouteErrorScreen
           title="Only for On this iPhone"
-          message="Model and GitHub settings belong to the On this iPhone profile. Your desktop profiles are unchanged."
+          message="Model, GitHub, and skill settings belong to the On this iPhone profile. Your desktop profiles are unchanged."
         />
       ) : runtime ? (
         <OnDeviceRuntimeScope runtime={runtime}>{children}</OnDeviceRuntimeScope>

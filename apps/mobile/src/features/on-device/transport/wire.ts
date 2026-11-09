@@ -11,8 +11,9 @@ import { findLocalModelDefinition, localModelDefinition, localModelName } from '
 import type { LocalModelSessionSnapshot } from '../models/session';
 import type { LocalModelDefinition } from '../models/types';
 import type { LocalRunSnapshot } from '../runtime/agentLoop';
-import type { LocalMessage, LocalThread, LocalToolCall } from '../runtime/types';
+import type { LocalChild, LocalMessage, LocalThread, LocalToolCall } from '../runtime/types';
 import type { LocalWorkspace } from '../workspaces/types';
+import { childActivity } from '../runtime/delegation';
 
 /** Agent identity the local transport reports for every local chat. */
 export const LOCAL_AGENT_ID = 'on-device';
@@ -133,9 +134,7 @@ export function localWorkspaceIdForPath(
   if (!normalized?.startsWith(`${LOCAL_WORKSPACE_ROOT}/`)) {
     return null;
   }
-  const exact = [...localWorkspacePaths(workspaces)].filter(([, candidate]) => {
-    return candidate === normalized;
-  });
+  const exact = [...localWorkspacePaths(workspaces)].filter(([, entry]) => entry === normalized);
   if (exact.length > 0) {
     return exact.length === 1 ? (exact[0]?.[0] ?? null) : null;
   }
@@ -179,6 +178,13 @@ const TOOL_VERBS: Record<
   rename_path: { kind: 'move', verb: 'Rename', activity: 'Renaming', pathKey: 'path' },
   delete_path: { kind: 'delete', verb: 'Delete', activity: 'Deleting', pathKey: 'path' },
   search_files: { kind: 'search', verb: 'Search', activity: 'Searching', pathKey: 'query' },
+  read_tool_output: { kind: 'read', verb: 'Read saved output', activity: 'Reading saved output' },
+  search_tool_output: {
+    kind: 'search',
+    verb: 'Search saved output',
+    activity: 'Searching saved output',
+    pathKey: 'query',
+  },
   git_status: { kind: 'read', verb: 'Git status', activity: 'Checking Git status' },
   git_diff: { kind: 'read', verb: 'Git diff', activity: 'Reading the Git diff' },
   git_history: { kind: 'read', verb: 'Git history', activity: 'Reading Git history' },
@@ -187,6 +193,10 @@ const TOOL_VERBS: Record<
   git_push: { kind: 'other', verb: 'Git push', activity: 'Pushing' },
   web_fetch: { kind: 'fetch', verb: 'Fetch', activity: 'Fetching', pathKey: 'url' },
   web_search: { kind: 'search', verb: 'Search web', activity: 'Searching web', pathKey: 'query' },
+  ask_user: { kind: 'think', verb: 'Ask user', activity: 'Waiting for answers' },
+  todo_read: { kind: 'think', verb: 'Todo read', activity: 'Reading tasks' },
+  todo_write: { kind: 'think', verb: 'Todo write', activity: 'Updating tasks' },
+  skill: { kind: 'read', verb: 'Use skill', activity: 'Loading skill', pathKey: 'name' },
 };
 
 /**
@@ -318,6 +328,8 @@ export function localRunActivity(
       return preparingActivity(model);
     case 'generating':
       return { title: 'Generating' };
+    case 'compacting':
+      return { title: 'Summarizing conversation' };
     case 'tool':
       return toolActivity(thread);
     case 'stopping':
@@ -348,6 +360,13 @@ function toolActivity(thread: LocalThread): RunActivity | null {
   const running = [...thread.messages]
     .reverse()
     .find((message) => message.tool?.status === 'running' || message.tool?.status === 'pending');
+  if (running?.children?.length) {
+    const active = running.children.filter((child) => child.status === 'running').length;
+    return {
+      title: 'Delegating',
+      detail: `${String(active)} of ${String(running.children.length)} children running`,
+    };
+  }
   return running ? { title: describeLocalToolMessage(thread, running).activity } : null;
 }
 
@@ -384,6 +403,8 @@ export interface LocalThreadProjectionContext {
   models: readonly LocalModelDefinition[];
   /** The active run, so a turn that is still loading its model can be found and stopped. */
   run?: Pick<LocalRunSnapshot, 'phase' | 'threadId' | 'turnId'>;
+  /** Cached skill slash commands for a workspace; see `LocalAgentPort.commands`. */
+  commands: (workspaceId: string, refresh?: boolean) => Readonly<RawAcpSnapshot['commands']>;
 }
 
 export function localThreadPath(
@@ -501,7 +522,43 @@ function liveTurn(
   return null;
 }
 
+function childSnapshotTool(parentId: string, child: LocalChild): RawAcpSnapshot['tools'][number] {
+  const statuses = {
+    idle: 'pending',
+    running: 'running',
+    complete: 'completed',
+    failed: 'failed',
+    interrupted: 'interrupted',
+  } as const;
+  return {
+    id: `child:${parentId}:${child.id}`,
+    generation: null,
+    kind: 'think',
+    ...localToolStatus(statuses[child.status]),
+    title: `${child.agent} child`,
+    startedAtMs: Date.parse(child.messages[0]?.createdAt ?? child.updatedAt),
+    completedAtMs:
+      child.status === 'running' || child.status === 'idle' ? null : Date.parse(child.updatedAt),
+    content: childActivity(parentId, child).content.text ?? '',
+    structuredContent: [],
+    locations: [],
+    truncated: false,
+    subagent: true,
+  };
+}
+
+function childSnapshotTools(parentId: string, message: LocalMessage): RawAcpSnapshot['tools'] {
+  return (message.children ?? []).map((child) => childSnapshotTool(parentId, child));
+}
+
 /** Full ACP-style snapshot used by `thread/read` with history. */
+const localSnapshotPlan = (tasks: LocalThread['tasks']): RawAcpSnapshot['plan'] =>
+  (tasks ?? []).map((task) => ({
+    content: task.content,
+    priority: 'medium',
+    status: task.status,
+  }));
+
 export function localThreadSnapshot(
   thread: LocalThread,
   context: LocalThreadProjectionContext,
@@ -552,10 +609,13 @@ export function localThreadSnapshot(
       truncated: false,
       subagent: false,
     });
+    for (const projected of childSnapshotTools(thread.id, message)) {
+      timeline.push({ sequence: timeline.length, kind: 'tool', canonicalId: projected.id });
+      tools.push(projected);
+    }
   }
   // The ACP snapshot's active run only exists once the turn has started.
-  const running = thread.status === 'running' && thread.activeTurnId !== null;
-  const turnId = running ? thread.activeTurnId : null;
+  const turnId = thread.status === 'running' ? thread.activeTurnId : null;
   return {
     ...localThreadSummary(thread, context),
     ...(liveTurn(thread, context.run) ?? failedTurn(thread)),
@@ -564,12 +624,12 @@ export function localThreadSnapshot(
       timeline,
       messages,
       tools,
-      plan: [],
+      plan: localSnapshotPlan(thread.tasks),
       usage: { used: null, size: contextSize(thread.modelId), cost: null },
       tokenTotals: null,
       mode: null,
       config: [modelConfig(thread, context.models)],
-      commands: [],
+      commands: [...context.commands(thread.workspaceId)],
       session: {
         agentId: LOCAL_AGENT_ID,
         threadId: thread.id,
@@ -581,11 +641,12 @@ export function localThreadSnapshot(
         runId: turnId ? localRunId(thread.id, turnId) : null,
         sourceTurnId: turnId,
         generation: null,
-        toolIds: running
-          ? tools
-              .filter((tool) => tool.status === 'pending' || tool.status === 'in_progress')
-              .map((tool) => tool.id)
-          : [],
+        toolIds:
+          turnId !== null
+            ? tools
+                .filter((tool) => tool.status === 'pending' || tool.status === 'in_progress')
+                .map((tool) => tool.id)
+            : [],
       },
     },
   };

@@ -38,6 +38,17 @@ function response(chunks = [JSON.stringify(message())], contentType = 'applicati
 
 afterEach(() => jest.useRealTimers());
 
+test('the agent capture hook receives complete bounded search text before the legacy 8192-character clip', async () => {
+  const full = `${'result '.repeat(2000)}TAIL-EVIDENCE`;
+  const h = response([JSON.stringify(message(full))]);
+  const offload = jest.fn((result: unknown) => Promise.resolve({ saved: result }));
+  const result = await executeWebSearch({ query: 'Public docs' }, undefined, h.request, offload);
+  expect(offload).toHaveBeenCalledWith(
+    expect.objectContaining({ content: full, truncated: false }),
+  );
+  expect(result).toHaveProperty('saved.content', full);
+});
+
 test('query search and page fetch are both in the default local toolset with no opt-in', () => {
   for (const name of ['web_search', 'web_fetch']) {
     expect(LOCAL_TOOL_DEFINITIONS).toContainEqual(

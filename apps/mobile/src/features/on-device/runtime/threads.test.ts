@@ -113,6 +113,48 @@ function legacyThread(title: string, messages: LocalMessage[]): LocalThread {
   };
 }
 
+test('recovers tasks independently of interrupted questions, history removal and journal compaction', async () => {
+  const { threads, documents } = await open();
+  const thread = await threads.create('workspace', 'model');
+  const tasks = [{ id: 'verify', content: 'Verify the outcome', status: 'in_progress' as const }];
+  const question = pendingTool('question', 'ask-1');
+  question.tool!.name = 'ask_user';
+  threads.change(thread.id, (current) => ({
+    ...current,
+    tasks,
+    status: 'running',
+    activeTurnId: 'turn-question',
+    messages: [userMessage('user'), question],
+  }));
+  await threads.save(thread.id);
+  await threads.flush();
+
+  const recovered = (await open(documents)).threads;
+  expect(recovered.get(thread.id)).toMatchObject({
+    status: 'interrupted',
+    activeTurnId: null,
+    tasks,
+    messages: [
+      expect.any(Object),
+      expect.objectContaining({
+        tool: expect.objectContaining({ name: 'ask_user', status: 'interrupted' }),
+      }),
+    ],
+  });
+  recovered.change(thread.id, (current) => ({ ...current, messages: [] }));
+  await recovered.save(thread.id);
+  for (let index = 0; index < THREAD_COMPACT_SEGMENTS + 1; index += 1) {
+    recovered.change(thread.id, (current) => ({ ...current, title: `Title ${String(index)}` }));
+    await recovered.save(thread.id);
+  }
+  await recovered.flush();
+  const reopened = (await open(documents)).threads;
+  expect(reopened.get(thread.id).tasks).toEqual(tasks);
+  expect(reopened.get(thread.id).messages).toEqual([]);
+  await reopened.remove(thread.id);
+  expect(storedLocalThread(documents, thread.id)).toBeNull();
+});
+
 test.each(['segment', 'base'])(
   'rollback after an unacknowledged %s write replaces actual durable state',
   async (kind) => {

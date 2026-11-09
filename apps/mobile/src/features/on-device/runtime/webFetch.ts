@@ -1,6 +1,7 @@
 import { argumentsRecord, integer, LocalToolInputError, text } from './toolArguments';
 import { toolDefinition } from './toolDefinition';
 import {
+  MAX_WEB_RESPONSE_BYTES,
   readWebText,
   requestWeb,
   withWebRequest,
@@ -15,7 +16,7 @@ const MAX_OFFSET = 256 * 1024;
 export const WEB_TOOL_DEFINITIONS = [
   toolDefinition(
     'web_fetch',
-    'GET an HTTPS URL. Read web pages, documentation, or search URLs; returns raw text/HTML, not a rendered browser. No cookies, credentials, or workspace files are attached. Redirects require a separate request. offset and limit count text characters; limit defaults to 4096 (max 16384).',
+    'GET an HTTPS URL as raw text/HTML, without cookies or credentials; follow a redirect with a new request. offset/limit count characters (limit default 4096, max 16384).',
     { url: { type: 'string' }, offset: { type: 'integer' }, limit: { type: 'integer' } },
     ['url'],
     { kind: 'fetch', approval: webFetchApproval },
@@ -75,6 +76,7 @@ export async function executeWebFetch(
   input: unknown,
   signal?: AbortSignal,
   request: WebRequest = requestWeb,
+  offload?: (result: unknown) => Promise<unknown>,
 ): Promise<unknown> {
   const { url, offset, limit } = fetchArguments(input);
   return withWebRequest(signal, async (requestSignal) => {
@@ -86,7 +88,19 @@ export async function executeWebFetch(
       signal: requestSignal,
     });
     const contentType = textContentType(response, url);
-    const content = await readWebText(response, offset + limit);
+    const content = await readWebText(response, offload ? MAX_WEB_RESPONSE_BYTES : offset + limit);
+    if (offload && content.length > 4096) {
+      return offload({
+        url,
+        status: response.status,
+        contentType,
+        content,
+        truncated: false,
+        producerLimit:
+          'Complete decoded response body within the 1 MiB download cap; not a rendered page.',
+        requestedOffset: offset,
+      });
+    }
     const truncated = content.length > offset + limit;
     return {
       url,

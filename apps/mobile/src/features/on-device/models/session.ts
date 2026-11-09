@@ -6,7 +6,12 @@ import type {
 } from 'llama.rn';
 import type { OnDeviceNativeServices } from '../native/services.types';
 import { localModelDefinition, requireLocalModelRuntime } from './catalog';
-import { generationTokenBudget, iteratePromptCandidates, promptFits } from './contextWindow';
+import {
+  generationTokenBudget,
+  iteratePromptCandidates,
+  LocalContextFull,
+  promptFits,
+} from './contextWindow';
 import type {
   LocalContextLoader,
   LocalModelContext,
@@ -20,6 +25,9 @@ import {
   type ResidentModel,
 } from './memory';
 import type { LocalModelDefinition } from './types';
+import { compactEarlierTurns } from './summary';
+
+export { LocalContextFull };
 
 export interface LocalModelSessionSnapshot {
   phase: 'empty' | 'loading' | 'ready' | 'running' | 'stopping' | 'error';
@@ -34,6 +42,25 @@ export interface LocalModelSessionSnapshot {
 export interface LocalModelUpdate {
   content: string;
   reasoning: string;
+}
+
+export interface LocalSummaryCheckpoint {
+  /** Identifies the earlier history to summarize; a failed summary of it is not retried. */
+  key: string;
+  previous: string | null;
+  started(): void;
+  /** The summary failed; history and the previous checkpoint stay and elision is used instead. */
+  failed(): void;
+  /** Validates the proposed prompt before persisting complete semantic memory. */
+  commit(
+    content: string,
+    validate: (messages: LocalModelMessage[]) => Promise<void>,
+  ): Promise<LocalModelMessage[]>;
+}
+
+export interface LocalGenerationOptions {
+  checkpoint?: LocalSummaryCheckpoint;
+  outputTokens?: number;
 }
 
 interface LoadedModel {
@@ -62,15 +89,6 @@ export class LocalModelInterrupted extends Error {
   }
 }
 
-export class LocalContextFull extends Error {
-  constructor() {
-    super(
-      'This turn no longer fits in the local context window, even after omitting earlier turns and tool output. Start a new conversation or ask for a smaller step.',
-    );
-    this.name = 'LocalContextFull';
-  }
-}
-
 export class LocalModelSession {
   private current: LoadedModel | null = null;
   private loading: Promise<void> | null = null;
@@ -78,6 +96,7 @@ export class LocalModelSession {
   private loadingEpoch = 0;
   private loadEpoch = 0;
   private generation: Generation | null = null;
+  private failedCheckpoint: string | null = null;
   private unloading = false;
   private disposed = false;
   private value: LocalModelSessionSnapshot = {
@@ -143,6 +162,7 @@ export class LocalModelSession {
     messages: LocalModelMessage[],
     tools: object[],
     update: (value: LocalModelUpdate) => void,
+    options?: LocalGenerationOptions,
   ): Promise<LocalModelReply> {
     if (this.disposed || this.loading || this.unloading || !this.current || this.generation) {
       return Promise.reject(
@@ -157,7 +177,7 @@ export class LocalModelSession {
       promise: null,
     };
     this.generation = generation;
-    generation.promise = this.performGeneration(generation, messages, tools, update);
+    generation.promise = this.performGeneration(generation, messages, tools, update, options);
     return generation.promise;
   }
 
@@ -326,18 +346,24 @@ export class LocalModelSession {
     messages: LocalModelMessage[],
     tools: object[],
     update: (value: LocalModelUpdate) => void,
+    options?: LocalGenerationOptions,
   ): Promise<LocalModelReply> {
     try {
       this.requireExecutionMemory();
       this.publish({ phase: 'running', error: null });
-      const prompt = await this.preparePrompt(generation, messages, tools);
+      const prompt = await this.preparePrompt(generation, messages, tools, options?.checkpoint);
       if (generation.interrupted) {
         throw new LocalModelInterrupted();
       }
       const result = await generation.model.context.completion(
         completionParams(
           prompt.formatted,
-          generationTokenBudget(prompt.tokens, generation.model.contextTokens),
+          Math.min(
+            generationTokenBudget(prompt.tokens, generation.model.contextTokens),
+            options?.outputTokens === undefined
+              ? Infinity
+              : Math.max(1, Math.min(512, options.outputTokens)),
+          ),
         ),
         (value) => this.partial(generation, value, update),
       );
@@ -369,40 +395,102 @@ export class LocalModelSession {
   /**
    * Formats with the real chat template and tokenizer, compacting earlier context only when the
    * prompt would not leave room to generate. The chosen formatted prompt is passed straight to
-   * completion so the template is rendered once per attempt.
+   * completion so the template is rendered once per attempt. Stored history is never modified.
    */
   private async preparePrompt(
     generation: Generation,
     messages: LocalModelMessage[],
     tools: object[],
+    checkpoint?: LocalSummaryCheckpoint,
   ): Promise<PreparedPrompt> {
-    const { context, contextTokens } = generation.model;
+    const { contextTokens } = generation.model;
+    const original = await this.formatPrompt(generation, messages, tools);
+    // Two free generation reserves always leave room for the next tool round. A summary that
+    // failed for this earlier history is not retried; elision runs instead.
+    if (
+      checkpoint &&
+      checkpoint.key !== this.failedCheckpoint &&
+      !promptFits(original.tokens, contextTokens, 2)
+    ) {
+      const compacted = await compactEarlierTurns(messages, original, contextTokens, checkpoint, {
+        format: (chat, withTools) => this.formatPrompt(generation, chat, withTools ? tools : []),
+        complete: (prompt, outputTokens) => this.summaryReply(generation, prompt, outputTokens),
+        failed: (error) => {
+          this.checkGeneration(generation);
+          if (error instanceof LocalModelInterrupted) {
+            throw error;
+          }
+          this.requireExecutionMemory();
+          this.failedCheckpoint = checkpoint.key;
+        },
+      });
+      if (compacted) {
+        return compacted;
+      }
+    }
     let fallback: PreparedPrompt | null = null;
     // A history candidate that fits is preferred to eliding the current turn's own output.
     for (const candidate of iteratePromptCandidates(messages, () => fallback !== null)) {
-      if (generation.interrupted) {
-        throw new LocalModelInterrupted();
-      }
-      const formatted = await context.getFormattedChat(candidate.messages, null, {
-        tools,
-        tool_choice: 'auto',
-        enable_thinking: false,
-        reasoning_format: 'auto',
-      });
-      const tokens = (await context.tokenize(formatted.prompt)).tokens.length;
-      if (!promptFits(tokens, contextTokens)) {
+      const prepared =
+        candidate.scope === 'original'
+          ? original
+          : await this.formatPrompt(generation, candidate.messages, tools);
+      if (!promptFits(prepared.tokens, contextTokens)) {
         continue;
       }
       // Once compaction is needed, free extra room so the next rounds keep a stable prefix.
-      if (candidate.scope !== 'history' || promptFits(tokens, contextTokens, 2)) {
-        return { formatted, tokens };
+      if (candidate.scope !== 'history' || promptFits(prepared.tokens, contextTokens, 2)) {
+        return prepared;
       }
-      fallback ??= { formatted, tokens };
+      fallback ??= prepared;
     }
     if (fallback) {
       return fallback;
     }
     throw new LocalContextFull();
+  }
+
+  private checkGeneration(generation: Generation): void {
+    if (generation.interrupted) {
+      throw new LocalModelInterrupted();
+    }
+    if (generation.stopFailure) {
+      throw generation.stopFailure;
+    }
+  }
+
+  private async formatPrompt(
+    generation: Generation,
+    messages: LocalModelMessage[],
+    tools: object[],
+  ): Promise<PreparedPrompt> {
+    this.checkGeneration(generation);
+    const formatted = await generation.model.context.getFormattedChat(messages, null, {
+      tools,
+      tool_choice: tools.length ? 'auto' : 'none',
+      enable_thinking: false,
+      reasoning_format: 'auto',
+    });
+    const tokens = (await generation.model.context.tokenize(formatted.prompt)).tokens.length;
+    this.checkGeneration(generation);
+    return { formatted, tokens };
+  }
+
+  private async summaryReply(
+    generation: Generation,
+    prompt: PreparedPrompt,
+    outputTokens: number,
+  ): Promise<LocalModelReply> {
+    this.requireExecutionMemory();
+    this.checkGeneration(generation);
+    const reply = await generation.model.context.completion(
+      completionParams(prompt.formatted, outputTokens),
+    );
+    this.checkGeneration(generation);
+    if (reply.interrupted) {
+      throw new LocalModelInterrupted();
+    }
+    return reply;
   }
 
   private partial(

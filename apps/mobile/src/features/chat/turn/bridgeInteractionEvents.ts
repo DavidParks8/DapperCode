@@ -105,7 +105,9 @@ export function processBridgeInteractionEvents(
       if (parsed.threadId !== currentId) {
         return;
       }
-      setSelectedCollaborationMode('plan');
+      if (parsed.agentId !== 'on-device') {
+        setSelectedCollaborationMode('plan');
+      }
       clearRunWatchdog();
       setPendingUserInputRequest(parsed);
       setUserInputDrafts(buildUserInputDrafts(parsed));
@@ -126,20 +128,22 @@ export function processBridgeInteractionEvents(
             continue;
           }
           cacheThreadPendingUserInputRequest(threadId, null);
-          cacheThreadActivity(threadId, {
-            tone: 'running',
-            title: 'Input submitted',
-          });
+          if (!isTerminalActivityTone(snapshot.activity?.tone)) {
+            cacheThreadActivity(threadId, { tone: 'running', title: 'Input submitted' });
+          }
         }
       }
       if (!selectedPendingUserInputId || resolvedId !== selectedPendingUserInputId) {
         return;
       }
-      bumpRunWatchdog();
       setPendingUserInputRequest(null);
       setUserInputDrafts({});
       setUserInputError(null);
       setResolvingUserInput(false);
+      if (isTerminalActivityTone(store.get(activityAtom).tone)) {
+        return;
+      }
+      bumpRunWatchdog();
       setActivity({
         tone: 'running',
         title: 'Input submitted',

@@ -15,6 +15,7 @@ import {
   LocalModelSession,
   type LocalModelSessionSnapshot,
 } from './session';
+import { summaryCharacters } from './summary';
 
 const small = localModelDefinition('qwen3-0.6b-q4-0');
 const medium = localModelDefinition('qwen3-1.7b-q4-k-m');
@@ -729,6 +730,7 @@ test('a newer load request supersedes an in-flight one instead of failing as bus
     started.resolve();
     return pending.promise;
   });
+
   const first = h.session.load(small.id);
   expect(h.session.load(small.id)).toBe(first);
   const superseded = first.catch((error: unknown) => error);
@@ -741,4 +743,264 @@ test('a newer load request supersedes an in-flight one instead of failing as bus
   await latest;
   expect(h.initial.release).toHaveBeenCalledTimes(1);
   expect(h.session.snapshot()).toMatchObject({ phase: 'ready', modelId: medium.id });
+});
+
+test('summary chunk candidates never split a Unicode code point', async () => {
+  const h = await summaryHarness();
+  h.transcript[2]!.content = JSON.stringify({ content: '🦙'.repeat(15000) });
+  h.initial.getFormattedChat.mockImplementation(async (chat) => {
+    for (const message of chat) {
+      if (typeof message.content !== 'string') {
+        throw new Error('Local summary candidates must contain text only.');
+      }
+      expect(
+        [...message.content].every((character) => {
+          const point = character.codePointAt(0) ?? 0;
+          return point < 0xd800 || point > 0xdfff;
+        }),
+      ).toBe(true);
+    }
+    return { ...formatted, prompt: JSON.stringify(chat) };
+  });
+  await h.session.generate(h.transcript, [], jest.fn(), { checkpoint: h.checkpoint });
+  expect(h.checkpoint.commit).toHaveBeenCalledTimes(1);
+});
+
+const currentRequest: LocalModelMessage = {
+  role: 'user',
+  content: 'Current user request must survive verbatim.',
+};
+
+async function summaryHarness(historyCharacters = 14_000) {
+  const h = harness();
+  await h.session.load(small.id);
+  const contextTokens = h.session.snapshot().contextTokens!;
+  const threshold = contextTokens - 2 * outputReserveTokens(contextTokens) - CONTEXT_SAFETY_TOKENS;
+  // Like the native template, the formatted prompt includes every advertised tool schema.
+  h.initial.getFormattedChat.mockImplementation(async (chat, _template, options) => ({
+    ...formatted,
+    prompt:
+      JSON.stringify(chat) +
+      (Array.isArray(options?.tools) && options.tools.length ? JSON.stringify(options.tools) : ''),
+  }));
+  h.initial.tokenize.mockImplementation(async (text) => ({
+    tokens: new Array<number>(Math.ceil(text.length / 2)).fill(1),
+  }));
+  const checkpoint = {
+    key: 'earlier-answer',
+    previous: 'Earlier decision: preserve user files.',
+    started: jest.fn(),
+    failed: jest.fn(),
+    commit: jest.fn(
+      async (content: string, validate: (messages: LocalModelMessage[]) => Promise<void>) => {
+        const messages: LocalModelMessage[] = [
+          { role: 'system' as const, content: `Coding instructions\nMemory: ${content}` },
+          currentRequest,
+        ];
+        await validate(messages);
+        return messages;
+      },
+    ),
+  };
+  h.initial.completion.mockResolvedValue({
+    ...reply,
+    content: 'Observed artifactId abc; completed edits; pending verification.',
+  });
+  const transcript: LocalModelMessage[] = [
+    { role: 'system', content: 'Coding instructions' },
+    { role: 'user', content: 'Earlier request to inspect the file.' },
+    {
+      role: 'tool',
+      content: JSON.stringify({
+        content: 'x'.repeat(historyCharacters),
+        artifactId: 'abc',
+        truncated: true,
+        revision: 'r',
+      }),
+    },
+    { role: 'assistant', content: 'Earlier answer.' },
+    currentRequest,
+  ];
+  const summaryCalls = () =>
+    h.initial.completion.mock.calls.filter(([params]) =>
+      params.prompt?.includes('Maintain a concise rolling memory'),
+    );
+  return { ...h, checkpoint, transcript, threshold, contextTokens, summaryCalls };
+}
+
+test('semantic compaction triggers at the real formatted-token threshold before overflow, never below it', async () => {
+  const h = await summaryHarness();
+  h.initial.tokenize.mockResolvedValueOnce({ tokens: new Array<number>(h.threshold).fill(1) });
+  await h.session.generate(h.transcript, [{ tool: 'definitions count too' }], jest.fn(), {
+    checkpoint: h.checkpoint,
+  });
+  expect(h.checkpoint.started).not.toHaveBeenCalled();
+  expect(h.checkpoint.commit).not.toHaveBeenCalled();
+  h.initial.completion.mockClear();
+  await h.session.generate(h.transcript, [{ tool: 'definitions count too' }], jest.fn(), {
+    checkpoint: h.checkpoint,
+  });
+  expect(h.checkpoint.started).toHaveBeenCalledTimes(1);
+  expect(h.checkpoint.commit).toHaveBeenCalledTimes(1);
+  expect(h.checkpoint.failed).not.toHaveBeenCalled();
+  const summaryCall = h.initial.completion.mock.calls[0]![0];
+  expect(summaryCall.n_predict).toBeGreaterThan(0);
+  expect(summaryCall.n_predict).toBeLessThanOrEqual(
+    Math.min(1024, outputReserveTokens(h.contextTokens)),
+  );
+  // The model is told a memory size derived from the real generation cap.
+  expect(summaryCall.prompt).toContain(
+    `at most ${String(summaryCharacters(summaryCall.n_predict!))} characters`,
+  );
+  expect(summaryCall.prompt).toContain('artifactId');
+  expect(summaryCall.prompt).toContain('Earlier decision');
+  expect(summaryCall.prompt).toContain('Earlier request');
+  // The current turn is never summarized; it reaches the model verbatim after compaction.
+  expect(summaryCall.prompt).not.toContain('Current user request');
+  expect(h.initial.completion.mock.calls.at(-1)?.[0].prompt).toContain(
+    'Current user request must survive verbatim.',
+  );
+});
+
+test('a large fixed prefix with small earlier history never generates a summary', async () => {
+  const h = await summaryHarness(400);
+  const tools = [{ schema: 's'.repeat(2 * h.threshold) }];
+  // The tool schemas alone exceed two generation reserves, but there is little history to shrink.
+  await h.session.generate(h.transcript, tools, jest.fn(), { checkpoint: h.checkpoint });
+  expect(h.checkpoint.started).not.toHaveBeenCalled();
+  expect(h.summaryCalls()).toHaveLength(0);
+  expect(h.initial.completion).toHaveBeenCalledTimes(1);
+  expect(h.initial.completion.mock.calls[0]![0].prompt).toContain('Earlier request');
+});
+
+test('oversized transcripts are fully consumed in multiple native summary rounds, with rolling memory and no tools', async () => {
+  const h = await summaryHarness(60_000);
+  await h.session.generate(h.transcript, [], jest.fn(), { checkpoint: h.checkpoint });
+  const summaryCalls = h.initial.completion.mock.calls.slice(0, -1);
+  expect(summaryCalls.length).toBeGreaterThan(1);
+  expect(h.checkpoint.commit).toHaveBeenCalledTimes(1);
+  expect(summaryCalls[1]?.[0].prompt).toContain('Observed artifactId abc');
+  expect(summaryCalls.at(-1)?.[0].prompt).toContain('last');
+  const chunks = summaryCalls
+    .map(([params]) => {
+      const parsed = JSON.parse(params.prompt!) as LocalModelMessage[];
+      return parsed[1]!.content.split(/Transcript chunk \((?:last|more follow)\):\n/u)[1];
+    })
+    .join('');
+  expect(chunks).toBe(JSON.stringify(h.transcript.slice(1, -1)));
+  expect(
+    h.initial.getFormattedChat.mock.calls
+      .filter(
+        ([chat]) =>
+          typeof chat[0]?.content === 'string' &&
+          chat[0].content.includes('Maintain a concise rolling memory'),
+      )
+      .every(
+        ([, , options]) =>
+          options?.tool_choice === 'none' &&
+          Array.isArray(options.tools) &&
+          options.tools.length === 0,
+      ),
+  ).toBe(true);
+});
+
+test.each([
+  { ...reply, content: '', name: 'empty' },
+  { ...reply, content: 'partial summary', truncated: true, name: 'truncated' },
+  { ...reply, content: 'partial summary', stopped_limit: 1, name: 'limited' },
+])(
+  'a $name summary falls back to elision without publishing memory, and is not retried',
+  async (invalid) => {
+    const h = await summaryHarness();
+    h.initial.completion.mockResolvedValueOnce(invalid);
+    const original = JSON.stringify(h.transcript);
+    await expect(
+      h.session.generate(h.transcript, [], jest.fn(), { checkpoint: h.checkpoint }),
+    ).resolves.toMatchObject({ content: expect.any(String) });
+    expect(h.checkpoint.commit).not.toHaveBeenCalled();
+    expect(h.checkpoint.failed).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(h.transcript)).toBe(original);
+    expect(h.session.snapshot().phase).toBe('ready');
+    const answer = h.initial.completion.mock.calls.at(-1)![0].prompt!;
+    expect(answer).not.toContain('Maintain a concise rolling memory');
+    expect(answer).toContain('Current user request must survive verbatim.');
+    expect(answer).toContain('elided');
+    expect(answer).not.toContain('x'.repeat(1000));
+    // The same earlier history is not summarized again on the next round.
+    h.initial.completion.mockClear();
+    await h.session.generate(h.transcript, [], jest.fn(), { checkpoint: h.checkpoint });
+    expect(h.checkpoint.started).toHaveBeenCalledTimes(1);
+    expect(h.initial.completion).toHaveBeenCalledTimes(1);
+  },
+);
+
+test('a valid summary whose compacted prompt cannot fit is not committed and falls back to elision', async () => {
+  const h = await summaryHarness();
+  h.checkpoint.commit.mockImplementationOnce(async (content, validate) => {
+    // Saved evidence references or memory can still overflow; validation runs before saving.
+    await validate([
+      { role: 'system', content: `Memory: ${content}${'r'.repeat(4 * h.contextTokens)}` },
+      currentRequest,
+    ]);
+    return [];
+  });
+  await expect(
+    h.session.generate(h.transcript, [], jest.fn(), { checkpoint: h.checkpoint }),
+  ).resolves.toMatchObject({ content: expect.any(String) });
+  expect(h.checkpoint.commit).toHaveBeenCalledTimes(1);
+  await expect(h.checkpoint.commit.mock.results[0]!.value).rejects.toBeInstanceOf(LocalContextFull);
+  expect(h.checkpoint.failed).toHaveBeenCalledTimes(1);
+  const answer = h.initial.completion.mock.calls.at(-1)![0].prompt!;
+  expect(answer).not.toContain('Memory: ');
+  expect(answer).toContain('Current user request must survive verbatim.');
+  expect(h.session.snapshot().phase).toBe('ready');
+});
+
+test('cancellation during summary generation suppresses late memory and leaves the model ready', async () => {
+  const h = await summaryHarness();
+  const native = deferred<LocalModelReply>();
+  const started = deferred<void>();
+  h.initial.completion.mockImplementationOnce(() => {
+    started.resolve();
+    return native.promise;
+  });
+  const run = h.session.generate(h.transcript, [], jest.fn(), { checkpoint: h.checkpoint });
+  const interrupted = run.catch((error: unknown) => error);
+  await started.promise;
+  const stop = h.session.stop();
+  native.resolve({ ...reply, content: 'Late summary must not publish.' });
+  await stop;
+  expect(await interrupted).toBeInstanceOf(LocalModelInterrupted);
+  expect(h.checkpoint.commit).not.toHaveBeenCalled();
+  expect(h.checkpoint.failed).not.toHaveBeenCalled();
+  expect(h.initial.completion).toHaveBeenCalledTimes(1);
+  expect(h.session.snapshot().phase).toBe('ready');
+});
+
+test('a later summary-round error or a checkpoint persistence failure never commits memory; both fall back to elision', async () => {
+  const h = await summaryHarness(60_000);
+  h.initial.completion
+    .mockResolvedValueOnce({ ...reply, content: 'partial memory' })
+    .mockRejectedValueOnce(new Error('native failure'))
+    .mockResolvedValueOnce({ ...reply, content: 'Answered from elided history.' });
+  await expect(
+    h.session.generate(h.transcript, [], jest.fn(), { checkpoint: h.checkpoint }),
+  ).resolves.toMatchObject({ content: 'Answered from elided history.' });
+  expect(h.checkpoint.commit).not.toHaveBeenCalled();
+  expect(h.checkpoint.failed).toHaveBeenCalledTimes(1);
+  h.initial.completion.mockResolvedValue({ ...reply, content: 'complete memory' });
+  h.checkpoint.key = 'a-later-turn';
+  h.checkpoint.commit.mockImplementationOnce(async (content, validate) => {
+    await validate([{ role: 'system', content: `Memory: ${content}` }, currentRequest]);
+    throw new Error('disk full');
+  });
+  await expect(
+    h.session.generate(h.transcript, [], jest.fn(), { checkpoint: h.checkpoint }),
+  ).resolves.toMatchObject({ content: 'complete memory' });
+  expect(h.checkpoint.failed).toHaveBeenCalledTimes(2);
+  const answer = h.initial.completion.mock.calls.at(-1)![0].prompt!;
+  expect(answer).not.toContain('Maintain a concise rolling memory');
+  expect(answer).not.toContain('Memory: ');
+  expect(answer).toContain('Current user request must survive verbatim.');
+  expect(h.session.snapshot().phase).toBe('ready');
 });

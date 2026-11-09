@@ -35,7 +35,7 @@
     "zod": "4.6.7"
   },
   "scripts": {
-    "postinstall": "pnpm --filter @dappercode/mobile run mermaid:prepare",
+    "postinstall": "pnpm --filter @dappercode/mobile run runtime:prepare",
     "mobile": "./scripts/start-expo.sh mobile",
     "ios": "./scripts/start-expo.sh ios",
     "android": "./scripts/start-expo.sh android",

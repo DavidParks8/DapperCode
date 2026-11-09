@@ -17,6 +17,7 @@ import {
   parseAgUiEventNotification,
   updateAgUiLiveAssistantMessages,
 } from '@bridge/agui/agUi';
+import { AGENT_COMMANDS_EVENT_NAME, parseAgentCommands } from '@bridge/agentCommands';
 import { parseRunActivity, RUN_ACTIVITY_EVENT_NAME } from '@bridge/runActivity';
 import type { ChatMessage, RpcNotification } from '@bridge/types/types';
 import { type ActivityState, RUN_WATCHDOG_MS } from '../helpers/helpers';
@@ -93,6 +94,16 @@ export function processAgUiRunEvents(
       }
       if (isRunActivityCustomEvent(agUiEnvelope)) {
         applyRunActivity(agUiEnvelope);
+        return;
+      }
+      if (
+        agUiEnvelope.event.type === EventType.CUSTOM &&
+        agUiEnvelope.event.name === AGENT_COMMANDS_EVENT_NAME
+      ) {
+        const acpCommands = parseAgentCommands(agUiEnvelope.event.value);
+        setSelectedChat((previous) =>
+          previous?.id === agUiEnvelope.threadId ? { ...previous, acpCommands } : previous,
+        );
         return;
       }
       if (!isSubagentCustomEvent(agUiEnvelope)) {

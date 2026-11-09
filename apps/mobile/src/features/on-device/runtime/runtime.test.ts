@@ -8,6 +8,7 @@ import { localModelDefinition } from '../models/catalog';
 import type { LocalModelContext, LocalModelMessage, LocalModelReply } from '../models/engine';
 import { loadNativeModelContext } from '../models/engine';
 import type { OnDeviceNativeServices } from '../native/services.types';
+import { OnDeviceNativeError } from '../native/services.errors';
 import type { LocalModelSessionSnapshot } from '../models/session';
 import { retryableLocalMessages, type LocalRunSnapshot } from './agentLoop';
 import { draftDocument } from './drafts';
@@ -146,6 +147,21 @@ function harness(documents = new Map<string, string>()) {
     removeWorkspacePath: jest.fn(async () => undefined),
     renameWorkspaceEntry: jest.fn(async () => undefined),
     removeWorkspaceEntry: jest.fn(async () => undefined),
+    beginWorkspaceOperation: jest.fn(),
+    cancelWorkspaceOperation: jest.fn(),
+    finishWorkspaceOperation: jest.fn(),
+    applyWorkspacePatch: jest.fn(async () => ({ files: [] })),
+    queryWorkspaceFiles: jest.fn(async () => ({
+      matches: [],
+      files: [],
+      nextOffset: null,
+      reason: 'complete' as const,
+      truncated: false,
+      skippedFiles: 0,
+      excludedEntries: 0,
+      visitedEntries: 0,
+      searchedBytes: 0,
+    })),
     searchWorkspaceFiles: jest.fn(async () => ({
       matches: [],
       truncated: false,
@@ -517,7 +533,10 @@ test('background during a native tool waits for its result, preserves durable hi
   const h = await ready();
   const started = deferred<void>();
   const result = deferred<Awaited<ReturnType<OnDeviceNativeServices['readWorkspaceFile']>>>();
-  h.native.readWorkspaceFile.mockImplementation(() => {
+  h.native.readWorkspaceFile.mockImplementation((_workspace, path) => {
+    if (path !== 'hello.txt') {
+      return Promise.reject(new OnDeviceNativeError('PATH_NOT_FOUND', 'No optional rules.'));
+    }
     started.resolve();
     return result.promise;
   });
@@ -1485,7 +1504,12 @@ test('after an empty workspace search, the next round says it is not proof of ab
     'submission',
     jest.fn(),
   );
-  expect(h.native.searchWorkspaceFiles).toHaveBeenCalledWith('workspace-one', 'GlassView');
+  expect(h.native.queryWorkspaceFiles).toHaveBeenCalledWith(
+    'workspace-one',
+    'GlassView',
+    expect.objectContaining({ regex: false, limit: 20 }),
+    expect.any(String),
+  );
   expect(inputs).toHaveLength(2);
   const followUp = inputs[1]!;
   expect(followUp[0]).toEqual({

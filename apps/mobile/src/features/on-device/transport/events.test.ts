@@ -11,6 +11,7 @@ const TOOLS = 20;
 const context = (): LocalThreadProjectionContext => ({
   workspaces: [{ id: 'ws-one', name: 'Demo', isRepository: true }],
   models: [],
+  commands: () => [],
 });
 
 const at = (second: number) => new Date(Date.UTC(2026, 9, 1, 0, 0, second)).toISOString();

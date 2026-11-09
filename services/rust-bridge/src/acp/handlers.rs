@@ -1,8 +1,8 @@
 #[cfg(test)]
 use agent_client_protocol::schema::v1::SessionNotification;
 use agent_client_protocol::schema::v1::{
-    ContentBlock, ContentChunk, SessionConfigKind, SessionUpdate, ToolCallContent, ToolCallStatus,
-    ToolKind,
+    AvailableCommandInput, ContentBlock, ContentChunk, SessionConfigKind, SessionUpdate,
+    ToolCallContent, ToolCallStatus, ToolKind,
 };
 use agent_client_protocol::schema::v1::{
     SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOptions,
@@ -164,6 +164,7 @@ pub async fn handle_session_notification(
                 .available_commands
                 .into_iter()
                 .map(|command| CommandEntry {
+                    hint: command_hint(command.input),
                     name: command.name,
                     description: command.description,
                 })
@@ -481,6 +482,14 @@ fn bound_text(mut value: String, max: usize) -> String {
     value
 }
 
+fn command_hint(input: Option<AvailableCommandInput>) -> Option<String> {
+    let AvailableCommandInput::Unstructured(input) = input? else {
+        return None;
+    };
+    let hint = input.hint.trim();
+    (!hint.is_empty()).then(|| hint.to_string())
+}
+
 fn field_update(value: MaybeUndefined<String>) -> FieldUpdate {
     match value {
         MaybeUndefined::Undefined => FieldUpdate::Unchanged,
@@ -526,6 +535,37 @@ mod tests {
                     .is_empty()
             );
         }
+    }
+
+    #[tokio::test]
+    async fn available_commands_carry_only_non_blank_unstructured_hints() {
+        let session = AcpSession::new("agent".into(), "thread".into());
+        let update: SessionUpdate = serde_json::from_value(serde_json::json!({
+            "sessionUpdate": "available_commands_update",
+            "availableCommands": [
+                { "name": "review", "description": "Review changes", "input": { "hint": " [focus] " } },
+                { "name": "compact", "description": "Compact" },
+                { "name": "blank", "description": "Blank hint", "input": { "hint": "   " } },
+                { "name": "invalid", "description": "Invalid input", "input": { "hint": 7 } }
+            ]
+        }))
+        .unwrap();
+        handle_session_notification(
+            "agent",
+            &session,
+            SessionNotification::new("session", update).into(),
+        )
+        .await;
+        let snapshot = session.snapshot().await;
+        assert_eq!(
+            serde_json::to_value(&snapshot.commands).unwrap(),
+            serde_json::json!([
+                { "name": "review", "description": "Review changes", "hint": "[focus]" },
+                { "name": "compact", "description": "Compact" },
+                { "name": "blank", "description": "Blank hint" },
+                { "name": "invalid", "description": "Invalid input" }
+            ])
+        );
     }
 
     #[tokio::test]

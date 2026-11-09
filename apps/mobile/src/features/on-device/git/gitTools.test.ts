@@ -55,6 +55,25 @@ test('Git tool results are bounded and retain truncation metadata and actual nat
   expect(h.native.getWorkspaceGitDiff).toHaveBeenCalledWith('fixed-workspace', 4096);
 });
 
+test('agent capture keeps native status/history before list clipping and requests the native diff budget', async () => {
+  const h = harness();
+  const capture = jest.fn((result: unknown) => Promise.resolve(result));
+  const execute = (name: string) =>
+    executeGitTool('fixed-workspace', name, {}, h.native, h.author, h.credentials, capture);
+  const status = await execute('git_status');
+  expect(status).toMatchObject({ files: expect.any(Array), totalFiles: 30, truncated: false });
+  expect((status as { files: unknown[] }).files).toHaveLength(30);
+  await execute('git_diff');
+  expect(h.native.getWorkspaceGitDiff).toHaveBeenLastCalledWith('fixed-workspace', 128 * 1024);
+  await execute('git_history');
+  expect(capture).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      commits: [],
+      producerLimit: expect.stringContaining('not the complete'),
+    }),
+  );
+});
+
 test('model descriptions distinguish changed paths and optional remote authentication', async () => {
   expect(
     GIT_TOOL_DEFINITIONS.find((tool) => tool.definition.function.name === 'git_status')?.definition

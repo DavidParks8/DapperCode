@@ -1,4 +1,5 @@
 import {
+  compactionOutputTokens,
   elideToolResult,
   generationTokenBudget,
   iteratePromptCandidates,
@@ -112,4 +113,18 @@ test('token budgets reserve generation room and give generation everything else'
   expect(promptFits(4096 - 1024 - 31, 4096)).toBe(false);
   expect(promptFits(16_384 - 2 * 2048 - 32, 16_384, 2)).toBe(true);
   expect(generationTokenBudget(1000, 4096)).toBe(3064);
+});
+
+test('compaction counts only the conversation after the measured fixed prefix', () => {
+  // 8K with a 3100-token fixed prefix leaves 3012 conversation tokens beside one reserve.
+  expect(compactionOutputTokens(8192, 3100, 1500, 3100 + 2900)).toBe(0);
+  expect(compactionOutputTokens(8192, 3100, 1600, 3100 + 1700)).toBe(753);
+  // Large contexts keep a full reserve of headroom before compacting.
+  expect(compactionOutputTokens(16_384, 4000, 6000, 4000 + 6100)).toBe(0);
+  expect(compactionOutputTokens(16_384, 4000, 6000, 4000 + 8300)).toBe(1024);
+  expect(compactionOutputTokens(4096, 1700, 700, 1700 + 800)).toBe(335);
+  // A current turn that cannot fit beside a full-size memory gets elision, not a wasted summary.
+  expect(compactionOutputTokens(8192, 3100, 1600, 3100 + 1600 + 2300)).toBe(0);
+  // A fixed prefix that leaves no room cannot be helped by a summary.
+  expect(compactionOutputTokens(4096, 3500, 100, 3600)).toBe(0);
 });

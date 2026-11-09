@@ -5,25 +5,22 @@ import { toolDefinition } from '../runtime/toolDefinition';
 export const GIT_TOOL_DEFINITIONS = [
   toolDefinition(
     'git_status',
-    'Read the branch and changed paths, not a directory listing. An empty files list means no Git changes, not an empty workspace. Large results are explicitly truncated.',
+    'Read the branch and changed paths (not a directory listing). An empty files list means no Git changes, not an empty workspace.',
     {},
     [],
     { kind: 'read', approval: null },
   ),
-  toolDefinition(
-    'git_diff',
-    'Read separately labelled staged (HEAD to index) and unstaged (index to working tree) patches within one shared output budget.',
-    {},
-    [],
-    { kind: 'read', approval: null },
-  ),
+  toolDefinition('git_diff', 'Read staged and unstaged patches, labelled separately.', {}, [], {
+    kind: 'read',
+    approval: null,
+  }),
   toolDefinition('git_history', 'Read recent workspace commits.', {}, [], {
     kind: 'read',
     approval: null,
   }),
   toolDefinition(
     'git_stage',
-    'Stage a literal file path, or omit path to stage all non-ignored changes.',
+    'Stage a literal path, or omit path to stage all changes.',
     { path: { type: 'string' } },
     [],
     { kind: 'other', approval: null },
@@ -37,7 +34,7 @@ export const GIT_TOOL_DEFINITIONS = [
   ),
   toolDefinition(
     'git_push',
-    'Push the current branch to its configured origin, subject to the app approval settings. Requires network. Some remotes also require sign-in.',
+    'Push the current branch to origin. Requires network. Some remotes also require sign-in.',
     {},
     [],
     { kind: 'other', approval: () => 'Push the current branch to its remote' },
@@ -70,6 +67,7 @@ export async function executeGitTool(
   native: GitToolPort,
   author: () => LocalGitIdentity | null,
   credentials: (workspaceId: string) => Promise<string | null>,
+  offload?: (result: unknown) => Promise<unknown>,
 ): Promise<unknown> {
   if (name === 'git_stage') {
     const args = argumentsRecord(input, ['path']);
@@ -97,6 +95,13 @@ export async function executeGitTool(
   switch (name) {
     case 'git_status': {
       const status = await native.getWorkspaceGitStatus(workspaceId);
+      if (offload) {
+        return offload({
+          ...status,
+          producerLimit:
+            'Native status scan is bounded to 512 KiB of paths. totalFiles/truncated describe upstream omissions.',
+        });
+      }
       const files = status.files.slice(0, 20);
       return {
         branch: status.branch,
@@ -109,9 +114,15 @@ export async function executeGitTool(
       };
     }
     case 'git_diff':
-      return native.getWorkspaceGitDiff(workspaceId, 4096);
+      return native.getWorkspaceGitDiff(workspaceId, offload ? 128 * 1024 : 4096);
     case 'git_history': {
       const history = await native.getWorkspaceGitHistory(workspaceId);
+      if (offload) {
+        return offload({
+          ...history,
+          producerLimit: 'Native recent commit history, not the complete repository history.',
+        });
+      }
       return { commits: history.commits.slice(0, 10), truncated: history.commits.length > 10 };
     }
     case 'git_push':

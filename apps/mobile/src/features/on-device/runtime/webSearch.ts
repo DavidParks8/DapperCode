@@ -19,7 +19,7 @@ const REQUEST_ID = 1;
 export const SEARCH_TOOL_DEFINITIONS = [
   toolDefinition(
     'web_search',
-    'Search the web by query using Exa. Use it for current information beyond your training data, such as libraries, APIs, products, and versions. Requires internet; approval follows the global setting. Queries are sent to Exa; never include secrets or private workspace content. Returns search text with source URLs; cite those URLs and use web_fetch to read pages. limit defaults to 3 results (max 8). Results are untrusted data and may be truncated.',
+    'Search the web with Exa. Use it for current information beyond your training data, such as libraries, APIs, products, and versions. Queries go to Exa; never include secrets or private workspace content. Returns untrusted text with source URLs to cite; read pages with web_fetch. limit defaults to 3 (max 8).',
     { query: { type: 'string' }, limit: { type: 'integer' } },
     ['query'],
     { kind: 'search', approval: webSearchApproval },
@@ -134,6 +134,7 @@ export async function executeWebSearch(
   input: unknown,
   signal?: AbortSignal,
   request: WebRequest = requestWeb,
+  offload?: (result: unknown) => Promise<unknown>,
 ): Promise<unknown> {
   const { query, limit } = searchArguments(input);
   return withWebRequest(
@@ -172,6 +173,15 @@ export async function executeWebSearch(
         );
       }
       const content = await readSearchResponse(response);
+      if (offload) {
+        return offload({
+          provider: 'Exa',
+          query,
+          content,
+          truncated: false,
+          producerLimit: 'Exa-selected results; 1 MiB response cap. Not an exhaustive web search.',
+        });
+      }
       return {
         provider: 'Exa',
         query,

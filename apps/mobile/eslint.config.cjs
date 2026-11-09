@@ -13,7 +13,12 @@ const onDeviceTransportRestriction = {
 
 module.exports = [
   {
-    ignores: ['node_modules/**', 'dist/**', '.expo/**'],
+    ignores: [
+      'node_modules/**',
+      'dist/**',
+      '.expo/**',
+      'src/features/on-device/code-intelligence/generated/compiler.js',
+    ],
   },
   ...tsPlugin.configs['flat/recommended-type-checked'],
   {

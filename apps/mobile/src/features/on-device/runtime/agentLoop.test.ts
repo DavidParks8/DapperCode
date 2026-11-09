@@ -30,6 +30,29 @@ beforeEach(() => {
     .mockImplementation(() => `00000000-0000-4000-8000-${String(++sequence).padStart(12, '0')}`);
 });
 
+test('output storage failure records a completed mutation and retry continues without replay', async () => {
+  const h = await harness();
+  h.model.generate.mockResolvedValueOnce(response('', ['write_file']));
+  h.execute.mockResolvedValueOnce({ revision: 'a'.repeat(64), content: 'evidence'.repeat(1000) });
+  const write = h.storage.writeRuntimeDocument.getMockImplementation()!;
+  h.storage.writeRuntimeDocument.mockImplementation((name, value) =>
+    name.startsWith('toolartifact-') ? Promise.reject(new Error('disk full')) : write(name, value),
+  );
+  await expect(h.loop.send(h.thread.id, 'Write the file.', 'storage-failure')).rejects.toThrow(
+    'Tool completed',
+  );
+  const failed = h.threads.get(h.thread.id);
+  expect(failed.status).toBe('failed');
+  expect(failed.messages.find((message) => message.role === 'tool')).toMatchObject({
+    tool: { status: 'completed' },
+    content: expect.stringContaining('Do not replay'),
+  });
+  expect(failed.messages[0]?.content).toBe('Write the file.');
+  await h.loop.retry(h.thread.id);
+  expect(h.execute).toHaveBeenCalledTimes(1);
+  expect(h.loop.snapshot().phase).toBe('idle');
+});
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -39,6 +62,21 @@ function deferred<T>() {
   });
   return { promise, resolve, reject };
 }
+
+test('offloaded evidence is durably associated with the conversation before the next model round', async () => {
+  const h = await harness();
+  h.execute.mockResolvedValueOnce({ path: 'file.ts', content: 'evidence'.repeat(1000) });
+  h.model.generate.mockResolvedValueOnce(response('', ['read_file'])).mockImplementationOnce(() => {
+    const durable = storedLocalThread(h.contents, h.thread.id);
+    expect(durable?.messages.find((message) => message.role === 'tool')).toMatchObject({
+      tool: { status: 'completed' },
+      content: expect.stringContaining('"offloaded":true'),
+    });
+    return Promise.resolve(response('Evidence retained.'));
+  });
+  await h.loop.send(h.thread.id, 'Read the file.', 'durable-output');
+  expect(h.execute).toHaveBeenCalledTimes(1);
+});
 
 function response(content: string, names: string[] = []): LocalModelReply {
   return {
@@ -203,6 +241,7 @@ test('real run ordering persists user input and tool intent before executing and
     'read_file',
     { path: 'main.txt' },
     expect.any(AbortSignal),
+    expect.any(Function),
   );
   expect(finished.status).toBe('complete');
   expect(finished.activeTurnId).toBeNull();
@@ -688,6 +727,7 @@ test('long write_file payloads reach the tool intact', async () => {
       content,
     },
     expect.any(AbortSignal),
+    expect.any(Function),
   );
 });
 
@@ -861,6 +901,7 @@ describe('metadata-driven tool approval', () => {
       'git_push',
       {},
       expect.any(AbortSignal),
+      expect.any(Function),
     );
   });
 

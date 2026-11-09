@@ -1,19 +1,23 @@
-import type {
-  BridgeThreadQueueState,
-  FileSystemListResponse,
-  WorkspaceListResponse,
-} from '@bridge/types/types';
+import type { BridgeThreadQueueState } from '@bridge/types/types';
 import type { LocalThread } from '../runtime/types';
 import { failure, LOCAL_RPC_ERROR, LocalRpcError } from './errors';
 import { MODEL_HOST_METHODS } from '@shared/hostModels';
 import { forwardLocalCloneProgress, LocalEventProjector, type LocalNotification } from './events';
 import { LocalApprovalRelay } from './approvals';
+import { LocalUserInputRelay } from './userInput';
 import { createLocalGitHandlers } from './gitHandlers';
 import { localModelListEntries } from './modelOptions';
 import { LOCAL_TURN_RETRY_METHOD, startLocalRetry } from './retry';
 import { startLocalTurn } from './turnStart';
 import { createLocalWorkspaceHandlers, LOCAL_WORKSPACE_METHODS } from './workspaceHandlers';
-import { readApprovalPolicy, readParam, readRecord, type RpcParams } from './params';
+import { localFilesystemList, localWorkspaceList } from './listings';
+import {
+  readApprovalPolicy,
+  readParam,
+  readRecord,
+  readInputText as inputText,
+  type RpcParams as Params,
+} from './params';
 import type { LocalAgentPort } from './port';
 import {
   LOCAL_MODEL_CONFIG_ID,
@@ -22,7 +26,6 @@ import {
   localFallbackWorkspaceId,
   localRunActivity,
   localWorkspaceIdForPath,
-  localWorkspacePaths,
   localThreadSnapshot,
   localThreadSummary,
   type LocalThreadProjectionContext,
@@ -38,8 +41,6 @@ export interface LocalRpcEndpoint {
   start(): void;
   stop(): void;
 }
-
-type Params = RpcParams;
 
 export { LOCAL_TURN_RETRY_METHOD } from './retry';
 
@@ -77,6 +78,7 @@ export const LOCAL_IMPLEMENTED_METHODS = [
   'bridge/approvals/list',
   'bridge/approvals/resolve',
   'bridge/userInput/list',
+  'bridge/userInput/resolve',
   'bridge/git/status',
   'bridge/git/diff',
   'bridge/git/history',
@@ -104,15 +106,6 @@ function emptyQueue(threadId: string): BridgeThreadQueueState {
   };
 }
 
-function inputText(params: Params): string {
-  const input = Array.isArray(params['input']) ? params['input'] : [];
-  return input
-    .map((entry) => readRecord(entry))
-    .filter((entry) => entry['type'] === 'text' && typeof entry['text'] === 'string')
-    .map((entry) => entry['text'] as string)
-    .join('\n');
-}
-
 /**
  * In-process implementation of the subset of the bridge JSON-RPC protocol that the chat shell
  * uses, backed by the on-device agent. It returns the same wire shapes as the Rust bridge so the
@@ -125,6 +118,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
   private readonly handlers: Record<string, Handler>;
   private unsubscribe: (() => void) | null = null;
   private readonly approvals: LocalApprovalRelay;
+  private readonly userInput: LocalUserInputRelay;
   private flushing = false;
   private dirty = false;
 
@@ -135,6 +129,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
       () => this.port.run(),
     );
     this.approvals = new LocalApprovalRelay(port);
+    this.userInput = new LocalUserInputRelay(port);
     this.handlers = this.createHandlers();
   }
 
@@ -144,6 +139,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
     }
     this.projector.prime(this.port.threads());
     this.approvals.prime();
+    this.userInput.prime();
     const stopThreads = this.port.subscribe(() => this.flush());
     const stopProgress = forwardLocalCloneProgress(this.port, (event) => this.publish(event));
     this.unsubscribe = () => {
@@ -181,7 +177,11 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
   }
 
   private context(): LocalThreadProjectionContext {
-    return { workspaces: this.port.workspaces(), models: this.port.availableModels() };
+    return {
+      workspaces: this.port.workspaces(),
+      models: this.port.availableModels(),
+      commands: (workspaceId, refresh) => this.port.commands?.(workspaceId, refresh) ?? [],
+    };
   }
 
   private flush(): void {
@@ -197,6 +197,9 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
           this.publish(notification);
         }
         for (const notification of this.approvals.diff()) {
+          this.publish(notification);
+        }
+        for (const notification of this.userInput.diff()) {
           this.publish(notification);
         }
       } while (this.dirty);
@@ -227,7 +230,12 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
     return thread;
   }
 
+  /** Every presented chat also gets its skill commands as a live event, then on each change. */
   private snapshot(thread: LocalThread) {
+    if (this.port.commands) {
+      const commands = this.projector.openCommands(thread);
+      void Promise.resolve().then(() => this.publish(commands));
+    }
     return localThreadSnapshot(this.port.thread(thread.id) ?? thread, {
       ...this.context(),
       run: this.port.run(),
@@ -351,47 +359,6 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
     }
   }
 
-  private workspaceList(): WorkspaceListResponse {
-    const threads = this.port.threads();
-    return {
-      bridgeRoot: LOCAL_WORKSPACE_ROOT,
-      allowOutsideRootCwd: false,
-      workspaces: [...localWorkspacePaths(this.port.workspaces())].map(([id, path]) => {
-        const owned = threads.filter((thread) => thread.workspaceId === id);
-        return {
-          path,
-          chatCount: owned.length,
-          ...(owned[0] ? { updatedAt: owned[0].updatedAt } : {}),
-        };
-      }),
-    };
-  }
-
-  private filesystemList(path: string | null): FileSystemListResponse {
-    const atRoot = !path || path === LOCAL_WORKSPACE_ROOT;
-    const workspaces = this.port.workspaces();
-    const entries = atRoot
-      ? [...localWorkspacePaths(workspaces)].map(([id, entryPath]) => ({
-          name: entryPath.slice(LOCAL_WORKSPACE_ROOT.length + 1),
-          path: entryPath,
-          kind: 'directory',
-          hidden: false,
-          selectable: true,
-          isGitRepo: workspaces.find((workspace) => workspace.id === id)?.isRepository === true,
-        }))
-      : [];
-    return {
-      bridgeRoot: LOCAL_WORKSPACE_ROOT,
-      path: atRoot ? LOCAL_WORKSPACE_ROOT : path,
-      parentPath: atRoot ? null : LOCAL_WORKSPACE_ROOT,
-      entries,
-      truncated: false,
-      totalEntries: entries.length,
-      omittedEntries: 0,
-      maxEntries: entries.length,
-    };
-  }
-
   private createHandlers(): Record<string, Handler> {
     const port = this.port;
     const handlers: Record<(typeof LOCAL_IMPLEMENTED_METHODS)[number], Handler> = {
@@ -467,6 +434,9 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
       },
       'thread/delete': async (params) => {
         const thread = this.requireThread(params);
+        if (port.run().threadId === thread.id) {
+          await port.stop();
+        }
         await port.deleteThread(thread.id);
         return { ok: true, threadId: thread.id };
       },
@@ -570,15 +540,16 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
       }),
       'bridge/workspaces/list': async () => {
         await port.refreshWorkspaces();
-        return this.workspaceList();
+        return localWorkspaceList(port.workspaces(), port.threads());
       },
       'bridge/fs/list': async (params) => {
         await port.refreshWorkspaces();
-        return this.filesystemList(readParam(params, 'path'));
+        return localFilesystemList(port.workspaces(), readParam(params, 'path'));
       },
       'bridge/approvals/list': () => this.approvals.list(),
       'bridge/approvals/resolve': (params) => this.approvals.resolve(params),
-      'bridge/userInput/list': () => [],
+      'bridge/userInput/list': () => this.userInput.list(),
+      'bridge/userInput/resolve': (params) => this.userInput.resolve(params),
       ...createLocalGitHandlers(port, (params) => this.gitWorkspace(params)),
       ...createLocalWorkspaceHandlers(port, (params) => this.gitWorkspace(params)),
     };

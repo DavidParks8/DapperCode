@@ -90,10 +90,42 @@ import { localModelDefinition } from '../../features/on-device/models/catalog';
 import { modelMemoryBytes } from '../../features/on-device/models/memory';
 import { fileSystemMock } from '@shared/testing/expoFileSystemMock';
 import { WORKSPACE_HOST_METHODS } from '../../features/workspace/api/protocol';
+import { ChatInput } from '../../features/chat/composer/ChatInput';
+import { ActivityEvent } from '../../features/chat/transcript/ActivityEvent';
+import { pendingUserInputRequestAtom } from '../../features/chat/state/turn';
+import { storedLocalThread } from '../../features/on-device/runtime/testing';
+import { WorkflowCard } from '../../features/chat/workflow/Workflow';
 
 const QWEN = 'qwen3-1.7b-q4-k-m';
 const TRANSITION_A = 'bonsai-2-2b-q2-0';
 const TRANSITION_B = 'qwen35-0.8b-q4-0';
+const ASK = {
+  name: 'ask_user',
+  arguments: {
+    questions: [
+      {
+        id: 'theme',
+        header: 'Theme',
+        question: 'Choose a theme',
+        options: [
+          { value: 'light', label: 'Light' },
+          { value: 'dark', label: 'Dark' },
+        ],
+      },
+      {
+        id: 'languages',
+        header: 'Languages',
+        question: 'Choose languages',
+        multiSelect: true,
+        options: [
+          { value: 'ts', label: 'TypeScript' },
+          { value: 'rust', label: 'Rust' },
+        ],
+      },
+      { id: 'notes', header: 'Notes', question: 'Anything else?' },
+    ],
+  },
+};
 
 type Node = ReactTestInstance & {
   props: Record<string, unknown>;
@@ -219,6 +251,20 @@ function composerText(root: Node): unknown {
   return root
     .findAllByType(TextInput)
     .find((node) => node.props['accessibilityLabel'] === 'Message')?.props['value'];
+}
+
+function expectSettledControls(root: Node): void {
+  expect(labeled(root, 'Stop agent')).toBeUndefined();
+  expect(labeled(root, 'Stop request')).toBeUndefined();
+  expect(root.findAllByType(ChatInput)[0]?.props).toMatchObject({
+    showStopButton: false,
+    isStopping: false,
+    isLoading: false,
+    submitDisabled: false,
+  });
+  expect(root.findAllByType(ActivityEvent).some((node) => node.props['tone'] === 'running')).toBe(
+    false,
+  );
 }
 
 function modelPickerOption(root: Node, modelId: string): SelectionSheetOption {
@@ -373,6 +419,367 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     await drive(() => mockLlama.finishCompletion());
     jest.restoreAllMocks();
     jest.useRealTimers();
+  });
+
+  it('waits for real multi-question choice, multiselect and free text answers then resumes generation', async () => {
+    const { tree, root, runtime, store } = await renderShell();
+    const api = store.get(apiClientAtom)!;
+    await act(async () => {
+      store.set(approvalModeAtom, 'none');
+      await api.setApprovalPolicy('never');
+    });
+    mockLlama.reply({ toolCalls: [ASK] }, { content: 'Applied your choices.' });
+    await submit(root, 'Ask me before deciding.');
+    const request = runtime.loop.snapshot().userInput!;
+    expect(request.questions).toHaveLength(3);
+    expect(await api.listPendingUserInputs()).toEqual([request]);
+    expect(mockLlama.executions).toHaveLength(1);
+    expect(drawerStatus(root)).toContain('Clarification needed');
+    expect(labeled(root, 'Light')?.props['accessibilityRole']).toBe('radio');
+    expect(labeled(root, 'Rust')?.props['accessibilityRole']).toBe('checkbox');
+    expect(root.findAllByType(ActivityEvent).some((node) => node.props['tone'] === 'running')).toBe(
+      false,
+    );
+    expect(labeled(root, 'Stop agent')).toBeDefined();
+    expect(root.findAllByType(ChatInput)[0]?.props).toMatchObject({
+      showStopButton: true,
+      isStopping: false,
+      isLoading: false,
+    });
+    await press(root, 'Submit answers');
+    expect(hasText(root, 'Please answer "Theme"')).toBe(true);
+    expect(runtime.loop.snapshot().phase).toBe('input');
+    await press(root, 'Light');
+    await press(root, 'TypeScript');
+    await press(root, 'Rust');
+    await press(root, 'TypeScript');
+    expect(labeled(root, 'TypeScript')?.props['accessibilityState']).toMatchObject({
+      checked: false,
+    });
+    expect(labeled(root, 'Rust')?.props['accessibilityState']).toMatchObject({ checked: true });
+    const notes = labeled(root, 'Notes')!;
+    await act(async () => {
+      (notes.props['onChangeText'] as (value: string) => void)('Keep it accessible.');
+      await flush();
+    });
+    mockLlama.holdCompletions = true;
+    await press(root, 'Submit answers');
+    expect(runtime.loop.snapshot().phase).toBe('generating');
+    expect(store.get(pendingUserInputRequestAtom)).toBeNull();
+    expect(await api.listPendingUserInputs()).toEqual([]);
+    expect(labeled(root, 'Stop request')).toBeUndefined();
+    expect(labeled(root, 'Stop agent')).toBeDefined();
+    expect(hasText(root, 'Generating')).toBe(true);
+    const thread = runtime.threads.list()[0]!;
+    expect(
+      JSON.parse(thread.messages.find((message) => message.tool?.name === 'ask_user')!.content),
+    ).toEqual({ answers: { theme: 'light', languages: ['rust'], notes: 'Keep it accessible.' } });
+    await expect(api.resolveUserInput(request.requestId, { answers: {} })).rejects.toThrow(
+      'no longer pending',
+    );
+    await drive(() => mockLlama.finishCompletion());
+    expect(transcript(root)).toContain('Applied your choices.');
+    expectSettledControls(root);
+    act(() => tree.unmount());
+  });
+
+  it.each(['cancel', 'decline'] as const)(
+    'returns an explicit %s error to the model, not an assumed answer',
+    async (action) => {
+      const { tree, root, runtime } = await renderShell();
+      mockLlama.reply({ toolCalls: [ASK] }, { content: 'I will wait for your direction.' });
+      await submit(root, 'Ask me.');
+      mockLlama.holdCompletions = true;
+      await press(root, action === 'cancel' ? 'Cancel request' : 'Decline request');
+      expect(runtime.loop.snapshot().phase).toBe('generating');
+      const tool = runtime.threads
+        .list()[0]!
+        .messages.find((message) => message.tool?.name === 'ask_user')!;
+      expect(tool.tool?.status).toBe('failed');
+      expect(JSON.parse(tool.content)).toEqual({
+        error: expect.stringContaining('No answer was provided'),
+      });
+      expect(labeled(root, 'Stop request')).toBeUndefined();
+      await drive(() => mockLlama.finishCompletion());
+      expectSettledControls(root);
+      act(() => tree.unmount());
+    },
+  );
+
+  it('keeps the next question and draft intact when an older answer acknowledgement fails late', async () => {
+    const { tree, root, runtime, store } = await renderShell();
+    const api = store.get(apiClientAtom)!;
+    const question = {
+      name: 'ask_user',
+      arguments: { questions: [{ id: 'notes', header: 'Notes', question: 'What next?' }] },
+    };
+    mockLlama.reply(
+      { toolCalls: [question] },
+      { toolCalls: [question] },
+      { content: 'Both answered.' },
+    );
+    await submit(root, 'Ask twice.');
+    const first = runtime.loop.snapshot().userInput!;
+    let rejectOld!: (error: Error) => void;
+    const gate = new Promise<never>((_resolve, reject) => {
+      rejectOld = reject;
+    });
+    const original = api.resolveUserInput.bind(api);
+    jest.spyOn(api, 'resolveUserInput').mockImplementationOnce(async (...args) => {
+      await original(...args);
+      return gate;
+    });
+    await act(async () => {
+      (labeled(root, 'Notes')!.props['onChangeText'] as (value: string) => void)('First answer');
+    });
+    await press(root, 'Submit answers');
+    const second = runtime.loop.snapshot().userInput!;
+    expect(second.requestId).not.toBe(first.requestId);
+    await act(async () => {
+      (labeled(root, 'Notes')!.props['onChangeText'] as (value: string) => void)('Second answer');
+      rejectOld(new Error('Old acknowledgement failed'));
+      await flush();
+    });
+    await settle();
+    expect(store.get(pendingUserInputRequestAtom)?.requestId).toBe(second.requestId);
+    expect(labeled(root, 'Notes')?.props['value']).toBe('Second answer');
+    expect(hasText(root, 'Old acknowledgement failed')).toBe(false);
+    expect(labeled(root, 'Submit answers')?.props['disabled']).toBe(false);
+    await expect(
+      api.resolveUserInput(first.requestId, { answers: { notes: 'stale' } }),
+    ).rejects.toThrow('no longer pending');
+    await press(root, 'Submit answers');
+    expect(transcript(root)).toContain('Both answered.');
+    expect(
+      runtime.threads.list()[0]?.messages.filter((message) => message.role === 'user'),
+    ).toHaveLength(1);
+    expectSettledControls(root);
+    act(() => tree.unmount());
+  });
+
+  it('keeps a failed answer delivery pending and enables an explicit retry', async () => {
+    const { tree, root, runtime, store } = await renderShell();
+    mockLlama.reply(
+      {
+        toolCalls: [
+          {
+            name: 'ask_user',
+            arguments: { questions: [{ id: 'notes', header: 'Notes', question: 'What next?' }] },
+          },
+        ],
+      },
+      { content: 'Answer received.' },
+    );
+    await submit(root, 'Ask me.');
+    const requestId = runtime.loop.snapshot().userInput!.requestId;
+    jest
+      .spyOn(store.get(apiClientAtom)!, 'resolveUserInput')
+      .mockRejectedValueOnce(new Error('Answer delivery failed'));
+    await act(async () => {
+      (labeled(root, 'Notes')!.props['onChangeText'] as (value: string) => void)('Please proceed');
+    });
+    await press(root, 'Submit answers');
+    expect(hasText(root, 'Answer delivery failed')).toBe(true);
+    expect(labeled(root, 'Submit answers')?.props['disabled']).toBe(false);
+    expect(runtime.loop.snapshot().userInput?.requestId).toBe(requestId);
+    expect(mockLlama.executions).toHaveLength(1);
+    expect(labeled(root, 'Stop agent')).toBeDefined();
+    await press(root, 'Submit answers');
+    expect(transcript(root)).toContain('Answer received.');
+    expectSettledControls(root);
+    act(() => tree.unmount());
+  });
+
+  it('rejects invalid model question/task arguments without waiting or mutating durable tasks', async () => {
+    const { tree, root, runtime, store } = await renderShell();
+    await act(async () => {
+      store.set(approvalModeAtom, 'all');
+      await store.get(apiClientAtom)!.setApprovalPolicy('untrusted');
+    });
+    mockLlama.reply(
+      { toolCalls: [{ name: 'ask_user', arguments: { questions: [] } }] },
+      {
+        toolCalls: [
+          {
+            name: 'todo_write',
+            arguments: { todos: [{ id: '../bad', content: 'No', status: 'pending' }] },
+          },
+        ],
+      },
+      { content: 'I could not run those requests.' },
+    );
+    await submit(root, 'Validate requests.');
+    expect(labeled(root, 'Allow')).toBeUndefined();
+    expect(labeled(root, 'Submit answers')).toBeUndefined();
+    expect(runtime.threads.list()[0]?.tasks).toBeUndefined();
+    const results = runtime.threads.list()[0]!.messages.filter((message) => message.tool);
+    expect(results.map((message) => message.tool?.status)).toEqual(['failed', 'failed']);
+    expect(results.every((message) => 'error' in JSON.parse(message.content))).toBe(true);
+    expectSettledControls(root);
+    act(() => tree.unmount());
+  });
+
+  it.each(['stop', 'background', 'profile', 'reload', 'delete'] as const)(
+    'settles a pending question on %s and fences stale replies without replay',
+    async (action) => {
+      const { tree, root, runtime, store } = await renderShell();
+      mockLlama.reply({ toolCalls: [ASK] });
+      await submit(root, 'Ask before acting.');
+      const request = runtime.loop.snapshot().userInput!;
+      const api = store.get(apiClientAtom)!;
+      const id = request.threadId;
+      if (action === 'stop') {
+        await press(root, 'Stop request');
+      } else if (action === 'background') {
+        await changeAppState('background');
+      } else if (action === 'delete') {
+        await act(async () => {
+          await api.deleteChat(id);
+        });
+        await settle();
+      } else if (action === 'profile') {
+        act(() => setActiveProfile(store, 'bridge-1'));
+        await settle();
+      } else {
+        act(() => tree.unmount());
+        await settle();
+      }
+      expect(runtime.loop.snapshot().phase).toBe('idle');
+      expect(runtime.loop.snapshot().userInput).toBeUndefined();
+      expect(() => runtime.loop.resolveUserInput(request.requestId, { answers: {} })).toThrow(
+        'no longer pending',
+      );
+      expect(mockLlama.executions).toHaveLength(1);
+      if (action === 'delete') {
+        expect(runtime.threads.find(id)).toBeNull();
+        expect(storedLocalThread(mockNative.documents, id)).toBeNull();
+      } else {
+        expect(storedLocalThread(mockNative.documents, id)?.status).toBe('interrupted');
+      }
+      if (action === 'profile' || action === 'background') {
+        if (action === 'profile') {
+          act(() => setActiveProfile(store, LOCAL_PROFILE_ID));
+          await settle();
+        } else {
+          await changeAppState('active');
+        }
+        expect(store.get(localRuntimeAtom)?.loop.snapshot().phase).toBe('idle');
+      }
+      if (action === 'reload') {
+        const restarted = await renderShell({
+          documents: Object.fromEntries(mockNative.documents),
+        });
+        expect(restarted.runtime.threads.get(id).status).toBe('interrupted');
+        expect(restarted.runtime.loop.snapshot().userInput).toBeUndefined();
+        expect(await restarted.store.get(apiClientAtom)!.listPendingUserInputs()).toEqual([]);
+        act(() => restarted.tree.unmount());
+      } else {
+        await settle();
+        expectSettledControls(root);
+        expect(store.get(pendingUserInputRequestAtom)).toBeNull();
+        act(() => tree.unmount());
+      }
+    },
+  );
+
+  it('persists and renders stable task updates through interruption, profile recovery and deletion', async () => {
+    const { tree, root, runtime, store } = await renderShell();
+    const todo = { id: 'build', content: 'Build accessible controls', status: 'in_progress' };
+    mockLlama.reply(
+      { toolCalls: [{ name: 'todo_write', arguments: { todos: [todo] } }] },
+      {
+        toolCalls: [
+          { name: 'todo_write', arguments: { todos: [{ ...todo, status: 'completed' }] } },
+        ],
+      },
+      { toolCalls: [ASK] },
+    );
+    await submit(root, 'Track the work and ask before finishing.');
+    const thread = runtime.threads.list()[0]!;
+    expect(thread.tasks).toEqual([{ ...todo, status: 'completed' }]);
+    expect(storedLocalThread(mockNative.documents, thread.id)?.tasks).toEqual(thread.tasks);
+    expect(root.findAllByType(WorkflowCard).map((node) => node.props['plan'])).toEqual([
+      expect.objectContaining({ steps: [{ step: todo.content, status: 'completed' }] }),
+    ]);
+    if (root.findAllByType(WorkflowCard)[0]?.props['collapsed']) {
+      await press(root, `Execution, ${todo.content}`);
+    }
+    expect(hasText(root, '1/1 done')).toBe(true);
+    expect(thread.status).toBe('running');
+    expect(labeled(root, 'Stop request')).toBeDefined();
+    await press(root, 'Stop request');
+    expectSettledControls(root);
+    act(() => setActiveProfile(store, 'bridge-1'));
+    await settle();
+    act(() => setActiveProfile(store, LOCAL_PROFILE_ID));
+    await settle();
+    const recovered = store.get(localRuntimeAtom)!;
+    expect(recovered.threads.get(thread.id).tasks).toEqual(thread.tasks);
+    const api = store.get(apiClientAtom)!;
+    expect((await api.getChat(thread.id)).latestPlan?.steps).toEqual([
+      { step: todo.content, status: 'completed' },
+    ]);
+    mockLlama.reply(
+      {
+        toolCalls: [
+          { name: 'todo_write', arguments: { todos: [{ ...todo, status: 'completed' }] } },
+        ],
+      },
+      { toolCalls: [{ name: 'todo_read', arguments: {} }] },
+      { content: 'Verified the result.' },
+    );
+    await act(async () => {
+      await recovered.retryTurn(thread.id);
+    });
+    await settle();
+    expect(recovered.threads.get(thread.id).tasks).toHaveLength(1);
+    expect(
+      recovered.threads.get(thread.id).messages.filter((message) => message.role === 'user'),
+    ).toHaveLength(1);
+    await act(async () => {
+      await api.deleteChat(thread.id);
+    });
+    await settle();
+    expect(storedLocalThread(mockNative.documents, thread.id)).toBeNull();
+    expect(
+      mockNative.calls.some((call) => /writeWorkspaceFile|writeWorkspaceConfig/.test(call)),
+    ).toBe(false);
+    act(() => tree.unmount());
+  });
+
+  it('reports a task storage failure as a failed tool and recovers the desired list through persistence retry', async () => {
+    const { tree, root, runtime } = await renderShell();
+    const original = mockNative.native.writeRuntimeDocument;
+    const write = jest
+      .spyOn(mockNative.native, 'writeRuntimeDocument')
+      .mockImplementation(async (name, content) => {
+        if (content.includes('"tasks"')) {
+          throw new Error('Task storage unavailable');
+        }
+        return original(name, content);
+      });
+    const todos = [{ id: 'verify', content: 'Verify first', status: 'pending' }];
+    mockLlama.reply(
+      { toolCalls: [{ name: 'todo_write', arguments: { todos } }] },
+      { content: 'The task list could not be saved.' },
+    );
+    await submit(root, 'Track this.');
+    const thread = runtime.threads.list()[0]!;
+    const result = thread.messages.find((message) => message.tool?.name === 'todo_write')!;
+    expect(result.tool?.status).toBe('failed');
+    expect(JSON.parse(result.content)).toEqual({ error: 'Task storage unavailable' });
+    expect(runtime.issues().some((issue) => issue.kind === 'persistence')).toBe(true);
+    expect(hasText(root, 'Task storage unavailable')).toBe(true);
+    expect(storedLocalThread(mockNative.documents, thread.id)?.tasks).toBeUndefined();
+    write.mockRestore();
+    await act(async () => {
+      await runtime.retryPersistence();
+    });
+    await settle();
+    expect(storedLocalThread(mockNative.documents, thread.id)?.tasks).toEqual(todos);
+    expect(runtime.issues().some((issue) => issue.kind === 'persistence')).toBe(false);
+    expectSettledControls(root);
+    act(() => tree.unmount());
   });
 
   it.each([false, true])(
@@ -1328,6 +1735,30 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     const { tree, root, runtime, thread } = await renderTransitionChat();
     await submit(root, `An older large note: ${'x'.repeat(70_000)}`);
     const history = structuredClone(runtime.threads.get(thread.id).messages);
+    let summaries = 0;
+    const originalLoader = mockLlama.loader;
+    const loader = jest.spyOn(mockLlama, 'loader').mockImplementation(async (...args) => {
+      const context = await originalLoader(...args);
+      const completion = context.completion;
+      context.completion = async (params, update) => {
+        if (params.prompt?.includes('Maintain a concise rolling memory')) {
+          summaries += 1;
+          return {
+            content:
+              'Prior large note retained. Pending: read seed.txt. No tools have been replayed.',
+            reasoning_content: '',
+            tool_calls: [],
+            interrupted: false,
+            truncated: false,
+            stopped_limit: 0,
+            tokens_predicted: 20,
+            tokens_evaluated: 100,
+          };
+        }
+        return completion(params, update);
+      };
+      return context;
+    });
     mockNative.memory.availableBytes = modelMemoryBytes(localModelDefinition(TRANSITION_B));
     await press(root, 'Model, Bonsai 2 2B Q2_0');
     await drive(() => modelPickerOption(root, TRANSITION_B).onPress());
@@ -1338,6 +1769,10 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     await submit(root, 'Read seed.txt using the smaller B context.');
     expect(mockLlama.executions.at(-1)).toBe(TRANSITION_B);
     expect(runtime.threads.get(thread.id).status).toBe('complete');
+    expect(summaries).toBeGreaterThan(1);
+    expect(runtime.threads.get(thread.id).contextSummary?.content).toContain(
+      'Pending: read seed.txt',
+    );
     expect(runtime.threads.get(thread.id).messages.slice(0, history.length)).toEqual(history);
     expect(runtime.threads.get(thread.id).messages.at(-1)?.content).toBe('B read alpha.');
     expect(runtime.models.snapshot().contextTokens).toBe(
@@ -1349,6 +1784,7 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     expect(labeled(root, 'Stop agent')).toBeUndefined();
     expect(composerText(root)).toBe('');
     act(() => tree.unmount());
+    loader.mockRestore();
   });
 
   it('excludes a lazy B Send from manual Files Save in both operation orders without replaying the save', async () => {
@@ -1666,9 +2102,25 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     expect(composerText(root)).toBe('');
     const next = transcript(root).indexOf(request);
     expect(transcript(root).slice(0, next)).not.toContain('Turn stopped by user.');
-    expect(mockNative.calls.filter((value) => value.startsWith('readWorkspaceFile:'))).toHaveLength(
-      2,
-    );
+    const skillConfig = /\["ws-one","(?:\.opencode\/)?opencode\.jsonc?"\]$/u;
+    expect(
+      mockNative.calls.filter(
+        (value) =>
+          value.startsWith('readWorkspaceFile:') &&
+          !/\["ws-one","(?:AGENTS|CLAUDE)\.md"\]$/u.test(value) &&
+          !skillConfig.test(value),
+      ),
+    ).toEqual([
+      'readWorkspaceFile:["ws-one","seed.txt"]',
+      'readWorkspaceFile:["ws-one","seed.txt"]',
+    ]);
+    // Skill config is cached by the workspace change token: one read per file, not per round.
+    expect(mockNative.calls.filter((value) => skillConfig.test(value))).toEqual([
+      'readWorkspaceFile:["ws-one","opencode.json"]',
+      'readWorkspaceFile:["ws-one","opencode.jsonc"]',
+      'readWorkspaceFile:["ws-one",".opencode/opencode.json"]',
+      'readWorkspaceFile:["ws-one",".opencode/opencode.jsonc"]',
+    ]);
     act(() => tree.unmount());
   });
 

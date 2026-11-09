@@ -17,6 +17,10 @@ const KEPT_RESULT_KEYS = [
   'staged',
   'pushed',
   'error',
+  'artifactId',
+  'offloaded',
+  'characters',
+  'producerLimit',
 ] as const;
 export const OMITTED_TURNS_NOTE =
   'Earlier turns of this conversation were omitted to fit the local context window.';
@@ -24,6 +28,33 @@ export const OMITTED_TURNS_NOTE =
 /** The minimum generation budget that must remain free before a round may start. */
 export function outputReserveTokens(contextTokens: number): number {
   return Math.min(2048, Math.floor(contextTokens / 4));
+}
+
+/**
+ * The rolling-summary generation cap when earlier turns should be compacted, or 0. Token counts come
+ * from the real template and tokenizer. Only the conversation counts against the room left after the
+ * fixed prefix (system prompt and tool schemas) and one generation reserve: compaction starts once
+ * earlier turns fill over half that room and the prompt leaves no headroom for another round (a full
+ * reserve, or half the room when smaller). Memory is capped at a quarter of the room, so a compaction
+ * at least halves earlier history, and is skipped when the current turn beside a full-size memory
+ * would not fit anyway.
+ */
+export function compactionOutputTokens(
+  contextTokens: number,
+  fixedTokens: number,
+  historyTokens: number,
+  promptTokens: number,
+): number {
+  const reserve = outputReserveTokens(contextTokens);
+  const room = contextTokens - fixedTokens - reserve - CONTEXT_SAFETY_TOKENS;
+  const cap = Math.min(1024, reserve, Math.floor(room / 4));
+  const conversation = promptTokens - fixedTokens;
+  return cap > 0 &&
+    historyTokens * 2 > room &&
+    conversation + Math.min(reserve, room / 2) > room &&
+    conversation - historyTokens + cap <= room
+    ? cap
+    : 0;
 }
 
 export function promptFits(
@@ -40,6 +71,13 @@ export function promptFits(
 /** Generation may use all context left after the prompt instead of a fixed small cap. */
 export function generationTokenBudget(promptTokens: number, contextTokens: number): number {
   return contextTokens - promptTokens - CONTEXT_SAFETY_TOKENS;
+}
+
+export class LocalContextFull extends Error {
+  constructor() {
+    super('The request exceeds local context. History is preserved; ask for a smaller step.');
+    this.name = 'LocalContextFull';
+  }
 }
 
 export interface PromptCandidate {

@@ -122,6 +122,7 @@ export default async function scenario(e2e) {
         credentialRemoval: true,
         nativeModelLoaded: true,
         fullProductionToolBudget: true,
+        smallContextLeavesRoom: true,
         structuredToolCall: true,
         correctToolName: true,
         correctToolArguments: true,

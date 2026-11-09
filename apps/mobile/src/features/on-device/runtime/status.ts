@@ -90,6 +90,9 @@ export function localAgentStatus(input: LocalAgentStatusInput): LocalAgentStatus
 }
 
 function runStatus(run: LocalRunSnapshot, model: LocalModelSessionSnapshot): LocalAgentStatus {
+  if (run.phase === 'compacting') {
+    return status('Summarizing conversation on this iPhone', 'busy');
+  }
   switch (run.phase) {
     case 'stopping':
       return status(
@@ -99,18 +102,10 @@ function runStatus(run: LocalRunSnapshot, model: LocalModelSessionSnapshot): Loc
         'busy',
       );
     case 'approval':
-      return status(
-        `Waiting for your approval · ${run.approval?.summary ?? run.toolName ?? 'tool'}`,
-        'attention',
-      );
+    case 'input':
+      return waitingStatus(run);
     case 'preparing':
-      if (model.phase === 'loading') {
-        return loading(model);
-      }
-      if (model.phase === 'stopping') {
-        return status('Releasing the previous model…', 'busy');
-      }
-      return status('Preparing local turn', 'busy');
+      return preparingStatus(model);
     case 'generating':
       return status('Generating on this iPhone', 'busy');
     case 'tool':
@@ -120,6 +115,24 @@ function runStatus(run: LocalRunSnapshot, model: LocalModelSessionSnapshot): Loc
     case 'idle':
       return status('Idle', 'ready');
   }
+}
+
+function preparingStatus(model: LocalModelSessionSnapshot): LocalAgentStatus {
+  if (model.phase === 'loading') {
+    return loading(model);
+  }
+  return model.phase === 'stopping'
+    ? status('Releasing the previous model…', 'busy')
+    : status('Preparing local turn', 'busy');
+}
+
+function waitingStatus(run: LocalRunSnapshot): LocalAgentStatus {
+  return status(
+    run.phase === 'input'
+      ? 'Clarification needed · waiting for your answers'
+      : `Waiting for your approval · ${run.approval?.summary ?? run.toolName ?? 'tool'}`,
+    'attention',
+  );
 }
 
 function loading(model: LocalModelSessionSnapshot): LocalAgentStatus {

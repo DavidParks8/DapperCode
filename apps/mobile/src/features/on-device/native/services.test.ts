@@ -78,6 +78,7 @@ test('untagged native failures never surface exception names or Swift source loc
     code: 'GIT_NON_FAST_FORWARD',
     message: 'This branch and its upstream have diverged.',
   });
+
   expect(toOnDeviceNativeError('[ondevice:FUTURE_CODE] Something new.')).toMatchObject({
     code: 'NATIVE_FAILURE',
     message: 'Something new.',
@@ -98,4 +99,16 @@ test('synchronous native throws are mapped and values pass through unchanged', (
   expect(() => services.getMemoryInfo()).toThrow(
     expect.objectContaining({ code: 'STORAGE_FAILURE', message: 'Memory unavailable.' }),
   );
+});
+
+test.each([
+  'OPERATION_CANCELLED',
+  'SEARCH_PATTERN_INVALID',
+  'SEARCH_PATTERN_TIMEOUT',
+  'PATCH_INVALID',
+  'PATCH_RECOVERY_REQUIRED',
+])('workspace tool failure %s survives the native adapter', (code) => {
+  expect(
+    toOnDeviceNativeError(new Error(`[ondevice:${code}] Workspace operation failed.`)),
+  ).toMatchObject({ code, message: 'Workspace operation failed.' });
 });

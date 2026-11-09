@@ -1134,10 +1134,16 @@ impl AgUiProjector {
                 &self.runs,
                 thread_id,
                 "dappercode.dev/commands",
-                json!({ "commands": commands.iter().take(128).map(|command| json!({
-                    "name": bounded(&command.name, 256),
-                    "description": bounded(&command.description, 2 * 1024)
-                })).collect::<Vec<_>>() }),
+                json!({ "commands": commands.iter().take(128).map(|command| {
+                    let mut entry = json!({
+                        "name": bounded(&command.name, 256),
+                        "description": bounded(&command.description, 2 * 1024)
+                    });
+                    if let Some(hint) = &command.hint {
+                        entry["hint"] = json!(bounded(hint, 256));
+                    }
+                    entry
+                }).collect::<Vec<_>>() }),
                 timestamp,
             ),
             CanonicalEvent::Ignored { .. } | CanonicalEvent::MessageChunk { .. } => {}
@@ -5642,6 +5648,35 @@ mod tests {
     }
 
     #[test]
+    fn command_metadata_includes_hint_only_when_present() {
+        let mut projector = AgUiProjector::default();
+        let projected = projector.project_canonical(&CanonicalEvent::Commands {
+            agent_id: "alpha-agent".into(),
+            thread_id: "thread".into(),
+            commands: vec![
+                crate::acp::events::CommandEntry {
+                    name: "review".into(),
+                    description: "Review changes".into(),
+                    hint: Some("x".repeat(300)),
+                },
+                crate::acp::events::CommandEntry {
+                    name: "compact".into(),
+                    description: "Compact".into(),
+                    hint: None,
+                },
+            ],
+        });
+        let value = &serde_json::to_value(&projected.events[0]).unwrap()["event"]["value"];
+        assert_eq!(
+            value,
+            &json!({ "commands": [
+                { "name": "review", "description": "Review changes", "hint": "x".repeat(256) },
+                { "name": "compact", "description": "Compact" }
+            ] })
+        );
+    }
+
+    #[test]
     fn canonical_metadata_and_interactions_use_custom_and_control_planes() {
         let mut projector = AgUiProjector::default();
         projector.project_canonical(&canonical_run_started());
@@ -5696,6 +5731,7 @@ mod tests {
                 commands: vec![crate::acp::events::CommandEntry {
                     name: "test".into(),
                     description: "Run tests".into(),
+                    hint: None,
                 }],
             },
         ];

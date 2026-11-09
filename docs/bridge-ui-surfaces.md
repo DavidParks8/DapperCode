@@ -267,6 +267,36 @@ on, as `messages[].usage`:
 - Mobile renders it as the collapsible response-details card under the message action row, and the
   card is absent entirely when `usage` is `null`.
 
+## Implemented Agent Commands Example
+
+An ACP `available_commands_update` becomes `CanonicalEvent::Commands`. The thread snapshot exposes the
+latest list as `commands`, and the projector emits each update as a `CUSTOM` event named
+`dappercode.dev/commands` (at most 128 entries; AG-UI bounds `name` and `hint` to 256 bytes and
+`description` to 2 KiB):
+
+```json
+{
+  "type": "CUSTOM",
+  "threadId": "v1.YWNwLWFnZW50.c2Vzc2lvbi0x",
+  "runId": "v1.YWNwLWFnZW50.c2Vzc2lvbi0x::session",
+  "name": "dappercode.dev/commands",
+  "value": {
+    "commands": [
+      { "name": "review", "description": "Review changes", "hint": "[focus]" },
+      { "name": "compact", "description": "Compact the conversation" }
+    ]
+  }
+}
+```
+
+- **`hint` is optional.** It carries the ACP unstructured input hint, trimmed, and is omitted when the
+  command takes no input or the hint is blank. Mobile ignores a missing, blank, or non-string hint.
+- **Mobile lists them in the composer slash menu** after its own built-in commands, with the
+  description as the summary and the hint as the argument placeholder. A built-in that can run in
+  the chat wins a name clash; one that cannot defers to the agent's command.
+- **Selecting a command only inserts its text.** Sending `/name args` delivers it to the agent as
+  ordinary prompt text, so ACP agents and on-device skills each interpret their own commands.
+
 ## Rules For Future Integrations
 
 - Add provider-specific parsing in the bridge adapter, not in mobile UI.

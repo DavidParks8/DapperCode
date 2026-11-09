@@ -1,10 +1,14 @@
 import { EventType } from '@ag-ui/core';
 
+import { AGENT_COMMANDS_EVENT_NAME } from '@bridge/agentCommands';
 import { RUN_ACTIVITY_EVENT_NAME, type RunActivity } from '@bridge/runActivity';
 import { TOOL_META_EVENT_NAME } from '@bridge/toolMeta';
+import { SUBAGENT_ACTIVITY_TYPE } from '@bridge/messages';
+import { childActivity } from '../runtime/delegation';
 import { WORKSPACE_HOST_NOTIFICATIONS } from '../../workspace/api/protocol';
 import type { LocalRunSnapshot } from '../runtime/agentLoop';
 import type { LocalMessage, LocalThread, LocalToolCall } from '../runtime/types';
+import type { LocalSkillCommand } from '../runtime/skills';
 import type { LocalAgentPort } from './port';
 import {
   describeLocalToolMessage,
@@ -63,6 +67,8 @@ export class LocalEventProjector {
   private loading: string | null = null;
   /** The workspace path last presented per thread, so a rename reaches open chats. */
   private readonly cwds = new Map<string, string>();
+  /** The skill commands last sent per opened chat, so a changed list reaches it live. */
+  private readonly commands = new Map<string, readonly LocalSkillCommand[]>();
 
   constructor(
     private readonly context: () => LocalThreadProjectionContext,
@@ -81,6 +87,7 @@ export class LocalEventProjector {
     this.lastTurn.clear();
     this.loading = null;
     this.cwds.clear();
+    this.commands.clear();
     const { workspaces } = this.context();
     const paths = localWorkspacePaths(workspaces);
     for (const thread of threads) {
@@ -104,6 +111,7 @@ export class LocalEventProjector {
       }
     }
     this.diffCwds(threads, notifications);
+    this.diffCommands(threads, notifications);
     this.diffLoadingActivity(threads, notifications);
     for (const thread of threads) {
       const run = this.runs.get(thread.id);
@@ -117,6 +125,7 @@ export class LocalEventProjector {
         this.runs.delete(id);
         this.lastTurn.delete(id);
         this.cwds.delete(id);
+        this.commands.delete(id);
         notifications.push({ method: 'thread/deleted', params: { threadId: id } });
       }
     }
@@ -143,6 +152,50 @@ export class LocalEventProjector {
     }
   }
 
+  /**
+   * A chat was opened or created: sends its workspace's skill commands now (refreshing them in the
+   * background) and again whenever that cached list changes.
+   */
+  openCommands(thread: LocalThread): LocalNotification {
+    const commands = this.context().commands(thread.workspaceId, true);
+    this.commands.set(thread.id, commands);
+    return this.commandsEvent(thread, commands);
+  }
+
+  private diffCommands(threads: readonly LocalThread[], out: LocalNotification[]): void {
+    const read = this.context().commands;
+    for (const thread of threads) {
+      const sent = this.commands.get(thread.id);
+      const commands = sent && read(thread.workspaceId);
+      if (commands && commands !== sent && JSON.stringify(commands) !== JSON.stringify(sent)) {
+        this.commands.set(thread.id, commands);
+        out.push(this.commandsEvent(thread, commands));
+      }
+    }
+  }
+
+  private commandsEvent(
+    thread: LocalThread,
+    commands: readonly LocalSkillCommand[],
+  ): LocalNotification {
+    const turnId =
+      this.runs.get(thread.id)?.turnId ?? thread.activeTurnId ?? `commands-${thread.id}`;
+    return {
+      method: 'bridge/agui.event',
+      params: {
+        threadId: thread.id,
+        runId: localRunId(thread.id, turnId),
+        sourceTurnId: turnId,
+        event: {
+          type: EventType.CUSTOM,
+          name: AGENT_COMMANDS_EVENT_NAME,
+          value: { commands },
+          timestamp: Date.now(),
+        },
+      },
+    };
+  }
+
   private track(threadId: string, turnId: string): RunTrack {
     this.lastTurn.set(threadId, turnId);
     return {
@@ -160,6 +213,17 @@ export class LocalEventProjector {
     thread: LocalThread,
     out: LocalNotification[],
   ): void {
+    if (previous?.tasks !== thread.tasks && thread.tasks) {
+      out.push({
+        method: 'turn/plan/updated',
+        params: {
+          threadId: thread.id,
+          turnId: thread.activeTurnId ?? `tasks-${thread.id}`,
+          explanation: 'Conversation tasks',
+          plan: thread.tasks.map((task) => ({ step: task.content, status: task.status })),
+        },
+      });
+    }
     if (!previous) {
       out.push({
         method: 'thread/started',
@@ -346,6 +410,7 @@ export class LocalEventProjector {
     if (!tool) {
       return;
     }
+    this.diffChildren(thread.id, previous, message, run, out);
     // Only a new tool or a status change is described; unchanged history (including an identical
     // message) skips the lookup and the parse of its possibly whole-file arguments. An unchanged
     // settled tool still reaches the end check below, which a newly tracked run reports once.
@@ -376,6 +441,28 @@ export class LocalEventProjector {
         toolCallId: tool.callId,
         role: 'tool',
         content: message.content || '{}',
+      });
+    }
+  }
+
+  private diffChildren(
+    threadId: string,
+    previous: LocalMessage | undefined,
+    message: LocalMessage,
+    run: RunTrack,
+    out: LocalNotification[],
+  ): void {
+    for (const child of message.children ?? []) {
+      const activity = childActivity(threadId, child);
+      const prior = previous?.children?.find((entry) => entry.id === child.id);
+      if (prior && childActivity(threadId, prior).content.text === activity.content.text) {
+        continue;
+      }
+      this.emit(out, threadId, run, {
+        type: EventType.ACTIVITY_SNAPSHOT,
+        messageId: activity.id,
+        activityType: SUBAGENT_ACTIVITY_TYPE,
+        content: activity.content,
       });
     }
   }

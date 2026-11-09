@@ -544,7 +544,7 @@ describe('AG-UI bridge notifications', () => {
     const commandEvent: AGUIEvent = {
       type: EventType.CUSTOM,
       name: 'dappercode.dev/commands',
-      value: { commands: [{ name: 'review', description: 'Review changes' }] },
+      value: { commands: [{ name: 'review', description: 'Review changes', hint: '[focus]' }] },
     };
     let state: AgUiLiveAssistantMessages = {};
     state = updateAgUiLiveAssistantMessages(state, {

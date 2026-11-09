@@ -38,3 +38,13 @@ export function readPathParam(params: RpcParams, key: string): string | null {
 export function readRecord(value: unknown): RpcParams {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as RpcParams) : {};
 }
+
+/** Text-only content sent by the shared composer. */
+export function readInputText(params: RpcParams): string {
+  const input = Array.isArray(params['input']) ? params['input'] : [];
+  return input
+    .map((entry) => readRecord(entry))
+    .filter((entry) => entry['type'] === 'text' && typeof entry['text'] === 'string')
+    .map((entry) => entry['text'] as string)
+    .join('\n');
+}

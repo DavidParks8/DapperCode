@@ -1,4 +1,4 @@
-import { router, Stack, useGlobalSearchParams } from 'expo-router';
+import { router, Stack, useGlobalSearchParams, useLocalSearchParams } from 'expo-router';
 jest.mock('react-native-drawer-layout', () => {
   const React = jest.requireActual('react');
   const progress = { value: 0 };
@@ -63,6 +63,15 @@ function ReadyMainRoute() {
   ) : null;
 }
 
+function SkillInfoRoute() {
+  const { name, workspaceId } = useLocalSearchParams<{ name?: string; workspaceId?: string }>();
+  return (
+    <Text>
+      Skill {name} in {workspaceId}
+    </Text>
+  );
+}
+
 function storeWith(activeProfileId: string, available: boolean) {
   const data = createDefaultAppStateData();
   data.bridgeProfiles = {
@@ -96,6 +105,11 @@ function render(store: ReturnType<typeof storeWith>, initialUrl: string) {
         'profiles/[profileId]/(drawer)/settings/models/index': () => <Text>Models</Text>,
         'profiles/[profileId]/(drawer)/settings/models/[familyId]': () => <Text>Family</Text>,
         'profiles/[profileId]/(drawer)/settings/github': () => <Text>Git and GitHub</Text>,
+        'profiles/[profileId]/(drawer)/settings/skills/index': () => <Text>Skills</Text>,
+        'profiles/[profileId]/(drawer)/settings/skills/add': () => <Text>Add skill</Text>,
+        'profiles/[profileId]/(drawer)/settings/skills/info/[name]': SkillInfoRoute,
+        'profiles/[profileId]/(drawer)/settings/skills/rules': () => <Text>Skill rules</Text>,
+        'profiles/[profileId]/(drawer)/settings/skills/catalogs': () => <Text>Skill catalogs</Text>,
         // A real route outside the profile tree, so navigation stays typed without generated routes.
         onboarding: () => <Text>Outside the profile</Text>,
       },
@@ -170,6 +184,45 @@ describe('local profile routing', () => {
       expect(store.get(activeProfileIdAtom)).toBe(LOCAL_PROFILE_ID);
       result.unmount();
     }
+  });
+
+  it('opens the skills pages, even for a skill named like the add page', async () => {
+    const store = storeWith(LOCAL_PROFILE_ID, true);
+    store.set(localRuntimeAtom, {} as OnDeviceRuntime);
+    const transport = new LocalBridgeWsClient(new LocalBridgeServer(new FakeAgentPort()));
+    transport.connect();
+    store.set(localTransportAtom, transport);
+    const result = render(store, '/profiles/on-device/chats/new');
+    act(() => router.push(routes.settingsSkills(LOCAL_PROFILE_ID)));
+    await waitFor(() => {
+      expect(screen.getByText('Skills')).toBeTruthy();
+    });
+    expect(result.getPathname()).toBe('/profiles/on-device/settings/skills');
+
+    act(() => router.push(routes.settingsSkillImport(LOCAL_PROFILE_ID, 'ws-one')));
+    await waitFor(() => {
+      expect(screen.getByText('Add skill')).toBeTruthy();
+    });
+    expect(result.getPathname()).toBe('/profiles/on-device/settings/skills/add');
+
+    act(() => router.push(routes.settingsSkill(LOCAL_PROFILE_ID, 'add', 'ws-one')));
+    await waitFor(() => {
+      expect(screen.getByText('Skill add in ws-one')).toBeTruthy();
+    });
+    expect(result.getPathname()).toBe('/profiles/on-device/settings/skills/info/add');
+
+    act(() => router.push(routes.settingsSkillRules(LOCAL_PROFILE_ID)));
+    await waitFor(() => {
+      expect(screen.getByText('Skill rules')).toBeTruthy();
+    });
+    expect(result.getPathname()).toBe('/profiles/on-device/settings/skills/rules');
+
+    act(() => router.push(routes.settingsSkillCatalogs(LOCAL_PROFILE_ID, null)));
+    await waitFor(() => {
+      expect(screen.getByText('Skill catalogs')).toBeTruthy();
+    });
+    expect(result.getPathname()).toBe('/profiles/on-device/settings/skills/catalogs');
+    transport.dispose();
   });
 
   it('keeps a switched profile after returning from a screen outside the profile', async () => {

@@ -83,3 +83,30 @@ test('the prompt prefix stays identical across days', () => {
     expect(next.startsWith(first.slice(0, -date.length))).toBe(true);
   }
 });
+
+test('child roles, instructions, task data and rolling memory preserve measured research placement', () => {
+  const context = 'Scoped instructions.\nPersistent tasks.\nRolling conversation memory.';
+  const direct = localAgentSystemPrompt('bonsai-2-2b-q2-0', today, 'explore', context);
+  expect(direct).toContain('Read-only: never mutate files or Git.');
+  expect(direct).toContain(context);
+  expect(direct.endsWith(` ${LOCAL_RESEARCH_GUIDANCE.direct.text}${date}`)).toBe(true);
+  expect(direct.split(LOCAL_RESEARCH_GUIDANCE.direct.text)).toHaveLength(2);
+  const reminder = localAgentSystemPrompt('qwen35-2b-q4-k-m', today, 'general', context);
+  expect(
+    reminder.startsWith(`${identity}${LOCAL_RESEARCH_GUIDANCE.reminder.text} Use the listed`),
+  ).toBe(true);
+  expect(reminder.endsWith(date)).toBe(true);
+});
+
+test('without advertised web tools, the prompt omits web rules and research guidance but keeps the shared rules', () => {
+  for (const model of LOCAL_MODEL_CATALOG) {
+    const prompt = localAgentSystemPrompt(model.id, today, undefined, '', false);
+    expect(prompt).not.toContain('web_search');
+    expect(prompt).not.toContain('web_fetch');
+    expect(prompt.startsWith(`${identity}Use the listed`)).toBe(true);
+    expect(prompt).toContain('Never emulate unavailable commands');
+    expect(
+      prompt.endsWith(`Do not guess file contents or report success without tool evidence.${date}`),
+    ).toBe(true);
+  }
+});

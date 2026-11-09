@@ -172,7 +172,8 @@ export function SettingsInlineActions({ actions }: { actions: readonly InlineAct
 
 /**
  * A grouped-list row with a leading icon, a title (and optional badge), and supporting lines.
- * `onPress` makes the whole row a navigation button with a chevron.
+ * `onPress` makes the whole row a navigation button with a chevron; otherwise a trailing
+ * `accessory` (such as a switch) stays a separate control, aligned with the title.
  */
 export function SettingsDetailRow({
   icon,
@@ -183,6 +184,7 @@ export function SettingsDetailRow({
   statusTone = 'default',
   accessibilityLabel,
   onPress,
+  accessory,
   children,
   testID,
 }: {
@@ -194,6 +196,7 @@ export function SettingsDetailRow({
   statusTone?: 'default' | 'accent' | 'error';
   accessibilityLabel?: string;
   onPress?: () => void;
+  accessory?: ReactNode;
   children?: ReactNode;
   testID?: string;
 }) {
@@ -245,6 +248,7 @@ export function SettingsDetailRow({
     return (
       <View style={styles.detailRow} testID={testID}>
         {content}
+        {accessory ? <View style={styles.accessory}>{accessory}</View> : null}
       </View>
     );
   }
@@ -468,6 +472,7 @@ function createStyles(theme: AppTheme) {
     detailStatusAccent: { color: colors.textPrimary, fontWeight: '600' },
     detailStatusError: { color: colors.error },
     chevron: { opacity: 0.5, alignSelf: 'center' },
+    accessory: { alignSelf: 'flex-start' },
     buttonRow: {
       minHeight: theme.touchTarget.minimum,
       flexDirection: 'row',
