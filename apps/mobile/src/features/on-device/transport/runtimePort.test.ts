@@ -353,7 +353,13 @@ describe('the local transport over the real on-device runtime', () => {
     expect(thread.messages.filter((message) => message.role === 'tool')).toHaveLength(1);
     expect(thread.messages.at(-1)).toMatchObject({ content: 'The README introduces Demo.' });
     expect(thread.lastError).toBeNull();
-    expect(fake.calls.filter((call) => call.startsWith('readWorkspaceFile'))).toHaveLength(1);
+    expect(
+      fake.calls.filter(
+        (call) =>
+          call.startsWith('readWorkspaceFile') &&
+          !/\["ws-one","(?:AGENTS|CLAUDE)\.md"\]$/u.test(call),
+      ),
+    ).toEqual(['readWorkspaceFile:["ws-one","README.md"]']);
     expect(mockLlama.loads).toHaveLength(1);
     expect(events().at(-1)).toMatchObject({ type: EventType.RUN_FINISHED });
   });

@@ -1666,9 +1666,16 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     expect(composerText(root)).toBe('');
     const next = transcript(root).indexOf(request);
     expect(transcript(root).slice(0, next)).not.toContain('Turn stopped by user.');
-    expect(mockNative.calls.filter((value) => value.startsWith('readWorkspaceFile:'))).toHaveLength(
-      2,
-    );
+    expect(
+      mockNative.calls.filter(
+        (value) =>
+          value.startsWith('readWorkspaceFile:') &&
+          !/\["ws-one","(?:AGENTS|CLAUDE)\.md"\]$/u.test(value),
+      ),
+    ).toEqual([
+      'readWorkspaceFile:["ws-one","seed.txt"]',
+      'readWorkspaceFile:["ws-one","seed.txt"]',
+    ]);
     act(() => tree.unmount());
   });
 

@@ -10,7 +10,7 @@ import type { LocalWorkspace } from '../workspaces/types';
 import { LocalAgentLoop } from './agentLoop';
 import { LegacyDraftReader, type LegacyDraftOutcome, type LocalDraftRestore } from './drafts';
 import { RuntimeSliceEmitter } from './emitter';
-import { LOCAL_TOOL_DEFINITIONS, localToolApproval, localToolExecutor } from './localTools';
+import * as localTools from './localTools';
 import { NetworkMonitor, unknownNetwork, type OnDeviceNetworkPort } from './network';
 import {
   recoveryNotices,
@@ -119,15 +119,17 @@ export class OnDeviceRuntime {
     this.loop = new LocalAgentLoop(
       this.threads,
       this.models,
-      LOCAL_TOOL_DEFINITIONS,
-      localToolExecutor(
+      localTools.LOCAL_TOOL_DEFINITIONS,
+      localTools.localToolExecutor(
         native,
         () => this.settings.get().author,
         (id) => this.credential(id),
         (action) => this.requireNetwork(action),
       ),
       () => this.emitter.emit('loop'),
-      localToolApproval,
+      localTools.localToolApproval,
+      undefined,
+      new localTools.LocalWorkspaceGuidance(native),
     );
     this.residency = new ModelResidency({
       models: this.models,

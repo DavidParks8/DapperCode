@@ -6,41 +6,30 @@ import type { LocalModelSession } from '../models/session';
 import type { LocalThreadRepository } from './threads';
 import { recoverLocalThread } from './threadCodec';
 import { emptyLocalAnswer, localModelHistory, retryableLocalMessages } from './modelHistory';
-import type { LocalMessage, LocalThread, LocalToolCall } from './types';
+import type {
+  LocalAgentRun as Run,
+  LocalMessage,
+  LocalRunSnapshot,
+  LocalThread,
+  LocalToolApproval,
+  LocalToolCall,
+} from './types';
 import type { LocalToolPermission } from './toolDefinition';
 import { localAgentSystemPrompt } from './systemPrompt';
+import type { LocalWorkspaceGuidance } from './workspaceGuidance';
+import {
+  localConversationTitle,
+  REPEATED_TOOL_CALL_LIMIT,
+  repeatedToolCallError,
+} from './agentPolicy';
 
 export { retryableLocalMessages } from './modelHistory';
-
-/** A model tool call waiting for an explicit user decision before it may run. */
-export interface LocalToolApproval extends LocalToolPermission {
-  threadId: string;
-  turnId: string;
-  callId: string;
-  toolName: string;
-}
-
-export interface LocalRunSnapshot {
-  phase: 'idle' | 'preparing' | 'generating' | 'tool' | 'approval' | 'stopping' | 'persisting';
-  threadId: string | null;
-  turnId: string | null;
-  toolName: string | null;
-  approval: LocalToolApproval | null;
-}
-
-interface Run {
-  threadId: string;
-  workspaceId: string;
-  modelId: string;
-  turnId: string;
-  submissionId: string | null;
-  stopped: boolean;
-  promise: Promise<LocalThread> | null;
-  interrupt: Promise<never>;
-  signalStop: () => void;
-  controller: AbortController;
-  approval: { callId: string; resolve: (approved: boolean | 'policy') => void } | null;
-}
+export type { LocalToolApproval, LocalRunSnapshot } from './types';
+export {
+  localConversationTitle,
+  REPEATED_TOOL_CALL_LIMIT,
+  repeatedToolCallError,
+} from './agentPolicy';
 
 export type LocalToolExecutor = (
   workspaceId: string,
@@ -62,33 +51,6 @@ const IDLE: LocalRunSnapshot = {
 
 class LocalStepLimit extends Error {}
 
-/**
- * Like opencode's doom-loop check: the same call this many times in a row is not run, and one more
- * repeat ends the turn.
- */
-export const REPEATED_TOOL_CALL_LIMIT = 3;
-
-export function repeatedToolCallError(name: string): string {
-  return `Not run: this is the same ${name} call with the same arguments ${String(REPEATED_TOOL_CALL_LIMIT)} times in a row, so its result would not change. Use the earlier result, try a different tool or arguments, or answer.`;
-}
-
-const TITLE_LIMIT = 60;
-
-/**
- * A conversation title from its first message: the first line, cut at a word boundary with an
- * ellipsis when it is longer than the drawer can show.
- */
-export function localConversationTitle(input: string): string {
-  const line = input.trim().split(/\r?\n/u)[0]?.replace(/\s+/gu, ' ').trim() ?? '';
-  if (line.length <= TITLE_LIMIT) {
-    return line || 'New local conversation';
-  }
-  const cut = line.slice(0, TITLE_LIMIT - 1);
-  const boundary = cut.lastIndexOf(' ');
-  const words = boundary >= TITLE_LIMIT / 2 ? cut.slice(0, boundary) : cut;
-  return `${words.replace(/[\s.,;:!?-]+$/u, '')}…`;
-}
-
 export class LocalAgentLoop {
   private active: Run | null = null;
   private value: LocalRunSnapshot = IDLE;
@@ -102,6 +64,7 @@ export class LocalAgentLoop {
     private readonly changed: (value: LocalRunSnapshot) => void,
     private readonly approval: LocalToolApprovalPolicy,
     private readonly today: () => Date = () => new Date(),
+    private readonly guidance?: LocalWorkspaceGuidance,
   ) {}
 
   snapshot(): LocalRunSnapshot {
@@ -243,6 +206,7 @@ export class LocalAgentLoop {
       signalStop,
       controller: new AbortController(),
       approval: null,
+      guidance: { directories: new Set(['']), rules: '' },
     };
     this.active = run;
     return run;
@@ -320,7 +284,7 @@ export class LocalAgentLoop {
       let reply: LocalModelReply;
       try {
         reply = await this.model.generate(
-          this.modelMessages(run, assistant.id),
+          await this.interruptible(run, this.modelMessages(run, assistant.id)),
           this.definitions,
           (update) => {
             if (this.active !== run || run.stopped) {
@@ -440,6 +404,19 @@ export class LocalAgentLoop {
         return;
       }
       this.checkStopped(run);
+      if (this.guidance) {
+        await this.interruptible(
+          run,
+          this.guidance.beforeTool(
+            run.workspaceId,
+            run.guidance,
+            call.function.name,
+            args,
+            run.controller.signal,
+          ),
+        );
+        this.checkStopped(run);
+      }
       this.publish(run, 'tool', call.function.name);
       this.toolStatus(run.threadId, id, 'running');
       const result = await this.execute(
@@ -520,12 +497,18 @@ export class LocalAgentLoop {
     }));
   }
 
-  private modelMessages(run: Run, pendingAssistantId: string): LocalModelMessage[] {
+  private async modelMessages(run: Run, pendingAssistantId: string): Promise<LocalModelMessage[]> {
+    const guidance = await this.guidance?.prompt(
+      run.workspaceId,
+      run.guidance,
+      this.model.snapshot().contextTokens ?? 8192,
+      run.controller.signal,
+    );
+    this.checkStopped(run);
     const messages = this.threads.get(run.threadId).messages;
-    return [
-      { role: 'system', content: localAgentSystemPrompt(run.modelId, this.today()) },
-      ...localModelHistory(messages, pendingAssistantId),
-    ];
+    const system = localAgentSystemPrompt(run.modelId, this.today());
+    const content = guidance?.content ? `${system}\n\n${guidance.content}` : system;
+    return [{ role: 'system', content }, ...localModelHistory(messages, pendingAssistantId)];
   }
 
   private message(

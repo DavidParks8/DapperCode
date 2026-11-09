@@ -9,12 +9,15 @@ import { executeWebFetch, WEB_TOOL_DEFINITIONS } from './webFetch';
 import { executeWebSearch, SEARCH_TOOL_DEFINITIONS } from './webSearch';
 import { LocalToolInputError } from './toolArguments';
 import { isRecord } from '@shared/records';
+import { LocalWorkspaceGuidance, SKILL_TOOL_DEFINITIONS } from './workspaceGuidance';
+export { LocalWorkspaceGuidance } from './workspaceGuidance';
 
 const LOCAL_TOOLS = [
   ...FILE_TOOL_DEFINITIONS,
   ...GIT_TOOL_DEFINITIONS,
   ...WEB_TOOL_DEFINITIONS,
   ...SEARCH_TOOL_DEFINITIONS,
+  ...SKILL_TOOL_DEFINITIONS,
 ];
 const TOOL_REGISTRY = new Map<string, (typeof LOCAL_TOOLS)[number]>(
   LOCAL_TOOLS.map((tool) => [tool.definition.function.name, tool]),
@@ -63,9 +66,13 @@ export function localToolExecutor(
   credential: (workspaceId: string) => Promise<string | null>,
   requireNetwork: (action: string) => void,
 ): LocalToolExecutor {
+  const guidance = new LocalWorkspaceGuidance(native);
   // Each run owns its signal, so observations cannot leak across turns or workspaces.
   const observed = new WeakMap<AbortSignal, Map<string, Map<string, string>>>();
   return (workspace, name, input, signal) => {
+    if (name === 'skill') {
+      return guidance.load(workspace, input, signal);
+    }
     if (name === 'web_fetch') {
       requireNetwork('fetch web pages');
       return executeWebFetch(input, signal);

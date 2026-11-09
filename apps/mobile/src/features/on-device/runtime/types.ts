@@ -1,3 +1,6 @@
+import type { LocalToolPermission } from './toolDefinition';
+import type { LocalGuidanceState } from './workspaceGuidance';
+
 export interface LocalToolCall {
   id: string;
   type: 'function';
@@ -67,3 +70,35 @@ export interface OnDeviceIssue {
 }
 
 export type OnDeviceReachability = 'unknown' | 'online' | 'offline';
+
+/** A model tool call waiting for an explicit user decision before it may run. */
+export interface LocalToolApproval extends LocalToolPermission {
+  threadId: string;
+  turnId: string;
+  callId: string;
+  toolName: string;
+}
+
+export interface LocalRunSnapshot {
+  phase: 'idle' | 'preparing' | 'generating' | 'tool' | 'approval' | 'stopping' | 'persisting';
+  threadId: string | null;
+  turnId: string | null;
+  toolName: string | null;
+  approval: LocalToolApproval | null;
+}
+
+/** In-process turn ownership; this state is never serialized into thread documents. */
+export interface LocalAgentRun {
+  threadId: string;
+  workspaceId: string;
+  modelId: string;
+  turnId: string;
+  submissionId: string | null;
+  stopped: boolean;
+  promise: Promise<LocalThread> | null;
+  interrupt: Promise<never>;
+  signalStop: () => void;
+  controller: AbortController;
+  approval: { callId: string; resolve: (approved: boolean | 'policy') => void } | null;
+  guidance: LocalGuidanceState;
+}

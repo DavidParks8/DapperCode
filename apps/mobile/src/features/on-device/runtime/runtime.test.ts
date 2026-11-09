@@ -8,6 +8,7 @@ import { localModelDefinition } from '../models/catalog';
 import type { LocalModelContext, LocalModelMessage, LocalModelReply } from '../models/engine';
 import { loadNativeModelContext } from '../models/engine';
 import type { OnDeviceNativeServices } from '../native/services.types';
+import { OnDeviceNativeError } from '../native/services.errors';
 import type { LocalModelSessionSnapshot } from '../models/session';
 import { retryableLocalMessages, type LocalRunSnapshot } from './agentLoop';
 import { draftDocument } from './drafts';
@@ -517,7 +518,10 @@ test('background during a native tool waits for its result, preserves durable hi
   const h = await ready();
   const started = deferred<void>();
   const result = deferred<Awaited<ReturnType<OnDeviceNativeServices['readWorkspaceFile']>>>();
-  h.native.readWorkspaceFile.mockImplementation(() => {
+  h.native.readWorkspaceFile.mockImplementation((_workspace, path) => {
+    if (path !== 'hello.txt') {
+      return Promise.reject(new OnDeviceNativeError('PATH_NOT_FOUND', 'No optional rules.'));
+    }
     started.resolve();
     return result.promise;
   });

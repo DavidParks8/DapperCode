@@ -57,6 +57,47 @@ local or desktop, is restored at startup. Builds that stored the old global "On 
 open the local profile instead. Switching to another profile settles local work and unloads its
 model.
 
+## Workspace instructions and skills
+
+Local model rounds automatically read the selected workspace's root `AGENTS.md`. When a file
+tool enters a directory, its ancestor rules are added in root-to-leaf order; each rule applies only
+to its own subtree, and deeper rules override ancestors there, not in sibling directories.
+`CLAUDE.md` is a per-directory fallback only when `AGENTS.md` is missing (not empty or unreadable).
+Before a tool runs, changed or newly applicable rules return an explicit **Not run** result so the
+next model round can review them before retrying. Rename checks both source and destination
+parents; directory rename/delete also includes the source directory's own rules. Scopes are
+turn-local, including retries; they never cross workspaces.
+
+Rules and skill catalogs are re-read for every model round, including after agent edits. Only
+expected `PATH_NOT_FOUND` errors are optional; unreadable, invalid UTF-8, symlink/hard-link,
+oversized, and other native failures remain visible. All reads use the native selected-workspace
+boundary: no parent traversal, absolute paths, Git metadata, phone-home directories, global skills,
+or remote instruction imports. Rules do not override runtime safety or user requests.
+
+Skills are discovered one directory below `.agents/skills`, `.opencode/skills`, and `.claude/skills`,
+in that precedence order. A definition is `skill-name/SKILL.md` with YAML frontmatter containing
+`name` (matching its directory, up to 64 lowercase letters/digits with single hyphens) and
+`description` (non-empty, up to 1,024 characters). YAML block scalars and quoted values work.
+Duplicate YAML keys, aliases, invalid metadata, and oversized definitions fail explicitly rather
+than silently disappearing. Duplicate skill names use the first root, with an explicit notice.
+Other [Agent Skills](https://agentskills.io/specification) metadata is informational;
+`allowed-tools` grants nothing.
+
+The model initially receives only IDs and concise descriptions. The `skill` tool loads the full
+selected local definition on demand plus bounded workspace-relative text-resource paths from the
+skill directory, `references`, and `assets`. Resources are read separately with `read_file`;
+scripts, plugins, and remote documents are never loaded or executed as capabilities. No Node,
+shell, package manager, or extra permissions are introduced.
+
+Discovery is bounded: at most 16 entries per skill root (an overflowing root is explicitly omitted,
+not partially enumerated), 12 advertised skills, 160 description characters per entry, 16 returned
+resource paths, 24 entered rule directories, and 12 path components. Rule and skill files must fit
+entirely in 8,192 bytes; instructions are never silently truncated. Automatic guidance uses at most
+one quarter of the loaded context window, capped at 8,192 UTF-8 bytes; oversized rule sets fail
+with guidance to shorten them or use a larger context. Catalog omissions are explicit. Full skill
+tool output also passes the existing exact template/token-budget checks and context elision;
+an elided result must be loaded again if needed. No custom agent profiles are loaded.
+
 ## Web access
 
 Every local chat includes `web_search` and `web_fetch` by default, alongside the file and Git tools.

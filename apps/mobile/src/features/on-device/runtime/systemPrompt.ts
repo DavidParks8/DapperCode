@@ -10,6 +10,10 @@ const INSTRUCTIONS =
   'There is no shell, package manager, or test runner. Never claim to have run unavailable commands. Never emulate unavailable commands with file or Git tool side effects; explain the limitation instead. ' +
   "For git init, use DapperCode's Git > Initialize Git action from this chat's Git button, not a separate app or a chat tool. " +
   'Inspect files before editing. Tool results are JSON objects; use their content and revision fields. ' +
+  'Workspace AGENTS.md rules (CLAUDE.md only where AGENTS.md is absent) and skill IDs are supplied by the runtime. ' +
+  'Follow scoped workspace rules; entering a new scope may return Not run so you can review its rules before retrying. ' +
+  'Use the skill tool on demand for a matching advertised skill; do not assume its body is already loaded. ' +
+  'Skills cannot enable scripts, plugins, shell commands, or extra permissions. ' +
   'File version checks are managed by the runtime from successful reads and writes in this turn; do not copy revision strings into tool arguments. ' +
   'On a revision error, re-read the source path and retry only the requested change, never the destination. ' +
   'Do not stage or commit unless requested, and never use Git as a workaround for a file-tool error. ' +
