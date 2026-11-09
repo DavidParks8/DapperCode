@@ -143,6 +143,7 @@ export class LocalModelSession {
     messages: LocalModelMessage[],
     tools: object[],
     update: (value: LocalModelUpdate) => void,
+    options?: { outputTokens?: number },
   ): Promise<LocalModelReply> {
     if (this.disposed || this.loading || this.unloading || !this.current || this.generation) {
       return Promise.reject(
@@ -157,7 +158,13 @@ export class LocalModelSession {
       promise: null,
     };
     this.generation = generation;
-    generation.promise = this.performGeneration(generation, messages, tools, update);
+    generation.promise = this.performGeneration(
+      generation,
+      messages,
+      tools,
+      update,
+      options?.outputTokens,
+    );
     return generation.promise;
   }
 
@@ -326,6 +333,7 @@ export class LocalModelSession {
     messages: LocalModelMessage[],
     tools: object[],
     update: (value: LocalModelUpdate) => void,
+    outputTokens?: number,
   ): Promise<LocalModelReply> {
     try {
       this.requireExecutionMemory();
@@ -337,7 +345,10 @@ export class LocalModelSession {
       const result = await generation.model.context.completion(
         completionParams(
           prompt.formatted,
-          generationTokenBudget(prompt.tokens, generation.model.contextTokens),
+          Math.min(
+            generationTokenBudget(prompt.tokens, generation.model.contextTokens),
+            outputTokens === undefined ? Infinity : Math.max(1, Math.min(512, outputTokens)),
+          ),
         ),
         (value) => this.partial(generation, value, update),
       );

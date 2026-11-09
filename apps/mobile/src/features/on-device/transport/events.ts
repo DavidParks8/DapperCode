@@ -2,6 +2,8 @@ import { EventType } from '@ag-ui/core';
 
 import { RUN_ACTIVITY_EVENT_NAME, type RunActivity } from '@bridge/runActivity';
 import { TOOL_META_EVENT_NAME } from '@bridge/toolMeta';
+import { SUBAGENT_ACTIVITY_TYPE } from '@bridge/messages';
+import { childActivity } from '../runtime/delegation';
 import { WORKSPACE_HOST_NOTIFICATIONS } from '../../workspace/api/protocol';
 import type { LocalRunSnapshot } from '../runtime/agentLoop';
 import type { LocalMessage, LocalThread, LocalToolCall } from '../runtime/types';
@@ -346,6 +348,7 @@ export class LocalEventProjector {
     if (!tool) {
       return;
     }
+    this.diffChildren(thread.id, previous, message, run, out);
     // Only a new tool or a status change is described; unchanged history (including an identical
     // message) skips the lookup and the parse of its possibly whole-file arguments. An unchanged
     // settled tool still reaches the end check below, which a newly tracked run reports once.
@@ -376,6 +379,28 @@ export class LocalEventProjector {
         toolCallId: tool.callId,
         role: 'tool',
         content: message.content || '{}',
+      });
+    }
+  }
+
+  private diffChildren(
+    threadId: string,
+    previous: LocalMessage | undefined,
+    message: LocalMessage,
+    run: RunTrack,
+    out: LocalNotification[],
+  ): void {
+    for (const child of message.children ?? []) {
+      const activity = childActivity(threadId, child);
+      const prior = previous?.children?.find((entry) => entry.id === child.id);
+      if (prior && childActivity(threadId, prior).content.text === activity.content.text) {
+        continue;
+      }
+      this.emit(out, threadId, run, {
+        type: EventType.ACTIVITY_SNAPSHOT,
+        messageId: activity.id,
+        activityType: SUBAGENT_ACTIVITY_TYPE,
+        content: activity.content,
       });
     }
   }

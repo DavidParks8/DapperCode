@@ -1,3 +1,5 @@
+import type { LocalToolPermission } from './toolDefinition';
+
 export interface LocalToolCall {
   id: string;
   type: 'function';
@@ -11,6 +13,8 @@ export interface LocalMessage {
   createdAt: string;
   reasoning?: string;
   toolCalls?: LocalToolCall[];
+  /** Child history lives in the owning tool's app document, never in another conversation. */
+  children?: LocalChild[];
   tool?: {
     callId: string;
     name: string;
@@ -18,6 +22,17 @@ export interface LocalMessage {
     startedAt: string;
     completedAt?: string;
   };
+}
+
+export interface LocalChild {
+  id: string;
+  agent: 'explore' | 'general';
+  workspaceId: string;
+  modelId: string;
+  status: LocalThread['status'];
+  updatedAt: string;
+  lastError: string | null;
+  messages: LocalMessage[];
 }
 
 export interface LocalThread {
@@ -67,3 +82,50 @@ export interface OnDeviceIssue {
 }
 
 export type OnDeviceReachability = 'unknown' | 'online' | 'offline';
+
+/** A model tool call waiting for an explicit user decision before it may run. */
+export interface LocalToolApproval extends LocalToolPermission {
+  threadId: string;
+  turnId: string;
+  callId: string;
+  toolName: string;
+}
+
+export interface LocalRunSnapshot {
+  phase: 'idle' | 'preparing' | 'generating' | 'tool' | 'approval' | 'stopping' | 'persisting';
+  threadId: string | null;
+  turnId: string | null;
+  toolName: string | null;
+  approval: LocalToolApproval | null;
+}
+
+export const IDLE_LOCAL_RUN: LocalRunSnapshot = {
+  phase: 'idle',
+  threadId: null,
+  turnId: null,
+  toolName: null,
+  approval: null,
+};
+
+export type LocalToolExecutor = (
+  workspaceId: string,
+  name: string,
+  args: unknown,
+  signal?: AbortSignal,
+) => Promise<unknown>;
+export type LocalToolApprovalPolicy = (name: string, args?: unknown) => LocalToolPermission | null;
+
+export interface LocalAgentRun {
+  threadId: string;
+  workspaceId: string;
+  modelId: string;
+  turnId: string;
+  submissionId: string | null;
+  stopped: boolean;
+  promise: Promise<LocalThread> | null;
+  interrupt: Promise<never>;
+  signalStop: () => void;
+  controller: AbortController;
+  approval: { callId: string; resolve: (approved: boolean | 'policy') => void } | null;
+  childAdmissions: number;
+}

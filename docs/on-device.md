@@ -691,6 +691,37 @@ The shared screens serve the local profile through the transport; nothing branch
   switch left the previous profile id on the parent route and returning from any root-level screen
   switched back.
 
+## Delegation and parallel work
+
+The model can call `task` with one to three independent prompts. Built-in `explore` children are
+runtime-enforced read-only (workspace reads, Git inspection, and approved web access); `general`
+children can use the normal tools for explicitly requested work. Children cannot delegate or read
+other children. No custom agent configuration, shell, executable, or additional model is involved.
+
+Each child gets a fresh conversation in the same workspace with the parent's selected model.
+**Inference is FIFO-serialized on the one resident model context, not parallel GPU inference.**
+While a child waits for a read or network tool, another child can generate or run its tools.
+Independent workspace-read calls also fan out, at most three at once; mutations are serialized
+across children. File-version observations belong to each child's own run. Competing edits
+still use native compare-and-swap, so one child's observation cannot authorize a sibling's edit.
+Network and push approvals retain the global policy; waiting children have individually addressable
+approval requests.
+
+Limits are six child admissions per parent turn, eight rounds/tools and at most 512 generated
+tokens per child round, 8,192 characters per child tool result, and 2,048 characters per returned
+summary. A conversation retains at most 24 children; resumptions stop admitting work once a child's
+history reaches 128 messages. `task` returns explicit child status, errors, and a resumable
+`child_id`. Supply that ID with the same agent and a new prompt to continue without replaying old
+tools. `read_child` pages saved evidence from this parent conversation only; IDs are also bound to
+the original workspace and model. Child progress uses the existing tool/subagent activity cards,
+not independent chats.
+
+Stop and backgrounding cancel every child and queued generation. The parent stays busy, including
+its Stop/composer controls, until all admitted children and in-flight native tools settle.
+Identity, history, status, and tool intent are journaled inside the parent's app-owned runtime
+document. Restart marks active children interrupted without replaying tools; deleting the parent
+also deletes its embedded children and cannot resurrect them.
+
 ## Ownership and testing
 
 `src/features/on-device` owns local models, authentication, workspaces, tool dispatch, journals,

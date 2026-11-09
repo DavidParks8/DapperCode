@@ -9,12 +9,15 @@ import { executeWebFetch, WEB_TOOL_DEFINITIONS } from './webFetch';
 import { executeWebSearch, SEARCH_TOOL_DEFINITIONS } from './webSearch';
 import { LocalToolInputError } from './toolArguments';
 import { isRecord } from '@shared/records';
+import { PARALLEL_READ_TOOLS, READ_CHILD_TOOL, TASK_TOOL } from './delegation';
 
 const LOCAL_TOOLS = [
   ...FILE_TOOL_DEFINITIONS,
   ...GIT_TOOL_DEFINITIONS,
   ...WEB_TOOL_DEFINITIONS,
   ...SEARCH_TOOL_DEFINITIONS,
+  TASK_TOOL,
+  READ_CHILD_TOOL,
 ];
 const TOOL_REGISTRY = new Map<string, (typeof LOCAL_TOOLS)[number]>(
   LOCAL_TOOLS.map((tool) => [tool.definition.function.name, tool]),
@@ -65,7 +68,26 @@ export function localToolExecutor(
 ): LocalToolExecutor {
   // Each run owns its signal, so observations cannot leak across turns or workspaces.
   const observed = new WeakMap<AbortSignal, Map<string, Map<string, string>>>();
+  let mutationTail: Promise<unknown> = Promise.resolve();
+  const mutation = (signal: AbortSignal | undefined, work: () => Promise<unknown>) => {
+    // Keep each child's captured revision when queuing, so a sibling edit still fails CAS.
+    const result = mutationTail
+      .catch(() => undefined)
+      .then(() => {
+        if (signal?.aborted) {
+          throw new Error('Local mutation was stopped before execution.');
+        }
+        return work();
+      });
+    mutationTail = result;
+    return result;
+  };
+  const dispatch = (name: string, signal: AbortSignal | undefined, work: () => Promise<unknown>) =>
+    PARALLEL_READ_TOOLS.has(name) ? work() : mutation(signal, work);
   return (workspace, name, input, signal) => {
+    if (signal?.aborted) {
+      return Promise.reject(new Error('Local tool work was stopped before execution.'));
+    }
     if (name === 'web_fetch') {
       requireNetwork('fetch web pages');
       return executeWebFetch(input, signal);
@@ -91,34 +113,37 @@ export function localToolExecutor(
       const args = isRecord(input) ? input : null;
       const path = typeof args?.['path'] === 'string' ? args['path'] : null;
       const revision = path === null ? undefined : versions?.get(path);
-      return executeFileTool(workspace, name, input, native, revision).then((result) => {
-        if (name === 'search_files') {
-          return withEmptySearchNote(result);
-        }
-        if (!versions || path === null) {
-          return result;
-        }
-        if (isRecord(result) && typeof result['revision'] === 'string') {
-          versions.set(path, result['revision']);
-        }
-        if (name === 'rename_path' || name === 'delete_path') {
-          const destination =
-            name === 'rename_path' && typeof args?.['destination'] === 'string'
-              ? args['destination']
-              : null;
-          forgetPathVersions(versions, path);
-          if (destination !== null) {
-            forgetPathVersions(versions, destination);
-            if (revision !== undefined) {
-              versions.set(destination, revision);
+      const work = () =>
+        executeFileTool(workspace, name, input, native, revision).then((result) => {
+          if (name === 'search_files') {
+            return withEmptySearchNote(result);
+          }
+          if (!versions || path === null) {
+            return result;
+          }
+          if (isRecord(result) && typeof result['revision'] === 'string') {
+            versions.set(path, result['revision']);
+          }
+          if (name === 'rename_path' || name === 'delete_path') {
+            const destination =
+              name === 'rename_path' && typeof args?.['destination'] === 'string'
+                ? args['destination']
+                : null;
+            forgetPathVersions(versions, path);
+            if (destination !== null) {
+              forgetPathVersions(versions, destination);
+              if (revision !== undefined) {
+                versions.set(destination, revision);
+              }
             }
           }
-        }
-        return result;
-      });
+          return result;
+        });
+      return dispatch(name, signal, work);
     }
     if (isGitTool(name)) {
-      return executeGitTool(workspace, name, input, native, author, credential);
+      const work = () => executeGitTool(workspace, name, input, native, author, credential);
+      return dispatch(name, signal, work);
     }
     return Promise.reject(new Error('The model requested a tool that is not available.'));
   };
