@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
-import { Keyboard, type GestureResponderEvent } from 'react-native';
+import { Keyboard, Platform, type GestureResponderEvent, type ScrollViewProps } from 'react-native';
 
 import type { AutoScrollState } from '../helpers/helpers';
 import type { TranscriptDisplayItem } from './messages';
@@ -41,10 +41,19 @@ export function useTranscriptScrollInteraction(
   chatId: string,
   stateRef: RefObject<AutoScrollState>,
   onInteractionStart: () => void,
+  keepKeyboardOpen = false,
 ) {
   const touchActiveRef = useRef(false);
   const dragActiveRef = useRef(false);
   const [isInteracting, setIsInteracting] = useState(false);
+  const keyboardDismissMode: ScrollViewProps['keyboardDismissMode'] = keepKeyboardOpen
+    ? 'none'
+    : Platform.OS === 'ios'
+      ? 'interactive'
+      : 'on-drag';
+  const keyboardShouldPersistTaps: ScrollViewProps['keyboardShouldPersistTaps'] = keepKeyboardOpen
+    ? 'always'
+    : 'handled';
   useEffect(() => {
     touchActiveRef.current = false;
     dragActiveRef.current = false;
@@ -58,6 +67,8 @@ export function useTranscriptScrollInteraction(
     setIsInteracting(stateRef.current.isUserInteracting);
   };
   return {
+    keyboardDismissMode,
+    keyboardShouldPersistTaps,
     isInteracting,
     onTouchStart: () => {
       touchActiveRef.current = true;
@@ -70,7 +81,9 @@ export function useTranscriptScrollInteraction(
     onScrollBeginDrag: () => {
       dragActiveRef.current = true;
       onInteractionStart();
-      Keyboard.dismiss();
+      if (!keepKeyboardOpen) {
+        Keyboard.dismiss();
+      }
       stateRef.current.isUserInteracting = true;
       stateRef.current.isMomentumScrolling = false;
       stateRef.current.shouldStickToBottom = false;

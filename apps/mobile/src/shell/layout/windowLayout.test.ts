@@ -1,6 +1,7 @@
 import { TABLET_LAYOUT_MIN_WIDTH, TABLET_SIDEBAR_WIDTH } from '@shell/boot/appConstants';
 
 import {
+  LAPTOP_RAIL_WIDTH,
   MIN_FOLD_PANE_WIDTH,
   READABLE_COLUMN_WIDTH,
   SHEET_MAX_WIDTH,
@@ -36,6 +37,7 @@ const OVERLAY = {
   sidebarSpansWindow: true,
   toolbarPlacement: 'top',
   fold: null,
+  tabletopFold: null,
 };
 const DOCKED = {
   sidebarMode: 'docked',
@@ -43,6 +45,7 @@ const DOCKED = {
   sidebarSpansWindow: false,
   toolbarPlacement: 'top',
   fold: null,
+  tabletopFold: null,
 };
 
 describe('resolveShellLayout', () => {
@@ -100,6 +103,7 @@ describe('resolveShellLayout', () => {
         sidebarSpansWindow: false,
         toolbarPlacement: 'top',
         fold: BOOK_FOLD,
+        tabletopFold: null,
       });
     }
   });
@@ -123,6 +127,7 @@ describe('resolveShellLayout', () => {
       sidebarSpansWindow: false,
       toolbarPlacement: 'top',
       fold: hinge,
+      tabletopFold: null,
     });
   });
 });
@@ -139,20 +144,48 @@ describe('toolbar placement', () => {
     }
   });
 
-  it('moves controls to the lower half of a device folded like a laptop', () => {
-    expect(
-      resolveShellLayout({ width: 669, height: 951 }, traits('regular', [LAPTOP_FOLD]))
-        .toolbarPlacement,
-    ).toBe('bottom');
+  it('moves the toolbar to a trailing rail on a device folded like a laptop', () => {
+    const layout = resolveShellLayout(
+      { width: 669, height: 951 },
+      traits('regular', [LAPTOP_FOLD]),
+    );
+    expect(layout.toolbarPlacement).toBe('trailing');
+    expect(layout.tabletopFold).toEqual(LAPTOP_FOLD);
+    expect(resolveShellLayout({ width: 669, height: 951 }, traits('regular')).tabletopFold).toBe(
+      null,
+    );
   });
 
   it('keeps bars on top otherwise, including over a fold too close to an edge', () => {
     expect(resolveShellLayout(size(390), traits('compact')).toolbarPlacement).toBe('top');
     const lowFold = { ...LAPTOP_FOLD, y: 951 - 40 - MIN_FOLD_PANE_WIDTH + 1 };
+    const low = resolveShellLayout({ width: 669, height: 951 }, traits('regular', [lowFold]));
+    expect(low.toolbarPlacement).toBe('top');
+    expect(low.tabletopFold).toBeNull();
+  });
+
+  it('builds its own rail in laptop pose, inside the safe area and above the hinge', () => {
+    const laptop = {
+      ...traits('regular', [LAPTOP_FOLD]),
+      statusBar: { x: 0, y: 0, width: 669, height: 54 },
+    };
+    const insets = { top: 82, left: 0, right: 0, bottom: 20 };
     expect(
-      resolveShellLayout({ width: 669, height: 951 }, traits('regular', [lowFold]))
-        .toolbarPlacement,
-    ).toBe('top');
+      resolveVerticalBarFrame({ width: 669, height: 951 }, laptop, insets, 'trailing'),
+    ).toEqual({
+      x: 669 - LAPTOP_RAIL_WIDTH,
+      y: 82,
+      width: LAPTOP_RAIL_WIDTH,
+      height: LAPTOP_FOLD.y - 82,
+    });
+    expect(
+      resolveVerticalBarFrame(
+        { width: 669, height: 951 },
+        laptop,
+        { ...insets, right: 12 },
+        'trailing',
+      )?.x,
+    ).toBe(669 - 12 - LAPTOP_RAIL_WIDTH);
   });
 });
 

@@ -36,12 +36,44 @@ export function useVerticalBarFrame(): LayoutRect | null {
   return resolveVerticalBarFrame({ width, height }, traits, insets, toolbarPlacement);
 }
 
+/**
+ * The vertical bar column a scene's trailing primary action joins, such as the composer's Send
+ * button on a closed iPhone Duo, or `null` when the action stays beside its content. Only compact
+ * windows qualify: wider ones center their content away from the bar, which would strand the action.
+ */
+export function useTrailingActionRail(): LayoutRect | null {
+  const traits = useAtomValue(windowTraitsAtom);
+  const frame = useVerticalBarFrame();
+  const { toolbarPlacement } = useShellLayout();
+  return toolbarPlacement === 'trailing' && traits?.horizontalSizeClass === 'compact'
+    ? frame
+    : null;
+}
+
 /** Horizontal corner clearance beyond the rectangular safe area, without adding header height. */
 export function useHeaderInsets() {
   const { width, height } = useWindowDimensions();
   const traits = useAtomValue(windowTraitsAtom);
   const insets = useContext(SafeAreaInsetsContext) ?? NO_INSETS;
   return resolveHeaderInsets({ width, height }, traits, insets);
+}
+
+/**
+ * Side padding beyond the safe area that keeps content clear of a vertical toolbar the system did
+ * not reserve a column for, as when the device is folded like a laptop. Safe-area insets are
+ * additive on `SafeAreaView`, so this can be added to one directly.
+ */
+export function useRailClearance(): SceneHorizontalInsets {
+  const frame = useVerticalBarFrame();
+  const { width } = useWindowDimensions();
+  const insets = useContext(SafeAreaInsetsContext) ?? NO_INSETS;
+  const { toolbarPlacement } = useShellLayout();
+  if (!frame) {
+    return { paddingLeft: 0, paddingRight: 0 };
+  }
+  return toolbarPlacement === 'leading'
+    ? { paddingLeft: Math.max(0, frame.x + frame.width - insets.left), paddingRight: 0 }
+    : { paddingLeft: 0, paddingRight: Math.max(0, width - frame.x - insets.right) };
 }
 
 export interface SceneHorizontalInsets {
@@ -51,15 +83,17 @@ export interface SceneHorizontalInsets {
 
 /**
  * Horizontal padding for content in the drawer scene. Side insets appear wherever the system
- * places its status bar, camera, or vertical bar beside the content, as foldables do. A docked
- * sidebar already owns the leading edge, so the scene only pads it when the sidebar is not docked.
+ * places its status bar, camera, or vertical bar beside the content, as foldables do, and wherever
+ * the app adds its own rail. A docked sidebar already owns the leading edge, so the scene only pads
+ * it when the sidebar is not docked.
  */
 export function useSceneHorizontalInsets(): SceneHorizontalInsets {
   const insets = useContext(SafeAreaInsetsContext);
   const { sidebarMode } = useShellLayout();
+  const rail = useRailClearance();
   return {
-    paddingLeft: sidebarMode === 'docked' ? 0 : (insets?.left ?? 0),
-    paddingRight: insets?.right ?? 0,
+    paddingLeft: sidebarMode === 'docked' ? 0 : (insets?.left ?? 0) + rail.paddingLeft,
+    paddingRight: (insets?.right ?? 0) + rail.paddingRight,
   };
 }
 

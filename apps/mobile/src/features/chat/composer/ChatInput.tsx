@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  ActivityIndicator,
   Platform,
   Pressable,
   ScrollView,
@@ -12,7 +11,13 @@ import {
   View,
 } from 'react-native';
 
-import { resolveComposerBottomSpacing } from './inputLayout';
+import { COMPOSER_ACTION_SIZE, resolveComposerBottomSpacing } from './inputLayout';
+import {
+  ComposerActionSlot,
+  resolveActionColumnLayout,
+  type ComposerActionColumn,
+} from './actionColumn';
+import { ChatInputActionButton } from './ChatInputActionButton';
 import { ComposerPasteView, type ComposerPasteViewProps } from './ComposerPasteView';
 import { createChatInputStyles } from './inputStyles';
 import { computeHitSlop } from '@shared/ui/touchTarget';
@@ -21,9 +26,10 @@ import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { feedback } from '@shared/feedback';
 import { controlAccessibilityState, decorativeAccessibilityProps } from '@shared/accessibility';
 import { useStoreReviewComposer } from '@shell/state/storeReview';
+import { useLaptopKeyboard } from './useLaptopKeyboard';
 
 const ACTION_BUTTON_PRESS_RETENTION_OFFSET = 8;
-const ACTION_BUTTON_VISIBLE_SIZE = { width: 48, height: 48 };
+const ACTION_BUTTON_VISIBLE_SIZE = { width: COMPOSER_ACTION_SIZE, height: COMPOSER_ACTION_SIZE };
 const ADD_BUTTON_VISIBLE_SIZE = { width: 36, height: 36 };
 const INPUT_TEXT_LINE_HEIGHT = 20;
 const INPUT_TEXT_VERTICAL_PADDING = Platform.OS === 'ios' ? 2 : 0;
@@ -56,6 +62,7 @@ interface ChatInputProps {
   keyboardVisible?: boolean;
   footer?: ReactNode;
   reserveFooterSpace?: boolean;
+  actionColumn?: ComposerActionColumn | null;
 }
 
 interface ChatInputAttachmentListProps {
@@ -118,180 +125,6 @@ function ChatInputAttachmentList({
   );
 }
 
-interface ChatInputActionButtonProps {
-  onSubmit: () => void;
-  onStop: () => void;
-  canSend: boolean;
-  canStop: boolean;
-  isLoading: boolean;
-  isUploading: boolean;
-  isStopping: boolean;
-  hitSlop: ReturnType<typeof computeHitSlop>;
-  pressRetentionOffset: number;
-  styles: ReturnType<typeof createChatInputStyles>;
-  textMutedColor: string;
-  textPrimaryColor: string;
-  label: string;
-  hint: string;
-}
-
-interface ChatInputActionState {
-  accessibilityHint: string;
-  accessibilityLabel: string;
-  busy: boolean;
-  enabled: boolean;
-  kind: 'send' | 'stop';
-  slotTestID: string;
-  surfaceTestID: string;
-}
-
-function resolveChatInputActionState({
-  canSend,
-  canStop,
-  isLoading,
-  isUploading,
-  isStopping,
-  label,
-  hint,
-}: Pick<
-  ChatInputActionButtonProps,
-  'canSend' | 'canStop' | 'isLoading' | 'isUploading' | 'isStopping' | 'label' | 'hint'
->): ChatInputActionState {
-  if (canStop && !canSend) {
-    return {
-      accessibilityHint: 'Stops the current turn',
-      accessibilityLabel: isStopping ? 'Stopping agent' : 'Stop agent',
-      busy: isStopping,
-      enabled: !isStopping,
-      kind: 'stop',
-      slotTestID: 'composer-stop-slot',
-      surfaceTestID: 'composer-stop-glass-surface',
-    };
-  }
-
-  const busy = isLoading && !canSend;
-  return {
-    accessibilityHint: hint,
-    accessibilityLabel: busy
-      ? isUploading
-        ? 'Preparing attachment'
-        : 'Agent is responding'
-      : label,
-    busy,
-    enabled: canSend,
-    kind: 'send',
-    slotTestID: 'composer-submit-slot',
-    surfaceTestID: 'composer-submit-glass-surface',
-  };
-}
-
-function ChatInputActionGlyph({
-  action,
-  styles,
-  textMutedColor,
-  textPrimaryColor,
-}: {
-  action: ChatInputActionState;
-  styles: ReturnType<typeof createChatInputStyles>;
-  textMutedColor: string;
-  textPrimaryColor: string;
-}) {
-  if (action.busy) {
-    return <ActivityIndicator size="small" color={textMutedColor} />;
-  }
-  if (action.kind === 'stop') {
-    return (
-      <View style={styles.stopButtonContent}>
-        <Ionicons
-          {...decorativeAccessibilityProps}
-          name="square"
-          size={10}
-          color={textPrimaryColor}
-        />
-      </View>
-    );
-  }
-  return (
-    <Ionicons
-      {...decorativeAccessibilityProps}
-      name="arrow-up"
-      size={16}
-      color={textPrimaryColor}
-    />
-  );
-}
-
-function ChatInputActionButton({
-  onSubmit,
-  onStop,
-  canSend,
-  canStop,
-  isLoading,
-  isUploading,
-  isStopping,
-  hitSlop,
-  pressRetentionOffset,
-  styles,
-  textMutedColor,
-  textPrimaryColor,
-  label,
-  hint,
-}: ChatInputActionButtonProps) {
-  const action = resolveChatInputActionState({
-    canSend,
-    canStop,
-    isLoading,
-    isUploading,
-    isStopping,
-    label,
-    hint,
-  });
-  return (
-    <View collapsable={false} style={styles.actionButtonFrame} testID={action.slotTestID}>
-      <Pressable
-        onPress={() => {
-          if (!action.enabled) {
-            return;
-          }
-          if (action.kind === 'stop') {
-            onStop();
-          } else {
-            onSubmit();
-          }
-        }}
-        style={({ pressed }) => [
-          styles.actionButtonPressable,
-          pressed && action.enabled && styles.actionButtonPressed,
-        ]}
-        hitSlop={hitSlop}
-        pressRetentionOffset={pressRetentionOffset}
-        accessibilityRole="button"
-        accessibilityLabel={action.accessibilityLabel}
-        accessibilityHint={action.accessibilityHint}
-        accessibilityState={controlAccessibilityState({
-          disabled: !action.enabled,
-          busy: action.busy,
-        })}
-      >
-        <GlassSurface
-          pointerEvents="none"
-          role="capsule"
-          style={styles.actionButtonGlass}
-          testID={action.surfaceTestID}
-        >
-          <View pointerEvents="none" style={styles.actionButtonOutline} />
-          <ChatInputActionGlyph
-            action={action}
-            styles={styles}
-            textMutedColor={textMutedColor}
-            textPrimaryColor={textPrimaryColor}
-          />
-        </GlassSurface>
-      </Pressable>
-    </View>
-  );
-}
-
 interface NormalizedChatInputProps {
   value: string;
   onChangeText: (text: string) => void;
@@ -313,6 +146,7 @@ interface NormalizedChatInputProps {
   keyboardVisible: boolean;
   footer: ReactNode;
   reserveFooterSpace: boolean;
+  actionColumn: ComposerActionColumn | null;
 }
 
 function normalizeChatInputProps(props: ChatInputProps): NormalizedChatInputProps {
@@ -337,10 +171,13 @@ function normalizeChatInputProps(props: ChatInputProps): NormalizedChatInputProp
     keyboardVisible: props.keyboardVisible ?? false,
     footer: props.footer ?? null,
     reserveFooterSpace: props.reserveFooterSpace ?? false,
+    actionColumn: props.actionColumn ?? null,
   };
 }
 
 export function ChatInput(props: ChatInputProps) {
+  const inputRef = useRef<TextInput>(null);
+  useLaptopKeyboard(inputRef);
   const {
     value,
     onChangeText,
@@ -362,6 +199,7 @@ export function ChatInput(props: ChatInputProps) {
     keyboardVisible,
     footer,
     reserveFooterSpace,
+    actionColumn,
   } = normalizeChatInputProps(props);
   const [focused, setFocused] = useState(false);
   useStoreReviewComposer(focused || value.length > 0);
@@ -422,18 +260,20 @@ export function ChatInput(props: ChatInputProps) {
     void feedback.destructive();
     onStop();
   };
+  const columnLayout = resolveActionColumnLayout(actionColumn, theme.spacing.lg);
 
   return (
-    <View style={styles.shell} testID="chat-composer">
+    <View style={[styles.shell, columnLayout.shell]} testID="chat-composer">
       <View
         style={[
           styles.container,
           {
             paddingBottom: composerBottomSpacing.totalBottomPadding,
           },
+          columnLayout.container,
         ]}
       >
-        <View style={styles.composerGroup} testID="composer-control-groups">
+        <View style={[styles.composerGroup, columnLayout.group]} testID="composer-control-groups">
           <GlassSurface
             isInteractive
             role="capsule"
@@ -504,6 +344,7 @@ export function ChatInput(props: ChatInputProps) {
                   {value.length > 0 ? `${value}\u200b` : ' '}
                 </Text>
                 <TextInput
+                  ref={inputRef}
                   style={[styles.input, { height: inputHeight }]}
                   value={value}
                   onChangeText={onChangeText}
@@ -539,22 +380,24 @@ export function ChatInput(props: ChatInputProps) {
             </View>
           </GlassSurface>
 
-          <ChatInputActionButton
-            onSubmit={handleSubmit}
-            onStop={handleStop}
-            canSend={canSend}
-            canStop={canStop}
-            isLoading={isLoading}
-            isUploading={props.isUploading ?? false}
-            isStopping={isStopping}
-            hitSlop={actionButtonHitSlop}
-            pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
-            styles={styles}
-            textMutedColor={colors.textMuted}
-            textPrimaryColor={colors.textPrimary}
-            label={submitLabel}
-            hint={submitHint}
-          />
+          <ComposerActionSlot column={actionColumn}>
+            <ChatInputActionButton
+              onSubmit={handleSubmit}
+              onStop={handleStop}
+              canSend={canSend}
+              canStop={canStop}
+              isLoading={isLoading}
+              isUploading={props.isUploading ?? false}
+              isStopping={isStopping}
+              hitSlop={actionButtonHitSlop}
+              pressRetentionOffset={ACTION_BUTTON_PRESS_RETENTION_OFFSET}
+              styles={styles}
+              textMutedColor={colors.textMuted}
+              textPrimaryColor={colors.textPrimary}
+              label={submitLabel}
+              hint={submitHint}
+            />
+          </ComposerActionSlot>
         </View>
         {footer || reserveFooterSpace ? (
           <View style={[styles.footer, !footer && styles.footerPlaceholder]}>{footer}</View>

@@ -14,7 +14,7 @@ import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { useAppTheme } from '@shared/theme';
 import { createStyles } from '../styles/styles';
-import { useSceneContentInsets } from '@shell/layout/useShellLayout';
+import { useSceneContentInsets, useShellLayout } from '@shell/layout/useShellLayout';
 import { NewChatRunTarget } from '@shell/profiles/ProfileSwitcher';
 import type { NewChatReadiness } from './newChatReadiness';
 
@@ -53,6 +53,7 @@ export function ComposeView({
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const keepKeyboardOpen = useShellLayout().tabletopFold !== null;
   const composeTopPadding = (keyboardVisible ? theme.spacing.xl : 0) + topInset;
   // Over a fold, the centered actions move to the trailing page instead of resting on the hinge.
   const { foldLeading } = useSceneContentInsets();
@@ -72,9 +73,11 @@ export function ComposeView({
       style={styles.composeScroll}
       contentContainerStyle={contentContainerStyle}
       showsVerticalScrollIndicator={false}
-      keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-      keyboardShouldPersistTaps="handled"
-      onScrollBeginDrag={Keyboard.dismiss}
+      keyboardDismissMode={
+        keepKeyboardOpen ? 'none' : Platform.OS === 'ios' ? 'interactive' : 'on-drag'
+      }
+      keyboardShouldPersistTaps={keepKeyboardOpen ? 'always' : 'handled'}
+      onScrollBeginDrag={keepKeyboardOpen ? undefined : Keyboard.dismiss}
       alwaysBounceVertical
       overScrollMode="always"
     >

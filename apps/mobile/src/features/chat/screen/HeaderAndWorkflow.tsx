@@ -18,7 +18,7 @@ import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { feedback } from '@shared/feedback';
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
-import { useInlineToolbar, useToolbarPlacement } from '@shell/layout/SceneToolbar';
+import { useInlineToolbar } from '@shell/layout/SceneToolbar';
 import { resolveInlineHeaderButtons } from './chatToolbar';
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { activeProfileFeaturesAtom } from '@shell/state/bridge/atoms';
@@ -201,6 +201,7 @@ function SessionMetaRow(props: {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        keyboardShouldPersistTaps="always"
         contentContainerStyle={styles.sessionMetaRowContent}
         testID="session-meta-selectors"
       >
@@ -465,7 +466,6 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
   } = context;
   const { theme, styles } = useMainScreenStyles();
   const inlineToolbar = useInlineToolbar();
-  const chromeAtBottom = useToolbarPlacement() === 'bottom';
   const sending = useAtomValue(sendingAtom);
   const creating = useAtomValue(creatingAtom);
   const stoppingTurn = useAtomValue(stoppingTurnAtom);
@@ -497,7 +497,6 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
           title={headerTitle}
           agent={activeAgent}
           embeddedInGlass
-          respectsTopSafeArea={!chromeAtBottom}
         />
         {showSessionMetaRow ? (
           <SessionMetaRow

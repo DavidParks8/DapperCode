@@ -345,7 +345,7 @@ describe('MainScreenTranscriptAndSheets', () => {
     act(() => tree?.unmount());
   });
 
-  it('moves the chrome above the composer on a device folded like a laptop', () => {
+  it('reserves the title bar at the top through laptop pose and keyboard transitions', () => {
     Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
     const store = createStore();
     store.set(topChromeHeightAtom, 80);
@@ -372,8 +372,6 @@ describe('MainScreenTranscriptAndSheets', () => {
     // Flat: the chrome is at the top.
     expect(mockTranscriptProps.at(-1)).toMatchObject({ topInset: 80, bottomInset: 88 });
 
-    // Laptop pose: the controls sit on the lower half, directly above the composer, so the
-    // transcript clears them at the bottom and only the safe area at the top.
     act(() => {
       store.set(windowTraitsAtom, {
         horizontalSizeClass: 'regular',
@@ -381,7 +379,24 @@ describe('MainScreenTranscriptAndSheets', () => {
         divisions: [{ x: 0, y: 455.5, width: 669, height: 40 }],
       });
     });
-    expect(mockTranscriptProps.at(-1)).toMatchObject({ topInset: 30, bottomInset: 88 + 80 });
+    expect(mockTranscriptProps.at(-1)).toMatchObject({ topInset: 80, bottomInset: 88 });
+    act(() => {
+      tree?.update(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 669, height: 951 },
+            insets: { top: 30, left: 0, right: 0, bottom: 20 },
+          }}
+        >
+          <Provider store={store}>
+            <MainScreenTranscriptAndSheets
+              context={{ ...context, composerReservedInset: 584 } as never}
+            />
+          </Provider>
+        </SafeAreaProvider>,
+      );
+    });
+    expect(mockTranscriptProps.at(-1)).toMatchObject({ topInset: 80, bottomInset: 584 });
     act(() => tree?.unmount());
   });
 });

@@ -1,20 +1,25 @@
 import { Provider, createStore } from 'jotai';
-import { Dimensions } from 'react-native';
+import { Dimensions, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { queryRoot } from '@shared/testing/foldableLayout';
 import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
+import type { WindowTraits } from '@shell/layout/windowLayout';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { windowTraitsAtom } from '@shell/state/layout/atoms';
+import { keyboardVisibleAtom } from '../state/composer';
 import { ChatSceneToolbar, resolveInlineHeaderButtons } from './chatToolbar';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 
 const theme = createAppTheme('dark');
 
-function renderToolbar(context: Record<string, unknown>): ReactTestRenderer {
+function renderToolbar(
+  context: Record<string, unknown>,
+  options: { keyboardVisible?: boolean; traits?: Partial<WindowTraits> } = {},
+): ReactTestRenderer {
   act(() => {
     Dimensions.set({
       window: { width: 466, height: 678, scale: 3, fontScale: 1 },
@@ -30,7 +35,9 @@ function renderToolbar(context: Record<string, unknown>): ReactTestRenderer {
     divisions: [],
     occlusions: [{ x: 382, y: 0, width: 84, height: 174 }],
     statusBar: null,
+    ...options.traits,
   });
+  store.set(keyboardVisibleAtom, options.keyboardVisible ?? false);
   store.set(drawerCommandsAtom, {
     closeDrawer: jest.fn(),
     toggleNavigation: jest.fn(),
@@ -61,6 +68,29 @@ function labels(tree: ReactTestRenderer): string[] {
     .findAll((node) => node.type === CircularToolbarButton)
     .map((button) => button.props['accessibilityLabel'] as string);
 }
+
+function barFrame(tree: ReactTestRenderer): { top: number; bottom: number } {
+  const bar = queryRoot(tree).findAll(
+    (node) => node.props['testID'] === 'scene-vertical-toolbar' && typeof node.type !== 'string',
+  )[0];
+  const style = StyleSheet.flatten(bar?.props['style'] as StyleProp<ViewStyle>);
+  const top = style?.top as number;
+  return { top, bottom: top + (style?.height as number) };
+}
+
+const chatWithComposer = {
+  onOpenDrawer: jest.fn(),
+  selectedChat: { id: 'chat' },
+  openTitleEditor: jest.fn(),
+  handleOpenGit: jest.fn(),
+  shouldShowComposer: true,
+  composerSafeAreaBottomInset: 20,
+};
+// The composer pads 8pt above the keyboard and 26pt above the home indicator at rest, and its
+// 48pt Send button sits on the bar's column at that height.
+const KEYBOARD_INSET = 320;
+const SEND_TOP_WITH_KEYBOARD = 678 - (KEYBOARD_INSET + 8 + 48);
+const SEND_TOP_AT_REST = 678 - (26 + 48);
 
 describe('chat toolbar', () => {
   afterEach(() => {
@@ -100,6 +130,40 @@ describe('chat toolbar', () => {
     });
 
     expect(labels(tree)).toEqual(['Open navigation drawer']);
+    act(() => tree.unmount());
+  });
+
+  it('ends the bar above the Send button and folds actions into More while typing', () => {
+    const tree = renderToolbar(
+      { ...chatWithComposer, composerOverlayInset: KEYBOARD_INSET },
+      { keyboardVisible: true },
+    );
+
+    expect(labels(tree)).toEqual(['Open navigation drawer', 'More']);
+    expect(barFrame(tree).bottom).toBeLessThanOrEqual(SEND_TOP_WITH_KEYBOARD - 12);
+    act(() => tree.unmount());
+  });
+
+  it('keeps every action while the keyboard is down and the Send button rests at the bottom', () => {
+    const tree = renderToolbar({ ...chatWithComposer, composerOverlayInset: 0 });
+
+    expect(labels(tree)).toEqual(['Open navigation drawer', 'Edit session title', 'Open Git']);
+    expect(barFrame(tree)).toEqual({ top: 182, bottom: SEND_TOP_AT_REST - 12 });
+    act(() => tree.unmount());
+  });
+
+  it.each([
+    ['without a composer', { shouldShowComposer: false }, {}],
+    ['while the window is regular width', {}, { horizontalSizeClass: 'regular' as const }],
+  ])('reserves nothing for Send %s', (_name, contextOverrides, traits) => {
+    const tree = renderToolbar(
+      { ...chatWithComposer, composerOverlayInset: KEYBOARD_INSET, ...contextOverrides },
+      { keyboardVisible: true, traits },
+    );
+
+    expect(labels(tree)).toEqual(['Open navigation drawer', 'Edit session title', 'Open Git']);
+    // The bar keeps the whole column below the status bar, down to the bottom safe area.
+    expect(barFrame(tree)).toEqual({ top: 182, bottom: 658 });
     act(() => tree.unmount());
   });
 

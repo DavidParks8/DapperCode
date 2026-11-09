@@ -17,11 +17,12 @@ import { ChatHeader } from '../../features/chat/screen/ChatHeader';
 import {
   useSceneHorizontalInsets,
   useShellLayout,
+  useTrailingActionRail,
   useVerticalBarFrame,
   type SceneHorizontalInsets,
 } from './useShellLayout';
 import { WindowLayoutObserver } from './WindowLayoutObserver.native';
-import type { LayoutRect, ShellLayout } from './windowLayout';
+import { LAPTOP_RAIL_WIDTH, type LayoutRect, type ShellLayout } from './windowLayout';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
 
@@ -44,6 +45,13 @@ function LayoutProbe() {
     insets: useSceneHorizontalInsets(),
     verticalBar: useVerticalBarFrame(),
   };
+  return null;
+}
+
+let observedActionRail: LayoutRect | null | undefined;
+
+function ActionRailProbe() {
+  observedActionRail = useTrailingActionRail();
   return null;
 }
 
@@ -100,6 +108,7 @@ function emitNativeTraits(tree: ReactTestRenderer, payload: unknown) {
 describe('iPhone Duo window layout', () => {
   afterEach(() => {
     observed = null;
+    observedActionRail = undefined;
     setWindowSize(750, 1334);
   });
 
@@ -134,6 +143,7 @@ describe('iPhone Duo window layout', () => {
         sidebarSpansWindow: true,
         toolbarPlacement: 'trailing',
         fold: null,
+        tabletopFold: null,
       },
       insets: { paddingLeft: 0, paddingRight: DUO_TRAILING_INSET },
       verticalBar: { x: 394, y: 182, width: 48, height: 462 },
@@ -149,6 +159,7 @@ describe('iPhone Duo window layout', () => {
       sidebarSpansWindow: false,
       toolbarPlacement: 'trailing',
       fold: null,
+      tabletopFold: null,
     });
     expect(observed?.insets).toEqual({ paddingLeft: 0, paddingRight: DUO_TRAILING_INSET });
     expect(observed?.verticalBar).toEqual({ x: 879, y: 132, width: 48, height: 503 });
@@ -169,6 +180,7 @@ describe('iPhone Duo window layout', () => {
       sidebarSpansWindow: false,
       toolbarPlacement: 'trailing',
       fold: BOOK_FOLD,
+      tabletopFold: null,
     });
     expect(observed?.insets).toEqual({ paddingLeft: 0, paddingRight: DUO_TRAILING_INSET });
 
@@ -176,8 +188,9 @@ describe('iPhone Duo window layout', () => {
     emitNativeTraits(tree, DUO_OPEN);
     expect(observed?.layout.sidebarMode).toBe('docked');
 
-    // Laptop pose: portrait, so bars are horizontal again, and the fold runs across the window.
-    // The narrow window keeps the session list behind the menu, and controls move to the bottom.
+    // Laptop pose: portrait, so the system keeps its bars horizontal and the fold runs across the
+    // window. The narrow window keeps the session list behind the menu, and the header's buttons
+    // move to the app's own trailing rail above the hinge, which the scene pads around.
     setWindowSize(669, 951);
     emitNativeTraits(tree, {
       horizontalSizeClass: 'regular',
@@ -190,10 +203,20 @@ describe('iPhone Duo window layout', () => {
       sidebarMode: 'overlay',
       sidebarWidth: 669,
       sidebarSpansWindow: true,
-      toolbarPlacement: 'bottom',
+      toolbarPlacement: 'trailing',
       fold: null,
+      tabletopFold: { x: 0, y: 455.5, width: 669, height: 40 },
     });
-    expect(observed?.verticalBar).toBeNull();
+    expect(observed?.verticalBar).toEqual({
+      x: 669 - DUO_TRAILING_INSET - LAPTOP_RAIL_WIDTH,
+      y: 0,
+      width: LAPTOP_RAIL_WIDTH,
+      height: 455.5,
+    });
+    expect(observed?.insets).toEqual({
+      paddingLeft: 0,
+      paddingRight: DUO_TRAILING_INSET + LAPTOP_RAIL_WIDTH,
+    });
 
     // Closed again.
     setWindowSize(466, 678);
@@ -202,6 +225,56 @@ describe('iPhone Duo window layout', () => {
       sidebarMode: 'overlay',
       toolbarPlacement: 'trailing',
     });
+
+    act(() => tree.unmount());
+  });
+
+  it('keeps the trailing bar for the primary action only on the compact closed display', () => {
+    const store = createTestStore();
+    setWindowSize(466, 678);
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 466, height: 678 },
+            insets: { top: 0, left: 0, right: DUO_TRAILING_INSET, bottom: 20 },
+          }}
+        >
+          <Provider store={store}>
+            <WindowLayoutObserver />
+            <ActionRailProbe />
+          </Provider>
+        </SafeAreaProvider>,
+      );
+    });
+
+    // Closed: the composer ends at the bar, so Send joins the bar's buttons.
+    emitNativeTraits(tree, DUO_CLOSED);
+    expect(observedActionRail).toEqual({ x: 394, y: 182, width: 48, height: 462 });
+
+    // Open flat or folded like a book: the wide window centers the composer away from the bar.
+    setWindowSize(951, 669);
+    emitNativeTraits(tree, DUO_OPEN);
+    expect(observedActionRail).toBeNull();
+    emitNativeTraits(tree, { ...DUO_OPEN, divisions: [BOOK_FOLD] });
+    expect(observedActionRail).toBeNull();
+
+    // Folded like a laptop: bars are the app's own, and the window is regular width.
+    setWindowSize(669, 951);
+    emitNativeTraits(tree, {
+      horizontalSizeClass: 'regular',
+      verticalSizeClass: 'regular',
+      verticalBarEdge: 'unspecified',
+      divisions: [{ x: 0, y: 455.5, width: 669, height: 40 }],
+      occlusions: [],
+    });
+    expect(observedActionRail).toBeNull();
+
+    // Closed again.
+    setWindowSize(466, 678);
+    emitNativeTraits(tree, DUO_CLOSED);
+    expect(observedActionRail).toEqual({ x: 394, y: 182, width: 48, height: 462 });
 
     act(() => tree.unmount());
   });

@@ -119,7 +119,7 @@ describe('MainScreenView', () => {
     }
   });
 
-  it('docks the chrome just above the composer, and only there, on a device folded like a laptop', () => {
+  it('keeps the title bar at the top through laptop pose and keyboard transitions', () => {
     const store = createStore();
     const { tree, updateContext } = renderScreen({ composerReservedInset: 102 }, store);
     const chromeStyle = () =>
@@ -137,13 +137,16 @@ describe('MainScreenView', () => {
         divisions: [{ x: 0, y: 455.5, width: 669, height: 40 }],
       });
     });
-    // Pinning both edges stretched the chrome over the whole transcript.
-    expect(chromeStyle()).toMatchObject({ position: 'absolute', bottom: 102 });
-    // Native ignores `top: undefined`, so the key itself must be absent.
-    expect('top' in chromeStyle()).toBe(false);
+    expect(chromeStyle()).toMatchObject({ position: 'absolute', top: 0 });
+    expect('bottom' in chromeStyle()).toBe(false);
 
-    updateContext({ composerReservedInset: 140 });
-    expect(chromeStyle()).toMatchObject({ bottom: 140 });
+    updateContext({ composerReservedInset: 584 });
+    expect(chromeStyle()).toMatchObject({ position: 'absolute', top: 0 });
+    expect('bottom' in chromeStyle()).toBe(false);
+    updateContext({ composerReservedInset: 88 });
+    expect(chromeStyle()).toMatchObject({ position: 'absolute', top: 0 });
+    act(() => store.set(windowTraitsAtom, null));
+    expect(chromeStyle()).toMatchObject({ position: 'absolute', top: 0 });
     act(() => tree.unmount());
   });
 

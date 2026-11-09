@@ -12,7 +12,7 @@ import { SelectionSheet, type SelectionSheetOption } from '@shared/ui/SelectionS
 import { computeHitSlop } from '@shared/ui/touchTarget';
 import { getDrawerFolderPickerLabels } from '@shell/navigation/drawerAttention';
 import { useInlineToolbar } from '@shell/layout/SceneToolbar';
-import { useHeaderInsets, useShellLayout } from '@shell/layout/useShellLayout';
+import { useHeaderInsets, useShellLayout, useRailClearance } from '@shell/layout/useShellLayout';
 import {
   createDrawerContentStyles,
   type DrawerContentStyles,
@@ -534,12 +534,13 @@ export const DrawerContentView = memo(function DrawerContentView({
   const horizontalToolbar = useInlineToolbar();
   // Only a full-window menu reaches the system's bar column; sidebars keep their own controls.
   const inlineToolbar = !sidebarSpansWindow || horizontalToolbar;
+  const railPadding = useRailClearance();
 
   return (
     <GlassSurface role="drawer" style={styles.container} testID="drawer-glass-surface">
       <SafeAreaView
         edges={sidebarSpansWindow ? undefined : SIDEBAR_EDGES}
-        style={styles.safeArea}
+        style={[styles.safeArea, inlineToolbar ? null : railPadding]}
         testID="drawer-safe-area"
       >
         <View style={styles.mainContent}>

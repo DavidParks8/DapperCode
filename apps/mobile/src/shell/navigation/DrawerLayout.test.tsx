@@ -1,4 +1,5 @@
 let mockDrawerProps: Record<string, unknown> | null = null;
+let mockDrawerStatus = 'closed';
 
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 jest.mock('expo-router/drawer', () => ({
@@ -6,11 +7,12 @@ jest.mock('expo-router/drawer', () => ({
     mockDrawerProps = props;
     return null;
   },
-  useDrawerStatus: () => 'closed',
+  useDrawerStatus: () => mockDrawerStatus,
 }));
 jest.mock('@shell/navigation/DrawerContent', () => ({ DrawerContent: () => null }));
 
 import type { ReactNode } from 'react';
+import { Keyboard } from 'react-native';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
 import { ResponsiveDrawerLayout } from '../../app/profiles/[profileId]/(drawer)/_layout';
@@ -19,6 +21,7 @@ import { resolveShellLayout, type WindowTraits } from '@shell/layout/windowLayou
 import { sidebarHiddenAtom } from '@shell/state/appState/settings';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { createTestStore, withAppStore } from '@shell/state/testing';
+import { keyboardFocusBlockersAtom } from '@shell/state/keyboard';
 
 function size(width: number, height = 900) {
   return { width, height };
@@ -59,6 +62,7 @@ function readScreenOptions(): DrawerScreenOptions {
 describe('DrawerLayout responsive sizing', () => {
   beforeEach(() => {
     mockDrawerProps = null;
+    mockDrawerStatus = 'closed';
   });
 
   it.each([320, 390, 430, TABLET_LAYOUT_MIN_WIDTH - 1])(
@@ -206,5 +210,33 @@ describe('DrawerLayout responsive sizing', () => {
     expect(store.get(sidebarHiddenAtom)).toBe(false);
 
     act(() => tree.unmount());
+  });
+
+  it('takes the keyboard and composer focus only while an overlay drawer covers the chat', () => {
+    // Measured on the iPhone Duo in laptop pose: the keyboard stayed up and hid the bottom of the
+    // session list.
+    const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+    const store = createTestStore();
+    const navigation = { closeDrawer: jest.fn(), toggleDrawer: jest.fn(), openDrawer: jest.fn() };
+    const tree = renderLayout(669);
+    const drawerContent = mockDrawerProps?.['drawerContent'] as (props: unknown) => ReactNode;
+    const content = () => withAppStore(store, drawerContent({ navigation }));
+    act(() => tree.update(content()));
+    expect(store.get(keyboardFocusBlockersAtom).size).toBe(0);
+    expect(dismiss).not.toHaveBeenCalled();
+    mockDrawerStatus = 'open';
+    act(() => tree.update(content()));
+    expect(store.get(keyboardFocusBlockersAtom).size).toBe(1);
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    // Re-rendering while open must not dismiss a keyboard the drawer's own search field raised.
+    act(() => tree.update(content()));
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    mockDrawerStatus = 'closed';
+    act(() => tree.update(content()));
+    expect(store.get(keyboardFocusBlockersAtom).size).toBe(0);
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+    expect(store.get(keyboardFocusBlockersAtom).size).toBe(0);
+    dismiss.mockRestore();
   });
 });

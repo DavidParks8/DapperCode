@@ -278,6 +278,70 @@ describe('SceneVerticalToolbar', () => {
 });
 
 describe('SceneVerticalToolbar without a host', () => {
+  function renderBar(reservedBottom: number): ReactTestRenderer {
+    act(() => {
+      Dimensions.set({
+        window: { width: 466, height: 678, scale: 3, fontScale: 1 },
+        screen: { width: 466, height: 678, scale: 3, fontScale: 1 },
+      });
+    });
+    const store = createStore();
+    store.set(windowTraitsAtom, DUO_CLOSED);
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 466, height: 678 },
+            insets: { top: 0, left: 0, right: 84, bottom: 20 },
+          }}
+        >
+          <Provider store={store}>
+            <AppThemeProvider theme={theme}>
+              <SceneVerticalToolbar
+                items={[
+                  item('menu', 'navigation'),
+                  item('rename', 'action'),
+                  item('git', 'action'),
+                ]}
+                reservedBottom={reservedBottom}
+              />
+            </AppThemeProvider>
+          </Provider>
+        </SafeAreaProvider>,
+      );
+    });
+    return tree;
+  }
+
+  afterEach(() => {
+    act(() => {
+      Dimensions.set({
+        window: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+        screen: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+      });
+    });
+  });
+
+  it.each([
+    // Nothing reserved: the bar runs from below the status column to the bottom safe area.
+    [0, 476, ['menu', 'rename', 'git']],
+    // A control 74pt tall at the bottom: the bar ends a 12pt gap above it, with room to spare.
+    [74, 678 - 74 - 12 - 182, ['menu', 'rename', 'git']],
+    // A control raised by the keyboard: two slots remain, so actions fold into the menu.
+    [376, 678 - 376 - 12 - 182, ['menu', 'More']],
+    // A control above the bar's top: the bar keeps navigation and the menu, never a negative size.
+    [600, 0, ['menu', 'More']],
+  ])('leaves %ipt at the bottom for another control', (reservedBottom, height, expected) => {
+    const tree = renderBar(reservedBottom);
+    const bar = queryRoot(tree).findAll(
+      (node) => node.props['testID'] === 'scene-vertical-toolbar' && typeof node.type !== 'string',
+    )[0];
+
+    expect(StyleSheet.flatten(bar?.props['style'])).toMatchObject({ top: 182, height });
+    expect(buttons(tree).map((button) => button.props['accessibilityLabel'])).toEqual(expected);
+    act(() => tree.unmount());
+  });
   it('renders nothing when there are no items', () => {
     const store = createStore();
     store.set(windowTraitsAtom, DUO_CLOSED);

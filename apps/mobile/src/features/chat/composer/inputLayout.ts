@@ -2,6 +2,9 @@ import { spacing } from '@shared/theme';
 
 const IOS_HOME_INDICATOR_THRESHOLD = 20;
 
+/** The composer's round Send/Stop button. */
+export const COMPOSER_ACTION_SIZE = 48;
+
 export interface ComposerBottomSpacing {
   baseBottomPadding: number;
   extraBottomInset: number;
@@ -27,6 +30,21 @@ export function resolveComposerBottomSpacing(
     extraBottomInset,
     totalBottomPadding: baseBottomPadding + extraBottomInset,
   };
+}
+
+/**
+ * How far above a footerless composer's bottom edge its Send/Stop button reaches. The button rests
+ * on the input box's bottom edge, which sits on the composer's bottom padding.
+ */
+export function resolveComposerActionReach(
+  platform: string,
+  safeAreaBottomInset: number,
+  keyboardVisible: boolean,
+): number {
+  return (
+    resolveComposerBottomSpacing(platform, safeAreaBottomInset, keyboardVisible)
+      .totalBottomPadding + COMPOSER_ACTION_SIZE
+  );
 }
 
 function resolveBaseBottomPadding(platform: string, keyboardVisible: boolean): number {

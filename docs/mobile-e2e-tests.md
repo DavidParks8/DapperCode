@@ -110,11 +110,23 @@ windows the user can hide the docked sidebar ("Hide sidebar"/"Show sidebar"). Th
 "Open navigation drawer" label never appears there, so fixtures can keep using it to detect the
 overlay shell. On iOS and Android, a vertical fold keeps the chat at full width and moves the
 session list behind the menu. On iOS, header buttons move to a vertical bar when the system
-reports one. The web build cannot report size classes, safe-area side insets, vertical bars, or
+reports one. In a compact window with that bar (closed iPhone Duo), the composer's Send/Stop
+button moves onto the bar, bottom-aligned with the input box. The bar reserves that space, so its
+other buttons fold into More. The web build cannot report size classes, safe-area side insets, vertical bars, or
 folds, so those are covered by Jest
-(`src/shell/layout`) and simulator/emulator checks. The
-shell spec still replays opening and closing iPhone Duo by resizing live between its outer
-(466×678) and inner (951×669) displays.
+(`src/shell/layout`) and simulator/emulator checks. The shell spec still replays opening and
+closing iPhone Duo by resizing live between its outer (466×678) and inner (951×669) displays.
+
+In laptop pose the system keeps its bars horizontal, so the header buttons stand on the app's own
+64pt trailing rail above the hinge, and scenes (including the full-window menu) pad clear of it.
+The chat title and session selectors stay at the top of the upper display rather than moving with
+the keyboard. The composer automatically focuses on entering that pose and returning to the chat;
+transcript and new-chat scrolling do not dismiss the keyboard. Sheets, the select-text sheet, and
+the overlay drawer temporarily own focus, and the drawer dismisses the keyboard so it cannot hide
+the session list. The composer takes focus back after they dismiss, but never fights a system
+alert for it: UIKit restores that keyboard itself. Leaving laptop pose restores normal keyboard
+dismissal. Native transition regression tests cover these behaviors, including keyboard overlap
+against the inner window rather than the outer screen.
 
 ## Observing transient state
 

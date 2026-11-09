@@ -1,6 +1,6 @@
 import React from 'react';
 import { getDefaultStore } from 'jotai';
-import { Dimensions, StyleSheet, Text } from 'react-native';
+import { Dimensions, Keyboard, ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -102,6 +102,38 @@ function hasText(root: QueryableInstance, text: string): boolean {
 }
 
 describe('ComposeView', () => {
+  it('keeps the keyboard open while browsing suggestions in laptop mode', () => {
+    const store = createTestStore();
+    const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+    const { tree, props } = renderCompose({}, store);
+    const scroll = () => tree.root.findByType(ScrollView);
+    expect(scroll().props['keyboardDismissMode']).toBe('interactive');
+    act(() => {
+      store.set(windowTraitsAtom, {
+        horizontalSizeClass: 'regular',
+        verticalSizeClass: 'regular',
+        divisions: [{ x: 0, y: 455.5, width: 669, height: 40 }],
+      });
+    });
+    expect(scroll().props['keyboardDismissMode']).toBe('none');
+    expect(scroll().props['keyboardShouldPersistTaps']).toBe('always');
+    expect(scroll().props['onScrollBeginDrag']).toBeUndefined();
+    act(() =>
+      (
+        findByLabel(tree.root as QueryableInstance, 'Use suggestion: Write tests').props[
+          'onPress'
+        ] as () => void
+      )(),
+    );
+    expect(props.onSuggestion).toHaveBeenCalledWith('Write tests for the main module');
+    expect(dismiss).not.toHaveBeenCalled();
+    act(() => store.set(windowTraitsAtom, null));
+    act(() => (scroll().props['onScrollBeginDrag'] as () => void)());
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+    dismiss.mockRestore();
+  });
+
   it('shows a missing-model reason once with the setup guide and keeps it after hiding the guide', () => {
     const data = createDefaultAppStateData();
     data.bridgeProfiles.activeProfileId = LOCAL_PROFILE_ID;

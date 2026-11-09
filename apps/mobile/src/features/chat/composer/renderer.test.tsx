@@ -1,20 +1,25 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import React from 'react';
-import { Dimensions, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
+import { Dimensions, Platform, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { ReduceMotion } from 'react-native-reanimated';
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
-import { READABLE_COLUMN_WIDTH } from '@shell/layout/windowLayout';
+import { CLOSED_DUO_TRAITS } from '@shared/testing/foldableLayout';
+import { READABLE_COLUMN_WIDTH, type WindowTraits } from '@shell/layout/windowLayout';
 import { sidebarHiddenAtom } from '@shell/state/appState/settings';
 import { windowTraitsAtom } from '@shell/state/layout/atoms';
 import { createTestStore, withAppStore } from '@shell/state/testing';
 import type { AppStore } from '@shell/state/types';
+import { keyboardVisibleAtom } from '../state/composer';
 import { useMainScreenStyles } from '../styles/useStyles';
+import { COMPOSER_ACTION_SIZE, resolveComposerActionReach } from './inputLayout';
 import { useMainScreenComposerRenderer } from './renderer';
 import type { MainScreenComposerRendererContext } from './renderer';
 import { ComposerPasteView, type ComposerPasteViewProps } from './ComposerPasteView';
+
+jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
@@ -389,6 +394,186 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
     expect(hitSlop.top).toBeGreaterThan(0);
     expect(hitSlop.bottom).toBeGreaterThan(0);
 
+    act(() => tree.unmount());
+  });
+});
+
+describe('mainScreenComposerRenderer Send on a trailing bar', () => {
+  const DUO_BAR_LAYOUT = { x: 394, y: 174, width: 48, height: 470 };
+  const DUO_OPEN: WindowTraits = {
+    horizontalSizeClass: 'regular',
+    verticalSizeClass: 'compact',
+    verticalBarEdge: 'trailing',
+    divisions: [],
+    occlusions: [{ x: 867, y: 0, width: 84, height: 124 }],
+    statusBar: { x: 0, y: 0, width: 951, height: 2 },
+    verticalBarLayout: { x: 879, y: 124, width: 48, height: 511 },
+  };
+
+  function hostStyle(tree: ReactTestRenderer, predicate: (node: QueryableInstance) => boolean) {
+    const node = root(tree).findAll((n) => typeof n.type === 'string' && predicate(n))[0];
+    return StyleSheet.flatten(node?.props['style'] as StyleProp<ViewStyle>) ?? {};
+  }
+
+  /**
+   * Window-space geometry of the composer's input box and trailing action, computed from styles.
+   * The chat body pads by the safe-area column, so the composer starts out ending there.
+   */
+  function composerGeometry(tree: ReactTestRenderer, windowWidth: number, insetRight: number) {
+    const composerEnd = windowWidth - insetRight - Number(composerStyle(tree).marginRight);
+    const overlay = hostStyle(tree, (node) => {
+      const style = StyleSheet.flatten(node.props['style'] as StyleProp<ViewStyle>);
+      return style?.position === 'absolute' && typeof style.bottom === 'number';
+    });
+    const shell = hostStyle(tree, (node) => node.props['testID'] === 'chat-composer');
+    const container = hostStyle(
+      tree,
+      (node) =>
+        typeof StyleSheet.flatten(node.props['style'] as StyleProp<ViewStyle>)?.paddingBottom ===
+        'number',
+    );
+    const group = hostStyle(tree, (node) => node.props['testID'] === 'composer-control-groups');
+    const column = hostStyle(tree, (node) => node.props['testID'] === 'composer-action-column');
+    const rowEnd =
+      composerEnd -
+      Number(shell.marginRight ?? 0) -
+      Number(container.paddingRight ?? container.paddingHorizontal);
+    const actionWidth = Number(column.width ?? 48);
+    return {
+      actionCenter: rowEnd - actionWidth / 2,
+      inputEnd: rowEnd - actionWidth - Number(group.gap),
+      // The row aligns its bottom edges, so the 48pt action rises this far above the window bottom.
+      actionTopAboveBottom:
+        Number(overlay.bottom) + Number(container.paddingBottom) + COMPOSER_ACTION_SIZE,
+      rowAlignment: group.alignItems,
+    };
+  }
+
+  function actionColumnSlots(tree: ReactTestRenderer, slot: string): QueryableInstance[] {
+    const column = root(tree).findAll(
+      (node) => node.props['testID'] === 'composer-action-column',
+    )[0];
+    return column?.findAll((node) => node.props['testID'] === slot) ?? [];
+  }
+
+  function renderIn(
+    traits: WindowTraits | null,
+    window: { width: number; height: number },
+    insetRight: number,
+    context = baseContext({ draft: 'Ship it' }),
+  ) {
+    act(() => {
+      Dimensions.set({
+        window: { ...window, scale: 3, fontScale: 1 },
+        screen: { ...window, scale: 3, fontScale: 1 },
+      });
+    });
+    const store = createTestStore();
+    store.set(sidebarHiddenAtom, true);
+    store.set(windowTraitsAtom, traits);
+    return render(context, true, store, { top: 0, bottom: 20, left: 0, right: insetRight });
+  }
+
+  afterEach(() => {
+    act(() => {
+      Dimensions.set({
+        window: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+        screen: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+      });
+    });
+  });
+
+  it.each([
+    // The simulator reports the bar's own layout guide: buttons are centered at 394 + 24.
+    [
+      'the bar layout the system reports',
+      { ...CLOSED_DUO_TRAITS, verticalBarLayout: DUO_BAR_LAYOUT },
+      418,
+    ],
+    // Without it, the bar fills the 84pt safe-area column from 382.
+    ['the safe-area column', CLOSED_DUO_TRAITS, 382 + 42],
+  ])('centers Send on the closed Duo bar using %s', (_name, traits, barCenter) => {
+    const tree = renderIn(traits, { width: 466, height: 678 }, 84);
+
+    expect(actionColumnSlots(tree, 'composer-submit-slot')).not.toHaveLength(0);
+    expect(composerGeometry(tree, 466, 84)).toMatchObject({
+      actionCenter: barCenter,
+      // The input box keeps its 16pt inset from the composer's edge at the safe-area column.
+      inputEnd: 382 - 16,
+      rowAlignment: 'flex-end',
+    });
+    act(() => tree.unmount());
+  });
+
+  it.each([
+    [false, 0, 20],
+    [true, 320, 20],
+  ])(
+    'puts Send exactly where the bar reserves room with the keyboard visible: %s',
+    (keyboardVisible, composerOverlayInset, composerSafeAreaBottomInset) => {
+      act(() => {
+        Dimensions.set({
+          window: { width: 466, height: 678, scale: 3, fontScale: 1 },
+          screen: { width: 466, height: 678, scale: 3, fontScale: 1 },
+        });
+      });
+      const store = createTestStore();
+      store.set(windowTraitsAtom, { ...CLOSED_DUO_TRAITS, verticalBarLayout: DUO_BAR_LAYOUT });
+      store.set(keyboardVisibleAtom, keyboardVisible);
+      const tree = render(
+        baseContext({ draft: 'Ship it', composerOverlayInset, composerSafeAreaBottomInset }),
+        true,
+        store,
+        { top: 0, bottom: 20, left: 0, right: 84 },
+      );
+
+      expect(composerGeometry(tree, 466, 84).actionTopAboveBottom).toBe(
+        composerOverlayInset +
+          resolveComposerActionReach(Platform.OS, composerSafeAreaBottomInset, keyboardVisible),
+      );
+      act(() => tree.unmount());
+    },
+  );
+
+  it('moves Stop onto the bar while a turn runs', () => {
+    const tree = renderIn(
+      { ...CLOSED_DUO_TRAITS, verticalBarLayout: DUO_BAR_LAYOUT },
+      { width: 466, height: 678 },
+      84,
+      baseContext({
+        draft: '',
+        isTurnLoading: true,
+        selectedChat: {
+          id: 'chat-1',
+          title: 'Chat',
+          status: 'running',
+          createdAt: '2026-08-03T00:00:00.000Z',
+          updatedAt: '2026-08-03T00:00:00.000Z',
+          statusUpdatedAt: '2026-08-03T00:00:00.000Z',
+          lastMessagePreview: '',
+          messages: [],
+        },
+      }),
+    );
+
+    expect(actionColumnSlots(tree, 'composer-stop-slot')).not.toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it.each([
+    ['open landscape, where the composer is centered away from the bar', DUO_OPEN, 951, 669],
+    ['an unknown window', null, 466, 678],
+  ])('keeps Send inside the composer in %s', (_name, traits, width, height) => {
+    const tree = renderIn(traits, { width, height }, 84);
+    const composerEnd = width - 84 - Number(composerStyle(tree).marginRight);
+
+    expect(
+      root(tree).findAll((node) => node.props['testID'] === 'composer-action-column'),
+    ).toHaveLength(0);
+    expect(composerGeometry(tree, width, 84)).toMatchObject({
+      actionCenter: composerEnd - 16 - 24,
+      inputEnd: composerEnd - 16 - 48 - 8,
+    });
     act(() => tree.unmount());
   });
 });

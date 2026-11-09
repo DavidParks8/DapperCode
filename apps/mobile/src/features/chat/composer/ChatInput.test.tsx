@@ -6,7 +6,9 @@ import {
   StyleSheet,
   TextInput,
   View,
+  type StyleProp,
   type TextInputProps,
+  type ViewStyle,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -19,6 +21,8 @@ import {
 } from '@shared/testing/glassEffectMock';
 import { ChatInput } from './ChatInput';
 import { storeReviewComposerOwnersAtom } from '@shell/state/storeReview';
+
+jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 
 jest.mock('@expo/vector-icons', () => {
   const mockReact = jest.requireActual('react');
@@ -546,6 +550,87 @@ describe('ChatInput behavior', () => {
       left: 6,
     });
     expect(removeAttachment.props['hitSlop']).toBeDefined();
+    act(() => rendered.unmount());
+  });
+
+  it('moves Send and Stop into a column beyond the composer edge, still beside the input box', () => {
+    const hostStyle = (root: Queryable, predicate: (node: Queryable) => boolean) =>
+      StyleSheet.flatten(
+        root.findAll((node) => typeof node.type === 'string' && predicate(node))[0]?.props
+          .style as StyleProp<ViewStyle>,
+      ) ?? {};
+    // Horizontal positions relative to the composer's trailing edge, computed from the styles.
+    const geometry = (root: Queryable) => {
+      const shell = hostStyle(root, (node) => node.props['testID'] === 'chat-composer');
+      const container = hostStyle(
+        root,
+        (node) =>
+          typeof StyleSheet.flatten(node.props.style as StyleProp<ViewStyle>)?.paddingBottom ===
+          'number',
+      );
+      const group = hostStyle(root, (node) => node.props['testID'] === 'composer-control-groups');
+      const column = hostStyle(root, (node) => node.props['testID'] === 'composer-action-column');
+      const rowEnd =
+        -Number(shell.marginRight ?? 0) -
+        Number(container.paddingRight ?? container.paddingHorizontal);
+      const actionWidth = Number(column.width ?? 48);
+      return {
+        alignItems: group.alignItems,
+        actionStart: rowEnd - actionWidth,
+        actionEnd: rowEnd,
+        inputEnd: rowEnd - actionWidth - Number(group.gap),
+      };
+    };
+    const actionIn = (root: Queryable, slot: string) =>
+      root
+        .findAll((node) => node.props['testID'] === 'composer-control-groups')[0]
+        ?.findAll((node) => node.props['testID'] === 'composer-action-column')[0]
+        ?.findAll((node) => node.props['testID'] === slot) ?? [];
+    const view = (props: Partial<React.ComponentProps<typeof ChatInput>>) =>
+      wrap(
+        <ChatInput
+          {...base}
+          value="Ship it"
+          isLoading={false}
+          actionColumn={{ offset: 12, width: 48 }}
+          {...props}
+        />,
+      );
+    let tree: ReactTestRenderer | undefined;
+    act(() => {
+      tree = renderer.create(view({}));
+    });
+    const rendered = tree as ReactTestRenderer;
+    const root = rendered.root as Queryable;
+
+    // A 48pt bar 12pt past the composer's edge holds Send; the input box keeps its usual 16pt
+    // inset from that edge, and the row keeps Send level with the input box's bottom edge.
+    expect(geometry(root)).toEqual({
+      alignItems: 'flex-end',
+      actionStart: 12,
+      actionEnd: 60,
+      inputEnd: -16,
+    });
+    expect(actionIn(root, 'composer-submit-slot')).not.toHaveLength(0);
+    act(() => byLabel(root, 'Send message').props.onPress());
+    expect(base.onSubmit).toHaveBeenCalledTimes(1);
+
+    act(() => rendered.update(view({ value: '', isLoading: true, showStopButton: true })));
+    expect(actionIn(root, 'composer-stop-slot')).not.toHaveLength(0);
+    act(() => byLabel(root, 'Stop agent').props.onPress());
+    expect(base.onStop).toHaveBeenCalledTimes(1);
+
+    // Without a column, the action returns inside the composer's padding.
+    act(() => rendered.update(view({ actionColumn: null })));
+    expect(root.findAll((node) => node.props['testID'] === 'composer-action-column')).toHaveLength(
+      0,
+    );
+    expect(geometry(root)).toEqual({
+      alignItems: 'flex-end',
+      actionStart: -64,
+      actionEnd: -16,
+      inputEnd: -72,
+    });
     act(() => rendered.unmount());
   });
 });

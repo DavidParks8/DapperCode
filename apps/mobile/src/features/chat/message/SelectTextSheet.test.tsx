@@ -5,6 +5,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import { getDefaultStore } from 'jotai';
+import { keyboardFocusBlockersAtom } from '@shell/state/keyboard';
 import { SelectableTextSheet } from './SelectTextSheet';
 
 type QueryableInstance = Omit<ReactTestInstance, 'props' | 'children' | 'findAll'> & {
@@ -63,6 +65,15 @@ function invokeProp(node: QueryableInstance, name: string, ...args: unknown[]): 
 }
 
 describe('SelectableTextSheet', () => {
+  it('owns keyboard focus while open so the laptop composer cannot steal a selection', () => {
+    const blockers = () => getDefaultStore().get(keyboardFocusBlockersAtom).size;
+    expect(blockers()).toBe(0);
+    const tree = render(<SelectableTextSheet text="hello" onClose={() => {}} />);
+    expect(blockers()).toBe(1);
+    act(() => tree.unmount());
+    expect(blockers()).toBe(0);
+  });
+
   it('invokes onClose when the close button is pressed', () => {
     const onClose = jest.fn();
     const tree = render(<SelectableTextSheet text="hello" onClose={onClose} />);

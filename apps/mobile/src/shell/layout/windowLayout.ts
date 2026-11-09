@@ -52,16 +52,21 @@ export interface ShellLayout {
    * Where scene toolbar buttons go:
    * - `top`: the header row, as on most devices.
    * - `leading`/`trailing`: a vertical bar in that edge's safe-area column, where the system puts
-   *   its own bars (iPhone Duo closed, open in landscape, or one side of a split view).
-   * - `bottom`: above the composer, on the lower half of a device folded like a laptop.
+   *   its own bars (iPhone Duo closed, open in landscape, or one side of a split view), or a
+   *   trailing rail above the hinge of a device folded like a laptop.
    */
-  readonly toolbarPlacement: 'top' | 'leading' | 'trailing' | 'bottom';
+  readonly toolbarPlacement: 'top' | 'leading' | 'trailing';
   /** A hinge splitting the window into side-by-side pages; tappable controls should avoid it. */
   readonly fold: LayoutRect | null;
+  /** A hinge across a device folded like a laptop; the keyboard owns the lower half. */
+  readonly tabletopFold: LayoutRect | null;
 }
 
 /** Narrowest pane either side of a fold may leave before the fold is ignored for the split. */
 export const MIN_FOLD_PANE_WIDTH = 240;
+
+/** The app's own toolbar rail in laptop pose: a 48pt button with an 8pt gutter on each side. */
+export const LAPTOP_RAIL_WIDTH = 64;
 
 const SIZE_CLASSES: readonly SizeClass[] = ['compact', 'regular', 'unspecified'];
 
@@ -70,7 +75,8 @@ export function resolveShellLayout(
   traits: WindowTraits | null,
   sidebarHidden = false,
 ): ShellLayout {
-  const toolbarPlacement = resolveToolbarPlacement(window, traits);
+  const tabletopFold = findTabletopFold(window, traits);
+  const toolbarPlacement = resolveToolbarPlacement(traits, tabletopFold);
   const fold = traits?.divisions.find((division) => isPaneSplittingFold(division, window.width));
   if (fold) {
     // The chat matters most, so it keeps the full width. The session list waits behind the menu
@@ -81,6 +87,7 @@ export function resolveShellLayout(
       sidebarSpansWindow: false,
       toolbarPlacement,
       fold,
+      tabletopFold,
     };
   }
   // Docking needs real width on every platform; a compact size class can still veto it.
@@ -92,6 +99,7 @@ export function resolveShellLayout(
       sidebarSpansWindow: true,
       toolbarPlacement,
       fold: null,
+      tabletopFold,
     };
   }
   return {
@@ -100,20 +108,24 @@ export function resolveShellLayout(
     sidebarSpansWindow: false,
     toolbarPlacement,
     fold: null,
+    tabletopFold,
   };
 }
 
 function resolveToolbarPlacement(
-  window: WindowSize,
   traits: WindowTraits | null,
+  tabletopFold: LayoutRect | null,
 ): ShellLayout['toolbarPlacement'] {
   const edge = traits?.verticalBarEdge;
   if (edge === 'leading' || edge === 'trailing') {
     return edge;
   }
-  return traits?.divisions.some((division) => isTabletopFold(division, window.height))
-    ? 'bottom'
-    : 'top';
+  // Folded like a laptop the upper half is short and wide, so a side rail spends less of it.
+  return tabletopFold ? 'trailing' : 'top';
+}
+
+function findTabletopFold(window: WindowSize, traits: WindowTraits | null): LayoutRect | null {
+  return traits?.divisions.find((division) => isTabletopFold(division, window.height)) ?? null;
 }
 
 function isPaneSplittingFold(division: LayoutRect, windowWidth: number): boolean {
@@ -144,7 +156,8 @@ export const VERTICAL_BAR_SYSTEM_GAP = 8;
 
 /**
  * The column a vertical toolbar may occupy, in window points: the native bar region, falling back
- * to the safe-area inset, below whatever the system already shows at the top of that column.
+ * to the safe-area inset (or, folded like a laptop, the app's own rail ending at the hinge), below
+ * whatever the system already shows at the top of that column.
  */
 export function resolveVerticalBarFrame(
   window: WindowSize,
@@ -155,11 +168,11 @@ export function resolveVerticalBarFrame(
   const { verticalBarLayout, statusBar, occlusions } = traits ?? {};
   const region =
     verticalBarLayout && fitsWindow(verticalBarLayout, window) ? verticalBarLayout : null;
-  const width = region?.width ?? (edge === 'trailing' ? insets.right : insets.left);
+  const hinge = findTabletopFold(window, traits);
+  const { x, width } = region ?? resolveBarColumn(window.width, insets, edge, hinge !== null);
   if (width <= 0) {
     return null;
   }
-  const x = region?.x ?? (edge === 'trailing' ? window.width - width : 0);
   const systemItems = [statusBar, ...(occlusions ?? [])].filter(
     (item): item is LayoutRect =>
       item !== undefined && item !== null && item.x < x + width && item.x + item.width > x,
@@ -172,8 +185,25 @@ export function resolveVerticalBarFrame(
   const bottom = Math.min(
     window.height - insets.bottom,
     region ? region.y + region.height : window.height,
+    hinge ? hinge.y : window.height,
   );
   return bottom > top ? { x, y: top, width, height: bottom - top } : null;
+}
+
+/**
+ * The bar's column without a native region: the side safe-area inset, or, folded like a laptop
+ * where the system keeps its bars horizontal, the app's own rail just inside that inset.
+ */
+function resolveBarColumn(
+  windowWidth: number,
+  insets: EdgeInsets,
+  edge: 'leading' | 'trailing',
+  appRail: boolean,
+): { readonly x: number; readonly width: number } {
+  const sideInset = edge === 'trailing' ? insets.right : insets.left;
+  const width = appRail ? LAPTOP_RAIL_WIDTH : sideInset;
+  const offset = appRail ? sideInset : 0;
+  return { x: edge === 'trailing' ? windowWidth - offset - width : offset, width };
 }
 
 function fitsWindow(rect: LayoutRect, window: WindowSize): boolean {

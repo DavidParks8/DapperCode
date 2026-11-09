@@ -1,7 +1,12 @@
+import { useAtomValue } from 'jotai';
 import type { ComponentProps } from 'react';
+import { Platform } from 'react-native';
 
 import { SceneVerticalToolbar, type SceneToolbarItem } from '@shell/layout/SceneToolbar';
+import { useTrailingActionRail } from '@shell/layout/useShellLayout';
 import { useNavigationToggleLabel } from '@shell/state/drawer/atoms';
+import { resolveComposerActionReach } from '../composer/inputLayout';
+import { keyboardVisibleAtom } from '../state/composer';
 import type { ChatHeader } from './ChatHeader';
 import type {
   MainScreenPanelCollapseCoordinatorContext,
@@ -12,8 +17,23 @@ type Context = MainScreenPanelCollapseCoordinatorContext & MainScreenPanelCollap
 
 /** The chat header's buttons, laid out vertically when the system puts its bars on a side. */
 export function ChatSceneToolbar({ context }: { context: Context }) {
-  const { onOpenDrawer, selectedChat, openTitleEditor, handleOpenGit } = context;
+  const {
+    onOpenDrawer,
+    selectedChat,
+    openTitleEditor,
+    handleOpenGit,
+    shouldShowComposer,
+    composerOverlayInset,
+    composerSafeAreaBottomInset,
+  } = context;
   const navigationLabel = useNavigationToggleLabel();
+  const keyboardVisible = useAtomValue(keyboardVisibleAtom);
+  // The composer's Send button sits at the bottom of a trailing bar, following the composer.
+  const sendInRail = useTrailingActionRail() !== null && shouldShowComposer;
+  const reservedBottom = sendInRail
+    ? composerOverlayInset +
+      resolveComposerActionReach(Platform.OS, composerSafeAreaBottomInset, keyboardVisible)
+    : 0;
   const items: SceneToolbarItem[] = [];
   if (onOpenDrawer) {
     items.push({
@@ -43,7 +63,7 @@ export function ChatSceneToolbar({ context }: { context: Context }) {
       },
     );
   }
-  return <SceneVerticalToolbar items={items} />;
+  return <SceneVerticalToolbar items={items} reservedBottom={reservedBottom} />;
 }
 
 /** The header shows its buttons only while bars are horizontal; otherwise the side bar does. */

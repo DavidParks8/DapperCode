@@ -1,5 +1,7 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import React from 'react';
+import { getDefaultStore } from 'jotai';
+import { keyboardFocusBlockersAtom } from '@shell/state/keyboard';
 import { Keyboard, Platform } from 'react-native';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import * as DocumentPicker from 'expo-document-picker';
@@ -112,6 +114,26 @@ async function runAction(
 }
 
 describe('attachmentController', () => {
+  it('keeps composer focus blocked from a menu action until the native picker closes', async () => {
+    const selection = deferred<{ canceled: boolean; assets: [] }>();
+    documentPicker.mockReturnValue(selection.promise);
+    const harness = makeHarness();
+    await harness.mount();
+    const blockers = () => getDefaultStore().get(keyboardFocusBlockersAtom).size;
+    expect(blockers()).toBe(0);
+    act(() => harness.current.requestMenuAction('phone-file'));
+    expect(blockers()).toBe(1);
+    await act(async () => {
+      jest.advanceTimersByTime(180);
+    });
+    expect(documentPicker).toHaveBeenCalledTimes(1);
+    expect(blockers()).toBe(1);
+    await act(async () => selection.resolve({ canceled: true, assets: [] }));
+    expect(blockers()).toBe(0);
+    harness.unmount();
+    expect(blockers()).toBe(0);
+  });
+
   it('normalizes and deduplicates attachment paths case-insensitively', () => {
     expect(addUniqueAttachmentPath(['/repo/File.ts'], ' /repo/file.ts ')).toEqual([
       '/repo/File.ts',

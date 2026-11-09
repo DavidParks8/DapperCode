@@ -1,10 +1,14 @@
 import React from 'react';
-import { StyleSheet } from 'react-native';
+import { Provider, createStore } from 'jotai';
+import { Dimensions, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { Chat } from '@bridge/types/types';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
+import { LAPTOP_RAIL_WIDTH } from '@shell/layout/windowLayout';
+import { windowTraitsAtom } from '@shell/state/layout/atoms';
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import {
   getRenderedGlassViewProps,
@@ -12,6 +16,7 @@ import {
   setMockLiquidGlassAvailable,
 } from '@shared/testing/glassEffectMock';
 import { formatCompactTokenCount, MainScreenHeaderAndWorkflow } from './HeaderAndWorkflow';
+import { ChatSceneToolbar } from './chatToolbar';
 import { SESSION_META_CHIP_HEIGHT } from '../styles/sessionMetaChip';
 import type {
   MainScreenPanelCollapseCoordinatorContext,
@@ -151,6 +156,82 @@ function invokeProp(node: QueryableInstance, name: string, ...args: unknown[]): 
   }
   return callback(...args);
 }
+
+describe('MainScreenHeaderAndWorkflow in laptop pose', () => {
+  const laptop = {
+    horizontalSizeClass: 'regular' as const,
+    verticalSizeClass: 'regular' as const,
+    divisions: [{ x: 0, y: 455.5, width: 669, height: 40 }],
+  };
+
+  afterEach(() => {
+    act(() => {
+      Dimensions.set({
+        window: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+        screen: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+      });
+    });
+  });
+
+  it('stands the header buttons up on a trailing rail above the hinge and lays them back down flat', () => {
+    act(() => {
+      Dimensions.set({
+        window: { width: 669, height: 951, scale: 3, fontScale: 1 },
+        screen: { width: 466, height: 678, scale: 3, fontScale: 1 },
+      });
+    });
+    const store = createStore();
+    store.set(windowTraitsAtom, laptop);
+    const context = baseContext();
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 669, height: 951 },
+            insets: { top: 82, left: 0, right: 0, bottom: 20 },
+          }}
+        >
+          <Provider store={store}>
+            <AppThemeProvider theme={theme}>
+              <MainScreenHeaderAndWorkflow context={context} />
+              <ChatSceneToolbar context={context} />
+            </AppThemeProvider>
+          </Provider>
+        </SafeAreaProvider>,
+      );
+    });
+    const root = queryRoot(tree);
+    const container = (testID: string) =>
+      root.findAll((node) => node.props['testID'] === testID && typeof node.type !== 'string')[0];
+    const buttonsIn = (testID: string) =>
+      container(testID)
+        ?.findAll((node) => node.type === CircularToolbarButton)
+        .map((button) => button.props['accessibilityLabel']) ?? [];
+    const headerButtons = ['Open navigation drawer', 'Edit session title', 'Open Git'];
+
+    expect(buttonsIn('chat-header-row')).toEqual([]);
+    expect(buttonsIn('scene-vertical-toolbar')).toEqual(headerButtons);
+    const rail = StyleSheet.flatten(container('scene-vertical-toolbar')?.props['style']) as {
+      top: number;
+      height: number;
+    };
+    expect(rail).toMatchObject({ top: 82, right: 0, width: LAPTOP_RAIL_WIDTH });
+    expect(rail.top + rail.height).toBe(laptop.divisions[0]!.y);
+    // The title and selectors keep clear of the rail instead of running under it.
+    expect(StyleSheet.flatten(container('session-meta-row')?.props['style'])).toMatchObject({
+      paddingRight: LAPTOP_RAIL_WIDTH,
+    });
+
+    act(() => store.set(windowTraitsAtom, { ...laptop, divisions: [] }));
+    expect(container('scene-vertical-toolbar')).toBeUndefined();
+    expect(buttonsIn('chat-header-row')).toEqual(headerButtons);
+    expect(StyleSheet.flatten(container('session-meta-row')?.props['style'])).toMatchObject({
+      paddingRight: 0,
+    });
+    act(() => tree.unmount());
+  });
+});
 
 describe('MainScreenHeaderAndWorkflow session meta chips', () => {
   beforeEach(() => {

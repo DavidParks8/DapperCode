@@ -34,8 +34,9 @@ export const VERTICAL_TOOLBAR_GAP = 12;
 const OVERFLOW_LABEL = 'More';
 
 /**
- * Whether a header shows its own toolbar buttons. When the system lays bars out vertically, the
- * buttons move to `SceneVerticalToolbar` and the header keeps only text, which stays horizontal.
+ * Whether a header shows its own toolbar buttons. When the system lays bars out vertically, or the
+ * device is folded like a laptop, the buttons move to `SceneVerticalToolbar` and the header keeps
+ * only text, which stays horizontal.
  */
 export function useInlineToolbar(): boolean {
   return useVerticalBarFrame() === null;
@@ -78,18 +79,35 @@ export function partitionToolbarItems(
 /**
  * Renders a scene's toolbar items as a vertical bar in the safe-area column where the system puts
  * its own bars, below the status bar. Renders nothing while bars are horizontal.
+ *
+ * `reservedBottom` is the window-space height, measured up from the bottom, of a control another
+ * surface places in this column, such as the composer's Send button. The bar ends a gap above it,
+ * so items overflow into the menu instead of overlapping that control.
  */
-export function SceneVerticalToolbar({ items }: { items: readonly SceneToolbarItem[] }) {
+export function SceneVerticalToolbar({
+  items,
+  reservedBottom = 0,
+}: {
+  items: readonly SceneToolbarItem[];
+  reservedBottom?: number;
+}) {
   const frame = useVerticalBarFrame();
   const placement = useToolbarPlacement();
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const theme = useAppTheme();
   const [overflowVisible, setOverflowVisible] = useState(false);
   if (!frame || items.length === 0) {
     return null;
   }
+  const height =
+    reservedBottom > 0
+      ? Math.max(
+          0,
+          Math.min(frame.height, windowHeight - reservedBottom - VERTICAL_TOOLBAR_GAP - frame.y),
+        )
+      : frame.height;
   const slot = CIRCULAR_TOOLBAR_BUTTON_SIZE + VERTICAL_TOOLBAR_GAP;
-  const capacity = Math.floor((frame.height + VERTICAL_TOOLBAR_GAP) / slot);
+  const capacity = Math.floor((height + VERTICAL_TOOLBAR_GAP) / slot);
   const { visible, overflow } = partitionToolbarItems(items, capacity);
   const renderButton = (item: SceneToolbarItem) => (
     <GlassSurface
@@ -126,7 +144,7 @@ export function SceneVerticalToolbar({ items }: { items: readonly SceneToolbarIt
       style={{
         position: 'absolute',
         top: frame.y,
-        height: frame.height,
+        height,
         width: frame.width,
         [placement === 'leading' ? 'left' : 'right']:
           placement === 'leading' ? frame.x : windowWidth - frame.x - frame.width,

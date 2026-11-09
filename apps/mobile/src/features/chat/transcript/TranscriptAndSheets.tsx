@@ -7,12 +7,10 @@ import {
 import { loadingAgentThreadsAtom } from '../../workspace/state/workspace';
 import { keyboardVisibleAtom, topChromeHeightAtom } from '../state/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useCallback, useContext } from 'react';
+import { useCallback } from 'react';
 import { Platform, View } from 'react-native';
-import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import { SelectionSheet } from '@shared/ui/SelectionSheet';
 import { useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
-import { useToolbarPlacement } from '@shell/layout/SceneToolbar';
 import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscriptView';
 import { ComposeView } from '../screen/Presentation';
 import { useNewChatReadiness } from '../screen/newChatReadiness';
@@ -280,10 +278,8 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
   const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);
   const usesOverlayComposer = Platform.OS === 'android' || Platform.OS === 'ios';
   const sceneInsets = useSceneHorizontalInsets();
-  const { contentTopInset, contentBottomInset } = useTranscriptInsets(
-    usesOverlayComposer ? composerReservedInset : 0,
-    topChromeHeight,
-  );
+  const contentTopInset = topChromeHeight;
+  const contentBottomInset = usesOverlayComposer ? composerReservedInset : 0;
   const contentProps: BodyContentProps = {
     selectedChat,
     isOpeningChat,
@@ -354,19 +350,4 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
       />
     </>
   );
-}
-
-/**
- * When the chrome sits above the composer (laptop pose), its measured height moves from the top
- * inset to the bottom one so the transcript never scrolls under it.
- */
-function useTranscriptInsets(
-  composerInset: number,
-  chromeHeight: number,
-): { contentTopInset: number; contentBottomInset: number } {
-  const safeAreaTop = useContext(SafeAreaInsetsContext)?.top ?? 0;
-  const chromeAtBottom = useToolbarPlacement() === 'bottom';
-  return chromeAtBottom
-    ? { contentTopInset: safeAreaTop, contentBottomInset: composerInset + chromeHeight }
-    : { contentTopInset: chromeHeight, contentBottomInset: composerInset };
 }

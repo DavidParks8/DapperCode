@@ -2,6 +2,7 @@ import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { Drawer, type DrawerContentComponentProps, useDrawerStatus } from 'expo-router/drawer';
 import { router, usePathname } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { Keyboard } from 'react-native';
 
 import type { ShellLayout } from '@shell/layout/windowLayout';
 import { useShellLayout } from '@shell/layout/useShellLayout';
@@ -12,6 +13,7 @@ import { activeProfileIdAtom, apiClientAtom, wsClientAtom } from '@shell/state/b
 import { drawerCommandsAtom, OPEN_NAVIGATION_LABEL } from '@shell/state/drawer/atoms';
 import { useAppTheme } from '@shared/theme';
 import { routes } from '@shell/navigation/routes';
+import { useKeyboardFocusBlocker } from '@shell/state/keyboard';
 
 export const unstable_settings = {
   anchor: 'chats/[chatId]',
@@ -51,6 +53,14 @@ function RouterDrawerContent({
   sidebarMode,
 }: DrawerContentComponentProps & { sidebarMode: ShellLayout['sidebarMode'] }) {
   const drawerStatus = useDrawerStatus();
+  const coversChat = sidebarMode === 'overlay' && drawerStatus === 'open';
+  useKeyboardFocusBlocker(coversChat);
+  // The keyboard would hide the bottom of the session list, as it does in laptop pose.
+  useEffect(() => {
+    if (coversChat) {
+      Keyboard.dismiss();
+    }
+  }, [coversChat]);
   const activeProfileId = useAtomValue(activeProfileIdAtom);
   const api = useAtomValue(apiClientAtom);
   const ws = useAtomValue(wsClientAtom);

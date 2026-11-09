@@ -6,7 +6,7 @@ import {
   type BottomSheetBackdropProps,
   type BottomSheetBackgroundProps,
 } from '@gorhom/bottom-sheet';
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Keyboard, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -21,6 +21,7 @@ import {
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { useAppTheme, type AppTheme } from '@shared/theme';
 import { useSheetMargins } from '@shell/layout/useShellLayout';
+import { useKeyboardFocusBlocker } from '@shell/state/keyboard';
 
 export interface AppSheetProps {
   visible: boolean;
@@ -90,6 +91,8 @@ export function AppSheet({
   );
   const visibleRef = useRef(visible);
   const presentedRef = useRef(false);
+  const [presented, setPresented] = useState(false);
+  useKeyboardFocusBlocker(visible || presented);
   visibleRef.current = visible;
 
   useEffect(() => {
@@ -105,6 +108,7 @@ export function AppSheet({
             return;
           }
           presentedRef.current = true;
+          setPresented(true);
           sheetRef.current?.present();
         };
 
@@ -146,6 +150,7 @@ export function AppSheet({
   const handleDismiss = useCallback(() => {
     const wasPresented = presentedRef.current;
     presentedRef.current = false;
+    setPresented(false);
     if (wasPresented && visibleRef.current) {
       onClose();
     }

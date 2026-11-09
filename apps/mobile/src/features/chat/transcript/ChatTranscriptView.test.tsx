@@ -1735,6 +1735,32 @@ describe('ChatTranscriptView continuation', () => {
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalOS });
   });
 
+  it('preserves the keyboard while browsing in laptop mode and restores normal dismissal when flat', () => {
+    const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+    const tree = render();
+    const store = getDefaultStore();
+    act(() => {
+      store.set(windowTraitsAtom, {
+        horizontalSizeClass: 'regular',
+        verticalSizeClass: 'regular',
+        divisions: [{ x: 0, y: 455.5, width: 669, height: 40 }],
+      });
+    });
+    expect(getList(tree).props['keyboardDismissMode']).toBe('none');
+    expect(getList(tree).props['keyboardShouldPersistTaps']).toBe('always');
+    act(() => getList(tree).props.onScrollBeginDrag());
+    act(() => getList(tree).props.onScrollEndDrag());
+    expect(dismiss).not.toHaveBeenCalled();
+
+    act(() => store.set(windowTraitsAtom, null));
+    expect(getList(tree).props['keyboardDismissMode']).toBe('interactive');
+    expect(getList(tree).props['keyboardShouldPersistTaps']).toBe('handled');
+    act(() => getList(tree).props.onScrollBeginDrag());
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    act(() => tree.unmount());
+    dismiss.mockRestore();
+  });
+
   it('applies a measured top inset after the memoized transcript has mounted', () => {
     const tree = render({ topInset: 24 });
     expect(getList(tree).props.contentContainerStyle[1]).toEqual({

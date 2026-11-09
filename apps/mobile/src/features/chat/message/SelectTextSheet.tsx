@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { useAppTheme } from '@shared/theme';
 import { computeHitSlop } from '@shared/ui/touchTarget';
+import { useKeyboardFocusBlocker } from '@shell/state/keyboard';
 import { createStyles } from './styles';
 
 const CLOSE_BUTTON_VISIBLE_SIZE = { width: 32, height: 32 };
@@ -30,6 +31,9 @@ export function SelectableTextSheet({
   const styles = useMemo(() => createStyles(theme), [theme]);
   const insets = useSafeAreaInsets();
   const closeHitSlop = useMemo(() => computeHitSlop(CLOSE_BUTTON_VISIBLE_SIZE), []);
+  // Selecting text makes this read-only input first responder; the laptop composer must not take
+  // focus back from it.
+  useKeyboardFocusBlocker(true);
 
   return (
     <Modal

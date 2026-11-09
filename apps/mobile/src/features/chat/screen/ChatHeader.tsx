@@ -168,6 +168,7 @@ function ScrollableTitle({ title }: { title: string }) {
         bounces={false}
         scrollEnabled
         showsHorizontalScrollIndicator={false}
+        keyboardShouldPersistTaps="always"
         contentContainerStyle={styles.titleScrollContent}
         accessibilityLabel={title}
         onLayout={overflow.onLayout}

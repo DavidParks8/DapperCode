@@ -7,9 +7,13 @@ import {
 } from '../state/composer';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useMemo, type ComponentProps } from 'react';
-import { useSceneContentInsets, useSceneHorizontalInsets } from '@shell/layout/useShellLayout';
+import {
+  useSceneContentInsets,
+  useSceneHorizontalInsets,
+  useTrailingActionRail,
+} from '@shell/layout/useShellLayout';
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, Text, View, type LayoutChangeEvent } from 'react-native';
+import { Pressable, Text, View, useWindowDimensions, type LayoutChangeEvent } from 'react-native';
 import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
 import { ApprovalBanner } from '../approvals/ApprovalBanner';
 import { BridgeUiBanner } from '../approvals/BridgeUiSurface';
@@ -102,6 +106,17 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
           marginLeft: contentInsets.readable + centeringOffset,
           marginRight: contentInsets.readable - centeringOffset,
         };
+  // Send moves onto a trailing bar, lined up with the bar's buttons. The scene ends at the window's
+  // trailing edge, so the composer ends where the scene's padding and its own margin begin.
+  const { width: windowWidth } = useWindowDimensions();
+  const actionRail = useTrailingActionRail();
+  const actionColumn = actionRail
+    ? {
+        offset:
+          actionRail.x - (windowWidth - sceneInsets.paddingRight - composerMargins.marginRight),
+        width: actionRail.width,
+      }
+    : null;
   const bridgeRecoveryBannerButtonHitSlop = useMemo(
     () => computeHitSlop({ width: 160, height: 32 }),
     [],
@@ -234,6 +249,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         keyboardVisible={keyboardVisible}
         reserveFooterSpace={false}
         footer={null}
+        actionColumn={actionColumn}
       />
     </View>
   );

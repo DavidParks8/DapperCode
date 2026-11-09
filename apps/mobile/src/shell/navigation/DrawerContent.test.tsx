@@ -31,6 +31,7 @@ import { apiClientAtom, wsClientAtom } from '@shell/state/bridge/atoms';
 import { selectedChatIdAtom } from '@shell/state/chat/atoms';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { windowTraitsAtom } from '@shell/state/layout/atoms';
+import { LAPTOP_RAIL_WIDTH } from '@shell/layout/windowLayout';
 import { createBridgeTestStore, withAppStore } from '@shell/state/testing';
 import { appStateSnapshotAtom } from '@shell/state/appState/atoms';
 import { localProfileAvailableAtom } from '@shell/state/bridge/atoms';
@@ -555,6 +556,56 @@ describe('DrawerContent vertical menu rail', () => {
       expect(findByLabel(root, 'New chat')).toBeDefined();
       expect(findByLabel(root, 'Open settings')).toBeDefined();
     }
+    act(() => tree.unmount());
+  });
+
+  it('moves the full-window menu onto the app rail in laptop pose and pads clear of it', async () => {
+    const harness = createHarness({ chats: [createChat()] });
+    const store = createDrawerStore(harness.api, harness.ws);
+    const laptop = {
+      horizontalSizeClass: 'regular' as const,
+      verticalSizeClass: 'regular' as const,
+      divisions: [{ x: 0, y: 455.5, width: 669, height: 40 }],
+    };
+    act(() => {
+      Dimensions.set({
+        window: { width: 669, height: 951, scale: 3, fontScale: 1 },
+        screen: { width: 466, height: 678, scale: 3, fontScale: 1 },
+      });
+    });
+    store.set(windowTraitsAtom, laptop);
+    const tree = await renderDrawer(
+      harness,
+      { store, onClose: jest.fn() },
+      {
+        frame: { x: 0, y: 0, width: 669, height: 951 },
+        insets: { top: 82, left: 0, right: 0, bottom: 20 },
+      },
+    );
+    const root = tree.root as Queryable;
+    const safeAreaPadding = () => {
+      const safeArea = root.findAll(
+        (node) => node.props['testID'] === 'drawer-safe-area' && typeof node.type !== 'string',
+      )[0];
+      const style = StyleSheet.flatten(safeArea?.props['style'] as StyleProp<ViewStyle>);
+      return { left: style?.paddingLeft ?? 0, right: style?.paddingRight ?? 0 };
+    };
+
+    expect(railButtons(tree).map((button) => button.props['accessibilityLabel'])).toEqual([
+      'Close session list',
+      'Select sessions',
+      'New chat',
+      'Open settings',
+    ]);
+    // Insets are additive on the safe area, so this is exactly the rail the system did not reserve.
+    expect(safeAreaPadding()).toEqual({ left: 0, right: LAPTOP_RAIL_WIDTH });
+
+    // Unfolded flat in portrait the bars are horizontal again and the extra room goes away.
+    act(() => store.set(windowTraitsAtom, { ...laptop, divisions: [] }));
+    expect(root.findAll((node) => node.props['testID'] === 'scene-vertical-toolbar')).toHaveLength(
+      0,
+    );
+    expect(safeAreaPadding()).toEqual({ left: 0, right: 0 });
     act(() => tree.unmount());
   });
 });

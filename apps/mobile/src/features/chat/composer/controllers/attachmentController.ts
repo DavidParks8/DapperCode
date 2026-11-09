@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Keyboard } from 'react-native';
+import { useKeyboardFocusBlocker } from '@shell/state/keyboard';
 
 import type { HostBridgeApiClient } from '@bridge/client/client';
 import type { Chat, LocalImageInput, MentionInput } from '@bridge/types/types';
@@ -135,6 +136,7 @@ export function useAttachmentController({
     removePreparedAttachment,
     uploading,
   } = useAttachmentUploadController({ api, chat, scopeKey, addImage, addMention, setError });
+  useKeyboardFocusBlocker(pickerBusy || pendingAction !== null);
 
   const openPathModal = useCallback(() => {
     if (pickerInProgressRef.current) {

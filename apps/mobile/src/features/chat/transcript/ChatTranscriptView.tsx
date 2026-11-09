@@ -1,7 +1,6 @@
 import { memo, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
-  Platform,
   type ListRenderItem,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -122,7 +121,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
   activity = null,
 }: ChatTranscriptViewProps) {
   const theme = useAppTheme();
-  const { sidebarMode } = useShellLayout();
+  const { sidebarMode, tabletopFold } = useShellLayout();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const { activityVisible, updateActivityVisibility, updateVisibleItems, visibleItemIds } =
@@ -397,6 +396,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
     onReachStart: handleRailReachStart,
   });
   const timestampReveal = useMessageTimestampReveal(rail.gesture);
+  const keepKeyboardOpen = tabletopFold !== null;
   const { isInteracting, ...scrollInteraction } = useTranscriptScrollInteraction(
     chat.id,
     autoScrollStateRef,
@@ -404,6 +404,7 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
       railJumpControllerRef.current?.cancel();
       onScrollInteractionStart();
     },
+    keepKeyboardOpen,
   );
 
   useEffect(() => {
@@ -508,8 +509,6 @@ export const ChatTranscriptView = memo(function ChatTranscriptView({
           inverted
           scrollEnabled={rail.scrollEnabled}
           showsVerticalScrollIndicator={false}
-          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-          keyboardShouldPersistTaps="handled"
           {...scrollInteraction}
           onScroll={handleScroll}
           scrollEventThrottle={32}
