@@ -57,6 +57,71 @@ local or desktop, is restored at startup. Builds that stored the old global "On 
 open the local profile instead. Switching to another profile settles local work and unloads its
 model.
 
+## Local formatting and code intelligence
+
+The local model can call `code_diagnostics`, `code_definitions`, `code_references`, and
+`code_symbols` for JavaScript/JSX and TypeScript/TSX (`.js`, `.jsx`, `.ts`, `.tsx`, `.mjs`,
+`.cjs`, `.mts`, `.cts`, including declaration files). These use the **real TypeScript 6
+LanguageService in-process**, not text matching, a remote service, or an LSP protocol/server.
+iOS does not launch arbitrary external language-server subprocesses.
+
+Each request reads a fresh, bounded native workspace snapshot. Definitions and references follow
+relative imports between snapshot files; results include workspace-relative paths, file revisions,
+and 1-based line/UTF-16 column ranges. References include declarations. Navigation returns workspace
+locations only, not bundled standard-library definitions. The initial compiler settings are strict
+ES2022, checked JavaScript, and preserved JSX, with bundled ES2022 standard-library declarations.
+Workspace `tsconfig.json`, package metadata, installed package types, automatic type acquisition,
+and Node/DOM/React ambient types are **not loaded**. Unresolved imports/types appear as diagnostics;
+an empty diagnostic list is not proof that the project's normal build or tests pass.
+
+Call `format_file` explicitly after edits (including patches) to format **one** file. It uses
+bundled Prettier 3 standalone with its TypeScript/Babel/ESTree plugins for the source extensions
+above and a distinct JSON parser for `.json`. No workspace configuration, plugins, or embedded
+language formatting are executed. This is intentionally not an automatic write/patch hook.
+Other languages reject explicitly. Syntax errors reject without writes; already-formatted files
+are not rewritten. Formatting uses the read revision for native compare-and-swap and, within a
+turn, also checks the runtime's previously observed revision. Conflicts require a fresh read;
+formatting never silently retries over a user's concurrent edit.
+
+Source limits are 64 KiB per UTF-8 file, 64 source files/512 KiB total, 512 visited directory
+entries, 12 directory levels, and 256-character relative paths. Symbolic links are never followed;
+`.git`, `node_modules`, `.expo`, `dist`, `build`, and `Pods` directories are excluded. Exceeding a
+project budget is an error, not a misleading partial-project success. Results are capped at 40
+entries/8,192 serialized characters with `truncated`; diagnostic messages are individually bounded.
+Formatting also caps output at 64 KiB UTF-8, so a successful format stays within the next read's
+budget. A five-second **cooperative** deadline and the run's
+abort signal are checked between native calls and compiler checkpoints. Stop/background cancellation
+prevents subsequent formatting writes; an already-admitted native atomic write is not rolled back.
+Synchronous parser/compiler work occupies the JS thread until a checkpoint returns, so this is not
+a hard real-time limit. Retry builds a new snapshot; no language-service cache survives the call.
+
+No source is uploaded, no shell/interpreter/JIT is used, no host filesystem resolver is available,
+and no app metadata is written into the workspace. Native workspace API/schema versions are unchanged.
+The build-time `intelligence:prepare` step bundles the installed TypeScript compiler and standard
+libraries for browsers with Node-host detection compiled out; runtime calls provide an explicit
+memory-only language-service host. The generated compiler is about **4.04 MB of minified JavaScript**
+before Hermes bytecode/package compression, plus Prettier and its three parser/printer plugins.
+These are real runtime dependencies, not free native OS services; they increase download size and
+first-use/transient AST memory costs. Compiler/parser modules are evaluated lazily on the first
+code-tool call. Generated code is ignored, reproduced at install/start/build/test,
+and does not replace or modify vendor files.
+
+Validation commands:
+
+```bash
+pnpm --filter @dappercode/mobile run intelligence:check
+pnpm --filter @dappercode/mobile exec jest --runInBand src/features/on-device/code-intelligence/tools.test.ts src/features/on-device/runtime/localTools.test.ts
+pnpm --filter @dappercode/mobile run build --max-workers 2
+```
+
+The first (also run by the mobile test/coverage preflight) runs actual compiler/formatter operations
+in a browser sandbox without Node globals,
+filesystem/network imports, or dynamic code generation. Native-memory regression fixtures cover
+cross-file lookup, edits and fresh diagnostics, parser errors, formatting idempotence/conflicts,
+containment, resource budgets, cancellation, and registry routing. Expo export additionally compiles
+the production iOS/Android bundles with Hermes; this is not a claim of simulator/device performance
+measurement.
+
 ## Web access
 
 Every local chat includes `web_search` and `web_fetch` by default, alongside the file and Git tools.

@@ -9,12 +9,15 @@ import { executeWebFetch, WEB_TOOL_DEFINITIONS } from './webFetch';
 import { executeWebSearch, SEARCH_TOOL_DEFINITIONS } from './webSearch';
 import { LocalToolInputError } from './toolArguments';
 import { isRecord } from '@shared/records';
+import { CODE_TOOL_DEFINITIONS, isCodeTool } from '../code-intelligence/definitions';
+import type * as CodeTools from '../code-intelligence/tools';
 
 const LOCAL_TOOLS = [
   ...FILE_TOOL_DEFINITIONS,
   ...GIT_TOOL_DEFINITIONS,
   ...WEB_TOOL_DEFINITIONS,
   ...SEARCH_TOOL_DEFINITIONS,
+  ...CODE_TOOL_DEFINITIONS,
 ];
 const TOOL_REGISTRY = new Map<string, (typeof LOCAL_TOOLS)[number]>(
   LOCAL_TOOLS.map((tool) => [tool.definition.function.name, tool]),
@@ -74,7 +77,7 @@ export function localToolExecutor(
       requireNetwork('search the web');
       return executeWebSearch(input, signal);
     }
-    if (isFileTool(name)) {
+    if (isFileTool(name) || isCodeTool(name)) {
       let versions: Map<string, string> | undefined;
       if (signal) {
         let workspaces = observed.get(signal);
@@ -91,7 +94,16 @@ export function localToolExecutor(
       const args = isRecord(input) ? input : null;
       const path = typeof args?.['path'] === 'string' ? args['path'] : null;
       const revision = path === null ? undefined : versions?.get(path);
-      return executeFileTool(workspace, name, input, native, revision).then((result) => {
+      let resultPromise: Promise<unknown>;
+      if (isCodeTool(name)) {
+        // Metro's local module loader defers the compiler/parsers until the first code-tool call.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const code = require('../code-intelligence/tools') as typeof CodeTools;
+        resultPromise = code.executeCodeTool(workspace, name, input, native, signal, revision);
+      } else {
+        resultPromise = executeFileTool(workspace, name, input, native, revision);
+      }
+      return resultPromise.then((result) => {
         if (name === 'search_files') {
           return withEmptySearchNote(result);
         }
