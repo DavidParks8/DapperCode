@@ -8,3 +8,4 @@ apps/mobile/ios/
 apps/mobile/android/
 apps/mobile/local-builds/
 apps/mobile/expo-env.d.ts
+apps/mobile/src/features/on-device/code-intelligence/generated/compiler.js

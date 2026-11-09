@@ -1,7 +1,34 @@
-/**
- * Like opencode's doom-loop check: the same call this many times in a row is not run, and one more
- * repeat ends the turn.
- */
+import type { LocalModelReply } from '../models/engine';
+import { randomUUID } from 'expo-crypto';
+import type { LocalAgentRun, LocalToolCall } from './types';
+
+export class LocalStepLimit extends Error {}
+
+export function interruptLocalRun<T>(run: LocalAgentRun, work: Promise<T>): Promise<T> {
+  work.catch(() => undefined);
+  return Promise.race([work, run.interrupt]);
+}
+
+export function localReplyToolCalls(reply: LocalModelReply): LocalToolCall[] {
+  return (reply.tool_calls ?? []).map((call) => ({
+    id: randomUUID(),
+    type: 'function',
+    function: { name: call.function.name, arguments: call.function.arguments },
+  }));
+}
+
+export function requireLocalAnswer(reply: LocalModelReply): void {
+  if (reply.truncated || reply.stopped_limit) {
+    throw new LocalStepLimit(
+      'The local model reached its output limit. Review the partial response and continue explicitly.',
+    );
+  }
+  if (!reply.content?.trim()) {
+    throw new Error('The model returned neither an answer nor a tool call.');
+  }
+}
+
+/** The third identical consecutive call is not run; a further repeat ends the turn. */
 export const REPEATED_TOOL_CALL_LIMIT = 3;
 
 export function repeatedToolCallError(name: string): string {

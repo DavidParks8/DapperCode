@@ -290,6 +290,12 @@ export function messageJournalEntries(message: LocalMessage): string[] {
   for (const call of message.toolCalls ?? []) {
     entries.push(`call:${call.id}`);
   }
+  for (const child of message.children ?? []) {
+    entries.push(`child:${child.id}`);
+    for (const entry of child.messages) {
+      entries.push(...messageJournalEntries(entry));
+    }
+  }
   return entries;
 }
 

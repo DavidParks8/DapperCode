@@ -1,5 +1,5 @@
 import { isRecord } from '@shared/records';
-import type { LocalMessage, LocalThread, LocalToolCall } from './types';
+import type { LocalChild, LocalMessage, LocalThread, LocalToolCall } from './types';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu;
 
@@ -62,13 +62,14 @@ function tool(value: unknown): NonNullable<LocalMessage['tool']> {
   };
 }
 
-function message(value: unknown): LocalMessage {
+function message(value: unknown, childHistory = false): LocalMessage {
   const item = record(value);
   const role = item['role'];
   if (role !== 'user' && role !== 'assistant' && role !== 'tool') {
     throw new Error('Local conversation message role is invalid.');
   }
   const calls = item['toolCalls'];
+  const children = messageChildren(item['children'], childHistory);
   if (calls !== undefined && !Array.isArray(calls)) {
     throw new Error('Local conversation tool calls are invalid.');
   }
@@ -80,6 +81,7 @@ function message(value: unknown): LocalMessage {
     ...(item['reasoning'] === undefined ? {} : { reasoning: text(item['reasoning'], true) }),
     ...(Array.isArray(calls) ? { toolCalls: calls.map(toolCall) } : {}),
     ...(item['tool'] === undefined ? {} : { tool: tool(item['tool']) }),
+    ...(children === undefined ? {} : { children }),
   };
   if (role === 'tool' && !parsed.tool) {
     throw new Error('A local tool result is missing its invocation metadata.');
@@ -87,8 +89,41 @@ function message(value: unknown): LocalMessage {
   return parsed;
 }
 
+function parseChild(value: unknown): LocalChild {
+  const child = record(value);
+  const id = text(child['id']);
+  const agent = child['agent'];
+  if (
+    !UUID.test(id) ||
+    (agent !== 'explore' && agent !== 'general') ||
+    !Array.isArray(child['messages'])
+  ) {
+    throw new Error('Local child identity or history is invalid.');
+  }
+  return {
+    id,
+    agent,
+    workspaceId: text(child['workspaceId']),
+    modelId: text(child['modelId']),
+    status: status(child['status']),
+    updatedAt: text(child['updatedAt']),
+    lastError: nullableText(child['lastError']),
+    messages: child['messages'].map((entry) => message(entry, true)),
+  };
+}
+
 export function parseLocalMessage(value: unknown): LocalMessage {
   return message(value);
+}
+
+function messageChildren(value: unknown, childHistory: boolean): LocalChild[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (childHistory || !Array.isArray(value) || value.length > 3) {
+    throw new Error('Local child history is invalid.');
+  }
+  return value.map(parseChild);
 }
 
 export const LOCAL_THREAD_HEADER_KEYS = [
@@ -207,7 +242,7 @@ export function parseLocalThreadBase(raw: string, expectedId: string): LocalThre
       activeTurnId: nullableText(item['activeTurnId']),
       lastSubmissionId: nullableText(item['lastSubmissionId']),
       lastError: nullableText(item['lastError']),
-      messages: item['messages'].map(message),
+      messages: item['messages'].map((entry) => message(entry)),
     },
   };
 }
@@ -217,6 +252,34 @@ export function parseLocalThread(raw: string, expectedId: string): LocalThread {
 }
 
 export function recoverLocalThread(thread: LocalThread): LocalThread {
+  const recoveringChildren = thread.messages.some((entry) =>
+    entry.children?.some((child) => child.status === 'running'),
+  );
+  if (recoveringChildren) {
+    thread = {
+      ...thread,
+      messages: thread.messages.map((entry) =>
+        !entry.children
+          ? entry
+          : {
+              ...entry,
+              children: entry.children.map((child) => {
+                const recovered = recoverLocalThread({
+                  ...thread,
+                  ...child,
+                  activeTurnId: child.status === 'running' ? child.id : null,
+                });
+                return {
+                  ...child,
+                  status: recovered.status,
+                  messages: recovered.messages,
+                  lastError: recovered.lastError,
+                };
+              }),
+            },
+      ),
+    };
+  }
   if (thread.status !== 'running' && thread.activeTurnId === null) {
     return thread;
   }

@@ -3,61 +3,66 @@ import type { ApprovalPolicy, ChatToolKind } from '@bridge/types/types';
 import type { LocalModelMessage, LocalModelReply } from '../models/engine';
 import { LocalModelInterrupted } from '../models/session';
 import type { LocalModelSession } from '../models/session';
-import type { LocalThreadRepository } from './threads';
 import { recoverLocalThread } from './threadCodec';
 import { emptyLocalAnswer, localModelHistory, retryableLocalMessages } from './modelHistory';
 import type {
-  LocalAgentRun as Run,
   LocalMessage,
-  LocalRunSnapshot,
   LocalThread,
-  LocalToolApproval,
   LocalToolCall,
+  LocalAgentRun as Run,
+  LocalRunSnapshot,
+  LocalToolApproval,
+  LocalToolExecutor,
+  LocalToolApprovalPolicy,
 } from './types';
 import type { LocalToolPermission } from './toolDefinition';
 import { localAgentSystemPrompt } from './systemPrompt';
 import type { LocalWorkspaceGuidance } from './workspaceGuidance';
+import { performLocalTool, updateLocalToolStatus } from './toolRunner';
+import { LocalInferenceScheduler } from './inferenceScheduler';
+import {
+  CHILD_OUTPUT_TOKENS,
+  CHILD_ROUNDS,
+  EXPLORE_TOOLS,
+  LOCAL_FANOUT,
+  parallelLocalReads,
+  delegateLocalChildren,
+  readChild,
+  type LocalThreadPort,
+} from './delegation';
+import { IDLE_LOCAL_RUN as IDLE } from './types';
 import {
   localConversationTitle,
   REPEATED_TOOL_CALL_LIMIT,
-  repeatedToolCallError,
+  LocalStepLimit,
+  requireLocalAnswer,
+  interruptLocalRun,
+  localReplyToolCalls,
 } from './agentPolicy';
 
 export { retryableLocalMessages } from './modelHistory';
-export type { LocalToolApproval, LocalRunSnapshot } from './types';
 export {
   localConversationTitle,
   REPEATED_TOOL_CALL_LIMIT,
   repeatedToolCallError,
 } from './agentPolicy';
-
-export type LocalToolExecutor = (
-  workspaceId: string,
-  name: string,
-  args: unknown,
-  signal?: AbortSignal,
-) => Promise<unknown>;
-/** Reads the permission request declared by a registered tool, otherwise null. */
-export type LocalToolApprovalPolicy = (name: string, args?: unknown) => LocalToolPermission | null;
+export type {
+  LocalRunSnapshot,
+  LocalToolApproval,
+  LocalToolExecutor,
+  LocalToolApprovalPolicy,
+} from './types';
 type ModelPort = Pick<LocalModelSession, 'snapshot' | 'load' | 'generate' | 'stop'>;
-
-const IDLE: LocalRunSnapshot = {
-  phase: 'idle',
-  threadId: null,
-  turnId: null,
-  toolName: null,
-  approval: null,
-};
-
-class LocalStepLimit extends Error {}
 
 export class LocalAgentLoop {
   private active: Run | null = null;
   private value: LocalRunSnapshot = IDLE;
   private approvalPolicy: ApprovalPolicy = 'untrusted';
+  private readonly scheduler: LocalInferenceScheduler;
+  private readonly children = new Set<LocalAgentLoop>();
 
   constructor(
-    private readonly threads: LocalThreadRepository,
+    private readonly threads: LocalThreadPort,
     private readonly model: ModelPort,
     private readonly definitions: object[],
     private readonly execute: LocalToolExecutor,
@@ -65,7 +70,11 @@ export class LocalAgentLoop {
     private readonly approval: LocalToolApprovalPolicy,
     private readonly today: () => Date = () => new Date(),
     private readonly guidance?: LocalWorkspaceGuidance,
-  ) {}
+    private readonly childAgent?: 'explore' | 'general',
+    scheduler?: LocalInferenceScheduler,
+  ) {
+    this.scheduler = scheduler ?? new LocalInferenceScheduler(model);
+  }
 
   snapshot(): LocalRunSnapshot {
     return this.value;
@@ -73,6 +82,9 @@ export class LocalAgentLoop {
 
   setApprovalPolicy(policy: ApprovalPolicy): void {
     this.approvalPolicy = policy;
+    for (const child of this.children) {
+      child.setApprovalPolicy(policy);
+    }
     const pending = this.value.approval;
     if (!this.active?.stopped && pending && this.automaticallyApproves(pending.kind)) {
       this.active?.approval?.resolve('policy');
@@ -166,6 +178,12 @@ export class LocalAgentLoop {
 
   /** Approves or declines the pending tool call identified by `callId`. */
   resolveApproval(callId: string, approved: boolean): void {
+    for (const child of this.children) {
+      if (child.snapshot().approval?.callId === callId) {
+        child.resolveApproval(callId, approved);
+        return;
+      }
+    }
     const pending = this.active?.approval;
     if (!pending || pending.callId !== callId) {
       throw new Error('This approval request is no longer pending.');
@@ -182,7 +200,11 @@ export class LocalAgentLoop {
     this.publish(run, 'stopping');
     run.controller.abort();
     run.signalStop();
-    await this.model.stop();
+    const children = [...this.children].map((child) => child.stop());
+    if (!this.childAgent) {
+      await this.model.stop();
+    }
+    await Promise.allSettled(children);
     if (run.promise) {
       await run.promise;
     }
@@ -207,6 +229,7 @@ export class LocalAgentLoop {
       controller: new AbortController(),
       approval: null,
       guidance: { directories: new Set(['']), rules: '' },
+      childAdmissions: 0,
     };
     this.active = run;
     return run;
@@ -217,8 +240,11 @@ export class LocalAgentLoop {
     try {
       this.publish(run, 'preparing');
       const model = this.model.snapshot();
-      if (model.modelId !== run.modelId || model.phase !== 'ready') {
-        await this.interruptible(run, this.model.load(run.modelId));
+      if (this.childAgent && model.modelId !== run.modelId) {
+        throw new Error('The resident model changed; child work cannot switch models.');
+      }
+      if (!this.childAgent && (model.modelId !== run.modelId || model.phase !== 'ready')) {
+        await interruptLocalRun(run, this.model.load(run.modelId));
       }
       this.checkStopped(run);
       started = true;
@@ -258,17 +284,12 @@ export class LocalAgentLoop {
     throw error;
   }
 
-  /** Stop settles the run promptly; the session releases work that finishes after the stop. */
-  private interruptible<T>(run: Run, work: Promise<T>): Promise<T> {
-    work.catch(() => undefined);
-    return Promise.race([work, run.interrupt]);
-  }
-
   private async rounds(run: Run): Promise<void> {
     let steps = 0;
     let lastCall = '';
     let repeats = 0;
-    for (let round = 0; round < 32; round += 1) {
+    const limit = this.childAgent ? CHILD_ROUNDS : 32;
+    for (let round = 0; round < limit; round += 1) {
       this.checkStopped(run);
       const assistant: LocalMessage = {
         id: randomUUID(),
@@ -283,8 +304,9 @@ export class LocalAgentLoop {
       this.publish(run, 'generating');
       let reply: LocalModelReply;
       try {
-        reply = await this.model.generate(
-          await this.interruptible(run, this.modelMessages(run, assistant.id)),
+        reply = await this.scheduler.generate(
+          run.controller.signal,
+          await interruptLocalRun(run, this.modelMessages(run, assistant.id)),
           this.definitions,
           (update) => {
             if (this.active !== run || run.stopped) {
@@ -296,6 +318,7 @@ export class LocalAgentLoop {
               reasoning: update.reasoning,
             }));
           },
+          this.childAgent ? { outputTokens: CHILD_OUTPUT_TOKENS } : undefined,
         );
       } catch (error) {
         this.threads.change(run.threadId, (thread) => ({
@@ -307,7 +330,7 @@ export class LocalAgentLoop {
         throw error;
       }
       this.checkStopped(run);
-      const calls = this.calls(reply);
+      const calls = localReplyToolCalls(reply);
       this.message(run.threadId, assistant.id, (message) => ({
         ...message,
         content: reply.content ?? '',
@@ -316,22 +339,39 @@ export class LocalAgentLoop {
       }));
       await this.threads.save(run.threadId);
       if (calls.length === 0) {
-        if (reply.truncated || reply.stopped_limit) {
-          throw new LocalStepLimit(
-            'The local model reached its output limit. Review the partial response and continue explicitly.',
-          );
-        }
-        if (!reply.content?.trim()) {
-          throw new Error('The model returned neither an answer nor a tool call.');
-        }
+        requireLocalAnswer(reply);
         return;
       }
-      for (const call of calls) {
+      for (let index = 0; index < calls.length; index += 1) {
+        const call = calls[index];
+        if (!call) {
+          throw new Error('The local tool call is unavailable.');
+        }
         this.checkStopped(run);
-        if (steps === 32) {
+        if (steps === limit) {
           throw new LocalStepLimit(
             'The local tool limit was reached. Review the workspace before continuing.',
           );
+        }
+        // Only independent, non-mutating workspace reads fan out here. Network approvals are
+        // serialized within each child; separate child workflows may wait for them concurrently.
+        const reads = parallelLocalReads(
+          calls.slice(index, index + Math.min(LOCAL_FANOUT, limit - steps)),
+          this.approval,
+        );
+        if (reads.length > 1) {
+          steps += reads.length;
+          const results = await Promise.allSettled(
+            reads.map((entry) => this.tool(run, entry, false)),
+          );
+          const failure = results.find((result) => result.status === 'rejected');
+          if (failure?.status === 'rejected') {
+            throw failure.reason;
+          }
+          index += reads.length - 1;
+          lastCall = '';
+          repeats = 0;
+          continue;
         }
         steps += 1;
         const key = `${call.function.name} ${call.function.arguments}`;
@@ -350,102 +390,52 @@ export class LocalAgentLoop {
     );
   }
 
-  private async tool(run: Run, call: LocalToolCall, repeated: boolean): Promise<void> {
-    const id = randomUUID();
-    const tool: LocalMessage = {
-      id,
-      role: 'tool',
-      content: '',
-      createdAt: new Date().toISOString(),
-      tool: {
-        callId: call.id,
-        name: call.function.name,
-        status: 'pending',
-        startedAt: new Date().toISOString(),
-      },
-    };
-    this.threads.change(run.threadId, (thread) => ({
-      ...thread,
-      messages: [...thread.messages, tool],
-    }));
-    await this.threads.save(run.threadId);
-    this.checkStopped(run);
-    if (repeated) {
-      const error = JSON.stringify({ error: repeatedToolCallError(call.function.name) });
-      this.toolStatus(run.threadId, id, 'failed', error);
-      await this.threads.save(run.threadId);
-      return;
-    }
-    try {
-      let args: unknown;
-      try {
-        args = JSON.parse(call.function.arguments);
-      } catch (error) {
-        if (error instanceof SyntaxError) {
-          throw new Error('The tool arguments were not valid JSON.');
+  private tool(run: Run, call: LocalToolCall, repeated: boolean): Promise<void> {
+    return performLocalTool(this.threads, run, call, repeated, {
+      permission: this.approval,
+      allows: (kind) => this.automaticallyApproves(kind),
+      approve: (id, permission) => this.approved(run, call, id, permission),
+      validate: (name) => {
+        if (
+          this.childAgent &&
+          (name === 'task' ||
+            name === 'read_child' ||
+            (this.childAgent === 'explore' && !EXPLORE_TOOLS.has(name)))
+        ) {
+          throw new Error('Not run: this child is read-only or requested recursive delegation.');
         }
-        throw error;
-      }
-      const permission = this.approval(call.function.name, args);
-      if (
-        permission &&
-        !this.automaticallyApproves(permission.kind) &&
-        !(await this.approved(run, call, id, permission))
-      ) {
-        this.toolStatus(
-          run.threadId,
-          id,
-          'failed',
-          JSON.stringify({
-            error: `The user declined this request (${permission.summary}). It did not run. Do not retry it unless the user asks.`,
-          }),
-        );
-        await this.threads.save(run.threadId);
-        return;
-      }
+      },
+      execute: (name, args, id) => this.executeTool(run, name, args, id),
+      started: () => this.publish(run, 'tool', call.function.name),
+      check: () => this.checkStopped(run),
+      outputLimit: this.childAgent ? 8192 : undefined,
+    });
+  }
+
+  private async executeTool(run: Run, name: string, args: unknown, id: string): Promise<unknown> {
+    if (this.guidance) {
+      await interruptLocalRun(
+        run,
+        this.guidance.beforeTool(run.workspaceId, run.guidance, name, args, run.controller.signal),
+      );
       this.checkStopped(run);
-      if (this.guidance) {
-        await this.interruptible(
-          run,
-          this.guidance.beforeTool(
-            run.workspaceId,
-            run.guidance,
-            call.function.name,
-            args,
-            run.controller.signal,
-          ),
-        );
-        this.checkStopped(run);
-      }
-      this.publish(run, 'tool', call.function.name);
-      this.toolStatus(run.threadId, id, 'running');
-      const result = await this.execute(
-        run.workspaceId,
-        call.function.name,
-        args,
-        run.controller.signal,
-      );
-      const content = JSON.stringify(result);
-      if (content === undefined) {
-        throw new Error('The local tool returned no JSON result.');
-      }
-      this.toolStatus(run.threadId, id, 'completed', content);
-    } catch (error) {
-      if (error instanceof LocalModelInterrupted) {
-        throw error;
-      }
-      const detail = error instanceof Error ? error.message : 'The local tool failed.';
-      this.toolStatus(
-        run.threadId,
-        id,
-        run.stopped ? 'interrupted' : 'failed',
-        JSON.stringify({ error: detail }),
-      );
-      if (run.stopped) {
-        throw error;
-      }
     }
-    await this.threads.save(run.threadId);
+    if (name === 'read_child') {
+      return readChild(
+        {
+          ...this.threads.get(run.threadId),
+          workspaceId: run.workspaceId,
+          modelId: run.modelId,
+        },
+        args,
+      );
+    }
+    if (name === 'task') {
+      const result = await this.delegate(run, id, args);
+      this.checkStopped(run);
+      return result;
+    }
+    return this.execute(run.workspaceId, name, args, run.controller.signal);
   }
 
   private async approved(
@@ -476,7 +466,8 @@ export class LocalAgentLoop {
         }
       }
     } catch (error) {
-      this.toolStatus(
+      updateLocalToolStatus(
+        this.threads,
         run.threadId,
         messageId,
         'interrupted',
@@ -489,14 +480,6 @@ export class LocalAgentLoop {
     }
   }
 
-  private calls(reply: LocalModelReply): LocalToolCall[] {
-    return (reply.tool_calls ?? []).map((call) => ({
-      id: randomUUID(),
-      type: 'function',
-      function: { name: call.function.name, arguments: call.function.arguments },
-    }));
-  }
-
   private async modelMessages(run: Run, pendingAssistantId: string): Promise<LocalModelMessage[]> {
     const guidance = await this.guidance?.prompt(
       run.workspaceId,
@@ -506,7 +489,7 @@ export class LocalAgentLoop {
     );
     this.checkStopped(run);
     const messages = this.threads.get(run.threadId).messages;
-    const system = localAgentSystemPrompt(run.modelId, this.today());
+    const system = localAgentSystemPrompt(run.modelId, this.today(), this.childAgent);
     const content = guidance?.content ? `${system}\n\n${guidance.content}` : system;
     return [{ role: 'system', content }, ...localModelHistory(messages, pendingAssistantId)];
   }
@@ -523,28 +506,6 @@ export class LocalAgentLoop {
         message.id === messageId ? update(message) : message,
       ),
     }));
-  }
-
-  private toolStatus(
-    id: string,
-    messageId: string,
-    status: NonNullable<LocalMessage['tool']>['status'],
-    content?: string,
-  ): void {
-    this.message(id, messageId, (message) => {
-      if (!message.tool) {
-        throw new Error('The local tool invocation is missing.');
-      }
-      return {
-        ...message,
-        ...(content === undefined ? {} : { content }),
-        tool: {
-          ...message.tool,
-          status,
-          ...(status === 'running' ? {} : { completedAt: new Date().toISOString() }),
-        },
-      };
-    });
   }
 
   private async settle(
@@ -576,7 +537,59 @@ export class LocalAgentLoop {
     toolName: string | null = null,
     approval: LocalToolApproval | null = null,
   ): void {
+    if (!run.stopped && !approval) {
+      const childApproval = [...this.children]
+        .map((child) => child.snapshot().approval)
+        .find((pending) => pending !== null);
+      if (childApproval) {
+        approval = { ...childApproval, threadId: run.threadId, turnId: run.turnId };
+        phase = 'approval';
+        toolName = childApproval.toolName;
+      }
+    }
     this.value = { phase, threadId: run.threadId, turnId: run.turnId, toolName, approval };
     this.changed(this.value);
+  }
+
+  private delegate(run: Run, messageId: string, input: unknown): Promise<object> {
+    return delegateLocalChildren(
+      this.threads,
+      run,
+      messageId,
+      input,
+      async (child, prompt, port) => {
+        const definitions = this.definitions.filter((definition) => {
+          const name = (definition as { function: { name: string } }).function.name;
+          return (
+            name !== 'task' &&
+            name !== 'read_child' &&
+            (child.agent !== 'explore' || EXPLORE_TOOLS.has(name))
+          );
+        });
+        const loop = new LocalAgentLoop(
+          port,
+          this.model,
+          definitions,
+          this.execute,
+          () => {
+            if (this.active === run) {
+              this.publish(run, run.stopped ? 'stopping' : 'tool', 'task');
+            }
+          },
+          this.approval,
+          this.today,
+          this.guidance,
+          child.agent,
+          this.scheduler,
+        );
+        loop.setApprovalPolicy(this.approvalPolicy);
+        this.children.add(loop);
+        try {
+          return await loop.send(child.id, prompt, randomUUID());
+        } finally {
+          this.children.delete(loop);
+        }
+      },
+    );
   }
 }

@@ -1,6 +1,8 @@
 import type { Chat, ChatMessage } from '@bridge/types/types';
 import type { LocalMessage, LocalThread } from './types';
 import { localToolKind } from './localTools';
+import { childActivity } from './delegation';
+import { SUBAGENT_ACTIVITY_TYPE } from '@bridge/messages';
 
 function messageProjection(message: LocalMessage, pending: boolean): ChatMessage {
   const base = { id: message.id, createdAt: message.createdAt, content: message.content };
@@ -67,11 +69,18 @@ export function localChatProjection(thread: LocalThread, workspaceName: string):
     activeTurnId: thread.activeTurnId,
     latestTurnStatus: thread.status,
     ...(thread.lastError ? { lastError: thread.lastError } : {}),
-    messages: thread.messages.map((message, index) =>
+    messages: thread.messages.flatMap((message, index) => [
       messageProjection(
         message,
         thread.status === 'running' && index === thread.messages.length - 1,
       ),
-    ),
+      ...(message.children ?? []).map((child): ChatMessage => ({
+        ...childActivity(thread.id, child),
+        role: 'activity',
+        activityType: SUBAGENT_ACTIVITY_TYPE,
+        createdAt: message.createdAt,
+        pending: child.status === 'running',
+      })),
+    ]),
   };
 }

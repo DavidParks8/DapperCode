@@ -11,8 +11,9 @@ import { findLocalModelDefinition, localModelDefinition, localModelName } from '
 import type { LocalModelSessionSnapshot } from '../models/session';
 import type { LocalModelDefinition } from '../models/types';
 import type { LocalRunSnapshot } from '../runtime/agentLoop';
-import type { LocalMessage, LocalThread, LocalToolCall } from '../runtime/types';
+import type { LocalChild, LocalMessage, LocalThread, LocalToolCall } from '../runtime/types';
 import type { LocalWorkspace } from '../workspaces/types';
+import { childActivity } from '../runtime/delegation';
 
 /** Agent identity the local transport reports for every local chat. */
 export const LOCAL_AGENT_ID = 'on-device';
@@ -348,6 +349,13 @@ function toolActivity(thread: LocalThread): RunActivity | null {
   const running = [...thread.messages]
     .reverse()
     .find((message) => message.tool?.status === 'running' || message.tool?.status === 'pending');
+  if (running?.children?.length) {
+    const active = running.children.filter((child) => child.status === 'running').length;
+    return {
+      title: 'Delegating',
+      detail: `${String(active)} of ${String(running.children.length)} children running`,
+    };
+  }
   return running ? { title: describeLocalToolMessage(thread, running).activity } : null;
 }
 
@@ -501,6 +509,35 @@ function liveTurn(
   return null;
 }
 
+function childSnapshotTool(parentId: string, child: LocalChild): RawAcpSnapshot['tools'][number] {
+  const statuses = {
+    idle: 'pending',
+    running: 'running',
+    complete: 'completed',
+    failed: 'failed',
+    interrupted: 'interrupted',
+  } as const;
+  return {
+    id: `child:${parentId}:${child.id}`,
+    generation: null,
+    kind: 'think',
+    ...localToolStatus(statuses[child.status]),
+    title: `${child.agent} child`,
+    startedAtMs: Date.parse(child.messages[0]?.createdAt ?? child.updatedAt),
+    completedAtMs:
+      child.status === 'running' || child.status === 'idle' ? null : Date.parse(child.updatedAt),
+    content: childActivity(parentId, child).content.text ?? '',
+    structuredContent: [],
+    locations: [],
+    truncated: false,
+    subagent: true,
+  };
+}
+
+function childSnapshotTools(parentId: string, message: LocalMessage): RawAcpSnapshot['tools'] {
+  return (message.children ?? []).map((child) => childSnapshotTool(parentId, child));
+}
+
 /** Full ACP-style snapshot used by `thread/read` with history. */
 export function localThreadSnapshot(
   thread: LocalThread,
@@ -552,6 +589,10 @@ export function localThreadSnapshot(
       truncated: false,
       subagent: false,
     });
+    for (const projected of childSnapshotTools(thread.id, message)) {
+      timeline.push({ sequence: timeline.length, kind: 'tool', canonicalId: projected.id });
+      tools.push(projected);
+    }
   }
   // The ACP snapshot's active run only exists once the turn has started.
   const running = thread.status === 'running' && thread.activeTurnId !== null;
