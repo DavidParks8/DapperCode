@@ -1,10 +1,17 @@
 import { randomUUID } from 'expo-crypto';
 import { loadNativeModelContext } from '../models/engine';
-import { LocalModelSession } from '../models/session';
+import { LocalModelInterrupted, LocalModelSession } from '../models/session';
 import { OnDeviceNativeError } from '../native/services.errors';
+import { LocalAgentLoop } from './agentLoop';
+import { LOCAL_TOOL_DEFINITIONS, localToolApproval } from './localTools';
 import { OnDeviceRuntime } from './runtime';
 import { createFakeOnDeviceNative, FakeLlama } from './testing';
-import { GUIDANCE_FILE_BYTES, SKILL_DIRECTORY_LIMIT } from './workspaceGuidance';
+import { toolDefinition } from './toolDefinition';
+import {
+  GUIDANCE_FILE_BYTES,
+  LocalWorkspaceGuidance,
+  SKILL_DIRECTORY_LIMIT,
+} from './workspaceGuidance';
 
 jest.mock('expo-crypto', () => ({ randomUUID: jest.fn() }));
 jest.mock('../models/engine', () => ({ loadNativeModelContext: jest.fn() }));
@@ -44,6 +51,18 @@ async function harness(files: Record<string, string> = {}) {
   return { ...fake, llama, runtime, thread, generate, prompt };
 }
 
+function readBarrier() {
+  let enter!: () => void;
+  let release!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { entered, pending, enter, release };
+}
+
 test('real model rounds load root then relevant nested rules before a path tool can run', async () => {
   const h = await harness({
     'ws-one:AGENTS.md': 'ROOT: use two spaces.',
@@ -77,6 +96,250 @@ test('real model rounds load root then relevant nested rules before a path tool 
   expect(
     h.calls.filter((call) => call === 'readWorkspaceFile:["ws-one","src/deep/file.txt"]'),
   ).toHaveLength(1);
+  await h.runtime.dispose();
+});
+
+test.each([
+  'code_diagnostics',
+  'code_definitions',
+  'code_references',
+  'code_symbols',
+  'format_file',
+])('code path scopes fence %s until ancestor rules have been supplied', async (name) => {
+  const h = await harness({
+    'ws-one:AGENTS.md': 'ROOT RULE',
+    'ws-one:src/AGENTS.md': 'SRC RULE',
+    'ws-one:src/deep/AGENTS.md': 'DEEP RULE',
+  });
+  const guidance = new LocalWorkspaceGuidance(h.native);
+  const state = { directories: new Set(['']), rules: '' };
+  const signal = new AbortController().signal;
+  await guidance.prompt('ws-one', state, 8192, signal);
+  await expect(
+    guidance.beforeTool('ws-one', state, name, { path: 'src/deep/file.ts' }, signal),
+  ).rejects.toThrow('Not run');
+  const refreshed = await guidance.prompt('ws-one', state, 8192, signal);
+  expect(refreshed.content.indexOf('ROOT RULE')).toBeLessThan(
+    refreshed.content.indexOf('SRC RULE'),
+  );
+  expect(refreshed.content.indexOf('SRC RULE')).toBeLessThan(
+    refreshed.content.indexOf('DEEP RULE'),
+  );
+  await expect(
+    guidance.beforeTool('ws-one', state, name, { path: 'src/deep/file.ts' }, signal),
+  ).resolves.toBeUndefined();
+  await h.runtime.dispose();
+});
+
+test.each([
+  [0, 'alpha'],
+  [0, 'beta'],
+  [22, 'alpha'],
+  [22, 'beta'],
+] as const)(
+  'parallel sibling reads merge bounded scopes (seeded %i, first %s)',
+  async (seeded, firstName) => {
+    const h = await harness({
+      'ws-one:AGENTS.md': 'ROOT PARALLEL RULE',
+      'ws-one:alpha/AGENTS.md': 'ALPHA PARALLEL RULE',
+      'ws-one:beta/AGENTS.md': 'BETA PARALLEL RULE',
+      'ws-one:alpha/file.txt': 'alpha contents',
+      'ws-one:beta/file.txt': 'beta contents',
+    });
+    const guidance = new LocalWorkspaceGuidance(h.native);
+    const initial = ['', ...Array.from({ length: seeded }, (_, index) => `seed-${String(index)}`)];
+    const state = { directories: new Set(initial), rules: '' };
+    const signal = new AbortController().signal;
+    await guidance.prompt('ws-one', state, 8192, signal);
+    const barriers = { alpha: readBarrier(), beta: readBarrier() };
+    const original = h.native.readWorkspaceFile;
+    jest
+      .spyOn(h.native, 'readWorkspaceFile')
+      .mockImplementation(async (id, path, offset, limit) => {
+        const barrier =
+          path === 'alpha/AGENTS.md'
+            ? barriers.alpha
+            : path === 'beta/AGENTS.md'
+              ? barriers.beta
+              : null;
+        if (barrier) {
+          barrier.enter();
+          await barrier.pending;
+        }
+        return original(id, path, offset, limit);
+      });
+    const calls = {
+      alpha: guidance.beforeTool('ws-one', state, 'read_file', { path: 'alpha/file.txt' }, signal),
+      beta: guidance.beforeTool('ws-one', state, 'read_file', { path: 'beta/file.txt' }, signal),
+    };
+    const settled = Promise.allSettled([calls.alpha, calls.beta]);
+    await Promise.all([barriers.alpha.entered, barriers.beta.entered]);
+    expect(state.directories).toEqual(new Set(initial));
+    barriers[firstName].release();
+    await expect(calls[firstName]).rejects.toThrow('Not run');
+    expect(state.directories).toEqual(new Set([...initial, firstName]));
+    const lastName = firstName === 'alpha' ? 'beta' : 'alpha';
+    barriers[lastName].release();
+    await settled;
+    if (seeded === 22) {
+      await expect(calls[lastName]).rejects.toThrow('24-directory limit');
+      expect(state.directories).toEqual(new Set([...initial, firstName]));
+      expect(state.directories.size).toBe(24);
+    } else {
+      await expect(calls[lastName]).rejects.toThrow('Not run');
+      expect(state.directories).toEqual(new Set(['', 'alpha', 'beta']));
+    }
+    const refreshed = await guidance.prompt('ws-one', state, 8192, signal);
+    expect(refreshed.content).toContain(`${firstName.toUpperCase()} PARALLEL RULE`);
+    if (seeded === 22) {
+      expect(refreshed.content).not.toContain(`${lastName.toUpperCase()} PARALLEL RULE`);
+    } else {
+      expect(refreshed.content).toContain('ALPHA PARALLEL RULE');
+      expect(refreshed.content).toContain('BETA PARALLEL RULE');
+      const reads = await Promise.all(
+        ['alpha', 'beta'].map(async (directory) => {
+          const path = `${directory}/file.txt`;
+          await guidance.beforeTool('ws-one', state, 'read_file', { path }, signal);
+          return h.native.readWorkspaceFile('ws-one', path, 0, 1024);
+        }),
+      );
+      expect(reads.map((read) => read.content)).toEqual(['alpha contents', 'beta contents']);
+    }
+    await h.runtime.dispose();
+  },
+);
+
+test.each(['error', 'cancel'])(
+  'parallel scope failure preserves completed scopes and explicit %s',
+  async (outcome) => {
+    const h = await harness({
+      'ws-one:AGENTS.md': 'ROOT PARALLEL RULE',
+      'ws-one:alpha/AGENTS.md': 'ALPHA SURVIVES',
+      'ws-one:beta/AGENTS.md': 'BETA MUST NOT ENTER',
+    });
+    const guidance = new LocalWorkspaceGuidance(h.native);
+    const state = { directories: new Set(['']), rules: '' };
+    const controller = new AbortController();
+    await guidance.prompt('ws-one', state, 8192, controller.signal);
+    const gate = readBarrier();
+    const failure = new OnDeviceNativeError('STORAGE_FAILURE', 'Sibling rules became unreadable.');
+    const original = h.native.readWorkspaceFile;
+    jest
+      .spyOn(h.native, 'readWorkspaceFile')
+      .mockImplementation(async (id, path, offset, limit) => {
+        if (path === 'beta/AGENTS.md') {
+          gate.enter();
+          await gate.pending;
+          if (outcome === 'error') {
+            throw failure;
+          }
+        }
+        return original(id, path, offset, limit);
+      });
+    const alpha = guidance.beforeTool(
+      'ws-one',
+      state,
+      'read_file',
+      { path: 'alpha/file.txt' },
+      controller.signal,
+    );
+    const beta = guidance.beforeTool(
+      'ws-one',
+      state,
+      'read_file',
+      { path: 'beta/file.txt' },
+      controller.signal,
+    );
+    const settled = Promise.allSettled([alpha, beta]);
+    await gate.entered;
+    await expect(alpha).rejects.toThrow('Not run');
+    expect(state.directories).toEqual(new Set(['', 'alpha']));
+    if (outcome === 'cancel') {
+      controller.abort();
+    }
+    gate.release();
+    await settled;
+    if (outcome === 'error') {
+      await expect(beta).rejects.toBe(failure);
+    } else {
+      await expect(beta).rejects.toBeInstanceOf(LocalModelInterrupted);
+    }
+    expect(state.directories).toEqual(new Set(['', 'alpha']));
+    const refreshed = await guidance.prompt('ws-one', state, 8192, new AbortController().signal);
+    expect(refreshed.content).toContain('ALPHA SURVIVES');
+    expect(refreshed.content).not.toContain('BETA MUST NOT ENTER');
+    await h.runtime.dispose();
+  },
+);
+
+test('format mutation cannot run until the real loop supplies deeper rules to a subsequent model round', async () => {
+  const path = 'src/deep/file.ts';
+  const h = await harness({
+    'ws-one:AGENTS.md': 'ROOT FORMATTING RULE',
+    'ws-one:src/AGENTS.md': 'SRC FORMATTING RULE',
+    'ws-one:src/deep/AGENTS.md': 'DEEP FORMATTING RULE: use two spaces.',
+    [`ws-one:${path}`]: 'const value=1;',
+  });
+  const write = jest.spyOn(h.native, 'writeWorkspaceFile');
+  const execute = jest.fn(async (workspace: string, name: string, input: unknown) => {
+    expect(name).toBe('format_file');
+    expect(input).toEqual({ path });
+    expect(h.generate).toHaveBeenCalledTimes(2);
+    expect(h.prompt(1)).toContain('DEEP FORMATTING RULE: use two spaces.');
+    const observed = await h.native.readWorkspaceFile(workspace, path, 0, 1024);
+    const revision = await h.native.writeWorkspaceFile(
+      workspace,
+      path,
+      'const value = 1;\n',
+      observed.revision,
+    );
+    return { path, revision };
+  });
+  const definition = toolDefinition(
+    'format_file',
+    'Format a workspace file.',
+    { path: { type: 'string' } },
+    ['path'],
+    { kind: 'edit', approval: null },
+  );
+  const loop = new LocalAgentLoop(
+    h.runtime.threads,
+    h.runtime.models,
+    [...LOCAL_TOOL_DEFINITIONS, definition.definition],
+    execute,
+    jest.fn(),
+    (name, input) => (name === 'format_file' ? null : localToolApproval(name, input)),
+    undefined,
+    new LocalWorkspaceGuidance(h.native),
+  );
+  const generate = LocalModelSession.prototype.generate.bind(h.runtime.models);
+  h.generate.mockImplementation(async (...args) => {
+    if (h.generate.mock.calls.length <= 2) {
+      expect(write).not.toHaveBeenCalled();
+      expect(h.files.get(`ws-one:${path}`)).toBe('const value=1;');
+    }
+    return generate(...args);
+  });
+  const call = { name: 'format_file', arguments: { path } };
+  h.llama.reply({ toolCalls: [call] }, { toolCalls: [call] }, { content: 'Formatted.' });
+  const result = await loop.send(h.thread.id, 'Format src/deep/file.ts.', 'format-scope');
+  expect(result.status).toBe('complete');
+  expect(h.prompt(0)).not.toContain('DEEP FORMATTING RULE');
+  const refreshed = h.prompt(1);
+  expect(refreshed.indexOf('ROOT FORMATTING RULE')).toBeLessThan(
+    refreshed.indexOf('SRC FORMATTING RULE'),
+  );
+  expect(refreshed.indexOf('SRC FORMATTING RULE')).toBeLessThan(
+    refreshed.indexOf('DEEP FORMATTING RULE'),
+  );
+  expect(result.messages.filter((entry) => entry.tool).map((entry) => entry.tool?.status)).toEqual([
+    'failed',
+    'completed',
+  ]);
+  expect(result.messages.find((entry) => entry.tool)?.content).toContain('Not run');
+  expect(execute).toHaveBeenCalledTimes(1);
+  expect(write).toHaveBeenCalledTimes(1);
+  expect(h.files.get(`ws-one:${path}`)).toBe('const value = 1;\n');
   await h.runtime.dispose();
 });
 

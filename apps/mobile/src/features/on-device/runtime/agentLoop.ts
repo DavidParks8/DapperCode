@@ -1,10 +1,10 @@
 import { randomUUID } from 'expo-crypto';
 import type { ApprovalPolicy, ChatToolKind } from '@bridge/types/types';
-import type { LocalModelMessage, LocalModelReply } from '../models/engine';
+import type { LocalModelReply } from '../models/engine';
 import { LocalModelInterrupted } from '../models/session';
 import type { LocalModelSession } from '../models/session';
 import { recoverLocalThread } from './threadCodec';
-import { emptyLocalAnswer, localModelHistory, retryableLocalMessages } from './modelHistory';
+import { emptyLocalAnswer, retryableLocalMessages } from './modelHistory';
 import type {
   LocalMessage,
   LocalThread,
@@ -52,6 +52,8 @@ export type {
   LocalToolExecutor,
   LocalToolApprovalPolicy,
 } from './types';
+import { executeWithToolOutput } from './toolArtifacts';
+import { localConversationContext } from './contextMemory';
 type ModelPort = Pick<LocalModelSession, 'snapshot' | 'load' | 'generate' | 'stop'>;
 
 export class LocalAgentLoop {
@@ -304,9 +306,10 @@ export class LocalAgentLoop {
       this.publish(run, 'generating');
       let reply: LocalModelReply;
       try {
+        const context = await interruptLocalRun(run, this.modelContext(run, assistant.id));
         reply = await this.scheduler.generate(
           run.controller.signal,
-          await interruptLocalRun(run, this.modelMessages(run, assistant.id)),
+          context.messages,
           this.definitions,
           (update) => {
             if (this.active !== run || run.stopped) {
@@ -318,7 +321,7 @@ export class LocalAgentLoop {
               reasoning: update.reasoning,
             }));
           },
-          this.childAgent ? { outputTokens: CHILD_OUTPUT_TOKENS } : undefined,
+          { ...context.options, ...(this.childAgent ? { outputTokens: CHILD_OUTPUT_TOKENS } : {}) },
         );
       } catch (error) {
         this.threads.change(run.threadId, (thread) => ({
@@ -420,22 +423,35 @@ export class LocalAgentLoop {
       );
       this.checkStopped(run);
     }
-    if (name === 'read_child') {
-      return readChild(
-        {
-          ...this.threads.get(run.threadId),
-          workspaceId: run.workspaceId,
-          modelId: run.modelId,
-        },
+    const dispatch: LocalToolExecutor = async (workspace, tool, input, signal, offload) => {
+      if (tool === 'read_child') {
+        return readChild(
+          {
+            ...this.threads.get(run.threadId),
+            workspaceId: run.workspaceId,
+            modelId: run.modelId,
+          },
+          input,
+        );
+      }
+      if (tool === 'task') {
+        const result = await this.delegate(run, id, input);
+        this.checkStopped(run);
+        return result;
+      }
+      return this.execute(workspace, tool, input, signal, offload);
+    };
+    const result: unknown = JSON.parse(
+      await executeWithToolOutput(
+        this.threads.artifacts,
+        { ...this.threads.get(run.threadId), workspaceId: run.workspaceId },
+        name,
         args,
-      );
-    }
-    if (name === 'task') {
-      const result = await this.delegate(run, id, args);
-      this.checkStopped(run);
-      return result;
-    }
-    return this.execute(run.workspaceId, name, args, run.controller.signal);
+        run.controller.signal,
+        dispatch,
+      ),
+    );
+    return result;
   }
 
   private async approved(
@@ -480,7 +496,10 @@ export class LocalAgentLoop {
     }
   }
 
-  private async modelMessages(run: Run, pendingAssistantId: string): Promise<LocalModelMessage[]> {
+  private async modelContext(
+    run: Run,
+    pendingAssistantId: string,
+  ): Promise<ReturnType<typeof localConversationContext>> {
     const guidance = await this.guidance?.prompt(
       run.workspaceId,
       run.guidance,
@@ -488,10 +507,16 @@ export class LocalAgentLoop {
       run.controller.signal,
     );
     this.checkStopped(run);
-    const messages = this.threads.get(run.threadId).messages;
     const system = localAgentSystemPrompt(run.modelId, this.today(), this.childAgent);
     const content = guidance?.content ? `${system}\n\n${guidance.content}` : system;
-    return [{ role: 'system', content }, ...localModelHistory(messages, pendingAssistantId)];
+    return localConversationContext(
+      this.threads,
+      run.threadId,
+      pendingAssistantId,
+      content,
+      () => this.checkStopped(run),
+      (phase) => this.publish(run, phase),
+    );
   }
 
   private message(

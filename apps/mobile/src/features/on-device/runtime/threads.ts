@@ -31,6 +31,7 @@ import {
   type SegmentName,
 } from './threadJournal';
 import type { LocalThread } from './types';
+import { hasDurableToolEvidence, LocalToolArtifacts } from './toolArtifacts';
 
 export type LocalDocumentPort = Pick<
   OnDeviceNativeServices,
@@ -81,6 +82,7 @@ function threadIdOf(name: string): string | null {
 }
 
 export class LocalThreadRepository {
+  readonly artifacts: LocalToolArtifacts;
   private readonly threads = new Map<string, LocalThread>();
   private readonly failures = new Map<string, Error>();
   private readonly persisted = new Map<string, PersistedThread>();
@@ -100,7 +102,9 @@ export class LocalThreadRepository {
     private readonly storage: LocalDocumentPort,
     private readonly changed: (change: LocalThreadChange) => void,
     private readonly progressDelayMs = THREAD_PROGRESS_SAVE_DELAY_MS,
-  ) {}
+  ) {
+    this.artifacts = new LocalToolArtifacts(storage);
+  }
 
   initialize(): Promise<void> {
     this.initialized ??= this.restore().catch((error: unknown) => {
@@ -250,6 +254,7 @@ export class LocalThreadRepository {
     this.rebase.delete(id);
     this.removing.delete(id);
     this.changed('persistence');
+    await this.artifacts.removeThread(id);
   }
 
   close(): void {
@@ -263,6 +268,9 @@ export class LocalThreadRepository {
     if (!previous || this.failures.has(id)) {
       return true;
     }
+    if (previous.durable.header.contextSummary !== thread.contextSummary) {
+      return true;
+    }
     if (thread.status !== 'running' && !previous.running) {
       return true;
     }
@@ -274,6 +282,9 @@ export class LocalThreadRepository {
       // Messages are never changed in place: a durable object's entries are already journaled.
       if (durable.get(message.id) === message) {
         continue;
+      }
+      if (hasDurableToolEvidence(message) && durable.get(message.id)?.content !== message.content) {
+        return true;
       }
       for (const entry of messageJournalEntries(message)) {
         if (!previous.journal.has(entry)) {
@@ -493,6 +504,7 @@ export class LocalThreadRepository {
       ids: new Set([...setAside, ...leftInPlace].filter((id) => bases.has(id))),
     };
     await Promise.allSettled(recovered.map((id) => this.write(id)));
+    await this.artifacts.removeOrphans(bases);
     this.changed('persistence');
   }
 

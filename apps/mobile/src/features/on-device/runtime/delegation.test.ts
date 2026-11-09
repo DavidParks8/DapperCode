@@ -4,7 +4,7 @@ import type { LocalModelMessage } from '../models/engine';
 import { loadNativeModelContext } from '../models/engine';
 import { LocalModelSession } from '../models/session';
 import { LocalAgentLoop, type LocalRunSnapshot } from './agentLoop';
-import { childEntries, CHILD_ROUNDS } from './delegation';
+import { childEntries, childThreadPort, CHILD_ROUNDS } from './delegation';
 import { LOCAL_TOOL_DEFINITIONS, localToolApproval, localToolExecutor } from './localTools';
 import { LocalThreadRepository } from './threads';
 import {
@@ -22,6 +22,7 @@ import { LocalEventProjector } from '../transport/events';
 import { localThreadSnapshot } from '../transport/wire';
 import { localModelDefinition } from '../models/catalog';
 import { LocalWorkspaceGuidance } from './workspaceGuidance';
+import { localConversationContext } from './contextMemory';
 
 jest.mock('expo-crypto', () => ({ randomUUID: jest.fn() }));
 jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
@@ -163,6 +164,82 @@ test('parent and fresh child generations all receive selected workspace instruct
       messages[0]?.content.includes('Keep scoped workspace evidence in every task.'),
     ),
   ).toBe(true);
+  await h.close();
+});
+
+test('child summary checkpoints survive parent reload and resume without inheriting private parent memory', async () => {
+  let childId = '';
+  const h = await harness((messages) => {
+    const request = user(messages);
+    const turn = messages.slice(messages.map((message) => message.role).lastIndexOf('user'));
+    if (request === 'parent private request') {
+      return results(turn).length ? { content: 'Parent complete.' } : tasks(['child A']);
+    }
+    if (request === 'Resume parent') {
+      return results(turn).length
+        ? { content: 'Resumed.' }
+        : tool('task', {
+            tasks: [{ agent: 'explore', child_id: childId, prompt: 'child resumed' }],
+          });
+    }
+    return { content: 'Child evidence.' };
+  });
+  await h.start();
+  childId = childEntries(h.current())[0]!.id;
+  h.threads.change(h.thread.id, (thread) => ({
+    ...thread,
+    contextSummary: {
+      content: 'PRIVATE-PARENT-MEMORY',
+      throughMessageId: thread.messages.at(-1)!.id,
+      modelId: thread.modelId,
+      createdAt: new Date().toISOString(),
+    },
+  }));
+  const port = childThreadPort(
+    h.threads,
+    h.thread.id,
+    childId,
+    h.thread.workspaceId,
+    h.thread.modelId,
+  );
+  expect(port.get(childId).contextSummary).toBeUndefined();
+  const context = localConversationContext(
+    port,
+    childId,
+    'pending',
+    'child system',
+    () => undefined,
+    () => undefined,
+  );
+  if (!context.options.checkpoint) {
+    throw new Error('Child summary checkpoint is required.');
+  }
+  await context.options.checkpoint.commit('CHILD-ONLY-MEMORY');
+  await h.threads.flush();
+  const reloaded = new LocalThreadRepository(h.native, jest.fn(), 0);
+  await reloaded.initialize();
+  expect(reloaded.get(h.thread.id).contextSummary?.content).toBe('PRIVATE-PARENT-MEMORY');
+  expect(childEntries(reloaded.get(h.thread.id))[0]?.contextSummary?.content).toBe(
+    'CHILD-ONLY-MEMORY',
+  );
+  const loop = new LocalAgentLoop(
+    reloaded,
+    h.session,
+    LOCAL_TOOL_DEFINITIONS,
+    localToolExecutor(
+      h.native,
+      () => ({ name: 'Test', email: 'test@example.com' }),
+      async () => null,
+      () => undefined,
+    ),
+    jest.fn(),
+    localToolApproval,
+  );
+  await loop.send(h.thread.id, 'Resume parent', randomUUID());
+  const resumed = h.prompts.find((messages) => user(messages) === 'child resumed');
+  expect(resumed?.[0]?.content).toContain('CHILD-ONLY-MEMORY');
+  expect(resumed?.[0]?.content).not.toContain('PRIVATE-PARENT-MEMORY');
+  await reloaded.flush();
   await h.close();
 });
 
@@ -787,7 +864,26 @@ test('read_child retrieves paged saved evidence but rejects stale IDs after work
   expect(taskResult).toContain('"truncated":true');
   await h.loop.send(h.thread.id, 'retrieve saved evidence', randomUUID());
   const evidence = h.current().messages.find((message) => message.tool?.name === 'read_child')!;
-  expect(evidence.content).toContain(answer);
+  const offloaded = JSON.parse(evidence.content) as { offloaded: boolean; artifactId: string };
+  expect(offloaded.offloaded).toBe(true);
+  let stored = '';
+  let offset: number | null = 0;
+  while (offset !== null) {
+    const page = (await h.threads.artifacts.retrieve(
+      h.thread.id,
+      h.thread.workspaceId,
+      'read_tool_output',
+      {
+        artifactId: offloaded.artifactId,
+        offset,
+        limit: 4096,
+      },
+    )) as { content: string; nextOffset: number | null };
+    stored += page.content;
+    offset = page.nextOffset;
+  }
+  const fullResult = JSON.parse(stored) as { content: string };
+  expect(fullResult.content).toContain(answer);
   h.threads.change(h.thread.id, (thread) => ({ ...thread, workspaceId: 'other-workspace' }));
   await h.loop.send(h.thread.id, 'retrieve forbidden evidence', randomUUID());
   const latest = h

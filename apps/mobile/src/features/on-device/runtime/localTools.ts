@@ -14,6 +14,7 @@ export { LocalWorkspaceGuidance } from './workspaceGuidance';
 import { CODE_TOOL_DEFINITIONS, isCodeTool } from '../code-intelligence/definitions';
 import type * as CodeTools from '../code-intelligence/tools';
 import { PARALLEL_READ_TOOLS, READ_CHILD_TOOL, TASK_TOOL } from './delegation';
+import { ARTIFACT_TOOL_DEFINITIONS } from './toolArtifacts';
 
 const LOCAL_TOOLS = [
   ...FILE_TOOL_DEFINITIONS,
@@ -24,6 +25,7 @@ const LOCAL_TOOLS = [
   ...CODE_TOOL_DEFINITIONS,
   TASK_TOOL,
   READ_CHILD_TOOL,
+  ...ARTIFACT_TOOL_DEFINITIONS,
 ];
 const TOOL_REGISTRY = new Map<string, (typeof LOCAL_TOOLS)[number]>(
   LOCAL_TOOLS.map((tool) => [tool.definition.function.name, tool]),
@@ -91,7 +93,7 @@ export function localToolExecutor(
   };
   const dispatch = (name: string, signal: AbortSignal | undefined, work: () => Promise<unknown>) =>
     PARALLEL_READ_TOOLS.has(name) ? work() : mutation(signal, work);
-  return (workspace, name, input, signal) => {
+  return (workspace, name, input, signal, offload) => {
     if (signal?.aborted) {
       return Promise.reject(new Error('Local tool work was stopped before execution.'));
     }
@@ -100,11 +102,11 @@ export function localToolExecutor(
     }
     if (name === 'web_fetch') {
       requireNetwork('fetch web pages');
-      return executeWebFetch(input, signal);
+      return executeWebFetch(input, signal, undefined, offload);
     }
     if (name === 'web_search') {
       requireNetwork('search the web');
-      return executeWebSearch(input, signal);
+      return executeWebSearch(input, signal, undefined, offload);
     }
     if (isFileTool(name) || isCodeTool(name)) {
       let versions: Map<string, string> | undefined;
@@ -161,7 +163,8 @@ export function localToolExecutor(
       return dispatch(name, signal, work);
     }
     if (isGitTool(name)) {
-      const work = () => executeGitTool(workspace, name, input, native, author, credential);
+      const work = () =>
+        executeGitTool(workspace, name, input, native, author, credential, offload);
       return dispatch(name, signal, work);
     }
     return Promise.reject(new Error('The model requested a tool that is not available.'));

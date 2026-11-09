@@ -74,9 +74,19 @@ export function guidanceDirectories(
   }
   const paths: string[] = [];
   if (
-    ['read_file', 'write_file', 'edit_file', 'delete_path', 'rename_path', 'git_stage'].includes(
-      name,
-    )
+    [
+      'read_file',
+      'write_file',
+      'edit_file',
+      'delete_path',
+      'rename_path',
+      'git_stage',
+      'code_diagnostics',
+      'code_definitions',
+      'code_references',
+      'code_symbols',
+      'format_file',
+    ].includes(name)
   ) {
     if (typeof input['path'] === 'string') {
       paths.push(parentWorkspacePath(safePath(input['path'])));
@@ -212,7 +222,12 @@ export class LocalWorkspaceGuidance {
     }
     const rules = await this.rules(workspace, directories, signal);
     checkCancelled(signal);
-    state.directories = directories;
+    // Parallel preparations may have added scopes during I/O; recheck the merged directory bound.
+    state.directories = guidanceDirectories(
+      new Set([...state.directories, ...directories]),
+      name,
+      input,
+    );
     if (rules !== state.rules) {
       throw new LocalToolInputError(
         'Not run: workspace instruction scope or contents changed. Review the refreshed rules in the next model round, then retry this call if still appropriate.',

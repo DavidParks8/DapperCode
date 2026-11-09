@@ -67,6 +67,10 @@ Before a tool runs, changed or newly applicable rules return an explicit **Not r
 next model round can review them before retrying. Rename checks both source and destination
 parents; directory rename/delete also includes the source directory's own rules. Scopes are
 turn-local, including retries; they never cross workspaces.
+When registered, `code_diagnostics`, `code_definitions`, `code_references`, `code_symbols`, and
+`format_file` use the same path scopes, so formatting cannot bypass previously unseen nested rules.
+Parallel read preparations retain the union of entered scopes and enforce the directory limit
+against that merged set; source errors and cancellation do not discard previously entered scopes.
 
 Rules and skill catalogs are re-read for every model round, including after agent edits. Only
 expected `PATH_NOT_FOUND` errors are optional; unreadable, invalid UTF-8, symlink/hard-link,
@@ -307,8 +311,8 @@ Only one local context and one local turn run at a time. Each round measures the
 model's real chat template and tokenizer, then lets generation use all remaining context (minus a
 small safety margin) rather than a fixed output cap, so long `write_file`/`edit_file` payloads are
 not cut off. A round starts only if at least a quarter of the context (up to 2,048 tokens) remains
-free. When it would not, the model input is compacted, while the saved conversation and transcript
-stay unchanged:
+free. Low-level model callers without a conversation checkpoint retain this fallback (normal chats
+use the semantic memory described below), while saved conversation history stays unchanged:
 
 1. Earlier turns' tool output is replaced by a short `{"elided": true, ...}` marker that keeps
    identifying fields such as `path`, `revision`, and `error`, and long earlier tool arguments and
@@ -328,6 +332,49 @@ Native tuning (verify on a physical iPhone): 4 CPU threads on device with every 
 the CPU-only simulator, 512-token batches, one sequence, and native prompt-prefix reuse across rounds
 (state snapshots for hybrid/sliding-window models). The chat template is rendered once per attempt
 and that prompt is passed straight to completion.
+
+### Saved tool evidence and rolling conversation memory
+
+Normal local chats save large tool outputs outside the prompt, in app-private runtime documents,
+never in the Git workspace. Outputs over 4,096 JSON characters return a 512-character preview,
+an opaque `artifactId`, and small identifying/truncation fields. `read_tool_output` pages saved JSON
+(2,048 characters by default, maximum 4,096); `search_tool_output` finds literal text in at most
+10 excerpts per page. Both tools are restricted to the originating conversation and workspace.
+They read historical evidence, not current files, and must not be replaced by replaying a mutation.
+
+The saved result is the exact bounded output available from the producer, **not omitted upstream
+data**. Agent web searches save returned Exa text before the legacy 8,192-character clipping;
+agent fetches read/save the complete decoded response within the 1 MiB download cap before page
+slicing. Oversized responses fail explicitly. Git status/history are captured before their
+JavaScript list clipping, and agent diffs request the native maximum 128 KiB rather than 4 KiB.
+Native diff/search/status limits and file/list pagination still apply; their `truncated`,
+`nextOffset`, and other omission metadata remain authoritative.
+
+Storage is capped at 2 MiB per serialized output, 8 MiB per conversation, 32 MiB total, and 128
+outputs. There is no silent eviction or clipping at these caps: the turn fails with an explicit
+completed-operation warning and bounded preview, so retry does not replay the tool. Delete old
+conversations to free space. Evidence survives reload; deleting a conversation removes its evidence
+and memory checkpoint, and startup finishes interrupted deletions without resurrecting history.
+Artifacts associated with quarantined damaged conversations are preserved.
+
+Before each generation, the resident model's real chat template/tokenizer measures the entire
+prompt, including tool definitions. When fewer than **two generation reserves** remain (each a
+quarter of context, capped at 2,048 tokens, plus the 32-token safety margin), the same model generates
+a rolling semantic summary with no tools. Oversized transcripts are processed in token-sized
+chunks, at most 64 rounds, reserving normal generation headroom and allowing at most 1,024 generated
+tokens per summary round. The complete summary is capped at 12,000 characters and durably journaled
+with its covered message ID, model ID, and timestamp before answering resumes.
+
+The summary prompt retains the current request, decisions/constraints, pending work, completed
+mutations, uncertainties and observed evidence. The latest user request is also retained verbatim
+outside the summary; saved artifact references are included independently of model wording.
+Original messages/tool intent remain intact: semantic memory is **not** journal-file compaction.
+“Summarizing conversation” activity remains stoppable. Stop, background/memory interruption,
+inference errors and truncated/empty summaries cannot publish partial memory or erase history.
+If the summary plus current request/tools still cannot fit, the run fails explicitly rather than
+silently dropping evidence. Physical-iPhone inference quality/performance still require device
+validation; deterministic tests use the real JavaScript loop/session/repository with scripted
+inference and isolated filesystem persistence.
 
 ## Tool and lifecycle boundaries
 

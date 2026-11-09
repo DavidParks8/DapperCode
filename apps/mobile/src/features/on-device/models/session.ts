@@ -6,7 +6,12 @@ import type {
 } from 'llama.rn';
 import type { OnDeviceNativeServices } from '../native/services.types';
 import { localModelDefinition, requireLocalModelRuntime } from './catalog';
-import { generationTokenBudget, iteratePromptCandidates, promptFits } from './contextWindow';
+import {
+  generationTokenBudget,
+  iteratePromptCandidates,
+  outputReserveTokens,
+  promptFits,
+} from './contextWindow';
 import type {
   LocalContextLoader,
   LocalModelContext,
@@ -20,6 +25,7 @@ import {
   type ResidentModel,
 } from './memory';
 import type { LocalModelDefinition } from './types';
+import { rollingSummary } from './summary';
 
 export interface LocalModelSessionSnapshot {
   phase: 'empty' | 'loading' | 'ready' | 'running' | 'stopping' | 'error';
@@ -34,6 +40,18 @@ export interface LocalModelSessionSnapshot {
 export interface LocalModelUpdate {
   content: string;
   reasoning: string;
+}
+
+export interface LocalSummaryCheckpoint {
+  previous: string | null;
+  started(): void;
+  /** Persists a complete semantic summary before returning the new prompt. */
+  commit(content: string): Promise<LocalModelMessage[]>;
+}
+
+export interface LocalGenerationOptions {
+  checkpoint?: LocalSummaryCheckpoint;
+  outputTokens?: number;
 }
 
 interface LoadedModel {
@@ -143,7 +161,7 @@ export class LocalModelSession {
     messages: LocalModelMessage[],
     tools: object[],
     update: (value: LocalModelUpdate) => void,
-    options?: { outputTokens?: number },
+    options?: LocalGenerationOptions,
   ): Promise<LocalModelReply> {
     if (this.disposed || this.loading || this.unloading || !this.current || this.generation) {
       return Promise.reject(
@@ -158,13 +176,7 @@ export class LocalModelSession {
       promise: null,
     };
     this.generation = generation;
-    generation.promise = this.performGeneration(
-      generation,
-      messages,
-      tools,
-      update,
-      options?.outputTokens,
-    );
+    generation.promise = this.performGeneration(generation, messages, tools, update, options);
     return generation.promise;
   }
 
@@ -333,12 +345,12 @@ export class LocalModelSession {
     messages: LocalModelMessage[],
     tools: object[],
     update: (value: LocalModelUpdate) => void,
-    outputTokens?: number,
+    options?: LocalGenerationOptions,
   ): Promise<LocalModelReply> {
     try {
       this.requireExecutionMemory();
       this.publish({ phase: 'running', error: null });
-      const prompt = await this.preparePrompt(generation, messages, tools);
+      const prompt = await this.preparePrompt(generation, messages, tools, options?.checkpoint);
       if (generation.interrupted) {
         throw new LocalModelInterrupted();
       }
@@ -347,7 +359,9 @@ export class LocalModelSession {
           prompt.formatted,
           Math.min(
             generationTokenBudget(prompt.tokens, generation.model.contextTokens),
-            outputTokens === undefined ? Infinity : Math.max(1, Math.min(512, outputTokens)),
+            options?.outputTokens === undefined
+              ? Infinity
+              : Math.max(1, Math.min(512, options.outputTokens)),
           ),
         ),
         (value) => this.partial(generation, value, update),
@@ -386,8 +400,27 @@ export class LocalModelSession {
     generation: Generation,
     messages: LocalModelMessage[],
     tools: object[],
+    checkpoint?: LocalSummaryCheckpoint,
   ): Promise<PreparedPrompt> {
     const { context, contextTokens } = generation.model;
+    if (checkpoint) {
+      const original = await this.formatPrompt(generation, messages, tools);
+      // Start before overflow, leaving two normal generation reserves for the next tool round.
+      if (promptFits(original.tokens, contextTokens, 2)) {
+        return original;
+      }
+      checkpoint.started();
+      const summary = await this.summarize(generation, messages.slice(1), checkpoint.previous);
+      this.checkGeneration(generation);
+      const compacted = await checkpoint.commit(summary);
+      this.checkGeneration(generation);
+      const prepared = await this.formatPrompt(generation, compacted, tools);
+      if (!promptFits(prepared.tokens, contextTokens)) {
+        // Never silently discard evidence or the current request after semantic compaction.
+        throw new LocalContextFull();
+      }
+      return prepared;
+    }
     let fallback: PreparedPrompt | null = null;
     // A history candidate that fits is preferred to eliding the current turn's own output.
     for (const candidate of iteratePromptCandidates(messages, () => fallback !== null)) {
@@ -414,6 +447,58 @@ export class LocalModelSession {
       return fallback;
     }
     throw new LocalContextFull();
+  }
+
+  private checkGeneration(generation: Generation): void {
+    if (generation.interrupted) {
+      throw new LocalModelInterrupted();
+    }
+    if (generation.stopFailure) {
+      throw generation.stopFailure;
+    }
+  }
+
+  private async formatPrompt(
+    generation: Generation,
+    messages: LocalModelMessage[],
+    tools: object[],
+  ): Promise<PreparedPrompt> {
+    this.checkGeneration(generation);
+    const formatted = await generation.model.context.getFormattedChat(messages, null, {
+      tools,
+      tool_choice: tools.length ? 'auto' : 'none',
+      enable_thinking: false,
+      reasoning_format: 'auto',
+    });
+    const tokens = (await generation.model.context.tokenize(formatted.prompt)).tokens.length;
+    this.checkGeneration(generation);
+    return { formatted, tokens };
+  }
+
+  private async summarize(
+    generation: Generation,
+    messages: LocalModelMessage[],
+    previous: string | null,
+  ): Promise<string> {
+    const { context, contextTokens } = generation.model;
+    return rollingSummary(
+      messages,
+      previous,
+      contextTokens,
+      (chat) => this.formatPrompt(generation, chat, []),
+      async (prompt) => {
+        this.requireExecutionMemory();
+        this.checkGeneration(generation);
+        const reply = await context.completion(
+          completionParams(prompt.formatted, Math.min(1024, outputReserveTokens(contextTokens))),
+        );
+        this.checkGeneration(generation);
+        if (reply.interrupted) {
+          throw new LocalModelInterrupted();
+        }
+        return reply;
+      },
+    );
   }
 
   private partial(

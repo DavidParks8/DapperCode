@@ -17,6 +17,10 @@ const KEPT_RESULT_KEYS = [
   'staged',
   'pushed',
   'error',
+  'artifactId',
+  'offloaded',
+  'characters',
+  'producerLimit',
 ] as const;
 export const OMITTED_TURNS_NOTE =
   'Earlier turns of this conversation were omitted to fit the local context window.';

@@ -180,6 +180,13 @@ const TOOL_VERBS: Record<
   rename_path: { kind: 'move', verb: 'Rename', activity: 'Renaming', pathKey: 'path' },
   delete_path: { kind: 'delete', verb: 'Delete', activity: 'Deleting', pathKey: 'path' },
   search_files: { kind: 'search', verb: 'Search', activity: 'Searching', pathKey: 'query' },
+  read_tool_output: { kind: 'read', verb: 'Read saved output', activity: 'Reading saved output' },
+  search_tool_output: {
+    kind: 'search',
+    verb: 'Search saved output',
+    activity: 'Searching saved output',
+    pathKey: 'query',
+  },
   git_status: { kind: 'read', verb: 'Git status', activity: 'Checking Git status' },
   git_diff: { kind: 'read', verb: 'Git diff', activity: 'Reading the Git diff' },
   git_history: { kind: 'read', verb: 'Git history', activity: 'Reading Git history' },
@@ -319,6 +326,8 @@ export function localRunActivity(
       return preparingActivity(model);
     case 'generating':
       return { title: 'Generating' };
+    case 'compacting':
+      return { title: 'Summarizing conversation' };
     case 'tool':
       return toolActivity(thread);
     case 'stopping':

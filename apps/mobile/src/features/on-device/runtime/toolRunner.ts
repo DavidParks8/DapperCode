@@ -2,6 +2,7 @@ import { randomUUID } from 'expo-crypto';
 import type { ChatToolKind } from '@bridge/types/types';
 import { LocalModelInterrupted } from '../models/session';
 import { repeatedToolCallError } from './agentPolicy';
+import { LocalArtifactStorageError } from './toolArtifacts';
 import type { LocalThreadPort } from './delegation';
 import type { LocalToolPermission } from './toolDefinition';
 import type { LocalAgentRun, LocalMessage, LocalToolApprovalPolicy, LocalToolCall } from './types';
@@ -132,6 +133,11 @@ export async function performLocalTool(
       resultJson(result, bindings.outputLimit),
     );
   } catch (error) {
+    if (error instanceof LocalArtifactStorageError) {
+      updateLocalToolStatus(threads, run.threadId, id, 'completed', JSON.stringify(error.result));
+      await threads.save(run.threadId);
+      throw error;
+    }
     if (error instanceof LocalModelInterrupted) {
       throw error;
     }

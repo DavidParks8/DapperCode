@@ -6,7 +6,7 @@ import type { LocalAgentRun, LocalToolApprovalPolicy, LocalToolCall } from './ty
 import type { LocalThreadRepository } from './threads';
 import type { ChatActivityContent } from '@bridge/types/types';
 
-export type LocalThreadPort = Pick<LocalThreadRepository, 'get' | 'change' | 'save'>;
+export type LocalThreadPort = Pick<LocalThreadRepository, 'get' | 'change' | 'save' | 'artifacts'>;
 export const LOCAL_FANOUT = 3;
 export const CHILD_ROUNDS = 8;
 export const CHILD_OUTPUT_TOKENS = 512;
@@ -20,6 +20,13 @@ export const PARALLEL_READ_TOOLS = new Set([
   'git_status',
   'git_diff',
   'git_history',
+  'skill',
+  'code_diagnostics',
+  'code_definitions',
+  'code_references',
+  'code_symbols',
+  'read_tool_output',
+  'search_tool_output',
 ]);
 export const EXPLORE_TOOLS = new Set([...PARALLEL_READ_TOOLS, 'web_fetch', 'web_search']);
 
@@ -216,12 +223,15 @@ export function childThreadPort(
     return {
       ...parent,
       ...child,
+      parentThreadId: parentId,
+      contextSummary: child.contextSummary,
       workspaceId,
       modelId,
       activeTurnId: child.status === 'running' ? child.id : null,
     };
   };
   return {
+    artifacts: threads.artifacts,
     get,
     save: async (id) => {
       get(id);
@@ -244,6 +254,7 @@ export function childThreadPort(
                         updatedAt: next.updatedAt,
                         lastError: next.lastError,
                         messages: next.messages,
+                        contextSummary: next.contextSummary,
                       },
                 ),
               }

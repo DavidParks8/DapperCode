@@ -34,6 +34,7 @@ export interface LocalChild {
   updatedAt: string;
   lastError: string | null;
   messages: LocalMessage[];
+  contextSummary?: LocalThread['contextSummary'];
 }
 
 export interface LocalThread {
@@ -49,6 +50,15 @@ export interface LocalThread {
   lastSubmissionId: string | null;
   lastError: string | null;
   messages: LocalMessage[];
+  /** Only synthesized for child execution; never serialized as a conversation header. */
+  parentThreadId?: string;
+  /** Semantic memory checkpoint; original messages and mutation journal are never replaced. */
+  contextSummary?: {
+    content: string;
+    throughMessageId: string;
+    modelId: string;
+    createdAt: string;
+  } | null;
 }
 
 /** Independently subscribable parts of the on-device runtime. */
@@ -93,7 +103,15 @@ export interface LocalToolApproval extends LocalToolPermission {
 }
 
 export interface LocalRunSnapshot {
-  phase: 'idle' | 'preparing' | 'generating' | 'tool' | 'approval' | 'stopping' | 'persisting';
+  phase:
+    | 'idle'
+    | 'preparing'
+    | 'generating'
+    | 'compacting'
+    | 'tool'
+    | 'approval'
+    | 'stopping'
+    | 'persisting';
   threadId: string | null;
   turnId: string | null;
   toolName: string | null;
@@ -113,6 +131,7 @@ export type LocalToolExecutor = (
   name: string,
   args: unknown,
   signal?: AbortSignal,
+  offload?: (result: unknown) => Promise<unknown>,
 ) => Promise<unknown>;
 export type LocalToolApprovalPolicy = (name: string, args?: unknown) => LocalToolPermission | null;
 

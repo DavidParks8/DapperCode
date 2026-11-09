@@ -33,6 +33,32 @@ function page(chunks: string[] = ['page contents'], contentType = 'text/html') {
 
 afterEach(() => jest.useRealTimers());
 
+test('agent capture stores the full bounded body before requested page slicing, without another network request', async () => {
+  const full = `${'response '.repeat(1500)}TAIL-EVIDENCE`;
+  const h = page([full.slice(0, 4000), full.slice(4000)]);
+  const offload = jest.fn((result: unknown) => Promise.resolve({ saved: result }));
+  const result = await executeWebFetch(
+    { url: 'https://docs.example/', offset: 100, limit: 500 },
+    undefined,
+    h.request,
+    offload,
+  );
+  expect(offload).toHaveBeenCalledWith(
+    expect.objectContaining({ content: full, truncated: false, requestedOffset: 100 }),
+  );
+  expect(result).toHaveProperty('saved.content', full);
+  expect(h.request).toHaveBeenCalledTimes(1);
+});
+
+test('full-body capture explicitly rejects over-limit downloads instead of claiming full data', async () => {
+  const h = page(['x'.repeat(1024 * 1024), 'extra']);
+  const offload = jest.fn((result: unknown) => Promise.resolve(result));
+  await expect(
+    executeWebFetch({ url: 'https://docs.example/' }, undefined, h.request, offload),
+  ).rejects.toThrow('1 MiB');
+  expect(offload).not.toHaveBeenCalled();
+});
+
 test('reads text through a credential-free GET and returns source metadata, not rendered HTML', async () => {
   const h = page(['<h1>Documentation</h1>']);
   const result = await executeWebFetch({ url: 'https://docs.example/guide' }, undefined, h.request);
