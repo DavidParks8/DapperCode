@@ -66,6 +66,7 @@ when tool approvals are disabled. **Cancel** and **Decline** return an explicit 
 let generation continue; **Stop** interrupts the turn instead. Backgrounding, leaving the local
 profile, deleting the conversation, or reloading settles pending calls without replaying them.
 Answers to an old request cannot resolve a later one.
+Choices and reply actions keep the platform's minimum touch target size.
 
 `todo_read` and `todo_write` manage up to 64 conversation-owned tasks. Each task has a stable
 alphanumeric id (hyphens/underscores allowed), nonblank text (maximum 500 characters), and
