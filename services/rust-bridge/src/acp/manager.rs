@@ -5419,6 +5419,7 @@ fn redact_error(error: &AcpRuntimeError) -> String {
 mod tests {
     use super::*;
 
+    use crate::acp::config::test_executable_root;
     use agent_client_protocol::schema::v1::{
         AgentCapabilities, CancelNotification, CloseSessionResponse, DeleteSessionResponse,
         InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
@@ -6367,7 +6368,7 @@ mod tests {
     #[test]
     fn local_manifest_set_rejects_duplicates_missing_preferred_and_empty_enabled_set() {
         let alpha = manifest("alpha-orbit", "Alpha Orbit");
-        let roots = [PathBuf::from("/bin")];
+        let roots = [test_executable_root(&alpha.resolved.executable)];
         let duplicate = LocalAgentManifestSet {
             preferred_agent_id: "alpha-orbit".into(),
             agents: vec![alpha.clone(), alpha.clone()],
@@ -6389,6 +6390,9 @@ mod tests {
 
     #[test]
     fn local_manifest_requires_executable_digest_and_typed_integrity() {
+        let roots = [test_executable_root(
+            &manifest("alpha-orbit", "Alpha Orbit").resolved.executable,
+        )];
         let value = serde_json::to_value(LocalAgentManifestSet {
             preferred_agent_id: "alpha-orbit".into(),
             agents: vec![manifest("alpha-orbit", "Alpha Orbit")],
@@ -6401,7 +6405,7 @@ mod tests {
             .remove("verifiedDigest");
         assert!(LocalAgentManifestSet::parse(
             &serde_json::to_string(&missing).expect("serialize missing digest"),
-            &[PathBuf::from("/bin")]
+            &roots
         )
         .is_err());
 
@@ -6412,7 +6416,7 @@ mod tests {
             .remove("integrity");
         assert!(LocalAgentManifestSet::parse(
             &serde_json::to_string(&missing_integrity).expect("serialize missing integrity"),
-            &[PathBuf::from("/bin")]
+            &roots
         )
         .is_err());
     }
@@ -6581,7 +6585,9 @@ mod tests {
 
     #[test]
     fn local_manifest_set_validates_counts_descriptors_and_enabled_agents() {
-        let roots = [PathBuf::from("/bin")];
+        let roots = [test_executable_root(
+            &manifest("alpha", "Alpha").resolved.executable,
+        )];
         let empty = LocalAgentManifestSet {
             preferred_agent_id: "alpha".to_string(),
             agents: Vec::new(),
@@ -6659,7 +6665,9 @@ mod tests {
 
     #[test]
     fn local_manifest_parse_load_and_cursor_validation_are_strict() {
-        let roots = [PathBuf::from("/bin")];
+        let roots = [test_executable_root(
+            &manifest("alpha", "Alpha").resolved.executable,
+        )];
         assert!(LocalAgentManifestSet::parse("not json", &roots).is_err());
         assert!(LocalAgentManifestSet::load(Path::new("/does/not/exist"), &roots).is_err());
         assert_eq!(decode_cursor(None).unwrap(), 0);

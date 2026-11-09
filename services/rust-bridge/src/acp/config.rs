@@ -397,6 +397,16 @@ fn executable_sha256(path: &Path) -> Result<String, RuntimeManifestError> {
     Ok(format!("sha256:{:x}", digest.finalize()))
 }
 
+#[cfg(test)]
+pub(crate) fn test_executable_root(executable: &Path) -> PathBuf {
+    executable
+        .canonicalize()
+        .expect("resolve test executable")
+        .parent()
+        .expect("test executable parent")
+        .to_path_buf()
+}
+
 enum TreeEntry {
     Directory {
         path: String,
@@ -801,6 +811,7 @@ while IFS= read -r _; do :; done
     #[test]
     fn manifest_rejects_disallowed_environment_reference() {
         let mut manifest = manifest();
+        let roots = [test_executable_root(&manifest.executable)];
         manifest.environment = BTreeMap::from([(
             "SAFE_NAME".to_string(),
             ResolvedEnvironment::HostReference {
@@ -808,13 +819,14 @@ while IFS= read -r _; do :; done
             },
         )]);
         assert!(matches!(
-            manifest.validate(&[PathBuf::from("/bin")]),
+            manifest.validate(&roots),
             Err(RuntimeManifestError::DisallowedEnvironmentReference { .. })
         ));
     }
 
     #[test]
     fn manifest_rejects_secret_shaped_literal_and_reference_names() {
+        let roots = [test_executable_root(&manifest().executable)];
         for name in [
             "BRIDGE_AUTH_TOKEN",
             "EXPO_ACCESS_TOKEN",
@@ -833,7 +845,7 @@ while IFS= read -r _; do :; done
                 },
             );
             assert!(matches!(
-                candidate.validate(&[PathBuf::from("/bin")]),
+                candidate.validate(&roots),
                 Err(RuntimeManifestError::SecretEnvironment { name: denied }) if denied == name
             ));
         }
@@ -846,7 +858,7 @@ while IFS= read -r _; do :; done
             },
         );
         assert!(matches!(
-            candidate.validate(&[PathBuf::from("/bin")]),
+            candidate.validate(&roots),
             Err(RuntimeManifestError::DisallowedEnvironmentReference { .. })
         ));
     }
@@ -935,6 +947,7 @@ while IFS= read -r _; do :; done
     #[test]
     fn manifest_requires_explicit_host_environment_values() {
         let mut manifest = manifest();
+        let roots = [test_executable_root(&manifest.executable)];
         manifest.argv = vec!["hello".to_string()];
         manifest.environment = BTreeMap::from([(
             "PATH".to_string(),
@@ -943,23 +956,19 @@ while IFS= read -r _; do :; done
             },
         )]);
         assert!(matches!(
-            manifest.acp_agent_with_args(
-                &[PathBuf::from("/bin")],
-                &BTreeMap::new(),
-                &[],
-                &BTreeMap::new(),
-            ),
+            manifest.acp_agent_with_args(&roots, &BTreeMap::new(), &[], &BTreeMap::new(),),
             Err(RuntimeManifestError::MissingEnvironmentReference { .. })
         ));
     }
 
     #[test]
     fn manifest_validates_identity_metadata_arguments_and_environment_limits() {
+        let roots = [test_executable_root(&manifest().executable)];
         for agent_id in ["", ".", "..", &"a".repeat(MAX_AGENT_ID_LEN + 1), "bad/id"] {
             let mut candidate = manifest();
             candidate.agent_id = agent_id.to_string();
             assert_eq!(
-                candidate.validate(&[PathBuf::from("/bin")]),
+                candidate.validate(&roots),
                 Err(RuntimeManifestError::InvalidAgentId)
             );
         }
@@ -969,7 +978,7 @@ while IFS= read -r _; do :; done
             candidate.resolved_version = version.to_string();
             candidate.provenance = provenance.to_string();
             assert_eq!(
-                candidate.validate(&[PathBuf::from("/bin")]),
+                candidate.validate(&roots),
                 Err(RuntimeManifestError::InvalidExecutable)
             );
         }
@@ -977,7 +986,7 @@ while IFS= read -r _; do :; done
         let mut too_many_args = manifest();
         too_many_args.argv = vec!["arg".to_string(); MAX_ARGS + 1];
         assert_eq!(
-            too_many_args.validate(&[PathBuf::from("/bin")]),
+            too_many_args.validate(&roots),
             Err(RuntimeManifestError::InvalidArgument { index: MAX_ARGS })
         );
         for argument in [
@@ -988,7 +997,7 @@ while IFS= read -r _; do :; done
             let mut candidate = manifest();
             candidate.argv = vec!["ok".to_string(), argument];
             assert_eq!(
-                candidate.validate(&[PathBuf::from("/bin")]),
+                candidate.validate(&roots),
                 Err(RuntimeManifestError::InvalidArgument { index: 1 })
             );
         }
@@ -1005,7 +1014,7 @@ while IFS= read -r _; do :; done
             })
             .collect();
         assert!(matches!(
-            too_many_environment_entries.validate(&[PathBuf::from("/bin")]),
+            too_many_environment_entries.validate(&roots),
             Err(RuntimeManifestError::InvalidEnvironment { name }) if name == "too many entries"
         ));
 
@@ -1018,7 +1027,7 @@ while IFS= read -r _; do :; done
                 },
             );
             assert!(matches!(
-                candidate.validate(&[PathBuf::from("/bin")]),
+                candidate.validate(&roots),
                 Err(RuntimeManifestError::InvalidEnvironment { name: invalid }) if invalid == name
             ));
         }
@@ -1033,7 +1042,7 @@ while IFS= read -r _; do :; done
                 ResolvedEnvironment::Literal { value },
             );
             assert!(matches!(
-                candidate.validate(&[PathBuf::from("/bin")]),
+                candidate.validate(&roots),
                 Err(RuntimeManifestError::InvalidEnvironment { name }) if name == "VALUE_1"
             ));
         }
@@ -1041,17 +1050,18 @@ while IFS= read -r _; do :; done
 
     #[test]
     fn manifest_validates_executable_roots_and_builds_typed_agent() {
+        let roots = [test_executable_root(&manifest().executable)];
         let mut candidate = manifest();
         candidate.executable = PathBuf::from("/does/not/exist");
         assert_eq!(
-            candidate.validate(&[PathBuf::from("/bin")]),
+            candidate.validate(&roots),
             Err(RuntimeManifestError::InvalidExecutable)
         );
 
         let mut candidate = manifest();
         candidate.executable = PathBuf::from("/bin");
         assert_eq!(
-            candidate.validate(&[PathBuf::from("/bin")]),
+            candidate.validate(&roots),
             Err(RuntimeManifestError::InvalidExecutable)
         );
 
@@ -1078,7 +1088,7 @@ while IFS= read -r _; do :; done
         ]);
         assert!(candidate
             .acp_agent_with_args(
-                &[PathBuf::from("/bin")],
+                &roots,
                 &BTreeMap::from([("PATH".to_string(), "/bin".to_string())]),
                 &[],
                 &BTreeMap::new(),
@@ -1086,12 +1096,111 @@ while IFS= read -r _; do :; done
             .is_ok());
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn manifest_launch_and_set_validation_follow_symlinked_executable_roots() {
+        use crate::acp::manager::{LocalAgentManifest, LocalAgentManifestSet};
+
+        let root = test_tree("merged-usr-executable");
+        let bin = root.join("usr/bin");
+        let runtime = root.join("usr/libexec/coreutils");
+        std::fs::create_dir_all(&bin).expect("create command directory");
+        std::fs::create_dir_all(&runtime).expect("create runtime directory");
+        let target = runtime.join("echo");
+        std::fs::write(&target, b"#!/bin/sh\nprintf '%s\\n' \"$*\"\n").expect("write executable");
+        std::fs::set_permissions(&target, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .expect("make fixture executable");
+        std::os::unix::fs::symlink("../libexec/coreutils/echo", bin.join("echo"))
+            .expect("link command to runtime");
+        std::os::unix::fs::symlink("usr/bin", root.join("bin")).expect("link merged bin");
+
+        let mut candidate = manifest();
+        candidate.executable = root.join("bin/echo");
+        candidate.verified_digest =
+            executable_sha256(&candidate.executable).expect("hash linked executable");
+        candidate.argv = vec!["hello".to_string()];
+        candidate.environment.insert(
+            "PATH_COPY".to_string(),
+            ResolvedEnvironment::HostReference {
+                name: "PATH".to_string(),
+            },
+        );
+        assert_eq!(
+            candidate.validate(&[root.join("bin")]),
+            Err(RuntimeManifestError::ExecutableOutsideRoot)
+        );
+
+        let roots = [test_executable_root(&candidate.executable)];
+        assert!(matches!(
+            candidate.acp_agent_with_args(&roots, &BTreeMap::new(), &[], &BTreeMap::new()),
+            Err(RuntimeManifestError::MissingEnvironmentReference { name }) if name == "PATH"
+        ));
+        let agent = candidate
+            .acp_agent_with_args(
+                &roots,
+                &BTreeMap::from([("PATH".to_string(), "/usr/bin:/bin".to_string())]),
+                &["from-root".to_string()],
+                &BTreeMap::new(),
+            )
+            .expect("build isolated agent using canonical runtime root");
+        assert_eq!(roots[0], runtime.canonicalize().unwrap());
+        assert_eq!(agent.executable, target.canonicalize().unwrap());
+        assert_eq!(agent.argv, ["hello", "from-root"]);
+        assert_eq!(agent.environment["PATH_COPY"], "/usr/bin:/bin");
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            agent
+                .spawn_process()
+                .expect("spawn linked executable")
+                .wait_with_output(),
+        )
+        .await
+        .expect("executable exits within deadline")
+        .expect("wait for executable");
+        assert!(
+            output.status.success(),
+            "fixture exit status: {}",
+            output.status
+        );
+        assert_eq!(output.stdout, b"hello from-root\n");
+
+        let enabled = LocalAgentManifest {
+            enabled: true,
+            display_name: "Test Agent".to_string(),
+            icon: None,
+            resolved: candidate.clone(),
+        };
+        let mut disabled = enabled.clone();
+        disabled.enabled = false;
+        disabled.resolved.agent_id = "disabled".to_string();
+        disabled.resolved.executable = root.join("does-not-exist");
+        let encoded = serde_json::to_string(&LocalAgentManifestSet {
+            preferred_agent_id: candidate.agent_id.clone(),
+            agents: vec![enabled, disabled],
+        })
+        .expect("encode manifest set");
+        let parsed = LocalAgentManifestSet::parse(&encoded, &roots)
+            .expect("enabled executable is approved; disabled invalid executable is ignored");
+        assert_eq!(parsed.agents.len(), 2);
+        assert!(parsed.agents[0].enabled);
+        assert!(!parsed.agents[1].enabled);
+        assert!(LocalAgentManifestSet::parse(&encoded, &[root.join("bin")]).is_err());
+
+        std::fs::write(&target, b"tampered").expect("replace symlink target contents");
+        assert!(matches!(
+            candidate.acp_agent_with_args(&roots, &BTreeMap::new(), &[], &BTreeMap::new()),
+            Err(RuntimeManifestError::ExecutableDigestMismatch)
+        ));
+        std::fs::remove_dir_all(root).expect("remove test root");
+    }
+
     #[test]
     fn manifest_rejects_invalid_missing_and_changed_executable_digests() {
+        let roots = [test_executable_root(&manifest().executable)];
         let mut invalid = manifest();
         invalid.verified_digest = "sha256:ABC".to_string();
         assert_eq!(
-            invalid.validate(&[PathBuf::from("/bin")]),
+            invalid.validate(&roots),
             Err(RuntimeManifestError::InvalidExecutableDigest)
         );
 

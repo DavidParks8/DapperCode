@@ -6,9 +6,7 @@ import {
   StyleSheet,
   TextInput,
   View,
-  type StyleProp,
   type TextInputProps,
-  type ViewStyle,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -556,17 +554,14 @@ describe('ChatInput behavior', () => {
   it('moves Send and Stop into a column beyond the composer edge, still beside the input box', () => {
     const hostStyle = (root: Queryable, predicate: (node: Queryable) => boolean) =>
       StyleSheet.flatten(
-        root.findAll((node) => typeof node.type === 'string' && predicate(node))[0]?.props
-          .style as StyleProp<ViewStyle>,
+        root.findAll((node) => typeof node.type === 'string' && predicate(node))[0]?.props.style,
       ) ?? {};
     // Horizontal positions relative to the composer's trailing edge, computed from the styles.
     const geometry = (root: Queryable) => {
       const shell = hostStyle(root, (node) => node.props['testID'] === 'chat-composer');
       const container = hostStyle(
         root,
-        (node) =>
-          typeof StyleSheet.flatten(node.props.style as StyleProp<ViewStyle>)?.paddingBottom ===
-          'number',
+        (node) => typeof StyleSheet.flatten(node.props.style)?.paddingBottom === 'number',
       );
       const group = hostStyle(root, (node) => node.props['testID'] === 'composer-control-groups');
       const column = hostStyle(root, (node) => node.props['testID'] === 'composer-action-column');
