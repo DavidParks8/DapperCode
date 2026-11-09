@@ -51,6 +51,7 @@ export function useMainScreenApprovalAndUserInputResolution(
     selectedChatRef,
     setSelectedChat,
     setStreamingText,
+    store,
   } = context;
   const sending = useAtomValue(sendingAtom);
   const creating = useAtomValue(creatingAtom);
@@ -228,7 +229,11 @@ export function useMainScreenApprovalAndUserInputResolution(
         setUserInputError(resolutionError);
         return;
       }
+      if (store.get(pendingUserInputRequestAtom)?.requestId !== pendingUserInputRequest.requestId) {
+        return;
+      }
       cacheThreadPendingUserInputRequest(pendingUserInputRequest.threadId, null);
+      setResolvingUserInput(false);
       setPendingUserInputRequest(null);
       setUserInputDrafts({});
       setUserInputError(null);
@@ -238,9 +243,13 @@ export function useMainScreenApprovalAndUserInputResolution(
       });
       bumpRunWatchdog();
     } catch (err) {
-      setUserInputError((err as Error).message);
+      if (store.get(pendingUserInputRequestAtom)?.requestId === pendingUserInputRequest.requestId) {
+        setUserInputError((err as Error).message);
+      }
     } finally {
-      setResolvingUserInput(false);
+      if (store.get(pendingUserInputRequestAtom)?.requestId === pendingUserInputRequest.requestId) {
+        setResolvingUserInput(false);
+      }
     }
   }, [
     approvalController,
@@ -254,6 +263,7 @@ export function useMainScreenApprovalAndUserInputResolution(
     setUserInputDrafts,
     setUserInputError,
     userInputDrafts,
+    store,
   ]);
 
   return {

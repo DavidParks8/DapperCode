@@ -33,6 +33,8 @@ export interface LocalThread {
   lastSubmissionId: string | null;
   lastError: string | null;
   messages: LocalMessage[];
+  /** Durable conversation state, never reconstructed from compacted model history. */
+  tasks?: LocalTask[];
 }
 
 /** Independently subscribable parts of the on-device runtime. */
@@ -67,3 +69,41 @@ export interface OnDeviceIssue {
 }
 
 export type OnDeviceReachability = 'unknown' | 'online' | 'offline';
+import type { LocalTask } from './interactionTools';
+import type { PendingUserInputRequest } from '@bridge/types/types';
+import type { LocalToolPermission } from './toolDefinition';
+
+/** A model tool call waiting for an explicit user decision before it may run. */
+export interface LocalToolApproval extends LocalToolPermission {
+  threadId: string;
+  turnId: string;
+  callId: string;
+  toolName: string;
+}
+
+export interface LocalRunSnapshot {
+  phase:
+    'idle' | 'preparing' | 'generating' | 'tool' | 'approval' | 'input' | 'stopping' | 'persisting';
+  threadId: string | null;
+  turnId: string | null;
+  toolName: string | null;
+  approval: LocalToolApproval | null;
+  userInput?: PendingUserInputRequest | null;
+}
+
+export const LOCAL_IDLE_RUN: LocalRunSnapshot = {
+  phase: 'idle',
+  threadId: null,
+  turnId: null,
+  toolName: null,
+  approval: null,
+};
+
+export type LocalToolExecutor = (
+  workspaceId: string,
+  name: string,
+  args: unknown,
+  signal?: AbortSignal,
+) => Promise<unknown>;
+/** Reads the permission request declared by a registered tool, otherwise null. */
+export type LocalToolApprovalPolicy = (name: string, args?: unknown) => LocalToolPermission | null;

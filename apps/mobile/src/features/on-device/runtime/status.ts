@@ -99,10 +99,8 @@ function runStatus(run: LocalRunSnapshot, model: LocalModelSessionSnapshot): Loc
         'busy',
       );
     case 'approval':
-      return status(
-        `Waiting for your approval · ${run.approval?.summary ?? run.toolName ?? 'tool'}`,
-        'attention',
-      );
+    case 'input':
+      return waitingStatus(run);
     case 'preparing':
       if (model.phase === 'loading') {
         return loading(model);
@@ -120,6 +118,15 @@ function runStatus(run: LocalRunSnapshot, model: LocalModelSessionSnapshot): Loc
     case 'idle':
       return status('Idle', 'ready');
   }
+}
+
+function waitingStatus(run: LocalRunSnapshot): LocalAgentStatus {
+  return status(
+    run.phase === 'input'
+      ? 'Clarification needed · waiting for your answers'
+      : `Waiting for your approval · ${run.approval?.summary ?? run.toolName ?? 'tool'}`,
+    'attention',
+  );
 }
 
 function loading(model: LocalModelSessionSnapshot): LocalAgentStatus {

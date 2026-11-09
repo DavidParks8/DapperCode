@@ -57,6 +57,26 @@ local or desktop, is restored at startup. Builds that stored the old global "On 
 open the local profile instead. Switching to another profile settles local work and unloads its
 model.
 
+## Questions and persistent tasks
+
+The local model can call `ask_user` to wait for 1–8 structured questions in the existing
+**Clarification needed** sheet. Questions support single-choice, multiple-choice, and custom text
+answers (up to 12 choices per question). Nothing is preselected or answered automatically, even
+when tool approvals are disabled. **Cancel** and **Decline** return an explicit tool error and
+let generation continue; **Stop** interrupts the turn instead. Backgrounding, leaving the local
+profile, deleting the conversation, or reloading settles pending calls without replaying them.
+Answers to an old request cannot resolve a later one.
+
+`todo_read` and `todo_write` manage up to 64 conversation-owned tasks. Each task has a stable
+alphanumeric id (hyphens/underscores allowed), nonblank text (maximum 500 characters), and
+`pending`, `in_progress`, or `completed` status. Writes upsert by id, preserve omitted tasks, and
+remove only explicitly listed ids. The existing execution card shows progress; tool rows also
+show readable task results. Completing every task does **not** finish the user's request.
+
+Tasks are acknowledged only after saving in the app-private conversation journal, never in the
+Git workspace. They survive context trimming, retry, and reload; deleting a conversation deletes
+its tasks. Persistence failures remain visible and retryable rather than being reported as success.
+
 ## Web access
 
 Every local chat includes `web_search` and `web_fetch` by default, alongside the file and Git tools.

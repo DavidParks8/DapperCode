@@ -1,6 +1,20 @@
 import type { LocalModelMessage } from '../models/engine';
 import type { LocalMessage, LocalThread } from './types';
 
+const TITLE_LIMIT = 60;
+
+/** First-message title, cut at a word boundary when it is longer than the drawer can show. */
+export function localConversationTitle(input: string): string {
+  const line = input.trim().split(/\r?\n/u)[0]?.replace(/\s+/gu, ' ').trim() ?? '';
+  if (line.length <= TITLE_LIMIT) {
+    return line || 'New local conversation';
+  }
+  const cut = line.slice(0, TITLE_LIMIT - 1);
+  const boundary = cut.lastIndexOf(' ');
+  const words = boundary >= TITLE_LIMIT / 2 ? cut.slice(0, boundary) : cut;
+  return `${words.replace(/[\s.,;:!?-]+$/u, '')}…`;
+}
+
 export function emptyLocalAnswer(message: LocalMessage): boolean {
   return message.role === 'assistant' && !message.content.trim() && !message.toolCalls?.length;
 }

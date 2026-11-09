@@ -1,5 +1,6 @@
 import { isRecord } from '@shared/records';
 import type { LocalMessage, LocalThread, LocalToolCall } from './types';
+import { parseLocalTasks } from './interactionTools';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu;
 
@@ -101,6 +102,7 @@ export const LOCAL_THREAD_HEADER_KEYS = [
   'activeTurnId',
   'lastSubmissionId',
   'lastError',
+  'tasks',
 ] as const;
 
 export type LocalThreadHeaderKey = (typeof LOCAL_THREAD_HEADER_KEYS)[number];
@@ -125,6 +127,8 @@ export function parseLocalThreadField(
   value: unknown,
 ): LocalThreadHeader[LocalThreadHeaderKey] {
   switch (key) {
+    case 'tasks':
+      return value === undefined ? undefined : parseLocalTasks(value);
     case 'status':
       return status(value);
     case 'activeTurnId':
@@ -208,6 +212,7 @@ export function parseLocalThreadBase(raw: string, expectedId: string): LocalThre
       lastSubmissionId: nullableText(item['lastSubmissionId']),
       lastError: nullableText(item['lastError']),
       messages: item['messages'].map(message),
+      ...(item['tasks'] === undefined ? {} : { tasks: parseLocalTasks(item['tasks']) }),
     },
   };
 }

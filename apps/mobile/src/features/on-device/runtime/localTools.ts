@@ -9,12 +9,14 @@ import { executeWebFetch, WEB_TOOL_DEFINITIONS } from './webFetch';
 import { executeWebSearch, SEARCH_TOOL_DEFINITIONS } from './webSearch';
 import { LocalToolInputError } from './toolArguments';
 import { isRecord } from '@shared/records';
+import { INTERACTION_TOOL_DEFINITIONS } from './interactionTools';
 
 const LOCAL_TOOLS = [
   ...FILE_TOOL_DEFINITIONS,
   ...GIT_TOOL_DEFINITIONS,
   ...WEB_TOOL_DEFINITIONS,
   ...SEARCH_TOOL_DEFINITIONS,
+  ...INTERACTION_TOOL_DEFINITIONS,
 ];
 const TOOL_REGISTRY = new Map<string, (typeof LOCAL_TOOLS)[number]>(
   LOCAL_TOOLS.map((tool) => [tool.definition.function.name, tool]),

@@ -8,12 +8,19 @@ import { failure, LOCAL_RPC_ERROR, LocalRpcError } from './errors';
 import { MODEL_HOST_METHODS } from '@shared/hostModels';
 import { forwardLocalCloneProgress, LocalEventProjector, type LocalNotification } from './events';
 import { LocalApprovalRelay } from './approvals';
+import { LocalUserInputRelay } from './userInput';
 import { createLocalGitHandlers } from './gitHandlers';
 import { localModelListEntries } from './modelOptions';
 import { LOCAL_TURN_RETRY_METHOD, startLocalRetry } from './retry';
 import { startLocalTurn } from './turnStart';
 import { createLocalWorkspaceHandlers, LOCAL_WORKSPACE_METHODS } from './workspaceHandlers';
-import { readApprovalPolicy, readParam, readRecord, type RpcParams } from './params';
+import {
+  readApprovalPolicy,
+  readParam,
+  readRecord,
+  readInputText as inputText,
+  type RpcParams as Params,
+} from './params';
 import type { LocalAgentPort } from './port';
 import {
   LOCAL_MODEL_CONFIG_ID,
@@ -38,8 +45,6 @@ export interface LocalRpcEndpoint {
   start(): void;
   stop(): void;
 }
-
-type Params = RpcParams;
 
 export { LOCAL_TURN_RETRY_METHOD } from './retry';
 
@@ -77,6 +82,7 @@ export const LOCAL_IMPLEMENTED_METHODS = [
   'bridge/approvals/list',
   'bridge/approvals/resolve',
   'bridge/userInput/list',
+  'bridge/userInput/resolve',
   'bridge/git/status',
   'bridge/git/diff',
   'bridge/git/history',
@@ -104,15 +110,6 @@ function emptyQueue(threadId: string): BridgeThreadQueueState {
   };
 }
 
-function inputText(params: Params): string {
-  const input = Array.isArray(params['input']) ? params['input'] : [];
-  return input
-    .map((entry) => readRecord(entry))
-    .filter((entry) => entry['type'] === 'text' && typeof entry['text'] === 'string')
-    .map((entry) => entry['text'] as string)
-    .join('\n');
-}
-
 /**
  * In-process implementation of the subset of the bridge JSON-RPC protocol that the chat shell
  * uses, backed by the on-device agent. It returns the same wire shapes as the Rust bridge so the
@@ -125,6 +122,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
   private readonly handlers: Record<string, Handler>;
   private unsubscribe: (() => void) | null = null;
   private readonly approvals: LocalApprovalRelay;
+  private readonly userInput: LocalUserInputRelay;
   private flushing = false;
   private dirty = false;
 
@@ -135,6 +133,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
       () => this.port.run(),
     );
     this.approvals = new LocalApprovalRelay(port);
+    this.userInput = new LocalUserInputRelay(port);
     this.handlers = this.createHandlers();
   }
 
@@ -144,6 +143,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
     }
     this.projector.prime(this.port.threads());
     this.approvals.prime();
+    this.userInput.prime();
     const stopThreads = this.port.subscribe(() => this.flush());
     const stopProgress = forwardLocalCloneProgress(this.port, (event) => this.publish(event));
     this.unsubscribe = () => {
@@ -197,6 +197,9 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
           this.publish(notification);
         }
         for (const notification of this.approvals.diff()) {
+          this.publish(notification);
+        }
+        for (const notification of this.userInput.diff()) {
           this.publish(notification);
         }
       } while (this.dirty);
@@ -467,6 +470,9 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
       },
       'thread/delete': async (params) => {
         const thread = this.requireThread(params);
+        if (port.run().threadId === thread.id) {
+          await port.stop();
+        }
         await port.deleteThread(thread.id);
         return { ok: true, threadId: thread.id };
       },
@@ -578,7 +584,8 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
       },
       'bridge/approvals/list': () => this.approvals.list(),
       'bridge/approvals/resolve': (params) => this.approvals.resolve(params),
-      'bridge/userInput/list': () => [],
+      'bridge/userInput/list': () => this.userInput.list(),
+      'bridge/userInput/resolve': (params) => this.userInput.resolve(params),
       ...createLocalGitHandlers(port, (params) => this.gitWorkspace(params)),
       ...createLocalWorkspaceHandlers(port, (params) => this.gitWorkspace(params)),
     };

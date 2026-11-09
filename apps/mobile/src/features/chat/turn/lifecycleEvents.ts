@@ -172,7 +172,9 @@ function handleTurnPlanUpdatedEvent(
     return;
   }
 
-  context.setSelectedCollaborationMode('plan');
+  if (context.activeAgentSupports?.planMode !== false) {
+    context.setSelectedCollaborationMode('plan');
+  }
   context.bumpRunWatchdog();
   if (planUpdate) {
     context.setActivePlan((prev) => buildNextPlanStateFromUpdate(prev, planUpdate));

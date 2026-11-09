@@ -30,6 +30,9 @@ const IDLE: LocalRunSnapshot = {
  * mutates thread state, so the transport's event projection is exercised without native code.
  */
 export class FakeAgentPort implements LocalAgentPort {
+  resolveUserInput: LocalAgentPort['resolveUserInput'] = () => {
+    throw new Error('This question is no longer pending.');
+  };
   approvalPolicy: ApprovalPolicy = 'untrusted';
   setApprovalPolicy(policy: ApprovalPolicy): void {
     this.approvalPolicy = policy;
