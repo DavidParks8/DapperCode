@@ -134,6 +134,7 @@ export async function executeWebSearch(
   input: unknown,
   signal?: AbortSignal,
   request: WebRequest = requestWeb,
+  offload?: (result: unknown) => Promise<unknown>,
 ): Promise<unknown> {
   const { query, limit } = searchArguments(input);
   return withWebRequest(
@@ -172,6 +173,15 @@ export async function executeWebSearch(
         );
       }
       const content = await readSearchResponse(response);
+      if (offload) {
+        return offload({
+          provider: 'Exa',
+          query,
+          content,
+          truncated: false,
+          producerLimit: 'Exa-selected results; 1 MiB response cap. Not an exhaustive web search.',
+        });
+      }
       return {
         provider: 'Exa',
         query,

@@ -9,12 +9,14 @@ import { executeWebFetch, WEB_TOOL_DEFINITIONS } from './webFetch';
 import { executeWebSearch, SEARCH_TOOL_DEFINITIONS } from './webSearch';
 import { LocalToolInputError } from './toolArguments';
 import { isRecord } from '@shared/records';
+import { ARTIFACT_TOOL_DEFINITIONS } from './toolArtifacts';
 
 const LOCAL_TOOLS = [
   ...FILE_TOOL_DEFINITIONS,
   ...GIT_TOOL_DEFINITIONS,
   ...WEB_TOOL_DEFINITIONS,
   ...SEARCH_TOOL_DEFINITIONS,
+  ...ARTIFACT_TOOL_DEFINITIONS,
 ];
 const TOOL_REGISTRY = new Map<string, (typeof LOCAL_TOOLS)[number]>(
   LOCAL_TOOLS.map((tool) => [tool.definition.function.name, tool]),
@@ -65,14 +67,14 @@ export function localToolExecutor(
 ): LocalToolExecutor {
   // Each run owns its signal, so observations cannot leak across turns or workspaces.
   const observed = new WeakMap<AbortSignal, Map<string, Map<string, string>>>();
-  return (workspace, name, input, signal) => {
+  return (workspace, name, input, signal, offload) => {
     if (name === 'web_fetch') {
       requireNetwork('fetch web pages');
-      return executeWebFetch(input, signal);
+      return executeWebFetch(input, signal, undefined, offload);
     }
     if (name === 'web_search') {
       requireNetwork('search the web');
-      return executeWebSearch(input, signal);
+      return executeWebSearch(input, signal, undefined, offload);
     }
     if (isFileTool(name)) {
       let versions: Map<string, string> | undefined;
@@ -118,7 +120,7 @@ export function localToolExecutor(
       });
     }
     if (isGitTool(name)) {
-      return executeGitTool(workspace, name, input, native, author, credential);
+      return executeGitTool(workspace, name, input, native, author, credential, offload);
     }
     return Promise.reject(new Error('The model requested a tool that is not available.'));
   };

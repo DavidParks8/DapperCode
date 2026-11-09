@@ -101,6 +101,7 @@ export const LOCAL_THREAD_HEADER_KEYS = [
   'activeTurnId',
   'lastSubmissionId',
   'lastError',
+  'contextSummary',
 ] as const;
 
 export type LocalThreadHeaderKey = (typeof LOCAL_THREAD_HEADER_KEYS)[number];
@@ -125,6 +126,22 @@ export function parseLocalThreadField(
   value: unknown,
 ): LocalThreadHeader[LocalThreadHeaderKey] {
   switch (key) {
+    case 'contextSummary': {
+      if (value === null || value === undefined) {
+        return null;
+      }
+      const summary = record(value);
+      const content = text(summary['content']);
+      if (content.length > 12_000) {
+        throw new Error('The local conversation summary exceeds its limit.');
+      }
+      return {
+        content,
+        throughMessageId: text(summary['throughMessageId']),
+        modelId: text(summary['modelId']),
+        createdAt: text(summary['createdAt']),
+      };
+    }
     case 'status':
       return status(value);
     case 'activeTurnId':
@@ -208,6 +225,14 @@ export function parseLocalThreadBase(raw: string, expectedId: string): LocalThre
       lastSubmissionId: nullableText(item['lastSubmissionId']),
       lastError: nullableText(item['lastError']),
       messages: item['messages'].map(message),
+      ...(item['contextSummary'] === undefined
+        ? {}
+        : {
+            contextSummary: parseLocalThreadField(
+              'contextSummary',
+              item['contextSummary'],
+            ) as LocalThread['contextSummary'],
+          }),
     },
   };
 }

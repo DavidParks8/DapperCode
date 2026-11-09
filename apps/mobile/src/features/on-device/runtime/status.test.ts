@@ -99,6 +99,10 @@ test('every run and model phase has a user-facing label, including load progress
   });
   expect(label({ run: run('preparing'), model: ready }).label).toBe('Preparing local turn');
   expect(label({ run: run('generating'), model: ready }).label).toBe('Generating on this iPhone');
+  expect(label({ run: run('compacting'), model: ready })).toMatchObject({
+    label: 'Summarizing conversation on this iPhone',
+    kind: 'busy',
+  });
   expect(label({ run: run('tool', { toolName: 'read_file' }) }).label).toBe('Running read_file');
   expect(label({ run: run('stopping'), model: loading }).label).toBe('Cancelling model load…');
   expect(label({ run: run('stopping'), model: ready }).label).toContain('Stopping');

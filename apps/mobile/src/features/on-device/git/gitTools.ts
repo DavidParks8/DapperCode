@@ -70,6 +70,7 @@ export async function executeGitTool(
   native: GitToolPort,
   author: () => LocalGitIdentity | null,
   credentials: (workspaceId: string) => Promise<string | null>,
+  offload?: (result: unknown) => Promise<unknown>,
 ): Promise<unknown> {
   if (name === 'git_stage') {
     const args = argumentsRecord(input, ['path']);
@@ -97,6 +98,13 @@ export async function executeGitTool(
   switch (name) {
     case 'git_status': {
       const status = await native.getWorkspaceGitStatus(workspaceId);
+      if (offload) {
+        return offload({
+          ...status,
+          producerLimit:
+            'Native status scan is bounded to 512 KiB of paths. totalFiles/truncated describe upstream omissions.',
+        });
+      }
       const files = status.files.slice(0, 20);
       return {
         branch: status.branch,
@@ -109,9 +117,15 @@ export async function executeGitTool(
       };
     }
     case 'git_diff':
-      return native.getWorkspaceGitDiff(workspaceId, 4096);
+      return native.getWorkspaceGitDiff(workspaceId, offload ? 128 * 1024 : 4096);
     case 'git_history': {
       const history = await native.getWorkspaceGitHistory(workspaceId);
+      if (offload) {
+        return offload({
+          ...history,
+          producerLimit: 'Native recent commit history, not the complete repository history.',
+        });
+      }
       return { commits: history.commits.slice(0, 10), truncated: history.commits.length > 10 };
     }
     case 'git_push':

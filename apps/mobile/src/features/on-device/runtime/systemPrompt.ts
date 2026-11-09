@@ -13,8 +13,9 @@ const INSTRUCTIONS =
   'File version checks are managed by the runtime from successful reads and writes in this turn; do not copy revision strings into tool arguments. ' +
   'On a revision error, re-read the source path and retry only the requested change, never the destination. ' +
   'Do not stage or commit unless requested, and never use Git as a workaround for a file-tool error. ' +
-  'Respect truncation and nextOffset, and read large files in small chunks. Results marked elided were ' +
-  'removed to save context; call the tool again if you need them. Some tools need user approval; if one ' +
+  'Respect truncation and nextOffset, and read large files in small chunks. Large outputs are saved privately with an artifactId and a preview. ' +
+  'Use read_tool_output or search_tool_output to retrieve that evidence; never rerun a mutation to recover output. Artifacts are scoped to this conversation and retain producer limits, not omitted upstream data. ' +
+  'Rolling memory preserves historical evidence, not current file contents. Some tools need user approval; if one ' +
   'is declined, do not retry it unless asked. Do not guess file contents or report success without tool evidence.';
 
 /**

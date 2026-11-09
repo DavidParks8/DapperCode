@@ -1,32 +1,32 @@
 import { randomUUID } from 'expo-crypto';
 import type { ApprovalPolicy, ChatToolKind } from '@bridge/types/types';
-import type { LocalModelMessage, LocalModelReply } from '../models/engine';
+import type { LocalModelReply } from '../models/engine';
 import { LocalModelInterrupted } from '../models/session';
 import type { LocalModelSession } from '../models/session';
 import type { LocalThreadRepository } from './threads';
 import { recoverLocalThread } from './threadCodec';
-import { emptyLocalAnswer, localModelHistory, retryableLocalMessages } from './modelHistory';
-import type { LocalMessage, LocalThread, LocalToolCall } from './types';
+import { emptyLocalAnswer, retryableLocalMessages } from './modelHistory';
+import type {
+  LocalMessage,
+  LocalThread,
+  LocalToolCall,
+  LocalToolApproval,
+  LocalRunSnapshot,
+  LocalToolExecutor,
+  LocalToolApprovalPolicy,
+} from './types';
 import type { LocalToolPermission } from './toolDefinition';
 import { localAgentSystemPrompt } from './systemPrompt';
+import { executeWithToolOutput, LocalArtifactStorageError } from './toolArtifacts';
+import { localConversationContext } from './contextMemory';
 
 export { retryableLocalMessages } from './modelHistory';
-
-/** A model tool call waiting for an explicit user decision before it may run. */
-export interface LocalToolApproval extends LocalToolPermission {
-  threadId: string;
-  turnId: string;
-  callId: string;
-  toolName: string;
-}
-
-export interface LocalRunSnapshot {
-  phase: 'idle' | 'preparing' | 'generating' | 'tool' | 'approval' | 'stopping' | 'persisting';
-  threadId: string | null;
-  turnId: string | null;
-  toolName: string | null;
-  approval: LocalToolApproval | null;
-}
+export type {
+  LocalToolApproval,
+  LocalRunSnapshot,
+  LocalToolExecutor,
+  LocalToolApprovalPolicy,
+} from './types';
 
 interface Run {
   threadId: string;
@@ -42,14 +42,6 @@ interface Run {
   approval: { callId: string; resolve: (approved: boolean | 'policy') => void } | null;
 }
 
-export type LocalToolExecutor = (
-  workspaceId: string,
-  name: string,
-  args: unknown,
-  signal?: AbortSignal,
-) => Promise<unknown>;
-/** Reads the permission request declared by a registered tool, otherwise null. */
-export type LocalToolApprovalPolicy = (name: string, args?: unknown) => LocalToolPermission | null;
 type ModelPort = Pick<LocalModelSession, 'snapshot' | 'load' | 'generate' | 'stop'>;
 
 const IDLE: LocalRunSnapshot = {
@@ -319,8 +311,16 @@ export class LocalAgentLoop {
       this.publish(run, 'generating');
       let reply: LocalModelReply;
       try {
+        const context = localConversationContext(
+          this.threads,
+          run.threadId,
+          assistant.id,
+          localAgentSystemPrompt(run.modelId, this.today()),
+          () => this.checkStopped(run),
+          (phase) => this.publish(run, phase),
+        );
         reply = await this.model.generate(
-          this.modelMessages(run, assistant.id),
+          context.messages,
           this.definitions,
           (update) => {
             if (this.active !== run || run.stopped) {
@@ -332,6 +332,7 @@ export class LocalAgentLoop {
               reasoning: update.reasoning,
             }));
           },
+          context.options,
         );
       } catch (error) {
         this.threads.change(run.threadId, (thread) => ({
@@ -442,18 +443,21 @@ export class LocalAgentLoop {
       this.checkStopped(run);
       this.publish(run, 'tool', call.function.name);
       this.toolStatus(run.threadId, id, 'running');
-      const result = await this.execute(
-        run.workspaceId,
+      const content = await executeWithToolOutput(
+        this.threads.artifacts,
+        { id: run.threadId, workspaceId: run.workspaceId },
         call.function.name,
         args,
         run.controller.signal,
+        this.execute,
       );
-      const content = JSON.stringify(result);
-      if (content === undefined) {
-        throw new Error('The local tool returned no JSON result.');
-      }
       this.toolStatus(run.threadId, id, 'completed', content);
     } catch (error) {
+      if (error instanceof LocalArtifactStorageError) {
+        this.toolStatus(run.threadId, id, 'completed', JSON.stringify(error.result));
+        await this.threads.save(run.threadId);
+        throw error;
+      }
       if (error instanceof LocalModelInterrupted) {
         throw error;
       }
@@ -518,14 +522,6 @@ export class LocalAgentLoop {
       type: 'function',
       function: { name: call.function.name, arguments: call.function.arguments },
     }));
-  }
-
-  private modelMessages(run: Run, pendingAssistantId: string): LocalModelMessage[] {
-    const messages = this.threads.get(run.threadId).messages;
-    return [
-      { role: 'system', content: localAgentSystemPrompt(run.modelId, this.today()) },
-      ...localModelHistory(messages, pendingAssistantId),
-    ];
   }
 
   private message(

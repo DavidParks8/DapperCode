@@ -413,13 +413,31 @@ describe('the local transport over the real on-device runtime', () => {
     for (const tokens of mockLlama.promptTokens) {
       expect(tokens + outputReserveTokens(contextTokens)).toBeLessThanOrEqual(contextTokens);
     }
-    // Compaction shapes only the model input; stored history keeps every tool result.
+    // The transcript holds previews; the exact producer results stay privately retrievable.
     const results = runtime.threads.get(threadId).messages.filter((message) => message.tool);
-    expect(results.map((message) => message.content.length > 16 * 1024)).toEqual([
-      true,
-      true,
-      true,
-    ]);
+    expect(results).toHaveLength(3);
+    for (const [index, message] of results.entries()) {
+      const saved = JSON.parse(message.content) as { artifactId: string; offloaded: boolean };
+      expect(saved.offloaded).toBe(true);
+      expect(message.content.length).toBeLessThan(4096);
+      let raw = '';
+      let offset: number | null = 0;
+      while (offset !== null) {
+        const page = (await runtime.threads.artifacts.retrieve(
+          threadId,
+          'ws-one',
+          'read_tool_output',
+          { artifactId: saved.artifactId, offset, limit: 4096 },
+        )) as { content: string; nextOffset: number | null };
+        raw += page.content;
+        offset = page.nextOffset;
+      }
+      expect(raw.length).toBeGreaterThan(16 * 1024);
+      expect(JSON.parse(raw)).toMatchObject({
+        content: big(['a', 'b', 'c'][index]!).slice(0, 16384),
+        nextOffset: 16384,
+      });
+    }
     expect(runtime.threads.get(threadId).messages.at(-1)).toMatchObject({ content: 'Read c.' });
   });
 

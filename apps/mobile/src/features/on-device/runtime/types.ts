@@ -1,3 +1,39 @@
+import type { LocalToolPermission } from './toolDefinition';
+
+/** A model tool call waiting for an explicit user decision before it may run. */
+export interface LocalToolApproval extends LocalToolPermission {
+  threadId: string;
+  turnId: string;
+  callId: string;
+  toolName: string;
+}
+
+export interface LocalRunSnapshot {
+  phase:
+    | 'idle'
+    | 'preparing'
+    | 'generating'
+    | 'compacting'
+    | 'tool'
+    | 'approval'
+    | 'stopping'
+    | 'persisting';
+  threadId: string | null;
+  turnId: string | null;
+  toolName: string | null;
+  approval: LocalToolApproval | null;
+}
+
+export type LocalToolExecutor = (
+  workspaceId: string,
+  name: string,
+  args: unknown,
+  signal?: AbortSignal,
+  offload?: (result: unknown) => Promise<unknown>,
+) => Promise<unknown>;
+/** Reads the permission request declared by a registered tool, otherwise null. */
+export type LocalToolApprovalPolicy = (name: string, args?: unknown) => LocalToolPermission | null;
+
 export interface LocalToolCall {
   id: string;
   type: 'function';
@@ -33,6 +69,13 @@ export interface LocalThread {
   lastSubmissionId: string | null;
   lastError: string | null;
   messages: LocalMessage[];
+  /** Semantic memory checkpoint; original messages and mutation journal are never replaced. */
+  contextSummary?: {
+    content: string;
+    throughMessageId: string;
+    modelId: string;
+    createdAt: string;
+  } | null;
 }
 
 /** Independently subscribable parts of the on-device runtime. */
