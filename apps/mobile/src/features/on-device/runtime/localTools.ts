@@ -42,6 +42,20 @@ function forgetPathVersions(versions: Map<string, string>, path: string): void {
   }
 }
 
+/**
+ * Small local models otherwise treat an empty workspace search as proof that something is absent.
+ * It deliberately does not say to search the web: that made models send this project's own symbols
+ * to the web. Research guidance lives in the system prompt.
+ */
+export const EMPTY_WORKSPACE_SEARCH_NOTE =
+  'No workspace matches. That only means this workspace does not mention it, not that it does not exist.';
+
+function withEmptySearchNote(result: unknown): unknown {
+  return isRecord(result) && Array.isArray(result['matches']) && result['matches'].length === 0
+    ? { ...result, note: EMPTY_WORKSPACE_SEARCH_NOTE }
+    : result;
+}
+
 /** Routes model tool calls to workspace tools or the approved HTTPS reader. */
 export function localToolExecutor(
   native: OnDeviceNativeServices,
@@ -78,6 +92,9 @@ export function localToolExecutor(
       const path = typeof args?.['path'] === 'string' ? args['path'] : null;
       const revision = path === null ? undefined : versions?.get(path);
       return executeFileTool(workspace, name, input, native, revision).then((result) => {
+        if (name === 'search_files') {
+          return withEmptySearchNote(result);
+        }
         if (!versions || path === null) {
           return result;
         }

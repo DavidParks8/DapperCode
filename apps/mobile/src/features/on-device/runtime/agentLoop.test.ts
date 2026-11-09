@@ -8,11 +8,14 @@ import { localToolApproval } from './localTools';
 import {
   LocalAgentLoop,
   localConversationTitle,
+  REPEATED_TOOL_CALL_LIMIT,
+  repeatedToolCallError,
   type LocalRunSnapshot,
   type LocalToolExecutor,
   type LocalToolApprovalPolicy,
 } from './agentLoop';
 import { LocalThreadRepository, type LocalDocumentPort } from './threads';
+import { LOCAL_RESEARCH_GUIDANCE, localAgentSystemPrompt } from './systemPrompt';
 import { storedLocalThread } from './testing';
 import { threadDocument } from './threadCodec';
 import { utf8Bytes } from './threadJournal';
@@ -57,6 +60,7 @@ function response(content: string, names: string[] = []): LocalModelReply {
 async function harness(
   contents = new Map<string, string>(),
   approval: LocalToolApprovalPolicy = () => null,
+  today?: () => Date,
 ) {
   const storage = {
     readRuntimeDocument: jest.fn(async (name: string) => contents.get(name) ?? null),
@@ -99,9 +103,34 @@ async function harness(
     execute,
     (state) => events.push(state),
     approval,
+    today,
   );
   return { contents, storage, threads, thread, model, execute, events, loop };
 }
+
+test('every round tells the running model to verify unfamiliar things, worded for its family', async () => {
+  const today = new Date(2026, 10, 8, 14, 11);
+  const h = await harness(
+    new Map(),
+    () => null,
+    () => today,
+  );
+  const recommended = await h.threads.create('workspace-fixed', 'qwen35-2b-q4-k-m');
+  h.model.generate.mockResolvedValueOnce(response('', ['read_file']));
+  await h.loop.send(h.thread.id, 'How do I use the new Expo Glass API?', 'legacy-family');
+  await h.loop.send(recommended.id, 'Is there an iPhone Air?', 'recommended-family');
+  const prompts = h.model.generate.mock.calls.map(([messages]) => messages[0]);
+  expect(prompts).toEqual([
+    { role: 'system', content: localAgentSystemPrompt('qwen3-1.7b-q4-k-m', today) },
+    { role: 'system', content: localAgentSystemPrompt('qwen3-1.7b-q4-k-m', today) },
+    { role: 'system', content: localAgentSystemPrompt('qwen35-2b-q4-k-m', today) },
+  ]);
+  expect(prompts[0]?.content).toContain(LOCAL_RESEARCH_GUIDANCE.direct.text);
+  expect(prompts[2]?.content).toContain(LOCAL_RESEARCH_GUIDANCE.reminder.text);
+  for (const prompt of prompts) {
+    expect(prompt?.content.endsWith("Today's date: Sun Nov 08 2026.")).toBe(true);
+  }
+});
 
 test('unavailable commands are not offered as file-tool substitutes in model context', async () => {
   const h = await harness();
@@ -396,12 +425,14 @@ test('a tool cannot execute if its durable intent write fails', async () => {
 
 test('tool budgets settle visibly and give every unexecuted call an interrupted result', async () => {
   const h = await harness();
-  h.model.generate.mockResolvedValueOnce(
-    response(
-      '',
-      Array.from({ length: 33 }, () => 'read_file'),
-    ),
-  );
+  h.model.generate.mockResolvedValueOnce({
+    ...response(''),
+    tool_calls: Array.from({ length: 33 }, (_, index) => ({
+      id: 'provider-reused-id',
+      type: 'function' as const,
+      function: { name: 'read_file', arguments: JSON.stringify({ path: `file-${index}.txt` }) },
+    })),
+  });
   const settled = await h.loop.send(h.thread.id, 'Inspect', 'request-one');
   expect(h.execute).toHaveBeenCalledTimes(32);
   expect(settled.status).toBe('interrupted');
@@ -410,6 +441,68 @@ test('tool budgets settle visibly and give every unexecuted call an interrupted 
   expect(results).toHaveLength(33);
   expect(results.filter((message) => message.tool?.status === 'interrupted')).toHaveLength(1);
   expect(new Set(results.map((message) => message.tool?.callId)).size).toBe(33);
+});
+
+test('a third identical tool call in a row is not run, and the model is told to change course', async () => {
+  const h = await harness();
+  h.model.generate
+    .mockResolvedValueOnce(call('search_files', { query: 'handleSubmit' }))
+    .mockResolvedValueOnce(call('search_files', { query: 'handleSubmit' }))
+    .mockResolvedValueOnce(call('search_files', { query: 'handleSubmit' }))
+    .mockResolvedValueOnce(call('read_file', { path: 'main.txt' }))
+    .mockResolvedValueOnce(call('search_files', { query: 'handleSubmit' }))
+    .mockResolvedValueOnce(response('handleSubmit is not defined in this project.'));
+  const settled = await h.loop.send(h.thread.id, 'Where is handleSubmit?', 'repeat-once');
+
+  expect(h.execute.mock.calls.map(([, name]) => name)).toEqual([
+    'search_files',
+    'search_files',
+    'read_file',
+    'search_files',
+  ]);
+  const results = settled.messages.filter((message) => message.role === 'tool');
+  expect(results.map((message) => message.tool?.status)).toEqual([
+    'completed',
+    'completed',
+    'failed',
+    'completed',
+    'completed',
+  ]);
+  expect(JSON.parse(results[2]!.content)).toEqual({
+    error: repeatedToolCallError('search_files'),
+  });
+  const nextRound = h.model.generate.mock.calls[3]![0];
+  expect(nextRound.filter((message) => message.role === 'tool').at(-1)?.content).toBe(
+    results[2]!.content,
+  );
+  expect(settled).toMatchObject({ status: 'complete', activeTurnId: null, lastError: null });
+  expect(settled.messages.at(-1)?.content).toBe('handleSubmit is not defined in this project.');
+});
+
+test('a model that keeps repeating one tool call stops visibly instead of spending the tool limit', async () => {
+  const h = await harness();
+  h.model.generate.mockResolvedValue(call('search_files', { query: 'handleSubmit' }));
+  const settled = await h.loop.send(h.thread.id, 'Where is handleSubmit?', 'repeat-forever');
+
+  expect(h.model.generate).toHaveBeenCalledTimes(REPEATED_TOOL_CALL_LIMIT + 1);
+  expect(h.execute).toHaveBeenCalledTimes(REPEATED_TOOL_CALL_LIMIT - 1);
+  expect(settled).toMatchObject({ status: 'interrupted', activeTurnId: null });
+  expect(settled.lastError).toBe(
+    'The local model kept repeating the same search_files call. Review the conversation, then continue or rephrase the request.',
+  );
+  expect(
+    settled.messages
+      .filter((message) => message.role === 'tool')
+      .map((message) => message.tool?.status),
+  ).toEqual(['completed', 'completed', 'failed', 'interrupted']);
+  expect(h.loop.snapshot()).toMatchObject({ phase: 'idle', threadId: null, approval: null });
+  const reopened = new LocalThreadRepository(h.storage, jest.fn());
+  await reopened.initialize();
+  expect(reopened.get(h.thread.id)).toMatchObject({
+    status: 'interrupted',
+    activeTurnId: null,
+    lastError: settled.lastError,
+  });
 });
 
 test('titles a conversation from its first message without cutting a word in half', async () => {

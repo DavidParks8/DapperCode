@@ -85,6 +85,33 @@ with explicit truncation, and time out after 30 seconds. Exa's free keyless serv
 errors are shown rather than silently switching providers. This is a fixed search integration, not
 general-purpose remote MCP server configuration. Inference still runs on the phone.
 
+### Researching before answering
+
+Small models answer from stale training data and can read an empty workspace search as proof that
+something does not exist. Like OpenCode, the agent searches without being asked:
+
+- The system prompt ends with `Today's date: …`, and the `web_search` description says to use it for
+  current information beyond training data, such as libraries, APIs, products, and versions.
+- An empty `search_files` result carries a note that the workspace not mentioning something does not
+  mean it does not exist. The note deliberately does not say to search the web: that wording made
+  models send this project's own symbols to Exa.
+- Research guidance is tailored per model family, as OpenCode routes prompts per model. The same
+  words push small models in opposite directions, so `runtime/systemPrompt.ts` maps each catalog
+  family to the wording and position that measured best for it. Unknown models get the reminder.
+
+| Family   | Guidance | Position                      | Why                                                                                                   |
+| -------- | -------- | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Qwen3.5  | reminder | After the identity sentence   | Already searches readily; firmer or final rules made it search the web for workspace code and thrash. |
+| Gemma 4  | reminder | After the identity sentence   | Already research-eager.                                                                               |
+| Qwen3    | direct   | Last instruction, before date | Otherwise denied that real products and packages existed after an empty workspace search.             |
+| Bonsai 2 | direct   | Last instruction, before date | Otherwise said it could not browse; the guidance only took effect as the final instruction.           |
+
+The direct guidance also says to use workspace tools, never `web_search`, for this project's own
+files and symbols. These choices came from running the production agent loop, tools, and
+persistence against each family's model over several seeds. Re-measure on real models before changing
+the wording or position: a one-sentence change can flip a family from never searching to leaking
+workspace code. Small models still sometimes explain configuration from memory without searching.
+
 The read-only, curl-like `web_fetch` tool reads the resulting HTTPS pages or documentation URLs.
 When approvals are required, each request
 shows the destination URL for **Allow** or **Deny** before any network access; scroll the request
@@ -223,6 +250,10 @@ and that prompt is passed straight to completion.
   enforced read-only permission mode. Use disposable workspaces and inspect actual file/Git changes.
   Chat `git_push`, `web_fetch`, and `web_search` request explicit approval unless the app's global
   **Require absolutely no approvals** mode is enabled.
+- Like OpenCode's doom-loop check, the third identical consecutive tool call (same name and
+  arguments) is not run; the model gets an error telling it to use the earlier result or answer. A
+  fourth stops the turn as interrupted with a visible notice. Alternating between different calls is
+  not detected; a turn still stops after 32 model rounds.
 - Replacing existing files requires their last read revision. Output, search, and file sizes are
   bounded; truncation is explicit.
 - The runtime remembers file versions from successful reads/writes within the same turn and

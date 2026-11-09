@@ -1,7 +1,12 @@
 import { ReadableStream } from 'node:stream/web';
 import { TextDecoder, TextEncoder } from 'node:util';
 import { LOCAL_TOOL_DEFINITIONS, localToolApproval } from './localTools';
-import { executeWebSearch, WEB_SEARCH_ENDPOINT, WEB_SEARCH_TIMEOUT_MS } from './webSearch';
+import {
+  executeWebSearch,
+  SEARCH_TOOL_DEFINITIONS,
+  WEB_SEARCH_ENDPOINT,
+  WEB_SEARCH_TIMEOUT_MS,
+} from './webSearch';
 import type { WebRequest } from './webRequest';
 
 jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
@@ -48,6 +53,18 @@ test('query search and page fetch are both in the default local toolset with no 
   });
   expect(localToolApproval('web_fetch', { url: 'https://example.com/' })).not.toBeNull();
   expect(localToolApproval('git_push', {})).not.toBeNull();
+});
+
+test('web_search tells the model when to use it, like opencode, without inviting workspace queries', () => {
+  const { definition } = SEARCH_TOOL_DEFINITIONS[0]!;
+  expect(definition.function.name).toBe('web_search');
+  expect(definition.function.description).toContain(
+    'Use it for current information beyond your training data, such as libraries, APIs, products, and versions.',
+  );
+  expect(definition.function.description).toContain(
+    'never include secrets or private workspace content',
+  );
+  expect(LOCAL_TOOL_DEFINITIONS).toContainEqual(definition);
 });
 
 test('search sends the query and bounded options to keyless Exa and preserves source URLs', async () => {

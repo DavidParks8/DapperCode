@@ -1,5 +1,6 @@
 import { OnDeviceNativeError } from '../native/services.errors';
 import {
+  EMPTY_WORKSPACE_SEARCH_NOTE,
   LOCAL_TOOL_DEFINITIONS,
   localToolApproval,
   localToolExecutor,
@@ -116,6 +117,38 @@ test('observed file versions never cross workspace or turn boundaries', async ()
     'revision',
   );
   expect(h.edit).not.toHaveBeenCalled();
+});
+
+test('an empty workspace search tells the model it is not evidence that something does not exist', async () => {
+  const { native } = createFakeOnDeviceNative(new FakeLlama());
+  const search = jest.spyOn(native, 'searchWorkspaceFiles');
+  const execute = localToolExecutor(
+    native,
+    () => null,
+    async () => null,
+    () => undefined,
+  );
+  const empty = {
+    matches: [],
+    truncated: false,
+    skippedFiles: 0,
+    visitedEntries: 12,
+    searchedBytes: 4096,
+  };
+  search.mockResolvedValueOnce(empty);
+  await expect(execute('workspace', 'search_files', { query: 'GlassView' })).resolves.toEqual({
+    ...empty,
+    note: EMPTY_WORKSPACE_SEARCH_NOTE,
+  });
+  const found = { ...empty, matches: [{ path: 'App.tsx', line: 3, content: '<GlassView />' }] };
+  search.mockResolvedValueOnce(found);
+  await expect(execute('workspace', 'search_files', { query: 'GlassView' })).resolves.toEqual(
+    found,
+  );
+  expect(search).toHaveBeenCalledWith('workspace', 'GlassView');
+  expect(EMPTY_WORKSPACE_SEARCH_NOTE).toContain('not that it does not exist');
+  // Telling models to search the web here made them send this project's own symbols to Exa.
+  expect(EMPTY_WORKSPACE_SEARCH_NOTE).not.toMatch(/web/i);
 });
 
 test('external changes still fail native compare-and-swap without silently refreshing the file', async () => {

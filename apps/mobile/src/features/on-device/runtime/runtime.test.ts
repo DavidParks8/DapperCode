@@ -5,13 +5,15 @@ import type * as NodeStreams from 'node:stream/web';
 import type * as NodeUtilities from 'node:util';
 import { fetch as fetchPage } from 'expo/fetch';
 import { localModelDefinition } from '../models/catalog';
-import type { LocalModelContext, LocalModelReply } from '../models/engine';
+import type { LocalModelContext, LocalModelMessage, LocalModelReply } from '../models/engine';
 import { loadNativeModelContext } from '../models/engine';
 import type { OnDeviceNativeServices } from '../native/services.types';
 import type { LocalModelSessionSnapshot } from '../models/session';
 import { retryableLocalMessages, type LocalRunSnapshot } from './agentLoop';
 import { draftDocument } from './drafts';
 import { COALESCED_EMIT_INTERVAL_MS } from './emitter';
+import { EMPTY_WORKSPACE_SEARCH_NOTE } from './localTools';
+import { LOCAL_RESEARCH_GUIDANCE } from './systemPrompt';
 import { OnDeviceOfflineError, type OnDeviceNetworkPort } from './network';
 import { emptyLocalPreferences } from './preferences';
 import { OnDeviceRuntime } from './runtime';
@@ -1456,6 +1458,48 @@ test('a model-initiated push waits for approval and a decline never reaches the 
   await running;
   expect(h.native.pushWorkspaceGit).not.toHaveBeenCalled();
   expect(h.runtime.threads.get(h.thread.id).status).toBe('complete');
+  await h.runtime.dispose();
+});
+
+test('after an empty workspace search, the next round says it is not proof of absence and to verify on the web', async () => {
+  const h = await ready();
+  const inputs: LocalModelMessage[][] = [];
+  h.context.getFormattedChat.mockImplementation(async (...args: unknown[]) => {
+    inputs.push(args[0] as LocalModelMessage[]);
+    return { type: 'jinja', prompt: 'prompt', has_media: false };
+  });
+  h.context.completion.mockResolvedValueOnce({
+    ...reply,
+    content: '',
+    tool_calls: [
+      {
+        id: 'search',
+        type: 'function',
+        function: { name: 'search_files', arguments: JSON.stringify({ query: 'GlassView' }) },
+      },
+    ],
+  });
+  const result = await h.runtime.sendMessage(
+    h.thread.id,
+    'How do I configure GlassView from expo-glass-effect?',
+    'submission',
+    jest.fn(),
+  );
+  expect(h.native.searchWorkspaceFiles).toHaveBeenCalledWith('workspace-one', 'GlassView');
+  expect(inputs).toHaveLength(2);
+  const followUp = inputs[1]!;
+  expect(followUp[0]).toEqual({
+    role: 'system',
+    content: expect.stringContaining(LOCAL_RESEARCH_GUIDANCE.direct.text),
+  });
+  expect(followUp.filter((message) => message.role === 'tool')).toEqual([
+    expect.objectContaining({ content: expect.stringContaining(EMPTY_WORKSPACE_SEARCH_NOTE) }),
+  ]);
+  expect(result.messages.find((message) => message.role === 'tool')).toMatchObject({
+    tool: { name: 'search_files', status: 'completed' },
+    content: expect.stringContaining(EMPTY_WORKSPACE_SEARCH_NOTE),
+  });
+  expect(result).toMatchObject({ status: 'complete', activeTurnId: null });
   await h.runtime.dispose();
 });
 

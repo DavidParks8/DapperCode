@@ -6,7 +6,7 @@ import { Text, View } from 'react-native';
 
 import { getOnDeviceNativeServices } from '../../../src/features/on-device/native/services';
 import { LOCAL_TOOL_DEFINITIONS } from '../../../src/features/on-device/runtime/localTools';
-import { LOCAL_AGENT_SYSTEM_PROMPT } from '../../../src/features/on-device/runtime/agentLoop';
+import { localAgentSystemPrompt } from '../../../src/features/on-device/runtime/systemPrompt';
 import { localModelHistory } from '../../../src/features/on-device/runtime/modelHistory';
 import type { LocalMessage } from '../../../src/features/on-device/runtime/types';
 import { executeFileTool } from '../../../src/features/on-device/workspaces/fileTools';
@@ -58,6 +58,7 @@ async function withModel(
 }
 
 async function checkPostCancellationContinuation(
+  modelId: string,
   context: LlamaContext,
   contextTokens: number,
   result: string,
@@ -129,7 +130,7 @@ async function checkPostCancellationContinuation(
     },
   ];
   const messages: LocalModelMessage[] = [
-    { role: 'system', content: LOCAL_AGENT_SYSTEM_PROMPT },
+    { role: 'system', content: localAgentSystemPrompt(modelId, new Date()) },
     ...localModelHistory(history, 'pending-answer'),
   ];
   const format = (input: LocalModelMessage[]) =>
@@ -175,7 +176,7 @@ async function exerciseInference() {
   const messages = [
     {
       role: 'system',
-      content: LOCAL_AGENT_SYSTEM_PROMPT,
+      content: localAgentSystemPrompt(model.id, new Date()),
     },
     {
       role: 'user',
@@ -269,7 +270,7 @@ async function exerciseInference() {
     check(chunks > 0, 'nativeStreaming');
     metrics['secondRoundCachedTokens'] = second.timings.cache_n;
     metrics['secondRoundPromptTokens'] = second.timings.prompt_n;
-    await checkPostCancellationContinuation(context, contextTokens, JSON.stringify(file));
+    await checkPostCancellationContinuation(model.id, context, contextTokens, JSON.stringify(file));
     await context.clearCache();
     let stop: Promise<void> | undefined;
     const stopped = await context.completion(
