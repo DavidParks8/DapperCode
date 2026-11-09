@@ -222,7 +222,12 @@ export class LocalWorkspaceGuidance {
     }
     const rules = await this.rules(workspace, directories, signal);
     checkCancelled(signal);
-    state.directories = directories;
+    // Parallel preparations may have added scopes during I/O; recheck the merged directory bound.
+    state.directories = guidanceDirectories(
+      new Set([...state.directories, ...directories]),
+      name,
+      input,
+    );
     if (rules !== state.rules) {
       throw new LocalToolInputError(
         'Not run: workspace instruction scope or contents changed. Review the refreshed rules in the next model round, then retry this call if still appropriate.',

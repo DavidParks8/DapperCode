@@ -1,6 +1,6 @@
 import { randomUUID } from 'expo-crypto';
 import { loadNativeModelContext } from '../models/engine';
-import { LocalModelSession } from '../models/session';
+import { LocalModelInterrupted, LocalModelSession } from '../models/session';
 import { OnDeviceNativeError } from '../native/services.errors';
 import { LocalAgentLoop } from './agentLoop';
 import { LOCAL_TOOL_DEFINITIONS, localToolApproval } from './localTools';
@@ -49,6 +49,18 @@ async function harness(files: Record<string, string> = {}) {
   const generate = jest.spyOn(runtime.models, 'generate');
   const prompt = (round: number) => generate.mock.calls[round]?.[0][0]?.content ?? '';
   return { ...fake, llama, runtime, thread, generate, prompt };
+}
+
+function readBarrier() {
+  let enter!: () => void;
+  let release!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { entered, pending, enter, release };
 }
 
 test('real model rounds load root then relevant nested rules before a path tool can run', async () => {
@@ -118,6 +130,147 @@ test.each([
   ).resolves.toBeUndefined();
   await h.runtime.dispose();
 });
+
+test.each([
+  [0, 'alpha'],
+  [0, 'beta'],
+  [22, 'alpha'],
+  [22, 'beta'],
+] as const)(
+  'parallel sibling reads merge bounded scopes (seeded %i, first %s)',
+  async (seeded, firstName) => {
+    const h = await harness({
+      'ws-one:AGENTS.md': 'ROOT PARALLEL RULE',
+      'ws-one:alpha/AGENTS.md': 'ALPHA PARALLEL RULE',
+      'ws-one:beta/AGENTS.md': 'BETA PARALLEL RULE',
+      'ws-one:alpha/file.txt': 'alpha contents',
+      'ws-one:beta/file.txt': 'beta contents',
+    });
+    const guidance = new LocalWorkspaceGuidance(h.native);
+    const initial = ['', ...Array.from({ length: seeded }, (_, index) => `seed-${String(index)}`)];
+    const state = { directories: new Set(initial), rules: '' };
+    const signal = new AbortController().signal;
+    await guidance.prompt('ws-one', state, 8192, signal);
+    const barriers = { alpha: readBarrier(), beta: readBarrier() };
+    const original = h.native.readWorkspaceFile;
+    jest
+      .spyOn(h.native, 'readWorkspaceFile')
+      .mockImplementation(async (id, path, offset, limit) => {
+        const barrier =
+          path === 'alpha/AGENTS.md'
+            ? barriers.alpha
+            : path === 'beta/AGENTS.md'
+              ? barriers.beta
+              : null;
+        if (barrier) {
+          barrier.enter();
+          await barrier.pending;
+        }
+        return original(id, path, offset, limit);
+      });
+    const calls = {
+      alpha: guidance.beforeTool('ws-one', state, 'read_file', { path: 'alpha/file.txt' }, signal),
+      beta: guidance.beforeTool('ws-one', state, 'read_file', { path: 'beta/file.txt' }, signal),
+    };
+    const settled = Promise.allSettled([calls.alpha, calls.beta]);
+    await Promise.all([barriers.alpha.entered, barriers.beta.entered]);
+    expect(state.directories).toEqual(new Set(initial));
+    barriers[firstName].release();
+    await expect(calls[firstName]).rejects.toThrow('Not run');
+    expect(state.directories).toEqual(new Set([...initial, firstName]));
+    const lastName = firstName === 'alpha' ? 'beta' : 'alpha';
+    barriers[lastName].release();
+    await settled;
+    if (seeded === 22) {
+      await expect(calls[lastName]).rejects.toThrow('24-directory limit');
+      expect(state.directories).toEqual(new Set([...initial, firstName]));
+      expect(state.directories.size).toBe(24);
+    } else {
+      await expect(calls[lastName]).rejects.toThrow('Not run');
+      expect(state.directories).toEqual(new Set(['', 'alpha', 'beta']));
+    }
+    const refreshed = await guidance.prompt('ws-one', state, 8192, signal);
+    expect(refreshed.content).toContain(`${firstName.toUpperCase()} PARALLEL RULE`);
+    if (seeded === 22) {
+      expect(refreshed.content).not.toContain(`${lastName.toUpperCase()} PARALLEL RULE`);
+    } else {
+      expect(refreshed.content).toContain('ALPHA PARALLEL RULE');
+      expect(refreshed.content).toContain('BETA PARALLEL RULE');
+      const reads = await Promise.all(
+        ['alpha', 'beta'].map(async (directory) => {
+          const path = `${directory}/file.txt`;
+          await guidance.beforeTool('ws-one', state, 'read_file', { path }, signal);
+          return h.native.readWorkspaceFile('ws-one', path, 0, 1024);
+        }),
+      );
+      expect(reads.map((read) => read.content)).toEqual(['alpha contents', 'beta contents']);
+    }
+    await h.runtime.dispose();
+  },
+);
+
+test.each(['error', 'cancel'])(
+  'parallel scope failure preserves completed scopes and explicit %s',
+  async (outcome) => {
+    const h = await harness({
+      'ws-one:AGENTS.md': 'ROOT PARALLEL RULE',
+      'ws-one:alpha/AGENTS.md': 'ALPHA SURVIVES',
+      'ws-one:beta/AGENTS.md': 'BETA MUST NOT ENTER',
+    });
+    const guidance = new LocalWorkspaceGuidance(h.native);
+    const state = { directories: new Set(['']), rules: '' };
+    const controller = new AbortController();
+    await guidance.prompt('ws-one', state, 8192, controller.signal);
+    const gate = readBarrier();
+    const failure = new OnDeviceNativeError('STORAGE_FAILURE', 'Sibling rules became unreadable.');
+    const original = h.native.readWorkspaceFile;
+    jest
+      .spyOn(h.native, 'readWorkspaceFile')
+      .mockImplementation(async (id, path, offset, limit) => {
+        if (path === 'beta/AGENTS.md') {
+          gate.enter();
+          await gate.pending;
+          if (outcome === 'error') {
+            throw failure;
+          }
+        }
+        return original(id, path, offset, limit);
+      });
+    const alpha = guidance.beforeTool(
+      'ws-one',
+      state,
+      'read_file',
+      { path: 'alpha/file.txt' },
+      controller.signal,
+    );
+    const beta = guidance.beforeTool(
+      'ws-one',
+      state,
+      'read_file',
+      { path: 'beta/file.txt' },
+      controller.signal,
+    );
+    const settled = Promise.allSettled([alpha, beta]);
+    await gate.entered;
+    await expect(alpha).rejects.toThrow('Not run');
+    expect(state.directories).toEqual(new Set(['', 'alpha']));
+    if (outcome === 'cancel') {
+      controller.abort();
+    }
+    gate.release();
+    await settled;
+    if (outcome === 'error') {
+      await expect(beta).rejects.toBe(failure);
+    } else {
+      await expect(beta).rejects.toBeInstanceOf(LocalModelInterrupted);
+    }
+    expect(state.directories).toEqual(new Set(['', 'alpha']));
+    const refreshed = await guidance.prompt('ws-one', state, 8192, new AbortController().signal);
+    expect(refreshed.content).toContain('ALPHA SURVIVES');
+    expect(refreshed.content).not.toContain('BETA MUST NOT ENTER');
+    await h.runtime.dispose();
+  },
+);
 
 test('format mutation cannot run until the real loop supplies deeper rules to a subsequent model round', async () => {
   const path = 'src/deep/file.ts';
