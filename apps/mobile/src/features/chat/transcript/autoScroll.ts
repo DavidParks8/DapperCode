@@ -3,6 +3,7 @@ import { Keyboard, Platform, type GestureResponderEvent, type ScrollViewProps } 
 
 import type { AutoScrollState } from '../helpers/helpers';
 import type { TranscriptDisplayItem } from './messages';
+import { renderTranscriptScrollView } from './TranscriptScrollView';
 
 export const PINNED_SCROLL_EPSILON_PX = 1;
 
@@ -70,6 +71,7 @@ export function useTranscriptScrollInteraction(
     keyboardDismissMode,
     keyboardShouldPersistTaps,
     isInteracting,
+    renderScrollComponent: renderTranscriptScrollView,
     onTouchStart: () => {
       touchActiveRef.current = true;
       stateRef.current.isUserInteracting = true;

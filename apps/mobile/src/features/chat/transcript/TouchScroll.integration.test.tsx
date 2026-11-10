@@ -1,6 +1,6 @@
 import { act, fireEvent, render } from '@testing-library/react-native';
-import { createRef } from 'react';
-import { FlatList } from 'react-native';
+import { createRef, isValidElement, type ReactElement, type ReactNode } from 'react';
+import { FlatList, ScrollView } from 'react-native';
 import type * as ReactNative from 'react-native';
 import { Provider } from 'jotai';
 
@@ -113,10 +113,89 @@ function setup() {
     tree,
     list,
     scroll,
+    scrollRef,
     scrollToOffset,
     recovery,
     context,
     update: (chat: Chat) => tree.rerender(element(chat)),
+  };
+}
+
+type ContentPosition = { minIndexForVisible: number } | null | undefined;
+type NativeFrame = { key: string; y: number; height: number };
+type NativeChild = ReactElement<{
+  collapsable?: boolean;
+  item?: TranscriptDisplayItem;
+  style?: unknown;
+}>;
+
+const CONTENT_INSET = 88;
+const PROMPT_HEIGHT = 40;
+
+function nativeChildren(node: ReactNode): NativeChild[] {
+  if (Array.isArray(node)) {
+    return node.flatMap((child: ReactNode) => nativeChildren(child));
+  }
+  return isValidElement<NativeChild['props']>(node) ? [node] : [];
+}
+
+/** Lays out the native scroll content: stacked cells plus the sentinel spanning all content. */
+function measureNativeContent(app: ReturnType<typeof setup>, answerHeight: number) {
+  const scrollView = app.list().findByType(ScrollView);
+  const children = nativeChildren(scrollView.props['children'] as ReactNode);
+  let y = CONTENT_INSET;
+  const frames = children.map((child): NativeFrame => {
+    const item = child.props.item;
+    const message = item?.kind === 'message' ? item.message : undefined;
+    const height = message ? (message.id === 'answer' ? answerHeight : PROMPT_HEIGHT) : 0;
+    y += height;
+    return { key: child.key ?? 'sentinel', y: y - height, height };
+  });
+  for (const frame of frames) {
+    if (frame.key === 'sentinel') {
+      Object.assign(frame, { y: 0, height: y + CONTENT_INSET });
+    }
+  }
+  return {
+    children,
+    frames,
+    position: scrollView.props['maintainVisibleContentPosition'] as ContentPosition,
+  };
+}
+
+/**
+ * Mirrors RCTScrollViewComponentView's mounting observer: before each transaction it captures the
+ * first visible content child under the previous props, and afterwards scrolls by how far that child
+ * moved under the next props.
+ */
+function createNativeAnchoringModel(initialOffset: number) {
+  let offset = initialOffset;
+  let props: ContentPosition;
+  let frames: NativeFrame[] = [];
+  let anchor: NativeFrame | undefined;
+  return {
+    get offset() {
+      return offset;
+    },
+    drag(to: number) {
+      offset = to;
+    },
+    mount(next: ContentPosition, nextFrames: NativeFrame[]) {
+      if (props) {
+        const min = props.minIndexForVisible;
+        anchor =
+          frames.find(
+            (frame, index) =>
+              index >= min && (frame.y + frame.height > offset || index === frames.length - 1),
+          ) ?? anchor;
+      }
+      props = next;
+      frames = nextFrames;
+      const moved = nextFrames.find((frame) => frame.key === anchor?.key);
+      if (props && anchor && moved) {
+        offset += moved.y - anchor.y;
+      }
+    },
   };
 }
 
@@ -316,5 +395,77 @@ describe('streaming scroll ownership', () => {
     expect(app.list().props['maintainVisibleContentPosition']).toEqual({ minIndexForVisible: 1 });
     expect(app.list().props['ListFooterComponent']).not.toBeNull();
     expect(app.list().props['ListFooterComponentStyle']).toBeUndefined();
+  });
+
+  it('does not jump when a finger starts anchoring a transcript that grew since its last anchor', () => {
+    const app = setup();
+    const native = createNativeAnchoringModel(12);
+    let answerHeight = 100;
+    const commit = () => {
+      const content = measureNativeContent(app, answerHeight);
+      native.mount(content.position, content.frames);
+    };
+    const stream = (height: number, status: Chat['status'] = 'running') => {
+      answerHeight = height;
+      app.update({
+        ...runningChat,
+        status,
+        messages: runningChat.messages.map((message) =>
+          message.role === 'assistant'
+            ? { ...message, content: `Streaming ${String(height)}`, pending: status === 'running' }
+            : message,
+        ),
+      });
+      commit();
+    };
+    app.scroll(12);
+    commit();
+
+    // A brief touch during the run anchors the prompt, then output keeps streaming untouched.
+    fireEvent(app.list(), 'touchStart');
+    commit();
+    fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
+    commit();
+    stream(400);
+
+    let offset = native.offset;
+    fireEvent(app.list(), 'touchStart');
+    commit();
+    expect(app.recovery.autoScrollStateRef.current.isUserInteracting).toBe(true);
+    expect(native.offset).toBe(offset);
+    stream(550);
+    expect(native.offset).toBe(offset + 150);
+    fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
+    commit();
+    stream(900);
+    stream(900, 'complete');
+    expect(app.tree.queryByLabelText('Jump to latest message')).toBeNull();
+
+    // Browsing the settled transcript starts anchoring under the finger once it leaves the latest.
+    fireEvent(app.list(), 'touchStart');
+    commit();
+    fireEvent(app.list(), 'scrollBeginDrag');
+    native.drag(160);
+    app.scroll(160);
+    offset = native.offset;
+    commit();
+    expect(native.offset).toBe(offset);
+    expect(app.tree.getByLabelText('Jump to latest message')).toBeTruthy();
+    expect(app.list().props['maintainVisibleContentPosition']).toEqual({ minIndexForVisible: 1 });
+    expect(measureNativeContent(app, answerHeight).position).toEqual({ minIndexForVisible: 2 });
+    expect(app.recovery.autoScrollStateRef.current.isUserInteracting).toBe(true);
+    // The model's idle anchor assumes a real first child pinned to the content origin.
+    const [sentinel] = measureNativeContent(app, answerHeight).children;
+    expect(sentinel?.key).toBeNull();
+    expect(sentinel?.props.collapsable).toBe(false);
+    expect(sentinel?.props.style).toEqual({
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      left: 0,
+      width: 0,
+    });
+    // Programmatic scrolls (pinning, jump to latest) still reach the native scroll view.
+    expect(app.scrollRef.current?.getNativeScrollRef()).toBeInstanceOf(ScrollView);
   });
 });

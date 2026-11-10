@@ -223,10 +223,16 @@ permits following again; releasing in history keeps the jump-to-latest action av
 Native position preservation anchors above the mutable response/tool rows at the latest user
 message (or the zero-height history edge when no user message exists). Anchoring the growing
 inverted response itself preserves its bottom edge, which still lets its text pan under a finger.
+Native anchoring itself never switches off: iOS captures its anchor only while anchoring is on but
+applies it under the new props, so enabling it mid-gesture replays every shift since it was last on
+as one jump. When no message is anchored, `TranscriptScrollView` points it at a sentinel fixed at
+the content origin, which never moves. The integration test replays that native capture/adjust
+sequence for a re-touch during a run and for a drag into history after the turn settles.
 
 Native verification is also required: during a real streaming turn, drag the transcript, pause
 without lifting the finger, and keep it stationary across several content updates. Measure a
 visible text anchor before and during the hold, not just the scroll offset (an inverted list can
 move text when a cell grows without changing that offset). Verify no anchor movement during the
-stationary hold, then verify release, momentum, and jump-to-latest behavior. Web geometry and
-mocked native events alone do not establish that iOS preserves the on-screen anchor.
+stationary hold, then verify release, momentum, and jump-to-latest behavior. After the turn
+completes, drag into history until jump-to-latest appears and verify the text does not jump. Web
+geometry and mocked native events alone do not establish that iOS preserves the on-screen anchor.
