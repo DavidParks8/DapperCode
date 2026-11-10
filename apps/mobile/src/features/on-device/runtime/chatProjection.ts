@@ -1,7 +1,7 @@
 import type { Chat, ChatMessage } from '@bridge/types/types';
 import type { LocalMessage, LocalThread } from './types';
 import { localToolKind } from './localTools';
-import { childActivity } from './delegation';
+import { childActivity } from '../transport/children';
 import { SUBAGENT_ACTIVITY_TYPE } from '@bridge/messages';
 
 function messageProjection(message: LocalMessage, pending: boolean): ChatMessage {

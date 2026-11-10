@@ -994,8 +994,9 @@ started.
 Every other method rejects with JSON-RPC `-32601` and `data.error = 'unsupported_on_device'`
 (surfaced as `RpcRequestError`). Other stable `data.error` reasons are `thread_not_found`,
 `on_device_model_required`, `on_device_workspace_required`, `on_device_busy`, `on_device_offline`,
-`on_device_not_repository`, `on_device_interrupted` (a send or retry stopped while its model was
-still loading; nothing was recorded), and `on_device_failed`; typed native failures also carry
+`on_device_not_repository`, `on_device_subagent_read_only` (a mutating call such as `turn/start`,
+`thread/resume`, or `thread/delete` named a task child's thread), `on_device_interrupted` (a send or
+retry stopped while its model was still loading; nothing was recorded), and `on_device_failed`; typed native failures also carry
 `data.nativeCode`. While a send or retry loads its model, `thread/read` lists it as an in-progress
 turn with no items, so the shell's Stop (`interruptLatestTurn`) can find and cancel the load. Git
 file paths are passed through exactly as sent; only an explicit `null` path discards every file. A tool approval requested by the agent loop is sent as
@@ -1228,8 +1229,21 @@ summary. A conversation retains at most 24 children; resumptions stop admitting 
 history reaches 128 messages. `task` returns explicit child status, errors, and a resumable
 `child_id`. Supply that ID with the same agent and a new prompt to continue without replaying old
 tools. Resuming requires the original workspace and model, while `read_child` can inspect historical
-evidence after a model switch in the same workspace. Child progress uses existing tool/subagent activity cards,
-not independent chats.
+evidence after a model switch in the same workspace.
+
+The transport presents each child as a read-only ACP sub-agent thread (`transport/children.ts`),
+so the shell's sub-agent card and transcript work unchanged. The thread ID is
+`v1.<base64url("on-device")>.<base64url(child_id)>`, the same ID the client derives from a
+snapshot's `<task id state>` header. `thread/list` (unless `sourceKinds` omits
+`subAgentThreadSpawn`) and `bridge/thread/list/stream/start` with `includeSubAgents` list each
+child right after its parent with `source.subAgent.thread_spawn.parentThreadId`, and `thread/read`
+returns its transcript. Live, the projector emits `thread/started` plus `thread/subagent/adopted`
+when a child is admitted, then streams the child's own run, text, and tool events under its thread
+ID while the parent's activity card (`subagent:child:<parent>:<child>`, `receiverThreadIds` =
+the child thread) reports its status and latest tool or answer. Tapping the card opens the live
+transcript. Child approvals and questions still surface in the parent chat, and every mutating
+method rejects a child ID with `on_device_subagent_read_only`; continue a child by asking the parent
+to resume it.
 
 Stop and backgrounding cancel every child and queued generation. The parent stays busy, including
 its Stop/composer controls, until all admitted children and in-flight native tools settle.

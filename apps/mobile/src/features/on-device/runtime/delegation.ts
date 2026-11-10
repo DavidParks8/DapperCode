@@ -5,7 +5,6 @@ import type { LocalChild, LocalMessage, LocalThread } from './types';
 import type { LocalRunSnapshot } from './types';
 import type { LocalAgentRun, LocalToolApprovalPolicy, LocalToolCall } from './types';
 import type { LocalThreadRepository } from './threads';
-import type { ChatActivityContent } from '@bridge/types/types';
 
 export type LocalThreadPort = Pick<
   LocalThreadRepository,
@@ -216,36 +215,6 @@ export function childResult(child: LocalChild): object {
     summary: answer.slice(0, CHILD_RESULT_CHARS),
     truncated: answer.length > CHILD_RESULT_CHARS,
     error: child.lastError,
-  };
-}
-
-export function childActivity(
-  parentId: string,
-  child: LocalChild,
-): {
-  id: string;
-  content: ChatActivityContent;
-} {
-  const latest = child.messages.filter((entry) => entry.tool).at(-1)?.tool;
-  return {
-    id: `subagent:child:${parentId}:${child.id}`,
-    content: {
-      text: JSON.stringify({ ...childResult(child), latestTool: latest }),
-      subAgent: {
-        toolCallId: `child:${parentId}:${child.id}`,
-        tool: 'task',
-        prompt: child.messages.find((entry) => entry.role === 'user')?.content,
-        senderThreadId: parentId,
-        // Child identities are resumable task IDs, not independently navigable chats.
-        receiverThreadIds: [],
-        agentStatus:
-          child.status === 'interrupted'
-            ? 'cancelled'
-            : child.status === 'complete'
-              ? 'completed'
-              : child.status,
-      },
-    },
   };
 }
 

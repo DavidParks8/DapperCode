@@ -1,11 +1,5 @@
 import type { RawAcpSnapshot, RawThread } from '@bridge/mapping/chatMapping';
-import type {
-  AgentDescriptor,
-  BridgeCapabilities,
-  BridgeCapabilitySupport,
-  ChatToolKind,
-  ChatToolStatus,
-} from '@bridge/types/types';
+import type { ChatToolKind, ChatToolStatus } from '@bridge/types/types';
 import type { RunActivity } from '@bridge/runActivity';
 import { findLocalModelDefinition, localModelDefinition, localModelName } from '../models/catalog';
 import type { LocalModelSessionSnapshot } from '../models/session';
@@ -13,7 +7,6 @@ import type { LocalModelDefinition } from '../models/types';
 import type { LocalRunSnapshot } from '../runtime/agentLoop';
 import type { LocalChild, LocalMessage, LocalThread, LocalToolCall } from '../runtime/types';
 import type { LocalWorkspace } from '../workspaces/types';
-import { childActivity } from '../runtime/delegation';
 
 /** Agent identity the local transport reports for every local chat. */
 export const LOCAL_AGENT_ID = 'on-device';
@@ -22,57 +15,10 @@ export const LOCAL_AGENT_NAME = 'On this iPhone';
 export const LOCAL_WORKSPACE_ROOT = '/On this iPhone';
 /** ACP config id used to expose and change a local chat's model through the model sheet. */
 export const LOCAL_MODEL_CONFIG_ID = 'model';
-export const LOCAL_STREAM_ID = 'on-device';
 /** Shown wherever a chat's workspace was removed from this iPhone. */
 export const LOCAL_UNAVAILABLE_WORKSPACE = 'Workspace unavailable';
-export const LOCAL_PROTOCOL_VERSION = 2;
-
-/**
- * What the local agent supports. Everything false is hidden by the chat shell (steer/queue,
- * forking, plan mode, browser preview, review, bridge UI surfaces, fast mode).
- */
-export const LOCAL_CAPABILITY_SUPPORT: BridgeCapabilitySupport = {
-  reviewStart: false,
-  goalSlash: false,
-  planMode: false,
-  agentList: false,
-  turnSteer: false,
-  threadFork: false,
-  threadDelete: true,
-  commandOutputDelta: false,
-  fastMode: false,
-  browserPreview: false,
-  genericUiSurface: false,
-};
-
-export function localCapabilities(): BridgeCapabilities {
-  const agent: AgentDescriptor = {
-    agentId: LOCAL_AGENT_ID,
-    displayName: LOCAL_AGENT_NAME,
-    icon: null,
-    version: '1',
-    provenance: 'Built into DapperCode',
-    lifecycle: 'ready',
-    capabilities: {
-      sessionList: true,
-      sessionLoad: true,
-      sessionResume: true,
-      sessionSteer: false,
-      sessionFork: false,
-      sessionDelete: true,
-    },
-  };
-  return {
-    protocolVersion: LOCAL_PROTOCOL_VERSION,
-    streamId: LOCAL_STREAM_ID,
-    preferredAgentId: LOCAL_AGENT_ID,
-    activeAgentId: LOCAL_AGENT_ID,
-    agents: [agent],
-    supportsByAgent: { [LOCAL_AGENT_ID]: LOCAL_CAPABILITY_SUPPORT },
-    agUiEvents: true,
-    supports: LOCAL_CAPABILITY_SUPPORT,
-  };
-}
+/** The `Latest:` line of a sub-agent card is bounded like the bridge bounds ACP sub-agents. */
+const CHILD_LATEST_CHARS = 512;
 
 /** The path segment a workspace name is presented as. */
 export function localWorkspaceDisplayName(name: string): string {
@@ -260,7 +206,7 @@ export function localToolStatus(status: NonNullable<LocalMessage['tool']>['statu
  * Each tool call of a thread by id (the first one wins, as a scan would find it). Build it once per
  * projection so describing every tool stays linear in the thread instead of tools × messages.
  */
-export function localToolCalls(thread: LocalThread): Map<string, LocalToolCall> {
+export function localToolCalls(thread: Pick<LocalThread, 'messages'>): Map<string, LocalToolCall> {
   const calls = new Map<string, LocalToolCall>();
   for (const message of thread.messages) {
     for (const call of message.toolCalls ?? []) {
@@ -297,7 +243,7 @@ function describeLocalToolCall(
 }
 
 export function describeLocalToolMessage(
-  thread: LocalThread,
+  thread: Pick<LocalThread, 'messages'>,
   message: LocalMessage,
   calls?: ReadonlyMap<string, LocalToolCall>,
 ): LocalToolDescription {
@@ -306,6 +252,37 @@ export function describeLocalToolMessage(
     return { kind: 'other', title: 'Tool', activity: 'Running a tool' };
   }
   return describeLocalToolCall(tool.name, (calls ?? localToolCalls(thread)).get(tool.callId));
+}
+
+/** A task child's state, named as ACP sub-agent cards and `<task state>` headers name it. */
+export function localChildState(child: LocalChild): string {
+  switch (child.status) {
+    case 'complete':
+      return 'completed';
+    case 'interrupted':
+      return 'cancelled';
+    case 'idle':
+      return 'pending';
+    default:
+      return child.status;
+  }
+}
+
+/**
+ * A child card's `Latest:` line: the child's newest tool while it works (its streamed reply would
+ * change the card on every token), then its answer or error once it settles. Always one line.
+ */
+export function localChildLatest(child: LocalChild): string {
+  let latest = '';
+  if (child.status === 'running' || child.status === 'idle') {
+    const tool = child.messages.filter((message) => message.tool).at(-1);
+    latest = tool ? describeLocalToolMessage(child, tool).title : '';
+  } else {
+    const answer =
+      child.messages.filter((message) => message.role === 'assistant').at(-1)?.content ?? '';
+    latest = child.status === 'complete' ? answer : child.lastError || answer;
+  }
+  return latest.replace(/\s+/gu, ' ').trim().slice(0, CHILD_LATEST_CHARS);
 }
 
 /**
@@ -420,6 +397,7 @@ export function localThreadSummary(
   thread: LocalThread,
   context: LocalThreadProjectionContext,
 ): RawThread {
+  const parentThreadId = thread.parentThreadId;
   return {
     id: thread.id,
     agentId: LOCAL_AGENT_ID,
@@ -430,6 +408,14 @@ export function localThreadSummary(
     updatedAt: seconds(thread.updatedAt),
     status: wireStatus(thread),
     cwd: localThreadPath(thread, context.workspaces),
+    // A task child is presented the way the bridge presents an adopted ACP sub-agent session.
+    ...(parentThreadId
+      ? {
+          source: { subAgent: { thread_spawn: { parentThreadId, depth: 1 } } },
+          agentNickname: thread.agent === 'general' ? 'General agent' : 'Explore agent',
+          ...(thread.agent ? { agentRole: thread.agent } : {}),
+        }
+      : {}),
   };
 }
 
@@ -530,6 +516,7 @@ function childSnapshotTool(parentId: string, child: LocalChild): RawAcpSnapshot[
     failed: 'failed',
     interrupted: 'interrupted',
   } as const;
+  const latest = localChildLatest(child);
   return {
     id: `child:${parentId}:${child.id}`,
     generation: null,
@@ -539,7 +526,14 @@ function childSnapshotTool(parentId: string, child: LocalChild): RawAcpSnapshot[
     startedAtMs: Date.parse(child.messages[0]?.createdAt ?? child.updatedAt),
     completedAtMs:
       child.status === 'running' || child.status === 'idle' ? null : Date.parse(child.updatedAt),
-    content: childActivity(parentId, child).content.text ?? '',
+    // ACP's `<task>` header links the card to the child's own thread; it goes last because the
+    // newest header wins and the result is model text.
+    content: [
+      latest ? `<task_result>${latest}</task_result>` : null,
+      `<task id="${child.id}" state="${localChildState(child)}">`,
+    ]
+      .filter(Boolean)
+      .join('\n'),
     structuredContent: [],
     locations: [],
     truncated: false,

@@ -56,6 +56,8 @@ export interface LocalThread {
   messages: LocalMessage[];
   /** Only synthesized for child execution; never serialized as a conversation header. */
   parentThreadId?: string;
+  /** Only synthesized for child threads: which built-in agent the child runs as. */
+  agent?: LocalChild['agent'];
   /** Semantic memory checkpoint; original messages and mutation journal are never replaced. */
   contextSummary?: {
     content: string;

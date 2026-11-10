@@ -4,7 +4,7 @@ import { AGENT_COMMANDS_EVENT_NAME } from '@bridge/agentCommands';
 import { RUN_ACTIVITY_EVENT_NAME, type RunActivity } from '@bridge/runActivity';
 import { TOOL_META_EVENT_NAME } from '@bridge/toolMeta';
 import { SUBAGENT_ACTIVITY_TYPE } from '@bridge/messages';
-import { childActivity } from '../runtime/delegation';
+import { childActivity } from './children';
 import { WORKSPACE_HOST_NOTIFICATIONS } from '../../workspace/api/protocol';
 import type { LocalRunSnapshot } from '../runtime/agentLoop';
 import type { LocalMessage, LocalThread, LocalToolCall } from '../runtime/types';
@@ -48,6 +48,10 @@ interface RunTrack {
 }
 
 const TERMINAL_TOOL_STATUSES = new Set(['completed', 'failed', 'interrupted']);
+
+function sameContent(left: object, right: object): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 
 /**
  * Turns successive runtime thread states into the bridge notifications the chat shell already
@@ -224,17 +228,7 @@ export class LocalEventProjector {
         },
       });
     }
-    if (!previous) {
-      out.push({
-        method: 'thread/started',
-        params: { threadId: thread.id, thread: localThreadSummary(thread, this.context()) },
-      });
-    } else if (previous.title !== thread.title) {
-      out.push({
-        method: 'thread/name/updated',
-        params: { threadId: thread.id, threadName: thread.title },
-      });
-    }
+    this.diffIdentity(previous, thread, out);
     const run = this.startRunIfNeeded(previous, thread, out);
     if (!run) {
       return;
@@ -256,6 +250,31 @@ export class LocalEventProjector {
     if (thread.status !== 'running') {
       this.finish(thread, run, out);
       this.runs.delete(thread.id);
+    }
+  }
+
+  private diffIdentity(
+    previous: LocalThread | undefined,
+    thread: LocalThread,
+    out: LocalNotification[],
+  ): void {
+    if (!previous) {
+      out.push({
+        method: 'thread/started',
+        params: { threadId: thread.id, thread: localThreadSummary(thread, this.context()) },
+      });
+      if (thread.parentThreadId) {
+        // As for an adopted ACP sub-agent: an open child view waiting for its thread rehydrates.
+        out.push({
+          method: 'thread/subagent/adopted',
+          params: { threadId: thread.id, parentThreadId: thread.parentThreadId },
+        });
+      }
+    } else if (previous.title !== thread.title) {
+      out.push({
+        method: 'thread/name/updated',
+        params: { threadId: thread.id, threadName: thread.title },
+      });
     }
   }
 
@@ -453,9 +472,12 @@ export class LocalEventProjector {
     out: LocalNotification[],
   ): void {
     for (const child of message.children ?? []) {
-      const activity = childActivity(threadId, child);
       const prior = previous?.children?.find((entry) => entry.id === child.id);
-      if (prior && childActivity(threadId, prior).content.text === activity.content.text) {
+      if (prior === child) {
+        continue;
+      }
+      const activity = childActivity(threadId, child);
+      if (prior && sameContent(childActivity(threadId, prior).content, activity.content)) {
         continue;
       }
       this.emit(out, threadId, run, {

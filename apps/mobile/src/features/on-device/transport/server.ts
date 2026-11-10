@@ -19,10 +19,11 @@ import {
   type RpcParams as Params,
 } from './params';
 import type { LocalAgentPort } from './port';
+import { localCapabilities } from './capabilities';
+import { findLocalChildThread, isLocalChildThreadId, withLocalChildren } from './children';
 import {
   LOCAL_MODEL_CONFIG_ID,
   LOCAL_WORKSPACE_ROOT,
-  localCapabilities,
   localFallbackWorkspaceId,
   localRunActivity,
   localWorkspaceIdForPath,
@@ -137,7 +138,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
     if (this.unsubscribe) {
       return;
     }
-    this.projector.prime(this.port.threads());
+    this.projector.prime(withLocalChildren(this.port.threads()));
     this.approvals.prime();
     this.userInput.prime();
     const stopThreads = this.port.subscribe(() => this.flush());
@@ -193,7 +194,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
     try {
       do {
         this.dirty = false;
-        for (const notification of this.projector.diff(this.port.threads())) {
+        for (const notification of this.projector.diff(withLocalChildren(this.port.threads()))) {
           this.publish(notification);
         }
         for (const notification of this.approvals.diff()) {
@@ -218,9 +219,28 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
     }
   }
 
+  /** A conversation the request may change; task children are watched, not continued. */
   private requireThread(params: Params): LocalThread {
     const threadId = readParam(params, 'threadId');
-    const thread = threadId ? this.port.thread(threadId) : null;
+    if (threadId && isLocalChildThreadId(threadId)) {
+      throw new LocalRpcError(
+        LOCAL_RPC_ERROR.invalidParams,
+        'Sub-agent chats are read-only; continue in the main chat.',
+        { error: 'on_device_subagent_read_only', threadId },
+      );
+    }
+    return this.found(threadId, threadId ? this.port.thread(threadId) : null);
+  }
+
+  /** Any presented thread, including a task child's read-only thread. */
+  private readableThread(params: Params): LocalThread {
+    const threadId = readParam(params, 'threadId');
+    return threadId && isLocalChildThreadId(threadId)
+      ? this.found(threadId, findLocalChildThread(this.port.threads(), threadId))
+      : this.requireThread(params);
+  }
+
+  private found(threadId: string | null, thread: LocalThread | null): LocalThread {
     if (!thread || !threadId) {
       throw new LocalRpcError(LOCAL_RPC_ERROR.notFound, 'Thread not found', {
         error: 'thread_not_found',
@@ -230,13 +250,19 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
     return thread;
   }
 
+  private listed(withChildren: boolean): readonly LocalThread[] {
+    const threads = this.port.threads();
+    return withChildren ? withLocalChildren(threads) : threads;
+  }
+
   /** Every presented chat also gets its skill commands as a live event, then on each change. */
   private snapshot(thread: LocalThread) {
-    if (this.port.commands) {
+    if (this.port.commands && !thread.parentThreadId) {
       const commands = this.projector.openCommands(thread);
       void Promise.resolve().then(() => this.publish(commands));
     }
-    return localThreadSnapshot(this.port.thread(thread.id) ?? thread, {
+    const latest = thread.parentThreadId ? thread : this.port.thread(thread.id);
+    return localThreadSnapshot(latest ?? thread, {
       ...this.context(),
       run: this.port.run(),
     });
@@ -369,7 +395,9 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
         return { ok: true };
       },
       'thread/list': (params) => {
-        const all = port.threads();
+        // Task children are listed like ACP sub-agents, unless the list filters them out.
+        const kinds = params['sourceKinds'];
+        const all = this.listed(!Array.isArray(kinds) || kinds.includes('subAgentThreadSpawn'));
         const offset = Number.parseInt(readParam(params, 'cursor') ?? '0', 10) || 0;
         const limit =
           typeof params['limit'] === 'number' && params['limit'] > 0
@@ -395,7 +423,9 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
             error: 'on_device_failed',
           });
         }
-        const data = port.threads().map((thread) => localThreadSummary(thread, this.context()));
+        const data = this.listed(params['includeSubAgents'] === true).map((thread) =>
+          localThreadSummary(thread, this.context()),
+        );
         void Promise.resolve().then(() =>
           this.publish({
             method: 'bridge/thread/list/stream/batch',
@@ -406,7 +436,7 @@ export class LocalBridgeServer implements LocalRpcEndpoint {
       },
       'bridge/thread/list/stream/cancel': () => ({ ok: true }),
       'thread/read': (params) => {
-        const thread = this.requireThread(params);
+        const thread = this.readableThread(params);
         return {
           thread:
             params['includeTurns'] === false

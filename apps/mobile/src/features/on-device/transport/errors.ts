@@ -21,6 +21,7 @@ export type LocalRpcErrorReason =
   | 'on_device_busy'
   | 'on_device_offline'
   | 'on_device_not_repository'
+  | 'on_device_subagent_read_only'
   | 'on_device_interrupted'
   | 'on_device_failed';
 
