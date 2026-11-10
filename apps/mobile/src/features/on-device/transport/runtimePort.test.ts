@@ -397,6 +397,7 @@ describe('the local transport over the real on-device runtime', () => {
   it('keeps a conversation usable after its tool output exceeds the context window', async () => {
     const big = (name: string) => `${name}:${'x'.repeat(16 * 1024)}`;
     const { runtime, createChat, send } = await setup({
+      availableBytes: modelMemoryBytes(localModelDefinition(QWEN), 8192),
       files: {
         'ws-one:a.txt': big('a'),
         'ws-one:b.txt': big('b'),

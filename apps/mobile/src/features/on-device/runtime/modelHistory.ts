@@ -1,3 +1,4 @@
+import { findLocalModelDefinition } from '../models/catalog';
 import type { LocalModelMessage } from '../models/engine';
 import type { LocalMessage, LocalThread } from './types';
 
@@ -38,6 +39,7 @@ export function retryableLocalMessages(thread: LocalThread): LocalMessage[] | nu
 export function localModelHistory(
   messages: readonly LocalMessage[],
   pendingAssistantId: string,
+  modelId: string,
 ): LocalModelMessage[] {
   const userIndex = messages.map((message) => message.role).lastIndexOf('user');
   const priorTools = messages.slice(0, userIndex).some((entry) => entry.role === 'tool');
@@ -54,8 +56,8 @@ export function localModelHistory(
     ...(message.toolCalls?.length ? { tool_calls: message.toolCalls } : {}),
     ...(message.tool ? { name: message.tool.name, tool_call_id: message.tool.callId } : {}),
   }));
-  // Tool-response templates need a new assistant boundary before decoding the next round.
-  return projected.at(-1)?.role === 'tool'
+  // LFM3 already emits the generation boundary; a dummy reply becomes a completed empty turn.
+  return projected.at(-1)?.role === 'tool' && findLocalModelDefinition(modelId)?.family !== 'LFM3'
     ? [...projected, { role: 'assistant', content: '' }]
     : projected;
 }

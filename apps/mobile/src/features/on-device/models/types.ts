@@ -11,7 +11,7 @@ export interface LocalModelDefinition {
   license: string;
   /** Smallest context the agent loop is usable with; memory admission is measured at this size. */
   contextTokens: number;
-  /** Largest context loaded when fresh memory headroom allows it. */
+  /** Native trained context limit; fresh headroom selects the loaded size up to this ceiling. */
   maxContextTokens: number;
   kvBytesPerToken: number;
   workingBytes: number;
@@ -19,6 +19,8 @@ export interface LocalModelDefinition {
   stateCacheBytes: number;
   minimumDeviceBytes: number;
   recommended: boolean;
+  /** Enables the template's reasoning for uncapped rounds, for families that degrade without it. */
+  thinking?: boolean;
   runtimeIssue?: string;
 }
 

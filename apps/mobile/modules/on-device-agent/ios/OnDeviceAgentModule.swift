@@ -11,7 +11,7 @@ public class OnDeviceAgentModule: Module {
   public func definition() -> ModuleDefinition {
     Name("OnDeviceAgent")
 
-    Function("getAPIVersion") { 10 }
+    Function("getAPIVersion") { 11 }
 
     // Clone, fetch, pull, and push progress is pushed as throttled events (API 8); the snapshot
     // function stays for a single read when a listener attaches mid-transfer.

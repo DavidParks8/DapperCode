@@ -18,7 +18,7 @@ import type {
   NativeModelVerificationProgress,
 } from '../models/downloadState';
 
-export const ON_DEVICE_NATIVE_API_VERSION = 10;
+export const ON_DEVICE_NATIVE_API_VERSION = 11;
 
 /** Native event carrying throttled clone, fetch, pull, and push progress (API 8). */
 export const GIT_TRANSFER_PROGRESS_EVENT = 'onGitTransferProgress';

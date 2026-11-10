@@ -1,5 +1,5 @@
 import type { CompletionParams, FormattedChatResult, TokenData } from 'llama.rn';
-import { localModelDefinition } from './catalog';
+import { LOCAL_MODEL_CATALOG, localModelDefinition } from './catalog';
 import { CONTEXT_SAFETY_TOKENS, OMITTED_TURNS_NOTE, outputReserveTokens } from './contextWindow';
 import type {
   LocalContextLoader,
@@ -120,6 +120,39 @@ function harness() {
   const session = new LocalModelSession(native, loader, (state) => events.push(state));
   return { native, initial, loader, events, session };
 }
+
+test.each(LOCAL_MODEL_CATALOG.filter((model) => !model.runtimeIssue))(
+  '$id loads above 16K and re-measures a smaller context after unload',
+  async (model) => {
+    const h = harness();
+    const memory = {
+      physicalBytes: 32 * 1024 ** 3,
+      availableBytes: modelMemoryBytes(model, 32768),
+      isSimulator: true,
+    };
+    h.native.getMemoryInfo.mockReturnValue(memory);
+    await h.session.load(model.id);
+    expect(h.loader.mock.calls[0]?.[2].contextTokens).toBe(32768);
+    expect(h.session.snapshot()).toMatchObject({ phase: 'ready', contextTokens: 32768 });
+    h.initial.tokenize.mockResolvedValue({ tokens: new Array<number>(20000).fill(1) });
+    await expect(h.session.generate(messages, [], jest.fn())).resolves.toMatchObject({
+      content: 'Hello',
+    });
+    expect(h.initial.completion).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: formatted.prompt, n_predict: 32768 - 20000 - 32 }),
+      expect.any(Function),
+    );
+    await h.session.unload();
+    h.native.getMemoryInfo.mockReturnValue({
+      ...memory,
+      availableBytes: modelMemoryBytes(model, 16384),
+    });
+    await h.session.load(model.id);
+    expect(h.loader.mock.calls[1]?.[2].contextTokens).toBe(16384);
+    expect(h.session.snapshot()).toMatchObject({ phase: 'ready', contextTokens: 16384 });
+    await h.session.dispose();
+  },
+);
 
 test('a Prism-only packing is rejected before native file access or model allocation', async () => {
   const h = harness();
@@ -329,6 +362,39 @@ test('each round renders the chat template once and completes from that formatte
   });
   expect(params.messages).toBeUndefined();
   expect(params.tools).toBeUndefined();
+});
+
+test('thinking models reason in uncapped rounds; capped child rounds and other models stay direct', async () => {
+  const lfm3 = localModelDefinition('lfm3-1.7b-q4-k-m');
+  expect(lfm3.thinking).toBe(true);
+  const h = harness();
+  await h.session.load(lfm3.id);
+  await h.session.generate(messages, [{ type: 'function' }], jest.fn());
+  expect(h.initial.getFormattedChat.mock.calls[0]![2]).toMatchObject({ enable_thinking: true });
+  expect(h.initial.completion.mock.calls[0]![0]).toMatchObject({ enable_thinking: true });
+  await h.session.generate(messages, [{ type: 'function' }], jest.fn(), { outputTokens: 512 });
+  expect(h.initial.getFormattedChat.mock.calls[1]![2]).toMatchObject({ enable_thinking: false });
+  expect(h.initial.completion.mock.calls[1]![0]).toMatchObject({ enable_thinking: false });
+  for (const model of LOCAL_MODEL_CATALOG) {
+    expect(model.thinking === true).toBe(model.family === 'LFM3');
+  }
+});
+
+test('a thinking model summarizes without reasoning and answers with it', async () => {
+  const h = await summaryHarness(14_000, localModelDefinition('lfm3-1.7b-q4-k-m'));
+  await h.session.generate(h.transcript, [{ tool: 'definitions count too' }], jest.fn(), {
+    checkpoint: h.checkpoint,
+  });
+  expect(h.checkpoint.commit).toHaveBeenCalledTimes(1);
+  expect(h.summaryCalls().length).toBeGreaterThan(0);
+  for (const [params] of h.summaryCalls()) {
+    expect(params.enable_thinking).toBe(false);
+  }
+  expect(h.initial.completion.mock.calls.at(-1)![0]).toMatchObject({ enable_thinking: true });
+  for (const [chat, , options] of h.initial.getFormattedChat.mock.calls) {
+    const summary = JSON.stringify(chat).includes('Maintain a concise rolling memory');
+    expect(options?.enable_thinking).toBe(!summary);
+  }
 });
 
 test('a full context compacts earlier tool output and turns instead of ending the conversation', async () => {
@@ -691,7 +757,7 @@ test('loads use the largest catalog context that fresh headroom admits and expos
   const h = harness();
   h.native.getMemoryInfo.mockReturnValue({
     physicalBytes: 32 * 1024 ** 3,
-    availableBytes: modelMemoryBytes(medium, medium.maxContextTokens) - 1,
+    availableBytes: modelMemoryBytes(medium, medium.contextTokens * 2) - 1,
     isSimulator: false,
   });
   await h.session.load(medium.id);
@@ -771,9 +837,14 @@ const currentRequest: LocalModelMessage = {
   content: 'Current user request must survive verbatim.',
 };
 
-async function summaryHarness(historyCharacters = 14_000) {
+async function summaryHarness(historyCharacters = 14_000, model = small) {
   const h = harness();
-  await h.session.load(small.id);
+  h.native.getMemoryInfo.mockReturnValue({
+    physicalBytes: 32 * 1024 ** 3,
+    availableBytes: modelMemoryBytes(model, 8192),
+    isSimulator: true,
+  });
+  await h.session.load(model.id);
   const contextTokens = h.session.snapshot().contextTokens!;
   const threshold = contextTokens - 2 * outputReserveTokens(contextTokens) - CONTEXT_SAFETY_TOKENS;
   // Like the native template, the formatted prompt includes every advertised tool schema.

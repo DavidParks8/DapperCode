@@ -1,4 +1,6 @@
 import { randomUUID } from 'expo-crypto';
+import { localModelDefinition } from '../models/catalog';
+import { modelMemoryBytes } from '../models/memory';
 import { loadNativeModelContext } from '../models/engine';
 import { LocalModelInterrupted, LocalModelSession } from '../models/session';
 import { OnDeviceNativeError } from '../native/services.errors';
@@ -640,6 +642,7 @@ test('the catalog advertises as many skills as fit the context, says how many we
     files[`ws-one:.agents/skills/${name}/SKILL.md`] = skill(name, 'Short.');
   }
   const h = await harness(files);
+  h.memory.availableBytes = modelMemoryBytes(localModelDefinition(modelId), 8192);
   await h.runtime.loop.send(h.thread.id, 'Hello', 'catalog-count');
   const advertised = (h.prompt(0).match(/^- skill-\d+: Short\.$/gmu) ?? []).length;
   expect(advertised).toBeGreaterThan(12);

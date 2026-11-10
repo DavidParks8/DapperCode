@@ -21,6 +21,7 @@ import {
   requireModelMemory,
 } from '../../../src/features/on-device/models/memory';
 import { completionParams } from '../../../src/features/on-device/models/session';
+import { STOPPED_BEFORE_APPROVAL } from '../../../src/features/on-device/runtime/toolRunner';
 import type {
   LocalModelDefinition,
   LocalModelFile,
@@ -61,6 +62,12 @@ async function withModel(
   }
 }
 
+/** Production reasoning setting, plus output room so a gate budget never truncates reasoning. */
+function thinking(modelId: string) {
+  const on = localModelDefinition(modelId).thinking === true;
+  return { enable_thinking: on, extraTokens: on ? 1024 : 0 };
+}
+
 /** The tools and system prompt a production round advertises at this context size. */
 function productionPrefix(modelId: string, contextTokens: number) {
   return {
@@ -85,7 +92,7 @@ async function measureToolTiers(modelId: string, context: LlamaContext) {
       {
         tools,
         tool_choice: 'auto',
-        enable_thinking: false,
+        enable_thinking: thinking(modelId).enable_thinking,
         reasoning_format: 'auto',
       },
     );
@@ -137,7 +144,7 @@ async function checkPostCancellationContinuation(
       id: 'push-result',
       role: 'tool',
       content: JSON.stringify({
-        error: 'Stopped before the user approved this request. It did not run.',
+        error: STOPPED_BEFORE_APPROVAL,
       }),
       createdAt: at,
       tool: {
@@ -183,13 +190,13 @@ async function checkPostCancellationContinuation(
   ];
   const messages: LocalModelMessage[] = [
     { role: 'system', content: system },
-    ...localModelHistory(history, 'pending-answer'),
+    ...localModelHistory(history, 'pending-answer', modelId),
   ];
   const format = (input: LocalModelMessage[]) =>
     context.getFormattedChat(input, null, {
       tools,
       tool_choice: 'auto',
-      enable_thinking: false,
+      enable_thinking: thinking(modelId).enable_thinking,
       reasoning_format: 'auto',
     });
   const formatted = await format(messages);
@@ -199,7 +206,10 @@ async function checkPostCancellationContinuation(
     'postCancelledToolBudget',
     `${promptTokens} prompt tokens in ${contextTokens}`,
   );
-  const reply = await context.completion(completionParams(formatted, 512));
+  const { enable_thinking, extraTokens } = thinking(modelId);
+  const reply = await context.completion(
+    completionParams(formatted, 512 + extraTokens, enable_thinking),
+  );
   check(
     reply.content?.includes('OFFLINE_TOOL_OK') === true,
     'postCancelledToolContinuation',
@@ -230,6 +240,7 @@ async function exerciseInference() {
     metrics['contextTokens'] = contextTokens;
     await measureToolTiers(model.id, context);
     const { tools, system } = productionPrefix(model.id, contextTokens);
+    const { enable_thinking, extraTokens } = thinking(model.id);
     const messages = [
       { role: 'system', content: system },
       {
@@ -241,7 +252,7 @@ async function exerciseInference() {
     const fullPrompt = await context.getFormattedChat(messages, null, {
       tools,
       tool_choice: 'required',
-      enable_thinking: false,
+      enable_thinking,
       reasoning_format: 'auto',
     });
     const promptTokens = (await context.tokenize(fullPrompt.prompt)).tokens.length;
@@ -252,7 +263,7 @@ async function exerciseInference() {
       `${promptTokens} prompt tokens do not leave the generation reserve in ${contextTokens}`,
     );
     const first = await context.completion({
-      ...completionParams(fullPrompt, 128),
+      ...completionParams(fullPrompt, 128 + extraTokens, enable_thinking),
       temperature: 0,
     });
     const calls = first.tool_calls ?? [];
@@ -302,12 +313,12 @@ async function exerciseInference() {
     const formatted = await context.getFormattedChat(continuation, null, {
       tools,
       tool_choice: 'none',
-      enable_thinking: false,
+      enable_thinking,
     });
     check(formatted.prompt.includes('OFFLINE_TOOL_OK'), 'toolResultInPrompt');
     let chunks = 0;
     const second = await context.completion(
-      { ...completionParams(formatted, 128), temperature: 0 },
+      { ...completionParams(formatted, 128 + extraTokens, enable_thinking), temperature: 0 },
       () => {
         chunks += 1;
       },
@@ -321,6 +332,48 @@ async function exerciseInference() {
     metrics['secondRoundCachedTokens'] = second.timings.cache_n;
     metrics['secondRoundPromptTokens'] = second.timings.prompt_n;
     await checkPostCancellationContinuation(model.id, context, contextTokens, JSON.stringify(file));
+    if (model.family === 'LFM3') {
+      // Web research is a measured rate (about 9 in 10 host seeds), so it needs a majority; keeping
+      // project symbols out of web_search is a privacy rule and must hold on every seed.
+      let webPasses = 0;
+      for (const seed of [1, 42, 123]) {
+        for (const [scope, request] of [
+          ['web', 'How do I configure the latest llama.cpp release to use LFM3?'],
+          ['workspace', 'Find the implementation of privateWorkspaceSentinel in this workspace.'],
+        ] as const) {
+          const research = await context.getFormattedChat(
+            [
+              { role: 'system', content: system },
+              { role: 'user', content: request },
+            ],
+            null,
+            { tools, tool_choice: 'auto', enable_thinking, reasoning_format: 'auto' },
+          );
+          const reply = await context.completion({
+            ...completionParams(research, 256 + extraTokens, enable_thinking),
+            seed,
+          });
+          const names = (reply.tool_calls ?? []).map((item) => item.function.name);
+          if (scope === 'web') {
+            webPasses += names.includes('web_search') ? 1 : 0;
+            metrics[`researchWeb${seed}`] = names.includes('web_search') ? 1 : 0;
+            continue;
+          }
+          check(
+            names.length > 0 &&
+              names.every((name) =>
+                ['search_files', 'glob_files', 'list_files', 'read_file', 'code_symbols'].includes(
+                  name,
+                ),
+              ),
+            `research-workspace-${seed}`,
+            JSON.stringify({ names, content: reply.content }),
+          );
+        }
+      }
+      metrics['researchWebPasses'] = webPasses;
+      check(webPasses >= 2, 'research-web-majority', `${webPasses} of 3 seeds called web_search`);
+    }
     await context.clearCache();
     let stop: Promise<void> | undefined;
     const stopped = await context.completion(

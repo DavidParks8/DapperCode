@@ -4,7 +4,7 @@ packages:
 allowBuilds:
   'esbuild@0.28.1': true
   esbuild: set this to true or false
-  'llama.rn@0.13.0-rc.8': true
+  'llama.rn@0.13.0-rc.10': true
   llama.rn: set this to true or false
 
 overrides:

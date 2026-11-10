@@ -43,19 +43,20 @@ See [product setup and limitations](../../../../docs/on-device.md).
   written releases the transfer and records the failure. Checkpoints from the earlier
   JavaScript transfer (`resume.json`) are imported on the next resume.
   `RuntimeDocumentStore.swift` owns separate atomic, size-limited local journals/preferences.
-- The native ABI is versioned (currently 10: bounded glob/regex search, synchronous workspace
+- The native ABI is versioned (currently 11: LFM3 inference, bounded glob/regex search, synchronous workspace
   cancellation, observed-revision coordinated patches, workspace rename/delete, change tokens, UI file
   rename/delete, fetch/pull, init, branch creation, discard, remote-aware status, typed errors,
   background model downloads, verification progress/cancellation, storage info, Git transfer
   progress events, and workspace size). An old binary is
   rejected before loading model variants that need the newer inference engine, including
-  Bonsai 2's activation transforms.
+  LFM3's hybrid architecture and Bonsai 2's activation transforms.
 - `scripts/build-git.mjs` builds pinned libgit2 1.9.7 for iOS arm64 and simulator arm64/x86_64.
   The source archive is SHA-256 verified. HTTPS uses SecureTransport; SSH, the CLI, and tests are
   excluded from the app library. Unmodified upstream notices (including bundled dependency
   licenses, llama.rn, and llama.cpp/ggml) are copied into the `OnDeviceAgentNotices` app resource bundle.
-- Inference uses pinned `llama.rn` 0.13.0-rc.8, loaded only by the on-device feature. This maintained
-  pre-release includes the upstream Hadamard runtime needed by Bonsai 2 Q2_0 weights. Its install script
+- Inference uses pinned `llama.rn` 0.13.0-rc.10 (llama.cpp b12211), loaded only by the on-device feature.
+  This maintained pre-release supports LFM3's architecture/tool template and the upstream Hadamard
+  runtime needed by Bonsai 2 Q2_0 weights. Its install script
   verifies the downloaded native artifacts. Android autolinking is disabled for this iOS-only
   feature so existing Android clients do not acquire an unused native runtime.
 - Authentication strategies live under `src/features/on-device/auth`; they do not implement Git
@@ -137,8 +138,24 @@ It also runs the production history projection after a stopped push and a succes
 requiring a genuine answer from the tool result without an extra user instruction or retry.
 Set `DAPPERCODE_NATIVE_TEST_MODEL` to a bundled catalog ID to run the same complete-tool-schema
 gate or native product scenario for another model. Both default to `qwen35-2b-q4-k-m`.
+For LFM3, use `DAPPERCODE_NATIVE_TEST_MODEL=lfm3-1.7b-q4-k-m`. The gate mirrors production
+reasoning for catalog models marked `thinking` (enabled formatting and completion, plus 1,024
+output tokens so a budget never truncates reasoning). LFM3's gate also checks research routing over
+three seeds: project-symbol questions must use workspace tools on every seed (a privacy rule), and
+current library questions must call `web_search` on at least two of three (a measured rate, about 9
+in 10 host seeds). LFM3's template supplies its own assistant generation boundary after a tool
+result; the history projection must not insert the empty completed assistant turn needed by the
+older templates. The stopped-push continuation imports the production stopped-approval result, so
+the gate and the app cannot drift.
+
+All catalog models now size context from fresh app headroom, including the full KV estimate and
+reserve, rather than stopping at 8K/16K. Native GGUF ceilings are 40K for Qwen3, 128K for Gemma 4,
+and 256K for Qwen3.5, Bonsai 2, and LFM3. A load chooses power-of-two tiers through that ceiling
+(including Qwen3's final 40K tier); unload/reload re-measures. Existing 4K/8K compaction fixtures
+explicitly constrain memory so the larger catalog ceilings cannot silently bypass their assertions.
 The original Qwen3 entries and ABI-6 representatives of Bonsai 2, Qwen3.5,
-and Gemma 4 have passed the simulator gate. Prism-only Bonsai packings are explicitly unavailable.
+and Gemma 4 have passed the simulator gate, and LFM3 1.7B Q4_K_M passes it on ABI 11 (131,072-token
+context). Prism-only Bonsai packings are explicitly unavailable.
 This is not proof
 of physical-iPhone Metal performance or measured phone RAM compatibility.
 

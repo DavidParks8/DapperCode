@@ -69,7 +69,7 @@ export function localConversationContext(
             : '',
         ),
       },
-      ...localModelHistory(recent, assistantId),
+      ...localModelHistory(recent, assistantId, thread.modelId),
     ];
   };
   return {

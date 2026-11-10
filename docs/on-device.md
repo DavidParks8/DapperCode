@@ -476,6 +476,7 @@ something does not exist. Like OpenCode, the agent searches without being asked:
 | -------- | -------- | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
 | Qwen3.5  | reminder | After the identity sentence   | Already searches readily; firmer or final rules made it search the web for workspace code and thrash.  |
 | Gemma 4  | reminder | After the identity sentence   | Already research-eager.                                                                                |
+| LFM3     | reminder | After the identity sentence   | Needs its reasoning on (below); then it searched in 9 of 10 seeds and never sent project symbols out.  |
 | Qwen3    | access   | After the identity sentence   | Otherwise told the user it had no access to the project or the web, and answered from memory.          |
 | Bonsai 2 | direct   | Last instruction, before date | Otherwise said it could not browse; this took effect only as the final instruction, and `access` hurt. |
 
@@ -528,10 +529,46 @@ appear in the tool transcript and are returned to the model, with no silent offl
 
 ## Models and memory
 
-The family-first catalog includes **Bonsai 2**, **Qwen3.5**, and **Gemma 4**, with pinned public GGUF
+The family-first catalog includes **LFM3**, **Bonsai 2**, **Qwen3.5**, and **Gemma 4**, with pinned public GGUF
 variants. Qwen3.5 has 0.8B/2B choices across Q4, Q5, and Q8 formats; Gemma 4 exposes E2B Q4_0/Q8_0.
 The original Qwen3 variants remain under **More families**, preserving existing downloads and chats.
 Catalog artifacts are immutable; arbitrary model URLs/imports are not supported.
+
+LFM3 uses Liquid AI's official **1.7B** text GGUFs in **Q4_K_M**, **Q5_K_M**, and **Q8_0**.
+Downloads are pinned to revision `cd0c74c575b5c416f3011b5b4c298077f26ca8c2` with publisher
+SHA-256 and size checks. Its hybrid convolution/full/sliding-attention architecture has an
+FP16 KV estimate of 22,528 bytes per token (conservatively counting all eleven attention layers)
+plus a 128 MiB prompt-state budget. Fresh app headroom selects a context up to the native
+262,144-token maximum. The 4 GiB RAM-class floor is an admission estimate, not physical-device
+certification. Vision, audio, Omni, decision, draft-head, and NVFP4 variants are not offered.
+Unlike the existing Apache-2.0 entries, these weights use the
+[LFM Open License v1.0](https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF/blob/cd0c74c575b5c416f3011b5b4c298077f26ca8c2/LICENSE);
+commercial use by entities exceeding its $10 million annual-revenue threshold requires a separate
+license from Liquid AI. The model row links to the publisher's source and license.
+Liquid AI does not recommend this small model for complex agentic coding or multi-step reasoning;
+review its edits and keep approval prompts enabled.
+
+LFM3 is the only catalog family that runs with its reasoning on (`thinking` in the catalog): its
+model card makes reasoning the default and warns that disabling it is inconsistent. Measured with
+the production prompt and all 30 tool schemas over ten seeds in `llama.node` (the same llama.cpp
+b12211 core), reasoning-off LFM3 answered current library questions by inventing `skill` names or
+listing the workspace (at best 5 of 10 called `web_search`, whatever the guidance wording or
+position); reasoning-on called `web_search` in 9 of 10 and kept project symbols in workspace tools in
+10 of 10. The cost is latency: a typical answer round adds about 200–400 reasoning tokens (up to
+about 900), several seconds on a phone. The reasoning streams in the transcript as for desktop
+agents. Rolling-summary rounds and capped child-agent rounds keep reasoning off, so it never
+consumes their small output budgets.
+
+LFM3 was also the model that exposed an ambiguous stopped-tool result: after a push stopped at its
+approval prompt, it re-issued the push on the next turn in most seeds. A stopped approval now
+returns "It did not run. Do not retry it unless the user asks.", matching a declined one; LFM3 then
+answered from the next tool's result in 10 of 10 seeds, and Qwen3.5 was unchanged. A system-prompt
+rule alone did not prevent the retry. Even so, a re-issued push would still have needed approval.
+
+The native simulator gate (`modules/on-device-agent/README.md`) passes for LFM3 1.7B Q4_K_M at a
+131,072-token context: complete tool schemas, a structured file read, tool-result use, the
+stopped-push continuation, streaming, cancellation, unload/reload, and research routing (workspace
+symbols stayed local on every seed; `web_search` on 2 of 3 seeds, consistent with the host rate).
 
 Bonsai 2 exposes the publisher's 2B/4B ternary packings. Q2_0 uses upstream llama.cpp support.
 PQ2_0/PTQ1_0 are displayed with an explicit unavailable reason: they require PrismML-specific
@@ -540,9 +577,10 @@ precision levels. Unsupported packings cannot be downloaded or passed to inferen
 controller APIs. The app does not download draft heads or multimodal projectors; these models run
 text-only here.
 
-The maintained `llama.rn` engine is pinned to `0.13.0-rc.8` for the upstream Hadamard activation
-support needed by Bonsai 2 Q2_0. This is a pre-release binding and requires a rebuilt native app
-(on-device ABI 6). Old binaries fail with a rebuild message rather than attempting unsupported
+The maintained `llama.rn` engine is pinned to `0.13.0-rc.10` (llama.cpp b12211) for LFM3 architecture
+and tool-template support, retaining the Hadamard activation support needed by Bonsai 2 Q2_0.
+This is a pre-release binding and requires a rebuilt native app
+(on-device ABI 11). Old binaries fail with a rebuild message rather than attempting unsupported
 inference through a JavaScript-only update.
 
 Compatibility uses physical RAM plus a fresh native app-memory-headroom measurement. A model's
@@ -552,8 +590,13 @@ reported value is rounded up to the device's whole-GiB RAM class before that com
 value must still hold the model's estimate. Admission
 includes weights, an FP16 KV cache at the model's minimum context (4,096 tokens), working space, the
 prompt-state budget of hybrid/sliding-window models, and a 384 MiB reserve. When fresh headroom
-allows, a load doubles the context up to the catalog maximum (8,192 tokens for Qwen3; 16,384 for
-Qwen3.5, Bonsai 2, and Gemma 4). The Models page credits the memory of a currently loaded model when
+allows, each load doubles the context from 4,096 through 8K, 16K, 32K and higher, up to the
+pinned GGUF's native limit: **40,960** for Qwen3, **131,072** for Gemma 4 E2B, and **262,144**
+for Qwen3.5, Bonsai 2, and LFM3. There is no global 16K cap and no extrapolated RoPE scaling.
+The complete estimate, including the larger KV cache and reserve, must fit measured app headroom;
+marketed device RAM alone never enables a tier. Reloading re-measures headroom, so another load can
+choose a smaller or larger context. The loaded size is shown separately from the supported range.
+This does not resize an active native context in place. The Models page credits the memory of a currently loaded model when
 judging another one ("Loading replaces the current model in memory"), because loading always
 releases the previous context first and then checks memory again. Free memory is re-measured every
 few seconds while the page is open and whenever the loaded model changes, so there is no manual
@@ -600,7 +643,7 @@ dispatcher, and saved-output retrieval is always advertised.
 - **4,096 tokens** (low-memory fallback): `list_directory`, `read_file`, `write_file`, `edit_file`,
   `search_files`, `git_status`, `git_diff`, `skill`, `read_tool_output`, `search_tool_output`, and
   `todo_read`.
-- **8,192 tokens** (the Qwen3 maximum) adds `rename_path`, `delete_path`, `glob_files`,
+- **8,192 tokens** adds `rename_path`, `delete_path`, `glob_files`,
   `apply_patch`, `git_history`, `git_stage`, `git_commit`, `git_push`, `web_fetch`, `web_search`,
   `ask_user`, and `todo_write`.
 - **16,384 tokens** adds code intelligence, `format_file`, `task`, and `read_child` (all 30 tools).

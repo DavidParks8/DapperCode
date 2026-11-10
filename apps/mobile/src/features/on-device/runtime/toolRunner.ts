@@ -13,6 +13,9 @@ import type {
   LocalToolCall,
 } from './types';
 
+export const STOPPED_BEFORE_APPROVAL =
+  'Stopped before the user approved this request. It did not run. Do not retry it unless the user asks.';
+
 export function updateLocalToolStatus(
   threads: LocalThreadPort,
   threadId: string,
@@ -204,7 +207,7 @@ export async function awaitLocalApproval(
       run.threadId,
       messageId,
       'interrupted',
-      JSON.stringify({ error: 'Stopped before the user approved this request. It did not run.' }),
+      JSON.stringify({ error: STOPPED_BEFORE_APPROVAL }),
     );
     await threads.save(run.threadId);
     throw error;

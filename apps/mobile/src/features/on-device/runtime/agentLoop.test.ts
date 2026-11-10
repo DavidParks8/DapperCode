@@ -661,6 +661,22 @@ test('retry continues after completed tools and never replays them', async () =>
   expect(continued.filter((message) => message.role === 'user')).toHaveLength(1);
 });
 
+test('LFM3 retries a tool result without a synthetic completed assistant turn', async () => {
+  const h = await harness();
+  h.threads.change(h.thread.id, (thread) => ({ ...thread, modelId: 'lfm3-1.7b-q4-k-m' }));
+  h.model.generate
+    .mockResolvedValueOnce(call('read_file', { path: 'a.txt' }))
+    .mockRejectedValueOnce(new Error('Decode failed'));
+  await expect(h.loop.send(h.thread.id, 'Read a.txt', 'lfm3-read')).rejects.toThrow('Decode');
+  await h.loop.retry(h.thread.id);
+  expect(h.execute).toHaveBeenCalledTimes(1);
+  const continued = h.model.generate.mock.calls[2]?.[0] ?? [];
+  expect(continued.at(-1)).toMatchObject({ role: 'tool', name: 'read_file' });
+  expect(continued.filter((message) => message.role === 'user')).toHaveLength(1);
+  expect(h.threads.get(h.thread.id)).toMatchObject({ status: 'complete', lastError: null });
+  expect(h.loop.snapshot().phase).toBe('idle');
+});
+
 test('retry after stopping a partial answer that followed a tool regenerates only that answer', async () => {
   const h = await harness();
   const answer = deferred<LocalModelReply>();
@@ -905,31 +921,36 @@ describe('metadata-driven tool approval', () => {
     );
   });
 
-  test('a new tool turn after Stop supplies an explicit assistant prefill without replaying prior work', async () => {
-    const h = await harness(new Map(), localToolApproval);
-    h.model.generate.mockResolvedValueOnce(call('git_push', {}));
-    const running = h.loop.send(h.thread.id, 'Push it', 'stopped-push');
-    await waitFor(() => h.loop.snapshot().phase === 'approval');
-    await h.loop.stop();
-    await running;
-    const history = structuredClone(h.threads.get(h.thread.id).messages);
-    h.model.generate.mockResolvedValueOnce(call('read_file', { path: 'main.txt' }));
-    await h.loop.send(h.thread.id, 'Read main.txt instead.', 'next-read');
-    const input = h.model.generate.mock.calls[2]![0];
-    expect(input.slice(-2)).toEqual([
-      expect.objectContaining({
-        role: 'tool',
-        name: 'read_file',
-        content: expect.stringContaining('actual contents'),
-      }),
-      { role: 'assistant', content: '' },
-    ]);
-    expect(input.filter((message) => message.role === 'user')).toHaveLength(2);
-    expect(h.threads.get(h.thread.id).messages.slice(0, history.length)).toEqual(history);
-    expect(h.execute).toHaveBeenCalledTimes(1);
-    expect(h.execute.mock.calls[0]?.[1]).toBe('read_file');
-    expect(h.threads.get(h.thread.id).status).toBe('complete');
-  });
+  test.each(['qwen3-1.7b-q4-k-m', 'lfm3-1.7b-q4-k-m'])(
+    'a new %s tool turn after Stop uses its template boundary without replaying prior work',
+    async (modelId) => {
+      const h = await harness(new Map(), localToolApproval);
+      h.threads.change(h.thread.id, (thread) => ({ ...thread, modelId }));
+      h.model.generate.mockResolvedValueOnce(call('git_push', {}));
+      const running = h.loop.send(h.thread.id, 'Push it', 'stopped-push');
+      await waitFor(() => h.loop.snapshot().phase === 'approval');
+      await h.loop.stop();
+      await running;
+      const history = structuredClone(h.threads.get(h.thread.id).messages);
+      h.model.generate.mockResolvedValueOnce(call('read_file', { path: 'main.txt' }));
+      await h.loop.send(h.thread.id, 'Read main.txt instead.', 'next-read');
+      const input = h.model.generate.mock.calls[2]![0];
+      const tail = [
+        expect.objectContaining({
+          role: 'tool',
+          name: 'read_file',
+          content: expect.stringContaining('actual contents'),
+        }),
+        ...(modelId.startsWith('lfm3-') ? [] : [{ role: 'assistant', content: '' }]),
+      ];
+      expect(input.slice(-tail.length)).toEqual(tail);
+      expect(input.filter((message) => message.role === 'user')).toHaveLength(2);
+      expect(h.threads.get(h.thread.id).messages.slice(0, history.length)).toEqual(history);
+      expect(h.execute).toHaveBeenCalledTimes(1);
+      expect(h.execute.mock.calls[0]?.[1]).toBe('read_file');
+      expect(h.threads.get(h.thread.id).status).toBe('complete');
+    },
+  );
 
   test('stop while awaiting approval interrupts without pushing', async () => {
     const h = await harness(new Map(), localToolApproval);
@@ -944,6 +965,10 @@ describe('metadata-driven tool approval', () => {
       tool: { status: 'interrupted' },
       content: expect.stringContaining('did not run'),
     });
+    // Without this, LFM3 re-issued the stopped push on the next turn instead of answering.
+    expect(settled.messages.find((message) => message.role === 'tool')?.content).toContain(
+      'Do not retry it unless the user asks.',
+    );
   });
 });
 

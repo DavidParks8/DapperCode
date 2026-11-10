@@ -137,6 +137,14 @@ export default async function scenario(e2e) {
         modelUnloaded: true,
         modelReloaded: true,
       });
+      if (testModel.family === 'LFM3') {
+        await e2e.expectSubset('LFM3 research routing', result.checks, {
+          'research-web-majority': true,
+          'research-workspace-1': true,
+          'research-workspace-42': true,
+          'research-workspace-123': true,
+        });
+      }
     });
     await e2e.phase('settled', async () => {
       await e2e.run('xcrun', ['simctl', 'terminate', simulator, bundleId]);

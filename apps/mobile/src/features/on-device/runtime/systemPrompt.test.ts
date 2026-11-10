@@ -19,6 +19,7 @@ test('every catalog family has measured research guidance', () => {
 test.each([
   ['qwen35-2b-q4-k-m', 'reminder'],
   ['gemma-4-e2b-q4-0', 'reminder'],
+  ['lfm3-1.7b-q4-k-m', 'reminder'],
   ['qwen3-1.7b-q4-k-m', 'access'],
   ['bonsai-2-2b-q2-0', 'direct'],
   ['retired-model', 'reminder'],

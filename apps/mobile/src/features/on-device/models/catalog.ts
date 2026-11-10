@@ -5,6 +5,16 @@ export const LOCAL_MODEL_CATALOG: readonly LocalModelDefinition[] = catalog;
 
 export const LOCAL_MODEL_FAMILIES: readonly LocalModelFamily[] = [
   {
+    id: 'lfm3',
+    name: 'LFM3',
+    publisher: 'Liquid AI',
+    icon: 'sparkles-outline',
+    description:
+      'Liquid AI text models that reason before answering, so replies are slower. Review coding edits; LFM Open License v1.0 terms apply.',
+    badge: 'Experimental',
+    featured: true,
+  },
+  {
     id: 'bonsai-2',
     name: 'Bonsai 2',
     publisher: 'Prism ML',

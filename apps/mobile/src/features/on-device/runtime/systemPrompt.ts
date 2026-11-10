@@ -60,6 +60,7 @@ export type LocalResearchGuidance = keyof typeof LOCAL_RESEARCH_GUIDANCE;
 
 /** Keyed by `LOCAL_MODEL_FAMILIES` id. */
 export const LOCAL_FAMILY_RESEARCH_GUIDANCE: Readonly<Record<string, LocalResearchGuidance>> = {
+  lfm3: 'reminder',
   'bonsai-2': 'direct',
   'qwen3.5': 'reminder',
   'gemma-4': 'reminder',

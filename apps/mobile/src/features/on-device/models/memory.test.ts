@@ -101,6 +101,8 @@ test('the offline catalog contains distinct immutable verified artifact identiti
       );
     } else if (entry.family === 'Gemma 4') {
       expect(entry.kvBytesPerToken).toBe(4 * (28 * 256 + 7 * 512));
+    } else if (entry.family === 'LFM3') {
+      expect(entry.kvBytesPerToken).toBe(2 * 11 * 4 * 128 * 2);
     } else {
       const fullAttentionLayers = entry.parameters === '4B' ? 8 : 6;
       const kvHeads = entry.parameters === '4B' ? 4 : 2;
@@ -147,4 +149,42 @@ test('loaded context grows to the catalog maximum only when fresh headroom allow
     expect(entry.contextTokens).toBeGreaterThanOrEqual(4096);
     expect(entry.maxContextTokens).toBeGreaterThanOrEqual(entry.contextTokens);
   }
+});
+
+test.each(LOCAL_MODEL_CATALOG)(
+  '$id grows beyond 16K within its native context and memory limits',
+  (entry) => {
+    const maximum = entry.family === 'Qwen3' ? 40960 : entry.family === 'Gemma 4' ? 131072 : 262144;
+    expect(entry.maxContextTokens).toBe(maximum);
+    const tiers = [4096, 8192, 16384, 32768, 65536, 131072, 262144].filter(
+      (tokens) => tokens < maximum,
+    );
+    tiers.push(maximum);
+    for (const [index, tokens] of tiers.entries()) {
+      const headroom = modelMemoryBytes(entry, tokens);
+      expect(
+        modelContextTokens(entry, { ...memory, physicalBytes: ample, availableBytes: headroom }),
+      ).toBe(tokens);
+      expect(
+        modelContextTokens(entry, {
+          ...memory,
+          physicalBytes: ample,
+          availableBytes: headroom - 1,
+        }),
+      ).toBe(tiers[Math.max(0, index - 1)]);
+    }
+    expect(
+      modelContextTokens(entry, { ...memory, physicalBytes: ample, availableBytes: ample }),
+    ).toBe(maximum);
+  },
+);
+
+test('reported headroom cannot grow a context beyond physical device RAM', () => {
+  expect(
+    modelContextTokens(model, {
+      ...memory,
+      physicalBytes: 4 * GiB,
+      availableBytes: ample,
+    }),
+  ).toBe(16384);
 });

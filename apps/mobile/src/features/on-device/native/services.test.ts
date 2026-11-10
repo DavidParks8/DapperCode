@@ -20,6 +20,12 @@ test('old native builds are rejected before exposing models requiring the update
   expect(() => getOnDeviceNativeServices()).toThrow('Rebuild the native iOS app');
 });
 
+test('ABI 10 predating LFM3 support cannot expose the updated catalog', () => {
+  expect(ON_DEVICE_NATIVE_API_VERSION).toBe(11);
+  mockNativeLookup.mockReturnValue({ getAPIVersion: () => 10 });
+  expect(() => getOnDeviceNativeServices()).toThrow('Rebuild the native iOS app');
+});
+
 test('the current native build passes the version boundary with error mapping applied', async () => {
   const listWorkspaces = jest.fn(() => Promise.resolve([]));
   mockNativeLookup.mockReturnValue({

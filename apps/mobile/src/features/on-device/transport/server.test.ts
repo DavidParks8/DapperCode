@@ -660,14 +660,14 @@ describe('LocalBridgeServer', () => {
       {
         id: 'qwen3-1.7b-q4-k-m',
         displayName: 'Qwen3 1.7B Q4_K_M',
-        description: 'Loaded · 8K context',
+        description: 'Loaded · 40K context',
         providerId: 'on-device',
         isDefault: false,
       },
       {
         id: 'qwen3-4b-q4-k-m',
         displayName: 'Qwen3 4B Q4_K_M',
-        description: 'Loads when you send · up to 8K context',
+        description: 'Loads when you send · up to 40K context',
         providerId: 'on-device',
         isDefault: true,
       },

@@ -87,7 +87,7 @@ async function harness(contextTokens: 4096 | 8192) {
   const fake = createFakeOnDeviceNative(llama, {
     downloaded: [modelId],
     files,
-    ...(contextTokens === 4096 ? { availableBytes: modelMemoryBytes(model, 4096) } : {}),
+    availableBytes: modelMemoryBytes(model, contextTokens),
   });
   const session = new LocalModelSession(fake.native, template.loader, jest.fn());
   const threads = new LocalThreadRepository(fake.native, jest.fn(), 0);
@@ -189,7 +189,10 @@ test('even all 30 tool schemas at 8K keep a requested read verbatim with no summ
   const llama = new FakeLlama();
   llama.charactersPerToken = 3.5;
   const template = toolTemplate(llama);
-  const fake = createFakeOnDeviceNative(llama, { downloaded: [modelId] });
+  const fake = createFakeOnDeviceNative(llama, {
+    downloaded: [modelId],
+    availableBytes: modelMemoryBytes(localModelDefinition(modelId), 8192),
+  });
   const session = new LocalModelSession(fake.native, template.loader, jest.fn());
   await session.load(modelId);
   expect(session.snapshot().contextTokens).toBe(8192);

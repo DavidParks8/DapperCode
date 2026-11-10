@@ -4,6 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'expo-crypto';
 import type { LocalModelContext, LocalModelMessage, LocalModelReply } from '../models/engine';
 import { localModelDefinition } from '../models/catalog';
+import { modelMemoryBytes } from '../models/memory';
 import { LocalModelSession } from '../models/session';
 import { LocalAgentLoop, type LocalRunSnapshot } from './agentLoop';
 import { LOCAL_TOOL_DEFINITIONS, localToolApproval } from './localTools';
@@ -163,7 +164,7 @@ async function setup() {
   const native = {
     getMemoryInfo: () => ({
       physicalBytes: 32 * 1024 ** 3,
-      availableBytes: 16 * 1024 ** 3,
+      availableBytes: modelMemoryBytes(localModelDefinition('qwen3-0.6b-q4-0'), 8192),
       isSimulator: true,
     }),
     getDownloadedModelFile: (id: string) => {

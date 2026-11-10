@@ -351,7 +351,14 @@ export class LocalModelSession {
     try {
       this.requireExecutionMemory();
       this.publish({ phase: 'running', error: null });
-      const prompt = await this.preparePrompt(generation, messages, tools, options?.checkpoint);
+      const thinking = roundThinks(generation.model.definition, options);
+      const prompt = await this.preparePrompt(
+        generation,
+        messages,
+        tools,
+        thinking,
+        options?.checkpoint,
+      );
       if (generation.interrupted) {
         throw new LocalModelInterrupted();
       }
@@ -364,6 +371,7 @@ export class LocalModelSession {
               ? Infinity
               : Math.max(1, Math.min(512, options.outputTokens)),
           ),
+          thinking,
         ),
         (value) => this.partial(generation, value, update),
       );
@@ -401,10 +409,11 @@ export class LocalModelSession {
     generation: Generation,
     messages: LocalModelMessage[],
     tools: object[],
+    thinking: boolean,
     checkpoint?: LocalSummaryCheckpoint,
   ): Promise<PreparedPrompt> {
     const { contextTokens } = generation.model;
-    const original = await this.formatPrompt(generation, messages, tools);
+    const original = await this.formatPrompt(generation, messages, tools, thinking);
     // Two free generation reserves always leave room for the next tool round. A summary that
     // failed for this earlier history is not retried; elision runs instead.
     if (
@@ -413,7 +422,9 @@ export class LocalModelSession {
       !promptFits(original.tokens, contextTokens, 2)
     ) {
       const compacted = await compactEarlierTurns(messages, original, contextTokens, checkpoint, {
-        format: (chat, withTools) => this.formatPrompt(generation, chat, withTools ? tools : []),
+        format: (chat, withTools) =>
+          // Summary prompts (no tools) never think; their output cap holds only memory.
+          this.formatPrompt(generation, chat, withTools ? tools : [], withTools && thinking),
         complete: (prompt, outputTokens) => this.summaryReply(generation, prompt, outputTokens),
         failed: (error) => {
           this.checkGeneration(generation);
@@ -434,7 +445,7 @@ export class LocalModelSession {
       const prepared =
         candidate.scope === 'original'
           ? original
-          : await this.formatPrompt(generation, candidate.messages, tools);
+          : await this.formatPrompt(generation, candidate.messages, tools, thinking);
       if (!promptFits(prepared.tokens, contextTokens)) {
         continue;
       }
@@ -463,12 +474,13 @@ export class LocalModelSession {
     generation: Generation,
     messages: LocalModelMessage[],
     tools: object[],
+    thinking: boolean,
   ): Promise<PreparedPrompt> {
     this.checkGeneration(generation);
     const formatted = await generation.model.context.getFormattedChat(messages, null, {
       tools,
       tool_choice: tools.length ? 'auto' : 'none',
-      enable_thinking: false,
+      enable_thinking: thinking,
       reasoning_format: 'auto',
     });
     const tokens = (await generation.model.context.tokenize(formatted.prompt)).tokens.length;
@@ -548,6 +560,11 @@ export class LocalModelSession {
   }
 }
 
+/** Capped rounds (child agents) cannot spare output tokens for reasoning. */
+function roundThinks(model: LocalModelDefinition, options?: LocalGenerationOptions): boolean {
+  return model.thinking === true && options?.outputTokens === undefined;
+}
+
 // Fields of llama.rn's Jinja formatting result that its own messages path forwards to completion.
 const FORMATTED_COMPLETION_KEYS = [
   'chat_format',
@@ -566,6 +583,7 @@ const FORMATTED_COMPLETION_KEYS = [
 export function completionParams(
   formatted: FormattedChatResult | JinjaFormattedChatResult,
   nPredict: number,
+  thinking = false,
 ): CompletionParams {
   const jinja: JinjaFormattedChatResult =
     formatted.type === 'jinja'
@@ -585,7 +603,7 @@ export function completionParams(
     ...forwarded,
     ...(jinja.additional_stops ? { stop: [...jinja.additional_stops] } : {}),
     prompt: formatted.prompt,
-    enable_thinking: false,
+    enable_thinking: thinking,
     reasoning_format: 'auto',
     temperature: 0.2,
     n_predict: nPredict,

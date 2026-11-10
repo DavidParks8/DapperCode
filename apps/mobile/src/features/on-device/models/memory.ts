@@ -121,16 +121,17 @@ export function requireModelMemory(model: LocalModelDefinition, memory: DeviceMe
 }
 
 /**
- * Chooses the largest supported context, halving from the catalog maximum, whose KV cache fits the
- * measured headroom. Never returns less than the admitted minimum.
+ * Grows through power-of-two tiers, then the native maximum, while the KV cache fits fresh
+ * headroom. Starting at the minimum keeps intermediate tiers stable for non-power-of-two maxima.
  */
 export function modelContextTokens(model: LocalModelDefinition, memory: DeviceMemory): number {
-  let tokens = Math.max(model.maxContextTokens, model.contextTokens);
-  while (tokens > model.contextTokens) {
-    if (validMemory(memory) && memory.availableBytes >= modelMemoryBytes(model, tokens)) {
-      return tokens;
+  let tokens = model.contextTokens;
+  while (tokens < model.maxContextTokens && validMemory(memory)) {
+    const next = Math.min(tokens * 2, model.maxContextTokens);
+    if (Math.min(memory.availableBytes, memory.physicalBytes) < modelMemoryBytes(model, next)) {
+      break;
     }
-    tokens = Math.max(model.contextTokens, Math.floor(tokens / 2));
+    tokens = next;
   }
-  return model.contextTokens;
+  return tokens;
 }

@@ -244,6 +244,39 @@ describe('Models settings', () => {
 });
 
 describe('Model family settings', () => {
+  it('offers LFM3 downloads with the publisher license and existing load flow', async () => {
+    const runtime = new FakeSettingsRuntime();
+    runtime.memory = { physicalBytes: 8 * GiB, availableBytes: 6 * GiB, isSimulator: false };
+    const source = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+    openFamily(runtime, 'lfm3');
+    expect(screen.getByText(/^Liquid AI\./)).toBeTruthy();
+    for (const quant of ['Q4_K_M', 'Q5_K_M', 'Q8_0']) {
+      expect(screen.getByLabelText(`Download LFM3 1.7B ${quant}`)).toBeTruthy();
+    }
+    await act(async () => {
+      fireEvent.press(row('lfm3-1.7b-q4-k-m').getByLabelText('Download LFM3 1.7B Q4_K_M'));
+    });
+    expect(runtime.downloadModel).toHaveBeenCalledWith('lfm3-1.7b-q4-k-m');
+    await act(async () => {
+      fireEvent.press(
+        row('lfm3-1.7b-q4-k-m').getByLabelText(
+          'Source and LFM Open License v1.0 license for LFM3 1.7B Q4_K_M',
+        ),
+      );
+    });
+    expect(source).toHaveBeenCalledWith('https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF');
+    act(() => runtime.setDownload('lfm3-1.7b-q4-k-m', { phase: 'ready' }));
+    await act(async () => {
+      fireEvent.press(row('lfm3-1.7b-q4-k-m').getByLabelText('Load LFM3 1.7B Q4_K_M'));
+    });
+    expect(runtime.selectModel).toHaveBeenCalledWith('lfm3-1.7b-q4-k-m');
+    act(() =>
+      runtime.setSession({ phase: 'ready', modelId: 'lfm3-1.7b-q4-k-m', contextTokens: 32768 }),
+    );
+    expect(row('lfm3-1.7b-q4-k-m').getByText('Loaded · 32K context')).toBeTruthy();
+    source.mockRestore();
+  });
+
   it('lists quants per size with one Recommended badge style and labels unsupported packings', () => {
     const runtime = new FakeSettingsRuntime();
     runtime.memory = { physicalBytes: 16 * GiB, availableBytes: 12 * GiB, isSimulator: false };
@@ -255,7 +288,7 @@ describe('Model family settings', () => {
     expect(unsupported.getByText(/PQ2_0 needs the PrismML-specific runtime/)).toBeTruthy();
     expect(unsupported.queryByLabelText('Download Bonsai 2 2B PQ2_0')).toBeNull();
     expect(row('bonsai-2-2b-q2-0').getByLabelText('Download Bonsai 2 2B Q2_0')).toBeTruthy();
-    expect(row('bonsai-2-2b-q2-0').getByText('547 MB · 4K–16K context')).toBeTruthy();
+    expect(row('bonsai-2-2b-q2-0').getByText('547 MB · 4K–256K context')).toBeTruthy();
     expect(screen.queryByText(/next page/)).toBeNull();
 
     runtime.memory = { physicalBytes: 16 * GiB, availableBytes: 12 * GiB, isSimulator: false };
