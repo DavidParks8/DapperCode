@@ -220,10 +220,14 @@ export class LocalAgentLoop {
     });
   }
 
-  async stop(): Promise<void> {
+  /** Stops the active run; `reason` replaces the default interruption message. */
+  async stop(reason?: string): Promise<void> {
     const run = this.active;
     if (!run) {
       return;
+    }
+    if (!run.stopped) {
+      run.stopReason = reason;
     }
     run.stopped = true;
     this.publish(run, 'stopping');
@@ -288,7 +292,11 @@ export class LocalAgentLoop {
         return this.abandon(run, error);
       }
       if (run.stopped || error instanceof LocalModelInterrupted) {
-        return this.settle(run, 'interrupted', 'Stopped. Completed edits are preserved.');
+        return this.settle(
+          run,
+          'interrupted',
+          run.stopReason ?? 'Stopped. Completed edits are preserved.',
+        );
       }
       if (error instanceof LocalStepLimit) {
         return this.settle(run, 'interrupted', error.message);

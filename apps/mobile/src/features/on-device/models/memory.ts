@@ -120,6 +120,32 @@ export function requireModelMemory(model: LocalModelDefinition, memory: DeviceMe
   }
 }
 
+/** A completion needs the reserve on top of the resident context. */
+export function requireExecutionMemory(memory: DeviceMemory): void {
+  if (
+    !Number.isSafeInteger(memory.availableBytes) ||
+    memory.availableBytes < MODEL_MEMORY_RESERVE_BYTES
+  ) {
+    throw new Error('iOS memory headroom is too low to run this model safely.');
+  }
+}
+
+/** Reopening a context keeps its window, so fresh headroom must fit that exact window. */
+export function requireContextMemory(
+  model: LocalModelDefinition,
+  contextTokens: number,
+  memory: DeviceMemory,
+): void {
+  if (
+    !(
+      Math.min(memory.availableBytes, memory.physicalBytes) >=
+      modelMemoryBytes(model, contextTokens)
+    )
+  ) {
+    throw new Error('iOS memory headroom is too low to resume this model.');
+  }
+}
+
 /**
  * Grows through power-of-two tiers, then the native maximum, while the KV cache fits fresh
  * headroom. Starting at the minimum keeps intermediate tiers stable for non-power-of-two maxima.

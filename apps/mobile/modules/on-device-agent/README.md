@@ -43,7 +43,14 @@ See [product setup and limitations](../../../../docs/on-device.md).
   written releases the transfer and records the failure. Checkpoints from the earlier
   JavaScript transfer (`resume.json`) are imported on the next resume.
   `RuntimeDocumentStore.swift` owns separate atomic, size-limited local journals/preferences.
-- The native ABI is versioned (currently 11: LFM3 inference, bounded glob/regex search, synchronous workspace
+- `LocalRunActivity.swift` keeps a local agent turn running after the app leaves the foreground:
+  an iOS 26 `BGContinuedProcessingTask` (registered on demand as `<bundle id>.localrun.<n>`,
+  permitted by `plugins/withOnDeviceAgentNative.js`, never queued), otherwise ordinary background
+  task time. JavaScript reports generic progress and ends the activity when the turn settles; an
+  expiration event (`onLocalRunExpired`) stops the turn. On the short budget the event fires once
+  `backgroundReserve` (10 s) remains, while the task is still held; module destruction ends every
+  activity.
+- The native ABI is versioned (currently 12: local run activities, LFM3 inference, bounded glob/regex search, synchronous workspace
   cancellation, observed-revision coordinated patches, workspace rename/delete, change tokens, UI file
   rename/delete, fetch/pull, init, branch creation, discard, remote-aware status, typed errors,
   background model downloads, verification progress/cancellation, storage info, Git transfer
@@ -211,6 +218,19 @@ preservation on rejected writes, prefix enumeration, and idempotent removal:
 node .agents/skills/local-e2e-validation/scripts/run.mjs \
   --evidence /absolute/path/to/new-storage-evidence.jsonl \
   apps/mobile/modules/on-device-agent/tests/native-model-files.mjs
+```
+
+The local-run scenario compiles the production `LocalRunActivity` into a minimal app, starts a run
+in the foreground, sends the app to the background, and checks that the process keeps running
+until the run is warned with background time to spare and ends its activity, then that it is
+suspended. The simulator has no
+continued-processing scheduler, so it exercises the background-task fallback; continued
+processing needs an iOS 26 device:
+
+```bash
+node .agents/skills/local-e2e-validation/scripts/run.mjs \
+  --evidence /absolute/path/to/new-local-run-evidence.jsonl \
+  apps/mobile/modules/on-device-agent/tests/native-local-run.mjs
 ```
 
 The download scenario bundles the production `ModelDownloadController` against a local HTTPS

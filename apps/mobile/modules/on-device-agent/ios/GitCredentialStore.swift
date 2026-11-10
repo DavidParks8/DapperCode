@@ -47,14 +47,25 @@ enum GitCredentialStore {
     var result: CFTypeRef?
     let status = SecItemCopyMatching(query as CFDictionary, &result)
     guard status == errSecSuccess, let data = result as? Data else {
-      throw CredentialError(
-        .credentialUnavailable, "Git credentials are unavailable. Sign in again (Keychain status \(status)).")
+      throw unavailable(status)
     }
     let credential = try JSONDecoder().decode(StoredGitCredential.self, from: data)
     guard credential.host == host else {
       throw CredentialError(.gitCredentialOrigin, "Git credentials cannot be used with a different host.")
     }
     return credential
+  }
+
+  /// Credentials are only readable while the device is unlocked, and local runs keep working
+  /// while it is locked, so a locked device gets its own instruction instead of "sign in again".
+  static func unavailable(_ status: OSStatus) -> Error {
+    if status == errSecInteractionNotAllowed {
+      return CredentialError(
+        .credentialUnavailable, "Unlock this iPhone to use your saved Git credentials.")
+    }
+    return CredentialError(
+      .credentialUnavailable,
+      "Git credentials are unavailable. Sign in again (Keychain status \(status)).")
   }
 
   static func remove(_ reference: String) throws {

@@ -14,6 +14,6 @@ Pod::Spec.new do |s|
   s.source_files = '*.{swift,h,m}'
   s.vendored_frameworks = 'build/git/libgit2.xcframework'
   s.resource_bundles = { 'OnDeviceAgentNotices' => ['build/git/THIRD_PARTY_NOTICES.txt'] }
-  s.frameworks = 'Security', 'CoreFoundation'
+  s.frameworks = 'Security', 'CoreFoundation', 'BackgroundTasks', 'UIKit'
   s.libraries = 'iconv', 'z'
 end

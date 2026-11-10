@@ -18,10 +18,27 @@ import type {
   NativeModelVerificationProgress,
 } from '../models/downloadState';
 
-export const ON_DEVICE_NATIVE_API_VERSION = 11;
+export const ON_DEVICE_NATIVE_API_VERSION = 12;
 
 /** Native event carrying throttled clone, fetch, pull, and push progress (API 8). */
 export const GIT_TRANSFER_PROGRESS_EVENT = 'onGitTransferProgress';
+
+/**
+ * Native event sent when iOS revokes a local run's background time or the user cancels its
+ * system progress UI (API 12). The run must stop; native completes the task shortly after.
+ */
+export const LOCAL_RUN_EXPIRED_EVENT = 'onLocalRunExpired';
+
+/**
+ * How a local run keeps executing while the app is in the background: a user-visible
+ * continued-processing task (iOS 26+), the short `beginBackgroundTask` budget, or nothing.
+ */
+export type NativeLocalRunActivityKind = 'continued' | 'background' | 'none';
+
+export interface NativeLocalRunActivity {
+  id: string;
+  kind: NativeLocalRunActivityKind;
+}
 
 export interface NativeGitTransferProgress {
   active: boolean;
@@ -49,6 +66,19 @@ export interface OnDeviceNativeServices {
     eventName: typeof GIT_TRANSFER_PROGRESS_EVENT,
     listener: (progress: NativeGitTransferProgress) => void,
   ): { remove(): void };
+  addListener(
+    eventName: typeof LOCAL_RUN_EXPIRED_EVENT,
+    listener: (event: { id: string }) => void,
+  ): { remove(): void };
+  /**
+   * Starts keeping the process alive for a local run. Call while the app is in the foreground;
+   * `kind: 'none'` means iOS granted no background time and nothing needs to be ended.
+   */
+  beginLocalRunActivity(title: string, subtitle: string): Promise<NativeLocalRunActivity>;
+  /** Reports progress, which keeps a continued-processing task alive, and updates its subtitle. */
+  updateLocalRunActivity(id: string, subtitle: string): void;
+  /** Releases the activity. Unknown or already expired ids are ignored. */
+  endLocalRunActivity(id: string, success: boolean): void;
   storeGitCredential(
     host: string,
     accountId: string,

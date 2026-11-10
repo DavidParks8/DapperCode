@@ -94,6 +94,7 @@ import { ChatInput } from '../../features/chat/composer/ChatInput';
 import { ActivityEvent } from '../../features/chat/transcript/ActivityEvent';
 import { pendingUserInputRequestAtom } from '../../features/chat/state/turn';
 import { storedLocalThread } from '../../features/on-device/runtime/testing';
+import { LOCAL_RUN_EXPIRED_MESSAGE } from '../../features/on-device/runtime/runActivity';
 import { WorkflowCard } from '../../features/chat/workflow/Workflow';
 
 const QWEN = 'qwen3-1.7b-q4-k-m';
@@ -1751,6 +1752,9 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
             interrupted: false,
             truncated: false,
             stopped_limit: 0,
+            stopped_eos: true,
+            stopped_word: '',
+            context_full: false,
             tokens_predicted: 20,
             tokens_evaluated: 100,
           };
@@ -1915,6 +1919,72 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     expect(runtime.models.snapshot()).toMatchObject({ phase: 'ready', modelId: QWEN });
     expect(runtime.threads.get(thread!.id).status).toBe('interrupted');
     expect(drawerStatus(root)).toBe('Qwen3 1.7B Q4_K_M · ready on this iPhone');
+    act(() => tree.unmount());
+  });
+
+  it('keeps generating while the phone is locked when iOS grants background time, and explains when it ends', async () => {
+    const { tree, root, runtime } = await renderShell({ localRunActivity: 'continued' });
+    mockLlama.holdCompletions = true;
+    mockLlama.reply({ content: 'Finished while the phone was locked.' });
+    await submit(root, 'Explain the workspace');
+    await drive(() => mockLlama.stream('Finished'));
+    expect(drawerStatus(root)).toBe('Generating on this iPhone');
+    const composer = () => {
+      const { showStopButton, isStopping, isLoading, submitDisabled } =
+        root.findAllByType(ChatInput)[0]!.props;
+      return { showStopButton, isStopping, isLoading, submitDisabled };
+    };
+    const running = composer();
+    expect(running).toMatchObject({ showStopButton: true, isStopping: false });
+
+    await changeAppState('inactive');
+    await changeAppState('background');
+    expect(mockLlama.stops).toBe(0);
+    expect(mockLlama.resident.size).toBe(1);
+    expect(labeled(root, 'Stop agent')).toBeTruthy();
+    expect(drawerStatus(root)).toBe('Generating on this iPhone');
+    expect(composer()).toEqual(running);
+
+    // The locked phone finishes the turn, then unloads before returning its background time.
+    mockLlama.refuseGpu = true;
+    mockLlama.holdCompletions = false;
+    await drive(() => mockLlama.finishCompletion());
+    const [thread] = runtime.threads.list();
+    expect(thread?.status).toBe('complete');
+    expect(mockLlama.loads.map((load) => load.backend)).toEqual(['gpu', 'cpu']);
+    expect(mockLlama.resident.size).toBe(0);
+    const [finished] = [...mockNative.localRuns.values()];
+    expect(finished).toMatchObject({ kind: 'continued', ended: true });
+    expect(transcript(root)).toContain('Finished while the phone was locked.');
+    expectSettledControls(root);
+
+    mockLlama.refuseGpu = false;
+    await changeAppState('active');
+    await drive(() => mockLlama.finishLoad());
+    expect(mockLlama.loads.map((load) => load.backend)).toEqual(['gpu', 'cpu', 'gpu']);
+    expect(drawerStatus(root)).toBe('Qwen3 1.7B Q4_K_M · ready on this iPhone');
+
+    // When iOS ends the time, the turn stops and says why instead of silently freezing.
+    mockLlama.holdCompletions = true;
+    mockLlama.reply({ content: 'Never finished' });
+    await submit(root, 'Keep going');
+    await drive(() => mockLlama.stream('Never'));
+    await changeAppState('background');
+    expect(labeled(root, 'Stop agent')).toBeTruthy();
+    await act(async () => {
+      mockNative.expireLocalRun();
+      await flush();
+    });
+    await settle();
+    expect(runtime.threads.get(thread!.id)).toMatchObject({
+      status: 'interrupted',
+      lastError: LOCAL_RUN_EXPIRED_MESSAGE,
+    });
+    expect([...mockNative.localRuns.values()].at(-1)).toMatchObject({ ended: false });
+    expect(mockLlama.resident.size).toBe(0);
+    expect(hasText(root, LOCAL_RUN_EXPIRED_MESSAGE)).toBe(true);
+    expect(transcript(root)).toContain('Never');
+    expectSettledControls(root);
     act(() => tree.unmount());
   });
 

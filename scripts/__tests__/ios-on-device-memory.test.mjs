@@ -20,3 +20,25 @@ test('prebuild grants on-device inference the increased iOS memory limit', async
   assert.equal(entitlements['com.apple.developer.kernel.increased-memory-limit'], true);
   assert.equal(entitlements['com.apple.developer.kernel.extended-virtual-addressing'], undefined);
 });
+
+test('prebuild permits the continued-processing tasks that keep local turns running when locked', async () => {
+  const plugin = require('./plugins/withOnDeviceAgentNative');
+  const { compileModsAsync } = require('expo/config-plugins');
+  const config = plugin({
+    name: 'Background test',
+    slug: 'background-test',
+    ios: { infoPlist: { BGTaskSchedulerPermittedIdentifiers: ['com.example.refresh'] } },
+  });
+  const result = await compileModsAsync(config, {
+    projectRoot: mobileRoot,
+    platforms: ['ios'],
+    introspect: true,
+  });
+  const infoPlist = result._internal.modResults.ios.infoPlist;
+  assert.deepEqual(infoPlist.BGTaskSchedulerPermittedIdentifiers, [
+    'com.example.refresh',
+    '$(PRODUCT_BUNDLE_IDENTIFIER).localrun.*',
+  ]);
+  // Continued processing needs no background mode, so none is declared.
+  assert.equal(infoPlist.UIBackgroundModes, undefined);
+});

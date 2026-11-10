@@ -25,6 +25,9 @@ export type LocalModelReply = Pick<
   | 'interrupted'
   | 'truncated'
   | 'stopped_limit'
+  | 'stopped_eos'
+  | 'stopped_word'
+  | 'context_full'
   | 'tokens_predicted'
   | 'tokens_evaluated'
 >;
@@ -40,9 +43,13 @@ export type LocalModelContext = Pick<
   ): Promise<LocalModelReply>;
 };
 
+/** iOS refuses GPU work from background apps, so background inference runs on the CPU. */
+export type LocalInferenceBackend = 'gpu' | 'cpu';
+
 export interface LocalModelLoadOptions {
   contextTokens: number;
   memory: DeviceMemory;
+  backend: LocalInferenceBackend;
 }
 
 export type LocalContextLoader = (
@@ -52,8 +59,9 @@ export type LocalContextLoader = (
   progress: (percent: number) => void,
 ) => Promise<LocalModelContext>;
 
-// A-series phones have two performance cores plus efficiency cores, and Metal runs every layer, so
-// CPU threads only drive sampling/grammar. Simulator inference is CPU-only on a multi-core Mac.
+// A-series phones have two performance cores plus efficiency cores. In the foreground Metal runs
+// every layer and CPU threads only drive sampling/grammar; background CPU inference keeps the same
+// count so efficiency cores are not oversubscribed. Simulator inference is CPU-only on a Mac.
 export const DEVICE_INFERENCE_THREADS = 4;
 export const SIMULATOR_INFERENCE_THREADS = 6;
 export const INFERENCE_BATCH_TOKENS = 512;
@@ -62,7 +70,7 @@ export const INFERENCE_MICRO_BATCH_TOKENS = 256;
 export function nativeContextParams(
   model: LocalModelDefinition,
   file: LocalModelFile,
-  { contextTokens, memory }: LocalModelLoadOptions,
+  { contextTokens, memory, backend }: LocalModelLoadOptions,
 ): ContextParams {
   return {
     model: modelFileSystemPath(file.uri),
@@ -72,7 +80,9 @@ export function nativeContextParams(
     n_threads: memory.isSimulator ? SIMULATOR_INFERENCE_THREADS : DEVICE_INFERENCE_THREADS,
     // One sequence: recurrent/hybrid state is allocated per sequence and only sequence 0 is used.
     n_parallel: 1,
-    n_gpu_layers: memory.isSimulator ? 0 : 99,
+    n_gpu_layers: memory.isSimulator || backend === 'cpu' ? 0 : 99,
+    // Naming only the CPU leaves llama.cpp no offload device, so no operation is sent to Metal.
+    ...(backend === 'cpu' && !memory.isSimulator ? { devices: ['CPU'] } : {}),
     cache_type_k: 'f16',
     cache_type_v: 'f16',
     ctx_shift: false,

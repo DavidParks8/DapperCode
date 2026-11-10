@@ -21,8 +21,13 @@ test('old native builds are rejected before exposing models requiring the update
 });
 
 test('ABI 10 predating LFM3 support cannot expose the updated catalog', () => {
-  expect(ON_DEVICE_NATIVE_API_VERSION).toBe(11);
   mockNativeLookup.mockReturnValue({ getAPIVersion: () => 10 });
+  expect(() => getOnDeviceNativeServices()).toThrow('Rebuild the native iOS app');
+});
+
+test('ABI 11 without background run activities is rejected, so locking never freezes a run', () => {
+  expect(ON_DEVICE_NATIVE_API_VERSION).toBe(12);
+  mockNativeLookup.mockReturnValue({ getAPIVersion: () => 11 });
   expect(() => getOnDeviceNativeServices()).toThrow('Rebuild the native iOS app');
 });
 

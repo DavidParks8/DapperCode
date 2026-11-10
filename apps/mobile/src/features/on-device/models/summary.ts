@@ -1,6 +1,19 @@
 import { compactionOutputTokens, LocalContextFull, promptFits } from './contextWindow';
 import type { LocalModelMessage, LocalModelReply } from './engine';
-import type { LocalSummaryCheckpoint } from './session';
+
+export interface LocalSummaryCheckpoint {
+  /** Identifies the earlier history to summarize; a failed summary of it is not retried. */
+  key: string;
+  previous: string | null;
+  started(): void;
+  /** The summary failed; history and the previous checkpoint stay and elision is used instead. */
+  failed(): void;
+  /** Validates the proposed prompt before persisting complete semantic memory. */
+  commit(
+    content: string,
+    validate: (messages: LocalModelMessage[]) => Promise<void>,
+  ): Promise<LocalModelMessage[]>;
+}
 
 /**
  * Memory characters requested per token of the summary generation cap. Hash-, ID- and digit-dense

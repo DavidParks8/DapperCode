@@ -210,6 +210,7 @@ and issues) over `createFakeOnDeviceNative` and `FakeLlama`:
 | Area | Test |
 |---|---|
 | `inactive` doesn't stop turns, unload, or pause; `background` stops and unloads; foreground warms without replay | `shell/runtime/LocalRuntimeShell.integration.test.tsx` "keeps a turn and its model through inactive states…" (fails if `inactive` suspends) |
+| A turn with background time keeps running while locked, moves to the CPU, unloads before returning the time, and explains an expiry | LocalRuntimeShell "keeps generating while the phone is locked…"; backgroundRun (fails if `background` suspends a held run); runActivity; session (CPU relocation and decode recovery); `native-local-run.mjs` |
 | Load-state UI (loading %, generating, stopping, load error) in the transcript, composer, and drawer | LocalRuntimeShell "keeps a turn…", "labels stopping and load errors…"; runtimePort "reports load progress before the run starts…" |
 | Context exhaustion and compaction | `features/on-device/transport/runtimePort.test.ts` "keeps a conversation usable after its tool output exceeds the context window" (fails with compaction disabled) |
 | Model switching under memory pressure (resident credit) | runtimePort "switches a chat to a larger model under memory pressure…"; `features/settings/local/LocalModelsScreen.runtime.test.tsx` "loads a larger model that only fits once the resident model is released" (fails if admission ignores the release) |
@@ -261,6 +262,7 @@ Short names in the tables refer to these files (under `apps/mobile/src` unless n
 | Short name | File |
 |---|---|
 | runtime | `features/on-device/runtime/runtime.test.ts` |
+| backgroundRun, runActivity | `features/on-device/runtime/{backgroundRun,runActivity}.test.ts` |
 | agentLoop | `features/on-device/runtime/agentLoop.test.ts` |
 | threads | `features/on-device/runtime/threads.test.ts` |
 | status | `features/on-device/runtime/status.test.ts` |
@@ -291,5 +293,5 @@ Short names in the tables refer to these files (under `apps/mobile/src` unless n
 | LocalRuntimeHost, LocalBridgeWsClient, LocalProfileExit, localDraftImport | `shell/runtime/*.test.ts(x)` |
 | localProfile, localProfileRouting | `shell/state/localProfile.test.ts`, `shell/navigation/localProfileRouting.test.tsx` |
 | DrawerContent | `shell/navigation/DrawerContent.test.tsx` |
-| Native scenarios | `modules/on-device-agent/tests/native-{workspaces,git,downloads,inference}.mjs` |
+| Native scenarios | `modules/on-device-agent/tests/native-{workspaces,git,downloads,inference,local-run}.mjs` |
 | Script tests | `scripts/__tests__/{ios-on-device-memory,on-device-background-events}.test.mjs` |

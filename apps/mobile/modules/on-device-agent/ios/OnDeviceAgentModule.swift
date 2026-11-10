@@ -2,6 +2,7 @@ import ExpoModulesCore
 import Foundation
 
 private let kGitTransferProgressEvent = "onGitTransferProgress"
+private let kLocalRunExpiredEvent = "onLocalRunExpired"
 
 public class OnDeviceAgentModule: Module {
   private let workspaces = WorkspaceStore()
@@ -11,11 +12,11 @@ public class OnDeviceAgentModule: Module {
   public func definition() -> ModuleDefinition {
     Name("OnDeviceAgent")
 
-    Function("getAPIVersion") { 11 }
+    Function("getAPIVersion") { 12 }
 
     // Clone, fetch, pull, and push progress is pushed as throttled events (API 8); the snapshot
     // function stays for a single read when a listener attaches mid-transfer.
-    Events(kGitTransferProgressEvent)
+    Events(kGitTransferProgressEvent, kLocalRunExpiredEvent)
 
     OnStartObserving(kGitTransferProgressEvent) { [weak self] in
       GitNetworkOperation.shared.setObserver { snapshot in
@@ -25,6 +26,39 @@ public class OnDeviceAgentModule: Module {
 
     OnStopObserving(kGitTransferProgressEvent) {
       GitNetworkOperation.shared.setObserver(nil)
+    }
+
+    // Local agent runs keep the process alive while the phone is locked or the app is in the
+    // background (API 12). Expiration, including the user cancelling the system Live Activity,
+    // is reported so JavaScript can stop the run before the native grace period ends it; a run on
+    // the short budget is warned while background time remains.
+    OnStartObserving(kLocalRunExpiredEvent) { [weak self] in
+      Task { @MainActor in
+        LocalRunActivity.shared.onExpired = { id in
+          self?.sendEvent(kLocalRunExpiredEvent, ["id": id])
+        }
+      }
+    }
+
+    OnStopObserving(kLocalRunExpiredEvent) {
+      Task { @MainActor in LocalRunActivity.shared.onExpired = nil }
+    }
+
+    // A reloaded JavaScript runtime can never end the previous runtime's activities.
+    OnDestroy {
+      _ = Task { @MainActor in LocalRunActivity.shared.endAll() }
+    }
+
+    AsyncFunction("beginLocalRunActivity") { (title: String, subtitle: String) in
+      await LocalRunActivity.shared.begin(title: title, subtitle: subtitle)
+    }
+
+    Function("updateLocalRunActivity") { (id: String, subtitle: String) in
+      _ = Task { @MainActor in LocalRunActivity.shared.update(id, subtitle: subtitle) }
+    }
+
+    Function("endLocalRunActivity") { (id: String, success: Bool) in
+      _ = Task { @MainActor in LocalRunActivity.shared.end(id, success: success) }
     }
 
     Function("cancelGitTransfer") { GitNetworkOperation.shared.cancel() }

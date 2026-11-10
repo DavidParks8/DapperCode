@@ -357,8 +357,9 @@ With at least an 8,192-token context, the local model can call `ask_user` to wai
 **Clarification needed** sheet. Questions support single-choice, multiple-choice, and custom text
 answers (up to 12 choices per question). Nothing is preselected or answered automatically, even
 when tool approvals are disabled. **Cancel** and **Decline** return an explicit tool error and
-let generation continue; **Stop** interrupts the turn instead. Backgrounding, leaving the local
-profile, deleting the conversation, or reloading settles pending calls without replaying them.
+let generation continue; **Stop** interrupts the turn instead. A turn keeps waiting while the phone
+is locked (see [Running while the phone is locked](#running-while-the-phone-is-locked)). Losing
+background time, leaving the local profile, deleting the conversation, or reloading settles pending calls without replaying them.
 Answers to an old request cannot resolve a later one.
 Choices and reply actions keep the platform's minimum touch target size.
 
@@ -505,8 +506,8 @@ bypassed. This is URL access, not a configured search-provider API.
 
 Reads default to 4,096 text characters (maximum 16,384), with `offset` and `nextOffset` for further
 chunks up to offset 262,144. `truncated` marks incomplete output. Each request has a 1 MiB download
-budget and a 15-second deadline. **Stop**, backgrounding, and memory pressure abort an in-flight
-request; declining approval or stopping while approval is pending sends nothing. Web failures
+budget and a 15-second deadline. **Stop**, backgrounding that stops the turn, and memory pressure
+abort an in-flight request; declining approval or stopping while approval is pending sends nothing. Web failures
 appear in the tool transcript and are returned to the model, with no silent offline fallback.
 
 ## Model downloads
@@ -580,7 +581,7 @@ text-only here.
 The maintained `llama.rn` engine is pinned to `0.13.0-rc.10` (llama.cpp b12211) for LFM3 architecture
 and tool-template support, retaining the Hadamard activation support needed by Bonsai 2 Q2_0.
 This is a pre-release binding and requires a rebuilt native app
-(on-device ABI 11). Old binaries fail with a rebuild message rather than attempting unsupported
+(on-device ABI 11 or later). Old binaries fail with a rebuild message rather than attempting unsupported
 inference through a JavaScript-only update.
 
 Compatibility uses physical RAM plus a fresh native app-memory-headroom measurement. A model's
@@ -823,13 +824,16 @@ inference and isolated filesystem persistence.
   continues from their recorded results. Tools are never replayed. Like sending, retrying waits for
   a pending model load/unload and is refused during workspace operations, backgrounding, or disposal.
 - A generation failure is a conversation failure; the resident model stays loaded and ready.
-- Only moving to the **background** stops local work, unloads the context, and flushes
+- A running turn keeps going after the phone locks or the app moves to the background, unlike a
+  desktop connection, which disconnects to save battery. See
+  [Running while the phone is locked](#running-while-the-phone-is-locked).
+- Otherwise, only moving to the **background** stops local work, unloads the context, and flushes
   drafts/history; model downloads keep running (see [Model downloads](#model-downloads)).
   Transient `inactive` states (Control Center, Notification Center, the app switcher, calls,
   Face ID, system alerts) do not interrupt anything. At startup and on each return, downloads are
   re-attached, transfers or verification the system interrupted continue (once the network is
-  reachable), and the previously loaded model is reloaded if memory admission still passes. Interrupted turns are not resumed or replayed. There
-  is no promise of continuous background inference on iOS.
+  reachable), and the previously loaded model is reloaded if memory admission still passes.
+  Interrupted turns are not resumed or replayed.
 - A memory warning stops local work and unloads the context but leaves downloads running.
 - Unrelated actions never stop a running conversation. Selecting the already-loaded model,
   choosing a workspace for new conversations, deleting an unrelated download, and signing out (when
@@ -890,6 +894,36 @@ inference and isolated filesystem persistence.
 - Network reachability is observed with `expo-network`. When the device is known to be offline,
   clone, push, sign-in, and model downloads fail immediately with a friendly message.
 - There is no automatic desktop/cloud fallback or synchronization of local workspaces.
+
+### Running while the phone is locked
+
+Each send or retry asks iOS for background time before the turn is admitted
+(`runtime/runActivity.ts`, native `LocalRunActivity.swift`):
+
+- On iOS 26 and later, the turn runs as a user-initiated continued-processing task
+  (`BGContinuedProcessingTask`, identifiers `<bundle id>.localrun.<n>`, permitted by the
+  `withOnDeviceAgentNative` config plugin). iOS shows its progress as **Local agent** with a
+  generic phase subtitle (**Generating on this iPhone**, **Running read_file**, **Waiting for your
+  approval**…). Conversation text, approval summaries, and questions never appear on the Lock
+  Screen. Progress is reported every 5 seconds in every phase, including approval and question
+  waits, so you can unlock and answer.
+- Earlier iOS versions, or a continued-processing request iOS refuses, fall back to ordinary
+  background task time, which iOS limits to about 30 seconds. The turn is told to stop once about
+  10 seconds remain, so it can still unload the model and save before iOS suspends the app.
+- Without either, backgrounding stops the turn as before.
+
+While the app is in the background, Metal refuses GPU work, so the next completion (or one whose
+native decode failed) reloads the same model with the same context size on the CPU and continues.
+Generation is slower there. After a return, the next completion moves back to the GPU. A decode
+that keeps failing after two reloads fails the turn with **The local model could not evaluate the
+prompt. Try again.** A turn that settles while the app is in the background unloads its model and
+flushes state before it gives the time back; the model warms again on return. So does a turn
+refused at admission after the phone locked. Reloading JavaScript ends every activity the previous
+runtime held.
+
+If iOS ends the time first, or you cancel the task from the system UI, the turn stops with **iOS
+ended background time for this turn. Completed edits are preserved; retry to continue.**
+A memory warning still stops the turn.
 
 ## GitHub configuration
 
@@ -1245,8 +1279,9 @@ transcript. Child approvals and questions still surface in the parent chat, and 
 method rejects a child ID with `on_device_subagent_read_only`; continue a child by asking the parent
 to resume it.
 
-Stop and backgrounding cancel every child and queued generation. The parent stays busy, including
-its Stop/composer controls, until all admitted children and in-flight native tools settle.
+Stop, and backgrounding that stops the turn, cancel every child and queued generation. The parent
+stays busy, including its Stop/composer controls, until all admitted children and in-flight native
+tools settle.
 Identity, history, status, and tool intent are journaled inside the parent's app-owned runtime
 document. Each child has its own persistent tasks and summary checkpoint, never the parent's
 private conversation memory. Large child results use the parent's private artifact namespace;

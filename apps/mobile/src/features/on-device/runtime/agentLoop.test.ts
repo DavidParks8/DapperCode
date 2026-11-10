@@ -85,6 +85,9 @@ function response(content: string, names: string[] = []): LocalModelReply {
     interrupted: false,
     truncated: false,
     stopped_limit: 0,
+    stopped_eos: true,
+    stopped_word: '',
+    context_full: false,
     tokens_predicted: 5,
     tokens_evaluated: 10,
     tool_calls: names.map((name) => ({

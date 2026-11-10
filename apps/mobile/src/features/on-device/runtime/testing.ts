@@ -1,18 +1,17 @@
 /* eslint-disable @typescript-eslint/require-await -- the fakes mirror async native APIs */
-import type { CompletionParams, FormattedChatResult, TokenData } from 'llama.rn';
-
 import { localModelDefinition } from '../models/catalog';
 import type { NativeModelTransfer } from '../models/downloadState';
-import type { LocalContextLoader, LocalModelContext, LocalModelReply } from '../models/engine';
-import { residentModelBytes } from '../models/memory';
 import type { LocalModelFile } from '../models/types';
 import { OnDeviceNativeError } from '../native/services.errors';
 import {
+  GIT_TRANSFER_PROGRESS_EVENT,
   ON_DEVICE_NATIVE_API_VERSION,
   type NativeGitTransferProgress,
+  type NativeLocalRunActivityKind,
   type OnDeviceNativeServices,
 } from '../native/services.types';
 import type { LocalGitStatus, LocalWorkspace } from '../workspaces/types';
+import type { FakeLlama } from './fakeLlama';
 import type { OnDeviceNetworkPort } from './network';
 import { parseLocalThreadBase, threadDocument } from './threadCodec';
 import {
@@ -21,6 +20,8 @@ import {
   threadSegmentDocument,
 } from './threadJournal';
 import type { LocalThread, OnDeviceReachability } from './types';
+
+export { FakeLlama, type ScriptedReply } from './fakeLlama';
 
 const MiB = 1024 * 1024;
 
@@ -45,230 +46,6 @@ export function storedLocalThread(
     }
     thread = applyLocalThreadDelta(thread, parseLocalThreadSegment(segment, id, sequence));
   }
-}
-
-/** One scripted model reply. Tool calls are emitted the way llama.rn reports them. */
-export interface ScriptedReply {
-  content?: string;
-  toolCalls?: { name: string; arguments: Record<string, unknown> }[];
-  /** Rejects the completion, as a native generation failure does. */
-  fail?: string;
-}
-
-interface HeldStep {
-  resolve: () => void;
-  reject: (error: Error) => void;
-}
-
-/**
- * Deterministic stand-in for llama.rn contexts that keeps the real runtime's ordering: loads report
- * progress and may be held, completions stream tokens and may be held, `stopCompletion` interrupts
- * a held completion, and each live context occupies the memory its catalog entry estimates.
- */
-export class FakeLlama {
-  /** Every load request, in order. */
-  readonly loads: { modelId: string; contextTokens: number }[] = [];
-  readonly executions: string[] = [];
-  readonly tokenCallbacks: Array<(text: string) => void> = [];
-  readonly resourceEvents: {
-    type: 'initializing' | 'ready' | 'releasing' | 'released';
-    modelId: string;
-  }[] = [];
-  private readonly owners = new Set<object>();
-  ownershipHighWater = 0;
-  /** Token counts of every prompt passed to completion, in order. */
-  readonly promptTokens: number[] = [];
-  /** `n_predict` of every completion, in order. */
-  readonly predictBudgets: number[] = [];
-  /** Live (unreleased) contexts with the memory each holds. */
-  readonly resident = new Map<object, { modelId: string; bytes: number }>();
-  /** Characters per token used by the fake tokenizer. */
-  charactersPerToken = 4;
-  holdLoads = false;
-  holdCompletions = false;
-  /** Keeps `stopCompletion` pending until `finishStop`, so the stopping phase is observable. */
-  holdStops = false;
-  holdReleases = false;
-  private releaseStep: HeldStep | null = null;
-  /** Completions interrupted by `stopCompletion`. */
-  stops = 0;
-  private stopStep: (() => void) | null = null;
-  private replies: ScriptedReply[] = [];
-  private loadStep: (HeldStep & { progress: (value: number) => void }) | null = null;
-  private completionStep: (HeldStep & { stream: (text: string) => void }) | null = null;
-  releases = 0;
-
-  /** Queues replies; once empty, every completion answers "Done.". */
-  reply(...replies: ScriptedReply[]): void {
-    this.replies.push(...replies);
-  }
-
-  get loadPending(): boolean {
-    return this.loadStep !== null;
-  }
-
-  get completionPending(): boolean {
-    return this.completionStep !== null;
-  }
-
-  residentBytes(): number {
-    return [...this.resident.values()].reduce((total, entry) => total + entry.bytes, 0);
-  }
-
-  loadProgress(percent: number): void {
-    this.loadStep?.progress(percent);
-  }
-
-  finishLoad(): void {
-    const step = this.loadStep;
-    this.loadStep = null;
-    step?.resolve();
-  }
-
-  failLoad(message: string): void {
-    const step = this.loadStep;
-    this.loadStep = null;
-    step?.reject(new Error(message));
-  }
-
-  /** Streams accumulated text into a held completion. */
-  stream(text: string): void {
-    this.completionStep?.stream(text);
-  }
-
-  finishCompletion(): void {
-    const step = this.completionStep;
-    this.completionStep = null;
-    step?.resolve();
-  }
-
-  finishStop(): void {
-    const step = this.stopStep;
-    this.stopStep = null;
-    step?.();
-  }
-
-  get releasePending(): boolean {
-    return this.releaseStep !== null;
-  }
-
-  finishRelease(): void {
-    const step = this.releaseStep;
-    this.releaseStep = null;
-    step?.resolve();
-  }
-
-  failRelease(message: string): void {
-    const step = this.releaseStep;
-    this.releaseStep = null;
-    step?.reject(new Error(message));
-  }
-
-  readonly loader: LocalContextLoader = async (model, _file, options, progress) => {
-    const owner = {};
-    this.owners.add(owner);
-    this.ownershipHighWater = Math.max(this.ownershipHighWater, this.owners.size);
-    this.resourceEvents.push({ type: 'initializing', modelId: model.id });
-    this.loads.push({ modelId: model.id, contextTokens: options.contextTokens });
-    try {
-      progress(0);
-      if (this.holdLoads) {
-        await new Promise<void>((resolve, reject) => {
-          this.loadStep = { resolve, reject, progress };
-        });
-      }
-      progress(100);
-      const context = this.context(model.id, owner);
-      this.resident.set(context, {
-        modelId: model.id,
-        bytes: residentModelBytes({ model, contextTokens: options.contextTokens }),
-      });
-      this.resourceEvents.push({ type: 'ready', modelId: model.id });
-      return context;
-    } catch (error) {
-      this.owners.delete(owner);
-      throw error;
-    }
-  };
-
-  private context(modelId: string, owner: object): LocalModelContext {
-    let interrupted = false;
-    const context: LocalModelContext = {
-      getFormattedChat: async (messages): Promise<FormattedChatResult> => ({
-        type: 'jinja',
-        prompt: JSON.stringify(messages),
-        has_media: false,
-      }),
-      tokenize: async (text: string) => ({
-        tokens: new Array<number>(Math.ceil(text.length / this.charactersPerToken)).fill(1),
-      }),
-      completion: async (params: CompletionParams, callback?: (value: TokenData) => void) => {
-        this.executions.push(modelId);
-        interrupted = false;
-        this.promptTokens.push(Math.ceil((params.prompt ?? '').length / this.charactersPerToken));
-        this.predictBudgets.push(params.n_predict ?? -1);
-        const script = this.replies.shift() ?? { content: 'Done.' };
-        const emit = (text: string) =>
-          callback?.({ token: text, content: text, accumulated_text: text });
-        this.tokenCallbacks.push(emit);
-        if (this.holdCompletions) {
-          await new Promise<void>((resolve, reject) => {
-            this.completionStep = { resolve, reject, stream: emit };
-          });
-        }
-        if (script.fail) {
-          throw new Error(script.fail);
-        }
-        if (!interrupted && script.content) {
-          emit(script.content);
-        }
-        return reply(script, interrupted);
-      },
-      stopCompletion: async () => {
-        this.stops += 1;
-        if (this.holdStops) {
-          await new Promise<void>((resolve) => {
-            this.stopStep = resolve;
-          });
-        }
-        interrupted = true;
-        this.finishCompletion();
-      },
-      release: async () => {
-        this.resourceEvents.push({ type: 'releasing', modelId });
-        if (this.holdReleases) {
-          await new Promise<void>((resolve, reject) => {
-            this.releaseStep = { resolve, reject };
-          });
-        }
-        this.releases += 1;
-        this.resident.delete(context);
-        this.owners.delete(owner);
-        this.resourceEvents.push({ type: 'released', modelId });
-      },
-      isJinjaSupported: () => true,
-    };
-    return context;
-  }
-}
-
-function reply(script: ScriptedReply, interrupted: boolean): LocalModelReply {
-  return {
-    content: interrupted ? '' : (script.content ?? ''),
-    reasoning_content: '',
-    tool_calls: interrupted
-      ? []
-      : (script.toolCalls ?? []).map((call, index) => ({
-          type: 'function' as const,
-          id: `call-${String(index)}`,
-          function: { name: call.name, arguments: JSON.stringify(call.arguments) },
-        })),
-    interrupted,
-    truncated: false,
-    stopped_limit: 0,
-    tokens_predicted: 1,
-    tokens_evaluated: 1,
-  };
 }
 
 /** A reachability observer the test can flip. */
@@ -301,6 +78,15 @@ export interface FakeNativeOptions {
   files?: Record<string, string>;
   /** Runtime documents (conversations, drafts, preferences) present at startup. */
   documents?: Record<string, string>;
+  /** Background time iOS grants a local run; `none` (the default) stops runs in the background. */
+  localRunActivity?: NativeLocalRunActivityKind;
+}
+
+/** A native local run activity as the fake records it. */
+export interface FakeLocalRunActivity {
+  kind: NativeLocalRunActivityKind;
+  subtitles: string[];
+  ended: boolean | null;
 }
 
 function idleTransfer(id: string): NativeModelTransfer {
@@ -363,6 +149,14 @@ export function createFakeOnDeviceNative(llama: FakeLlama, options: FakeNativeOp
     return { id, uri: `file:///models/${id}.gguf`, bytes: model.bytes, sha256: model.sha256 };
   };
   const gitProgressListeners = new Set<(progress: NativeGitTransferProgress) => void>();
+  const runExpiredListeners = new Set<(event: { id: string }) => void>();
+  const localRuns = new Map<string, FakeLocalRunActivity>();
+  const addListener = ((eventName: string, listener: (value: never) => void) => {
+    const listeners: Set<(value: never) => void> =
+      eventName === GIT_TRANSFER_PROGRESS_EVENT ? gitProgressListeners : runExpiredListeners;
+    listeners.add(listener);
+    return { remove: () => listeners.delete(listener) };
+  }) as OnDeviceNativeServices['addListener'];
   const native: OnDeviceNativeServices = {
     getAPIVersion: () => ON_DEVICE_NATIVE_API_VERSION,
     getMemoryInfo: () => ({
@@ -372,9 +166,28 @@ export function createFakeOnDeviceNative(llama: FakeLlama, options: FakeNativeOp
     }),
     cancelGitTransfer: () => record('cancelGitTransfer'),
     getGitTransferProgress: () => ({ active: false, cancelled: false, completed: 0, total: 0 }),
-    addListener: (_eventName, listener) => {
-      gitProgressListeners.add(listener);
-      return { remove: () => gitProgressListeners.delete(listener) };
+    addListener,
+    beginLocalRunActivity: async (_title, subtitle) => {
+      const id = `local-run-${String(localRuns.size + 1)}`;
+      const kind = options.localRunActivity ?? 'none';
+      record('beginLocalRunActivity', kind);
+      if (kind !== 'none') {
+        localRuns.set(id, { kind, subtitles: [subtitle], ended: null });
+      }
+      return { id, kind };
+    },
+    updateLocalRunActivity: (id, subtitle) => {
+      const activity = localRuns.get(id);
+      if (activity && activity.ended === null) {
+        activity.subtitles.push(subtitle);
+      }
+    },
+    endLocalRunActivity: (id, success) => {
+      const activity = localRuns.get(id);
+      if (activity && activity.ended === null) {
+        activity.ended = success;
+        record('endLocalRunActivity', success);
+      }
     },
     storeGitCredential: async () => 'credential-ref',
     removeGitCredential: async () => undefined,
@@ -581,6 +394,19 @@ export function createFakeOnDeviceNative(llama: FakeLlama, options: FakeNativeOp
     installed,
     memory,
     gitProgressListeners,
+    runExpiredListeners,
+    /** Every granted local run activity by native id, in the order runs began. */
+    localRuns,
+    /** Expires the most recent unfinished activity, as iOS does when background time runs out. */
+    expireLocalRun(): void {
+      const id = [...localRuns].reverse().find(([, activity]) => activity.ended === null)?.[0];
+      if (!id) {
+        throw new Error('No local run activity is held.');
+      }
+      for (const listener of [...runExpiredListeners]) {
+        listener({ id });
+      }
+    },
     /** Sends a Git transfer progress event, as the native module does while objects arrive. */
     emitGitTransferProgress(progress: NativeGitTransferProgress): void {
       for (const listener of [...gitProgressListeners]) {

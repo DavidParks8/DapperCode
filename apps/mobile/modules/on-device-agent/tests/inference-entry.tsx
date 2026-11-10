@@ -20,7 +20,7 @@ import {
   modelContextTokens,
   requireModelMemory,
 } from '../../../src/features/on-device/models/memory';
-import { completionParams } from '../../../src/features/on-device/models/session';
+import { completionParams } from '../../../src/features/on-device/models/completion';
 import { STOPPED_BEFORE_APPROVAL } from '../../../src/features/on-device/runtime/toolRunner';
 import type {
   LocalModelDefinition,
@@ -51,10 +51,12 @@ async function withModel(
   const memory = getOnDeviceNativeServices().getMemoryInfo();
   requireModelMemory(model, memory);
   check(true, 'nativeMemoryAdmission');
-  // The production context parameters: admitted context size, threads, batch, one sequence, and
-  // prompt-state reuse.
+  // The production foreground context parameters: admitted context size, threads, batch, one
+  // sequence, and prompt-state reuse.
   const contextTokens = modelContextTokens(model, memory);
-  const context = await initLlama(nativeContextParams(model, file, { contextTokens, memory }));
+  const context = await initLlama(
+    nativeContextParams(model, file, { contextTokens, memory, backend: 'gpu' }),
+  );
   try {
     await run(context, contextTokens);
   } finally {

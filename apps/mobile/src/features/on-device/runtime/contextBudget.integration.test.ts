@@ -33,6 +33,9 @@ const memory: LocalModelReply = {
   interrupted: false,
   truncated: false,
   stopped_limit: 0,
+  stopped_eos: true,
+  stopped_word: '',
+  context_full: false,
   tokens_predicted: 1,
   tokens_evaluated: 1,
 };

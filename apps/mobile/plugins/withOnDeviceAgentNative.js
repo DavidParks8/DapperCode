@@ -1,10 +1,20 @@
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
-const { withAppDelegate, withDangerousMod, withEntitlementsPlist } = require('expo/config-plugins');
+const {
+  withAppDelegate,
+  withDangerousMod,
+  withEntitlementsPlist,
+  withInfoPlist,
+} = require('expo/config-plugins');
 
 // Lets on-device models use the larger per-app memory limit Apple grants to apps that need it.
 // It is a self-service capability; it raises the iOS limit but does not bypass memory admission.
 const INCREASED_MEMORY_LIMIT = 'com.apple.developer.kernel.increased-memory-limit';
+
+// Local agent turns keep running after the phone locks as iOS 26 continued-processing tasks,
+// registered on demand as `<bundle id>.localrun.<n>`; no background mode is needed.
+const PERMITTED_TASKS = 'BGTaskSchedulerPermittedIdentifiers';
+const LOCAL_RUN_TASK = '$(PRODUCT_BUNDLE_IDENTIFIER).localrun.*';
 
 const DELEGATE_ANCHOR = '  var reactNativeFactory: RCTReactNativeFactory?\n';
 const IMPORT_ANCHOR = 'import React\n';
@@ -49,6 +59,13 @@ function updateAppDelegate({ language, contents }) {
 function withOnDeviceAgentNative(config) {
   config = withAppDelegate(config, (modConfig) => {
     modConfig.modResults.contents = updateAppDelegate(modConfig.modResults);
+    return modConfig;
+  });
+  config = withInfoPlist(config, (modConfig) => {
+    const permitted = modConfig.modResults[PERMITTED_TASKS] ?? [];
+    if (!permitted.includes(LOCAL_RUN_TASK)) {
+      modConfig.modResults[PERMITTED_TASKS] = [...permitted, LOCAL_RUN_TASK];
+    }
     return modConfig;
   });
   config = withEntitlementsPlist(config, (modConfig) => {

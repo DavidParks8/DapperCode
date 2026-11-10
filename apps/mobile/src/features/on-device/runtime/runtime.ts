@@ -1,7 +1,7 @@
-import { GitHubAuthStrategy } from '../auth/github';
+import type { GitHubAuthStrategy } from '../auth/github';
 import type { GitDeviceAuthorization } from '../auth/strategy';
 import type { LocalGitIdentity } from '../git/gitTools';
-import { LOCAL_MODEL_CATALOG, localModelDefinition } from '../models/catalog';
+import { LOCAL_MODEL_CATALOG } from '../models/catalog';
 import { ModelDownloadController, type ModelDownloadSnapshot } from '../models/downloads';
 import { loadNativeModelContext } from '../models/engine';
 import { LocalModelSession } from '../models/session';
@@ -10,6 +10,7 @@ import type { LocalWorkspace } from '../workspaces/types';
 import { LocalAgentLoop } from './agentLoop';
 import { LegacyDraftReader, type LegacyDraftOutcome, type LocalDraftRestore } from './drafts';
 import { RuntimeSliceEmitter } from './emitter';
+import { LocalGitAccount } from './gitAccount';
 import * as localTools from './localTools';
 import { NetworkMonitor, unknownNetwork, type OnDeviceNetworkPort } from './network';
 import {
@@ -21,6 +22,11 @@ import {
 } from './issues';
 import { LocalPreferencesStore, type LocalPreferences } from './preferences';
 import { ModelResidency } from './residency';
+import {
+  LocalRunActivities,
+  LOCAL_RUN_EXPIRED_MESSAGE,
+  localRunActivitySubtitle,
+} from './runActivity';
 import { LocalModelSelection } from './modelSelection';
 import { LocalSkills } from './skills';
 import { LocalThreadRepository } from './threads';
@@ -39,6 +45,8 @@ export interface OnDeviceRuntimeOptions {
   emitIntervalMs?: number;
   /** Delay for coalescing non-journal conversation writes during a run. */
   threadProgressDelayMs?: number;
+  /** Interval between progress reports that keep a background run's native activity alive. */
+  runHeartbeatMs?: number;
 }
 
 type SuspensionMode = 'background' | 'memory' | 'dispose';
@@ -49,8 +57,7 @@ export class OnDeviceRuntime {
   readonly downloads: ModelDownloadController;
   readonly loop: LocalAgentLoop;
   readonly authentication: GitHubAuthStrategy;
-  private readonly githubClientId =
-    process.env.EXPO_PUBLIC_GITHUB_CLIENT_ID?.trim() ?? 'Ov23ctzKpdigHwQUbG8X';
+  private readonly gitAccount: LocalGitAccount;
   private readonly emitter: RuntimeSliceEmitter;
   private readonly drafts: LegacyDraftReader;
   private readonly networkMonitor: NetworkMonitor;
@@ -68,18 +75,31 @@ export class OnDeviceRuntime {
   private suspensionMode: SuspensionMode | null = null;
   private backgrounded = false;
   private readonly residency: ModelResidency;
+  private readonly runActivity: LocalRunActivities;
   private disposal: Promise<void> | null = null;
   private disposing = false;
   private workspaceOperation: Promise<unknown> | null = null;
   private workspaceOperationLabel: string | null = null;
   private readonly modelSelection: LocalModelSelection;
-  private readonly removingModels = new Set<string>();
 
   constructor(
     readonly native: OnDeviceNativeServices,
     options: OnDeviceRuntimeOptions = {},
   ) {
     this.emitter = new RuntimeSliceEmitter(options.emitIntervalMs);
+    this.runActivity = new LocalRunActivities(
+      native,
+      {
+        subtitle: () => localRunActivitySubtitle(this.loop.snapshot()),
+        expired: () => this.expireRun(),
+        // A turn that settles in the background releases the model before giving the time back.
+        settled: () =>
+          this.backgrounded && !this.disposal
+            ? this.suspendFor('background').catch((error: unknown) => this.report(error))
+            : null,
+      },
+      options.runHeartbeatMs,
+    );
     this.networkMonitor = new NetworkMonitor(options.network ?? unknownNetwork, (value) => {
       this.emitter.emit('network');
       if (value !== 'offline') {
@@ -114,14 +134,11 @@ export class OnDeviceRuntime {
     this.downloads = new ModelDownloadController(LOCAL_MODEL_CATALOG, native, () =>
       this.emitter.coalesce('downloads'),
     );
-    this.authentication = new GitHubAuthStrategy({
-      clientId: this.githubClientId,
-      credentials: {
-        store: ({ host, accountId, username, token }) =>
-          native.storeGitCredential(host, accountId, username, token),
-        remove: (reference) => native.removeGitCredential(reference),
-      },
+    this.gitAccount = new LocalGitAccount(native, this.settings, {
+      requireNetwork: (action) => this.requireNetwork(action),
+      gitBusy: () => this.workspaceOperation !== null || native.getGitTransferProgress().active,
     });
+    this.authentication = this.gitAccount.authentication;
     this.loop = new LocalAgentLoop(
       this.threads,
       this.models,
@@ -132,7 +149,10 @@ export class OnDeviceRuntime {
         (id) => this.credential(id),
         (action) => this.requireNetwork(action),
       ),
-      () => this.emitter.emit('loop'),
+      () => {
+        this.emitter.emit('loop');
+        this.runActivity.changed();
+      },
       localTools.localToolApproval,
       undefined,
       new localTools.LocalWorkspaceGuidance(native, this.skills),
@@ -143,7 +163,9 @@ export class OnDeviceRuntime {
       idle: () => this.loop.snapshot().phase === 'idle',
       memory: () => native.getMemoryInfo(),
     });
-    this.modelSelection = new LocalModelSelection(this, this.settings, this.residency);
+    this.modelSelection = new LocalModelSelection(this, this.settings, this.residency, () =>
+      this.emitter.emit('models', 'downloads'),
+    );
   }
 
   /** Subscribes to the given slices (all by default); unrelated changes do not notify. */
@@ -163,7 +185,7 @@ export class OnDeviceRuntime {
     return this.networkMonitor.current();
   }
   authConfigured(): boolean {
-    return Boolean(this.githubClientId);
+    return this.gitAccount.configured();
   }
   workspaceActivity(): string | null {
     return this.workspaceOperationLabel;
@@ -245,19 +267,33 @@ export class OnDeviceRuntime {
     return task;
   }
 
-  async sendMessage(
+  sendMessage(
     id: string,
     text: string,
     submissionId: string,
     accepted: () => void,
   ): Promise<LocalThread> {
-    await this.admitTurn(id, 'sending');
-    return this.loop.send(id, text, submissionId, accepted);
+    return this.runActivity.run(
+      () => this.admitTurn(id, 'sending'),
+      () => this.loop.send(id, text, submissionId, accepted),
+    );
   }
 
-  async retryTurn(id: string): Promise<LocalThread> {
-    await this.admitTurn(id, 'retrying');
-    return this.loop.retry(id);
+  retryTurn(id: string): Promise<LocalThread> {
+    return this.runActivity.run(
+      () => this.admitTurn(id, 'retrying'),
+      () => this.loop.retry(id),
+    );
+  }
+
+  /** iOS revoked the background time, or the user cancelled the run from the system UI. */
+  private expireRun(): void {
+    this.native.cancelGitTransfer();
+    // The turn's own failure reaches its sender; only the lifecycle's failures are reported here.
+    void this.loop.stop(LOCAL_RUN_EXPIRED_MESSAGE).catch(() => undefined);
+    if (this.backgrounded) {
+      void this.suspendFor('background').catch((error: unknown) => this.report(error));
+    }
   }
 
   private async admitTurn(id: string, action: string): Promise<void> {
@@ -337,12 +373,7 @@ export class OnDeviceRuntime {
 
   async cloneWorkspace(name: string, url: string): Promise<LocalWorkspace> {
     this.requireNetwork('clone repositories');
-    const account = this.settings.get().account;
-    const parsed = new URL(url);
-    const reference =
-      account?.host === parsed.hostname
-        ? this.authentication.resolveCredential(account, url)
-        : null;
+    const reference = this.gitAccount.cloneCredential(url);
     return this.workspaceTask('Cloning repository', async () => {
       const workspace = await this.native.cloneWorkspace(name, url, reference);
       await this.refreshWorkspaces();
@@ -391,7 +422,7 @@ export class OnDeviceRuntime {
 
   /** Rejects while `id`'s weights are being deleted, so nothing loads a file being removed. */
   isRemovingModel(id: string | null | undefined): boolean {
-    return id !== null && id !== undefined && this.removingModels.has(id);
+    return this.modelSelection.isRemoving(id);
   }
 
   private requireModelPresent(id: string | null | undefined): Promise<never> | null {
@@ -414,31 +445,8 @@ export class OnDeviceRuntime {
   }
 
   /** Deletes a download. Unrelated downloads never interrupt a running conversation. */
-  async removeModel(id: string): Promise<void> {
-    localModelDefinition(id);
-    this.requireModelSelectionSettled();
-    const run = this.loop.snapshot();
-    const loaded = this.models.snapshot().modelId === id;
-    const used = run.threadId ? this.threads.find(run.threadId)?.modelId === id : false;
-    if (run.phase !== 'idle' && (loaded || used)) {
-      throw new Error('Stop the running local conversation before deleting the model it uses.');
-    }
-    this.residency.forget(id);
-    this.removingModels.add(id);
-    this.emitter.emit('models', 'downloads');
-    try {
-      if (loaded) {
-        await this.residency.transition(() => this.models.unload());
-      }
-      await this.downloads.remove(id);
-    } finally {
-      this.removingModels.delete(id);
-      this.emitter.emit('models', 'downloads');
-    }
-    if (this.settings.get().modelId === id) {
-      this.settings.update({ modelId: null });
-      await this.settings.save();
-    }
+  removeModel(id: string): Promise<void> {
+    return this.modelSelection.remove(id);
   }
 
   /** Starts a catalog download, failing fast with a friendly message while offline. */
@@ -492,57 +500,31 @@ export class OnDeviceRuntime {
     throwFirstRejection([...results, ...(await Promise.allSettled([this.settings.flush()]))]);
   }
 
-  async saveAuthor(author: LocalGitIdentity): Promise<void> {
-    if (!author.name.trim() || !author.email.trim()) {
-      throw new Error('Enter a Git author name and email.');
-    }
-    this.settings.update({ author: { name: author.name.trim(), email: author.email.trim() } });
-    await this.settings.save();
+  saveAuthor(author: LocalGitIdentity): Promise<void> {
+    return this.gitAccount.saveAuthor(author);
   }
-
-  async signIn(presentCode: (value: GitDeviceAuthorization) => Promise<void>): Promise<void> {
-    this.requireNetwork('sign in to GitHub');
-    const account = await this.authentication.signIn(presentCode);
-    this.settings.update({
-      account,
-      author: this.settings.get().author ?? {
-        name: account.login,
-        email: `${account.id}+${account.login}@users.noreply.github.com`,
-      },
-    });
-    await this.settings.save();
+  signIn(presentCode: (value: GitDeviceAuthorization) => Promise<void>): Promise<void> {
+    return this.gitAccount.signIn(presentCode);
   }
-
   /** Removes the credential; rejects only while a Git transfer might be using it. */
-  async signOut(): Promise<void> {
-    if (this.workspaceOperation || this.native.getGitTransferProgress().active) {
-      throw new Error('Wait for the active Git transfer to finish before signing out.');
-    }
-    const account = this.settings.get().account;
-    if (account) {
-      await this.authentication.signOut(account);
-    }
-    this.settings.update({ account: null });
-    await this.settings.save();
+  signOut(): Promise<void> {
+    return this.gitAccount.signOut();
   }
-
-  async credential(workspaceId: string): Promise<string | null> {
-    const account = this.settings.get().account;
-    if (!account) {
-      return null;
-    }
-    return this.authentication.resolveCredential(
-      account,
-      await this.native.getWorkspaceGitOrigin(workspaceId),
-    );
+  credential(workspaceId: string): Promise<string | null> {
+    return this.gitAccount.credential(workspaceId);
   }
 
   /**
-   * The app moved to the background: stops local work, unloads the model, and flushes state.
-   * Model downloads keep running in their background URL session.
+   * The app moved to the background. A turn holding background time keeps running with inference
+   * on the CPU; otherwise local work stops, the model unloads, and state is flushed. Model
+   * downloads keep running in their background URL session either way.
    */
   background(): Promise<void> {
     this.backgrounded = true;
+    this.models.setPlacement('background');
+    if (this.runActivity.held()) {
+      return this.flush();
+    }
     return this.suspendFor('background');
   }
 
@@ -554,10 +536,12 @@ export class OnDeviceRuntime {
   /**
    * The app is active (after startup or a return from the background): re-attaches downloads and,
    * once online, continues transfers or verification the system interrupted, then warms
-   * the previously loaded model if memory admits it. Interrupted turns are never replayed.
+   * the previously loaded model if memory admits it. A turn that kept running moves back to the
+   * GPU at its next completion. Interrupted turns are never replayed.
    */
   async foreground(): Promise<void> {
     this.backgrounded = false;
+    this.models.setPlacement('foreground');
     if (this.suspension) {
       await Promise.allSettled([this.suspension]);
     }
@@ -584,6 +568,7 @@ export class OnDeviceRuntime {
       await this.suspend('dispose');
       throwFirstRejection(previous);
     } finally {
+      this.runActivity.dispose();
       this.networkMonitor.close();
       this.threads.close();
       this.emitter.close();

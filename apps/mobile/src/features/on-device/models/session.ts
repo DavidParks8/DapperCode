@@ -14,18 +14,21 @@ import {
 } from './contextWindow';
 import type {
   LocalContextLoader,
+  LocalInferenceBackend,
   LocalModelContext,
   LocalModelMessage,
   LocalModelReply,
 } from './engine';
+import { completionParams, decodeFailed } from './completion';
 import {
-  MODEL_MEMORY_RESERVE_BYTES,
   modelContextTokens,
+  requireContextMemory,
+  requireExecutionMemory,
   requireModelMemory,
   type ResidentModel,
 } from './memory';
-import type { LocalModelDefinition } from './types';
-import { compactEarlierTurns } from './summary';
+import type { LocalModelDefinition, LocalModelFile } from './types';
+import { compactEarlierTurns, type LocalSummaryCheckpoint } from './summary';
 
 export { LocalContextFull };
 
@@ -44,33 +47,32 @@ export interface LocalModelUpdate {
   reasoning: string;
 }
 
-export interface LocalSummaryCheckpoint {
-  /** Identifies the earlier history to summarize; a failed summary of it is not retried. */
-  key: string;
-  previous: string | null;
-  started(): void;
-  /** The summary failed; history and the previous checkpoint stay and elision is used instead. */
-  failed(): void;
-  /** Validates the proposed prompt before persisting complete semantic memory. */
-  commit(
-    content: string,
-    validate: (messages: LocalModelMessage[]) => Promise<void>,
-  ): Promise<LocalModelMessage[]>;
-}
-
 export interface LocalGenerationOptions {
   checkpoint?: LocalSummaryCheckpoint;
   outputTokens?: number;
 }
 
+/** Where the app is running; iOS refuses GPU work from background apps. */
+export type LocalModelPlacement = 'foreground' | 'background';
+
+/** Context recreations allowed for one completion before its turn fails. */
+const DECODE_RECOVERIES = 2;
+
 interface LoadedModel {
   definition: LocalModelDefinition;
+  file: LocalModelFile;
   context: LocalModelContext;
   contextTokens: number;
+  backend: LocalInferenceBackend;
+  /** A native decode failed; ggml-metal fails every later decode until the context is recreated. */
+  failed: boolean;
 }
 
 interface Generation {
+  /** Replaced when the context is recreated on another backend mid-generation. */
   model: LoadedModel;
+  /** The context is being recreated, so there is no native completion to stop. */
+  relocating: boolean;
   interrupted: boolean;
   lateStopRequested: boolean;
   stopFailure: Error | null;
@@ -89,6 +91,19 @@ export class LocalModelInterrupted extends Error {
   }
 }
 
+const EMPTY: LocalModelSessionSnapshot = {
+  phase: 'empty',
+  modelId: null,
+  progress: 0,
+  error: null,
+  contextTokens: null,
+};
+
+function ready(model: LoadedModel): LocalModelSessionSnapshot {
+  const { definition, contextTokens } = model;
+  return { phase: 'ready', modelId: definition.id, progress: 100, error: null, contextTokens };
+}
+
 export class LocalModelSession {
   private current: LoadedModel | null = null;
   private loading: Promise<void> | null = null;
@@ -99,13 +114,9 @@ export class LocalModelSession {
   private failedCheckpoint: string | null = null;
   private unloading = false;
   private disposed = false;
-  private value: LocalModelSessionSnapshot = {
-    phase: 'empty',
-    modelId: null,
-    progress: 0,
-    error: null,
-    contextTokens: null,
-  };
+  private placement: LocalModelPlacement = 'foreground';
+  private simulator = false;
+  private value = EMPTY;
 
   constructor(
     private readonly native: Pick<
@@ -125,6 +136,14 @@ export class LocalModelSession {
     return this.current
       ? { model: this.current.definition, contextTokens: this.current.contextTokens }
       : null;
+  }
+
+  /**
+   * Records whether the app is in the foreground. The next completion recreates the context on
+   * the backend that placement allows: GPU work submitted from the background fails natively.
+   */
+  setPlacement(placement: LocalModelPlacement): void {
+    this.placement = placement;
   }
 
   load(id: string): Promise<void> {
@@ -171,6 +190,7 @@ export class LocalModelSession {
     }
     const generation: Generation = {
       model: this.current,
+      relocating: false,
       interrupted: false,
       lateStopRequested: false,
       stopFailure: null,
@@ -201,13 +221,7 @@ export class LocalModelSession {
       }
       await this.stopGeneration();
       await this.releaseCurrent();
-      this.publish({
-        phase: 'empty',
-        modelId: null,
-        progress: 0,
-        error: null,
-        contextTokens: null,
-      });
+      this.publish(EMPTY);
     } catch (error) {
       this.publish({ phase: 'error', error: this.error(error).message });
       throw error;
@@ -236,7 +250,9 @@ export class LocalModelSession {
     generation.interrupted = true;
     this.publish({ phase: 'stopping' });
     try {
-      await generation.model.context.stopCompletion();
+      if (!generation.relocating) {
+        await generation.model.context.stopCompletion();
+      }
     } catch (error) {
       generation.stopFailure = this.error(error);
       this.publish({ phase: 'error', error: generation.stopFailure.message });
@@ -290,44 +306,34 @@ export class LocalModelSession {
       this.checkLoad(epoch);
       const memory = this.native.getMemoryInfo();
       requireModelMemory(model, memory);
+      this.simulator = memory.isSimulator;
       const contextTokens = modelContextTokens(model, memory);
-      const context = await this.loadContext(model, file, { contextTokens, memory }, (progress) => {
-        if (!this.cancelled(epoch)) {
-          this.publish({ progress });
-        }
-      });
-      loaded = { definition: model, context, contextTokens };
+      const backend = this.backend();
+      const context = await this.loadContext(
+        model,
+        file,
+        { contextTokens, memory, backend },
+        (progress) => {
+          if (!this.cancelled(epoch)) {
+            this.publish({ progress });
+          }
+        },
+      );
+      loaded = { definition: model, file, context, contextTokens, backend, failed: false };
       this.current = loaded;
       this.checkLoad(epoch);
       if (!context.isJinjaSupported()) {
         await this.releaseCurrent();
         throw new Error('This model does not support the verified native tool format.');
       }
-      this.publish({
-        phase: 'ready',
-        modelId: model.id,
-        progress: 100,
-        error: null,
-        contextTokens,
-      });
+      this.publish(ready(loaded));
     } catch (error) {
       if (error instanceof LocalModelInterrupted || this.cancelled(epoch)) {
         if (loaded && this.current === loaded) {
           await this.releaseCurrent();
         }
         if (!this.unloading && !this.disposed) {
-          const resident = this.current;
-          this.publish(
-            resident
-              ? {
-                  phase: 'ready',
-                  modelId: resident.definition.id,
-                  progress: 100,
-                  error: null,
-                  contextTokens: resident.contextTokens,
-                }
-              : { phase: 'empty', modelId: null, progress: 0, error: null, contextTokens: null },
-          );
+          this.publish(this.current ? ready(this.current) : EMPTY);
         }
         throw error instanceof LocalModelInterrupted ? error : new LocalModelInterrupted();
       }
@@ -362,7 +368,8 @@ export class LocalModelSession {
       if (generation.interrupted) {
         throw new LocalModelInterrupted();
       }
-      const result = await generation.model.context.completion(
+      return await this.complete(
+        generation,
         completionParams(
           prompt.formatted,
           Math.min(
@@ -375,13 +382,6 @@ export class LocalModelSession {
         ),
         (value) => this.partial(generation, value, update),
       );
-      if (generation.stopFailure) {
-        throw generation.stopFailure;
-      }
-      if (generation.interrupted || result.interrupted) {
-        throw new LocalModelInterrupted();
-      }
-      return result;
     } finally {
       if (this.generation === generation) {
         this.generation = null;
@@ -495,14 +495,82 @@ export class LocalModelSession {
   ): Promise<LocalModelReply> {
     this.requireExecutionMemory();
     this.checkGeneration(generation);
-    const reply = await generation.model.context.completion(
-      completionParams(prompt.formatted, outputTokens),
-    );
+    return this.complete(generation, completionParams(prompt.formatted, outputTokens));
+  }
+
+  /**
+   * Completes the formatted prompt on the backend the app placement allows. A failed native
+   * decode, such as Metal refusing background work, recreates the context and evaluates the prompt
+   * again, so the reply never carries the partial output of a failed evaluation.
+   */
+  private async complete(
+    generation: Generation,
+    params: CompletionParams,
+    callback?: (value: TokenData) => void,
+  ): Promise<LocalModelReply> {
+    for (let recoveries = 0; ; recoveries += 1) {
+      if (generation.model.failed || generation.model.backend !== this.backend()) {
+        await this.relocate(generation);
+      }
+      const reply = await generation.model.context.completion(params, callback);
+      if (generation.stopFailure) {
+        throw generation.stopFailure;
+      }
+      if (generation.interrupted || reply.interrupted) {
+        throw new LocalModelInterrupted();
+      }
+      if (!decodeFailed(reply)) {
+        return reply;
+      }
+      generation.model.failed = true;
+      if (recoveries === DECODE_RECOVERIES) {
+        throw new Error('The local model could not evaluate the prompt. Try again.');
+      }
+    }
+  }
+
+  /** Recreates the generation's context, with the same window, on the preferred backend. */
+  private async relocate(generation: Generation): Promise<void> {
+    const previous = generation.model;
     this.checkGeneration(generation);
-    if (reply.interrupted) {
+    if (this.current !== previous) {
       throw new LocalModelInterrupted();
     }
-    return reply;
+    generation.relocating = true;
+    try {
+      await this.releaseCurrent();
+      this.checkGeneration(generation);
+      const memory = this.native.getMemoryInfo();
+      requireContextMemory(previous.definition, previous.contextTokens, memory);
+      const backend = this.backend();
+      const context = await this.loadContext(
+        previous.definition,
+        previous.file,
+        { contextTokens: previous.contextTokens, memory, backend },
+        () => undefined,
+      );
+      const relocated: LoadedModel = { ...previous, context, backend, failed: false };
+      this.current = relocated;
+      generation.model = relocated;
+      this.checkGeneration(generation);
+    } catch (error) {
+      // The released model is gone; settle the session so the next turn loads it again.
+      if (!this.current && !this.loading && !this.unloading && !this.disposed) {
+        this.publish(
+          generation.interrupted
+            ? EMPTY
+            : { phase: 'error', error: this.error(error).message, contextTokens: null },
+        );
+      }
+      throw error;
+    } finally {
+      generation.relocating = false;
+    }
+  }
+
+  private backend(): LocalInferenceBackend {
+    // Simulator contexts already run on the CPU and never move.
+    return this.simulator || this.placement === 'background' ? 'cpu' : 'gpu';
   }
 
   private partial(
@@ -531,13 +599,7 @@ export class LocalModelSession {
   }
 
   private requireExecutionMemory(): void {
-    const memory = this.native.getMemoryInfo();
-    if (
-      !Number.isSafeInteger(memory.availableBytes) ||
-      memory.availableBytes < MODEL_MEMORY_RESERVE_BYTES
-    ) {
-      throw new Error('iOS memory headroom is too low to run this model safely.');
-    }
+    requireExecutionMemory(this.native.getMemoryInfo());
   }
 
   private async releaseCurrent(): Promise<void> {
@@ -563,49 +625,4 @@ export class LocalModelSession {
 /** Capped rounds (child agents) cannot spare output tokens for reasoning. */
 function roundThinks(model: LocalModelDefinition, options?: LocalGenerationOptions): boolean {
   return model.thinking === true && options?.outputTokens === undefined;
-}
-
-// Fields of llama.rn's Jinja formatting result that its own messages path forwards to completion.
-const FORMATTED_COMPLETION_KEYS = [
-  'chat_format',
-  'grammar',
-  'grammar_lazy',
-  'grammar_triggers',
-  'preserved_tokens',
-  'generation_prompt',
-  'thinking_forced_open',
-  'thinking_start_tag',
-  'thinking_end_tag',
-  'chat_parser',
-] as const;
-
-/** Mirrors llama.rn's own messages-to-prompt mapping so completion reuses one formatted prompt. */
-export function completionParams(
-  formatted: FormattedChatResult | JinjaFormattedChatResult,
-  nPredict: number,
-  thinking = false,
-): CompletionParams {
-  const jinja: JinjaFormattedChatResult =
-    formatted.type === 'jinja'
-      ? formatted
-      : {
-          type: formatted.type,
-          prompt: formatted.prompt,
-          has_media: formatted.has_media,
-        };
-  const forwarded: Partial<CompletionParams> = Object.fromEntries(
-    FORMATTED_COMPLETION_KEYS.flatMap((key) => {
-      const value = jinja[key];
-      return value === undefined || value === null || value === '' ? [] : [[key, value]];
-    }),
-  );
-  return {
-    ...forwarded,
-    ...(jinja.additional_stops ? { stop: [...jinja.additional_stops] } : {}),
-    prompt: formatted.prompt,
-    enable_thinking: thinking,
-    reasoning_format: 'auto',
-    temperature: 0.2,
-    n_predict: nPredict,
-  };
 }

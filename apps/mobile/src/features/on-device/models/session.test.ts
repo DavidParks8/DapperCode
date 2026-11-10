@@ -9,6 +9,7 @@ import type {
 } from './engine';
 import { modelFileSystemPath, nativeContextParams } from './engine';
 import { MODEL_MEMORY_RESERVE_BYTES, modelMemoryBytes } from './memory';
+import { decodeFailed } from './completion';
 import {
   LocalContextFull,
   LocalModelInterrupted,
@@ -32,6 +33,9 @@ const reply: LocalModelReply = {
   interrupted: false,
   truncated: false,
   stopped_limit: 0,
+  stopped_eos: true,
+  stopped_word: '',
+  context_full: false,
   tokens_predicted: 1,
   tokens_evaluated: 10,
 };
@@ -54,7 +58,12 @@ test('native context tuning uses the admitted context, one sequence, and hybrid 
     availableBytes: 4 * 1024 ** 3,
     isSimulator: false,
   };
-  expect(nativeContextParams(small, file, { contextTokens: 8192, memory: device })).toMatchObject({
+  const gpu = nativeContextParams(small, file, {
+    contextTokens: 8192,
+    memory: device,
+    backend: 'gpu',
+  });
+  expect(gpu).toMatchObject({
     n_ctx: 8192,
     n_parallel: 1,
     n_threads: 4,
@@ -62,13 +71,47 @@ test('native context tuning uses the admitted context, one sequence, and hybrid 
     n_gpu_layers: 99,
     state_cache_budget_mb: 0,
   });
+  expect(gpu).not.toHaveProperty('devices');
   const hybrid = localModelDefinition('qwen35-0.8b-q4-0');
-  expect(
-    nativeContextParams(hybrid, file, {
-      contextTokens: 4096,
-      memory: { ...device, isSimulator: true },
-    }),
-  ).toMatchObject({ n_ctx: 4096, n_threads: 6, n_gpu_layers: 0, state_cache_budget_mb: 128 });
+  const simulator = nativeContextParams(hybrid, file, {
+    contextTokens: 4096,
+    memory: { ...device, isSimulator: true },
+    backend: 'cpu',
+  });
+  expect(simulator).toMatchObject({
+    n_ctx: 4096,
+    n_threads: 6,
+    n_gpu_layers: 0,
+    state_cache_budget_mb: 128,
+  });
+  expect(simulator).not.toHaveProperty('devices');
+});
+
+test('background CPU contexts keep the admitted window and never register Metal', () => {
+  const file = { id: small.id, uri: 'file:///m.gguf', sha256: small.sha256, bytes: small.bytes };
+  const memory = {
+    physicalBytes: 8 * 1024 ** 3,
+    availableBytes: 4 * 1024 ** 3,
+    isSimulator: false,
+  };
+  expect(nativeContextParams(small, file, { contextTokens: 8192, memory, backend: 'cpu' })).toEqual(
+    {
+      ...nativeContextParams(small, file, { contextTokens: 8192, memory, backend: 'gpu' }),
+      n_gpu_layers: 0,
+      devices: ['CPU'],
+    },
+  );
+});
+
+test('only a completion with no native stop reason is a failed decode', () => {
+  const failed = { ...reply, stopped_eos: false };
+  expect(decodeFailed(failed)).toBe(true);
+  expect(decodeFailed(reply)).toBe(false);
+  expect(decodeFailed({ ...failed, interrupted: true })).toBe(false);
+  expect(decodeFailed({ ...failed, stopped_limit: 1 })).toBe(false);
+  expect(decodeFailed({ ...failed, context_full: true })).toBe(false);
+  // llama.rn's JSI layer reports stopped_word as a boolean despite its string type.
+  expect(decodeFailed({ ...failed, stopped_word: true as unknown as string })).toBe(false);
 });
 
 function deferred<T>() {
@@ -727,6 +770,185 @@ test('a native completion failure leaves the healthy resident model ready withou
   expect(h.loader).toHaveBeenCalledTimes(1);
 });
 
+/** llama.rn's reply when a native decode fails: partial output and no stop reason. */
+const decodeFailure: LocalModelReply = { ...reply, content: 'Garbled', stopped_eos: false };
+
+async function deviceHarness() {
+  const h = harness();
+  h.native.getMemoryInfo.mockReturnValue({
+    physicalBytes: 8 * 1024 ** 3,
+    availableBytes: 4 * 1024 ** 3,
+    isSimulator: false,
+  });
+  const contexts: ReturnType<typeof context>[] = [];
+  const create = (setup: (next: ReturnType<typeof context>) => void = () => undefined) =>
+    h.loader.mockImplementation(async () => {
+      const next = contexts.length === 0 ? h.initial : context();
+      setup(next);
+      contexts.push(next);
+      return next;
+    });
+  create();
+  await h.session.load(small.id);
+  const backends = () => h.loader.mock.calls.map(([, , options]) => options.backend);
+  return { ...h, contexts, create, backends };
+}
+
+test('background placement runs the next completion on a CPU context and the foreground restores the GPU', async () => {
+  const h = await deviceHarness();
+  expect(h.backends()).toEqual(['gpu']);
+  h.session.setPlacement('background');
+  expect(h.initial.release).not.toHaveBeenCalled();
+  await expect(h.session.generate(messages, [], jest.fn())).resolves.toMatchObject({
+    content: 'Hello',
+  });
+  expect(h.initial.release).toHaveBeenCalledTimes(1);
+  expect(h.initial.completion).not.toHaveBeenCalled();
+  const [model, file, options] = h.loader.mock.calls[1]!;
+  expect(options).toMatchObject({
+    backend: 'cpu',
+    contextTokens: h.loader.mock.calls[0]![2].contextTokens,
+  });
+  expect(nativeContextParams(model, file, options)).toMatchObject({
+    n_gpu_layers: 0,
+    devices: ['CPU'],
+  });
+  expect(h.session.snapshot()).toMatchObject({ phase: 'ready', modelId: small.id });
+  // Later background rounds keep the CPU context instead of reloading.
+  await h.session.generate(messages, [], jest.fn());
+  expect(h.contexts[1]!.completion).toHaveBeenCalledTimes(2);
+  h.session.setPlacement('foreground');
+  await h.session.generate(messages, [], jest.fn());
+  expect(h.backends()).toEqual(['gpu', 'cpu', 'gpu']);
+  expect(h.contexts[1]!.release).toHaveBeenCalledTimes(1);
+  expect(h.contexts[2]!.completion).toHaveBeenCalledTimes(1);
+});
+
+test('a GPU decode refused after backgrounding mid-completion is evaluated again on the CPU', async () => {
+  const h = await deviceHarness();
+  const pending = deferred<LocalModelReply>();
+  const started = deferred<void>();
+  h.initial.completion.mockImplementationOnce((_params, callback) => {
+    callback?.({ token: 'G', accumulated_text: 'G', content: 'G' });
+    started.resolve();
+    return pending.promise;
+  });
+  const update = jest.fn();
+  const operation = h.session.generate(messages, [], update);
+  await started.promise;
+  const settled = h.events.length;
+  h.session.setPlacement('background');
+  pending.resolve(decodeFailure);
+  await expect(operation).resolves.toMatchObject({ content: 'Hello' });
+  expect(h.backends()).toEqual(['gpu', 'cpu']);
+  expect(h.initial.release).toHaveBeenCalledTimes(1);
+  expect(h.contexts[1]!.completion).toHaveBeenCalledWith(
+    h.initial.completion.mock.calls[0]![0],
+    expect.any(Function),
+  );
+  // The model stays running while its context moves; nothing reports it unloaded or loading.
+  expect(h.events.slice(settled).map((state) => state.phase)).toEqual(['ready']);
+});
+
+test('a foreground decode failure recreates the GPU context so the latched Metal error clears', async () => {
+  const h = await deviceHarness();
+  h.initial.completion.mockResolvedValueOnce(decodeFailure);
+  await expect(h.session.generate(messages, [], jest.fn())).resolves.toMatchObject({
+    content: 'Hello',
+  });
+  expect(h.backends()).toEqual(['gpu', 'gpu']);
+  expect(h.initial.release).toHaveBeenCalledTimes(1);
+  expect(h.initial.completion).toHaveBeenCalledTimes(1);
+});
+
+test('repeated decode failures fail the turn after bounded recreation and the next turn starts clean', async () => {
+  const h = await deviceHarness();
+  h.initial.completion.mockResolvedValue(decodeFailure);
+  h.create((next) => next.completion.mockResolvedValue(decodeFailure));
+  await expect(h.session.generate(messages, [], jest.fn())).rejects.toThrow(
+    'could not evaluate the prompt',
+  );
+  expect(h.loader).toHaveBeenCalledTimes(3);
+  expect(h.session.snapshot()).toMatchObject({ phase: 'ready', modelId: small.id, error: null });
+  h.create();
+  await expect(h.session.generate(messages, [], jest.fn())).resolves.toMatchObject({
+    content: 'Hello',
+  });
+  expect(h.loader).toHaveBeenCalledTimes(4);
+  expect(h.contexts[2]!.release).toHaveBeenCalledTimes(1);
+});
+
+test('stop while the context is recreated never touches a released context and leaves the new one ready', async () => {
+  const h = await deviceHarness();
+  const pending = deferred<LocalModelContext>();
+  const started = deferred<void>();
+  const relocated = context();
+  h.loader.mockImplementationOnce(() => {
+    started.resolve();
+    return pending.promise;
+  });
+  h.session.setPlacement('background');
+  const operation = h.session.generate(messages, [], jest.fn());
+  const interrupted = operation.catch((error: unknown) => error);
+  await started.promise;
+  const stopped = h.session.stop();
+  expect(h.session.snapshot().phase).toBe('stopping');
+  pending.resolve(relocated);
+  await stopped;
+  expect(await interrupted).toBeInstanceOf(LocalModelInterrupted);
+  expect(h.initial.stopCompletion).not.toHaveBeenCalled();
+  expect(relocated.stopCompletion).not.toHaveBeenCalled();
+  expect(relocated.completion).not.toHaveBeenCalled();
+  expect(h.session.snapshot()).toMatchObject({ phase: 'ready', modelId: small.id });
+  expect(h.session.resident()).toMatchObject({ model: small });
+});
+
+test('a context that cannot be recreated fails the turn and leaves the model to be reloaded', async () => {
+  const h = await deviceHarness();
+  h.loader.mockRejectedValueOnce(new Error('Context allocation failed'));
+  h.session.setPlacement('background');
+  await expect(h.session.generate(messages, [], jest.fn())).rejects.toThrow(
+    'Context allocation failed',
+  );
+  expect(h.session.snapshot()).toMatchObject({
+    phase: 'error',
+    error: 'Context allocation failed',
+    contextTokens: null,
+  });
+  expect(h.session.resident()).toBeNull();
+  await h.session.load(small.id);
+  expect(h.session.snapshot()).toMatchObject({ phase: 'ready', modelId: small.id });
+  // A load while the app is in the background goes straight to the CPU.
+  expect(h.backends()).toEqual(['gpu', 'cpu', 'cpu']);
+});
+
+test('recreating a context re-admits its window against fresh memory headroom', async () => {
+  const h = await deviceHarness();
+  const { contextTokens } = h.loader.mock.calls[0]![2];
+  h.native.getMemoryInfo.mockReturnValue({
+    physicalBytes: 8 * 1024 ** 3,
+    availableBytes: modelMemoryBytes(small, contextTokens) - 1,
+    isSimulator: false,
+  });
+  h.session.setPlacement('background');
+  await expect(h.session.generate(messages, [], jest.fn())).rejects.toThrow(
+    'memory headroom is too low',
+  );
+  expect(h.loader).toHaveBeenCalledTimes(1);
+  expect(h.initial.release).toHaveBeenCalledTimes(1);
+  expect(h.session.snapshot()).toMatchObject({ phase: 'error', contextTokens: null });
+});
+
+test('simulator contexts already run on the CPU and are not recreated for background placement', async () => {
+  const h = harness();
+  await h.session.load(small.id);
+  expect(h.loader.mock.calls[0]![2].backend).toBe('cpu');
+  h.session.setPlacement('background');
+  await h.session.generate(messages, [], jest.fn());
+  expect(h.loader).toHaveBeenCalledTimes(1);
+  expect(h.initial.release).not.toHaveBeenCalled();
+});
+
 test('stop during a native load returns promptly and releases the context when it arrives', async () => {
   const h = harness();
   const pending = deferred<LocalModelContext>();
@@ -1004,6 +1226,25 @@ test.each([
     expect(h.initial.completion).toHaveBeenCalledTimes(1);
   },
 );
+
+test('a summary round whose native decode fails is evaluated again before memory is committed', async () => {
+  const h = await summaryHarness();
+  h.initial.completion.mockResolvedValueOnce({ ...decodeFailure, content: 'Garbled memory' });
+  await h.session.generate(h.transcript, [], jest.fn(), { checkpoint: h.checkpoint });
+  expect(h.loader).toHaveBeenCalledTimes(2);
+  expect(h.initial.release).toHaveBeenCalledTimes(1);
+  const rounds = h.summaryCalls().map(([params]) => params.prompt!);
+  // The failed round is evaluated again unchanged; its partial output never becomes memory.
+  expect(rounds).toHaveLength(3);
+  expect(rounds[1]).toBe(rounds[0]);
+  expect(rounds[2]).toContain('Observed artifactId abc');
+  expect(rounds[2]).not.toContain('Garbled');
+  expect(h.checkpoint.failed).not.toHaveBeenCalled();
+  expect(h.checkpoint.commit).toHaveBeenCalledTimes(1);
+  expect(h.checkpoint.commit.mock.calls[0]![0]).toBe(
+    'Observed artifactId abc; completed edits; pending verification.',
+  );
+});
 
 test('a valid summary whose compacted prompt cannot fit is not committed and falls back to elision', async () => {
   const h = await summaryHarness();

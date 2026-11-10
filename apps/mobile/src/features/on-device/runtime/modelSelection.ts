@@ -6,11 +6,14 @@ import type { OnDeviceRuntime } from './runtime';
 export class LocalModelSelection {
   private choices: Promise<void> = Promise.resolve();
   private pending = 0;
+  private readonly removing = new Set<string>();
 
   constructor(
-    private readonly runtime: Pick<OnDeviceRuntime, 'threads' | 'models' | 'loop'>,
+    private readonly runtime: Pick<OnDeviceRuntime, 'threads' | 'models' | 'loop' | 'downloads'>,
     private readonly settings: LocalPreferencesStore,
     private readonly residency: ModelResidency,
+    /** The loaded model or the downloads changed. */
+    private readonly changed: () => void,
   ) {}
 
   settled(): Promise<void> {
@@ -81,6 +84,40 @@ export class LocalModelSelection {
       () => undefined,
     );
     await settled;
+  }
+
+  /** True while `id`'s weights are being deleted, so nothing loads a file being removed. */
+  isRemoving(id: string | null | undefined): boolean {
+    return id !== null && id !== undefined && this.removing.has(id);
+  }
+
+  /** Deletes a download. Unrelated downloads never interrupt a running conversation. */
+  async remove(id: string): Promise<void> {
+    localModelDefinition(id);
+    this.requireSettled();
+    const { downloads, loop, models, threads } = this.runtime;
+    const run = loop.snapshot();
+    const loaded = models.snapshot().modelId === id;
+    const used = run.threadId ? threads.find(run.threadId)?.modelId === id : false;
+    if (run.phase !== 'idle' && (loaded || used)) {
+      throw new Error('Stop the running local conversation before deleting the model it uses.');
+    }
+    this.residency.forget(id);
+    this.removing.add(id);
+    this.changed();
+    try {
+      if (loaded) {
+        await this.residency.transition(() => models.unload());
+      }
+      await downloads.remove(id);
+    } finally {
+      this.removing.delete(id);
+      this.changed();
+    }
+    if (this.settings.get().modelId === id) {
+      this.settings.update({ modelId: null });
+      await this.settings.save();
+    }
   }
 
   private isRunning(threadId: string): boolean {

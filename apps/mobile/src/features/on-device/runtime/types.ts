@@ -163,6 +163,8 @@ export interface LocalAgentRun {
   turnId: string;
   submissionId: string | null;
   stopped: boolean;
+  /** Why the run was stopped when it was not the user's choice; shown with the interruption. */
+  stopReason?: string;
   promise: Promise<LocalThread> | null;
   interrupt: Promise<never>;
   signalStop: () => void;

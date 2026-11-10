@@ -7,7 +7,7 @@ import { fetch as fetchPage } from 'expo/fetch';
 import { localModelDefinition } from '../models/catalog';
 import type { LocalModelContext, LocalModelMessage, LocalModelReply } from '../models/engine';
 import { loadNativeModelContext } from '../models/engine';
-import type { OnDeviceNativeServices } from '../native/services.types';
+import type { NativeLocalRunActivity, OnDeviceNativeServices } from '../native/services.types';
 import { OnDeviceNativeError } from '../native/services.errors';
 import type { LocalModelSessionSnapshot } from '../models/session';
 import { retryableLocalMessages, type LocalRunSnapshot } from './agentLoop';
@@ -65,6 +65,9 @@ const reply: LocalModelReply = {
   interrupted: false,
   truncated: false,
   stopped_limit: 0,
+  stopped_eos: true,
+  stopped_word: '',
+  context_full: false,
   tokens_predicted: 5,
   tokens_evaluated: 10,
 };
@@ -92,6 +95,12 @@ function harness(documents = new Map<string, string>()) {
       total: 0,
     })),
     addListener: jest.fn(() => ({ remove: jest.fn() })),
+    beginLocalRunActivity: jest.fn(async (): Promise<NativeLocalRunActivity> => ({
+      id: 'activity',
+      kind: 'none',
+    })),
+    updateLocalRunActivity: jest.fn(),
+    endLocalRunActivity: jest.fn(),
     getMemoryInfo: jest.fn(() => ({
       physicalBytes: 32 * 1024 ** 3,
       availableBytes: 16 * 1024 ** 3,
