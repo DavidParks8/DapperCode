@@ -143,6 +143,8 @@ const TOOL_VERBS: Record<
   todo_read: { kind: 'think', verb: 'Todo read', activity: 'Reading tasks' },
   todo_write: { kind: 'think', verb: 'Todo write', activity: 'Updating tasks' },
   skill: { kind: 'read', verb: 'Read skill', activity: 'Loading skill', pathKey: 'name' },
+  // Not "task": the shared snapshot mapper would turn that title into an empty sub-agent card.
+  task: { kind: 'other', verb: 'Run sub-agents', activity: 'Starting sub-agents' },
 };
 
 /**
@@ -202,6 +204,19 @@ export function localToolStatus(status: NonNullable<LocalMessage['tool']>['statu
     default:
       return { status };
   }
+}
+
+/**
+ * Whether a tool message is a transcript row of its own, live and in snapshots alike. A `task` call
+ * is presented by the sub-agent cards of the children it started, as ACP presents a sub-agent
+ * session; it gets a row only once it settles without starting any (refused, stopped before
+ * admission, or only resuming earlier children), so its result or error stays visible.
+ */
+export function localToolHasRow(message: LocalMessage): boolean {
+  const tool = message.tool;
+  return tool?.name === 'task'
+    ? !message.children?.length && tool.status !== 'running' && tool.status !== 'pending'
+    : Boolean(tool);
 }
 
 /**
@@ -589,22 +604,24 @@ export function localThreadSnapshot(
     if (!tool) {
       continue;
     }
-    const described = describeLocalToolMessage(thread, message, calls);
-    timeline.push({ sequence: timeline.length, kind: 'tool', canonicalId: tool.callId });
-    tools.push({
-      id: tool.callId,
-      generation: null,
-      kind: described.kind,
-      ...localToolStatus(tool.status),
-      title: described.title,
-      startedAtMs: Date.parse(tool.startedAt),
-      completedAtMs: tool.completedAt ? Date.parse(tool.completedAt) : null,
-      content: message.content,
-      structuredContent: [],
-      locations: [],
-      truncated: false,
-      subagent: false,
-    });
+    if (localToolHasRow(message)) {
+      const described = describeLocalToolMessage(thread, message, calls);
+      timeline.push({ sequence: timeline.length, kind: 'tool', canonicalId: tool.callId });
+      tools.push({
+        id: tool.callId,
+        generation: null,
+        kind: described.kind,
+        ...localToolStatus(tool.status),
+        title: described.title,
+        startedAtMs: Date.parse(tool.startedAt),
+        completedAtMs: tool.completedAt ? Date.parse(tool.completedAt) : null,
+        content: message.content,
+        structuredContent: [],
+        locations: [],
+        truncated: false,
+        subagent: false,
+      });
+    }
     for (const projected of childSnapshotTools(thread.id, message)) {
       timeline.push({ sequence: timeline.length, kind: 'tool', canonicalId: projected.id });
       tools.push(projected);

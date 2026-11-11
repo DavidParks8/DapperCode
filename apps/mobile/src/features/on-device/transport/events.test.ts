@@ -1,7 +1,8 @@
 import { EventType } from '@ag-ui/core';
 
 import { TOOL_META_EVENT_NAME } from '@bridge/toolMeta';
-import type { LocalMessage, LocalThread, LocalToolCall } from '../runtime/types';
+import { mapChat, toRawThread } from '@bridge/mapping/chatMapping';
+import type { LocalChild, LocalMessage, LocalThread, LocalToolCall } from '../runtime/types';
 import { LocalEventProjector, type LocalNotification } from './events';
 import { localThreadSnapshot, type LocalThreadProjectionContext } from './wire';
 
@@ -115,14 +116,20 @@ class Turn {
   }
 
   finishTool(index: number): void {
-    this.messages = this.messages.map((message) =>
-      message.id === `tool-${String(index)}` && message.tool
+    this.updateTool(index, (message) =>
+      message.tool
         ? {
             ...message,
             content: '{"ok":true}',
             tool: { ...message.tool, status: 'completed', completedAt: at(index + 1) },
           }
         : message,
+    );
+  }
+
+  updateTool(index: number, update: (message: LocalMessage) => LocalMessage): void {
+    this.messages = this.messages.map((message) =>
+      message.id === `tool-${String(index)}` ? update(message) : message,
     );
   }
 
@@ -314,9 +321,101 @@ describe('LocalEventProjector', () => {
       EventType.RUN_FINISHED,
     ]);
   });
+
+  it('presents a task call by its children’s cards and never as a row of its own', () => {
+    const projector = new LocalEventProjector(context);
+    projector.prime([]);
+    const turn = new Turn('turn-1');
+    const out = [...projector.diff([turn.thread()])];
+    turn.startTool(1, 'task');
+    out.push(...projector.diff([turn.thread()]));
+    turn.updateTool(1, (message) => ({ ...message, children: [child('running')] }));
+    out.push(...projector.diff([turn.thread()]));
+    turn.updateTool(1, (message) => settle(message, 'completed', [child('complete')]));
+    turn.settle();
+    out.push(...projector.diff([turn.thread()]));
+    expect(summarize(out)).toEqual([
+      EventType.RUN_STARTED,
+      EventType.ACTIVITY_SNAPSHOT,
+      EventType.ACTIVITY_SNAPSHOT,
+      EventType.RUN_FINISHED,
+    ]);
+  });
+
+  it('gives a task call that settled without starting a child a row once it settles', () => {
+    const projector = new LocalEventProjector(context);
+    projector.prime([]);
+    const turn = new Turn('turn-1');
+    const out = [...projector.diff([turn.thread()])];
+    turn.startTool(1, 'task');
+    out.push(...projector.diff([turn.thread()]));
+    expect(summarize(out)).toEqual([EventType.RUN_STARTED]);
+    turn.updateTool(1, (message) => settle(message, 'failed'));
+    const args = String(turn.history()[1]?.toolCalls?.[0]?.function.arguments.length);
+    expect(summarize(projector.diff([turn.thread()]))).toEqual([
+      `${EventType.TOOL_CALL_START} call-1 Run sub-agents`,
+      `${EventType.TOOL_CALL_ARGS} call-1 ${args}`,
+      'META call-1 failed Run sub-agents',
+      `${EventType.TOOL_CALL_END} call-1`,
+      `${EventType.TOOL_CALL_RESULT} call-1`,
+    ]);
+  });
 });
 
+function child(status: LocalChild['status']): LocalChild {
+  return {
+    id: 'child-1',
+    agent: 'explore',
+    workspaceId: 'ws-one',
+    modelId: 'qwen3-1.7b-q4-k-m',
+    status,
+    messages: [{ id: 'child-user', role: 'user', content: 'List files', createdAt: at(1) }],
+    lastError: null,
+    updatedAt: at(2),
+  };
+}
+
+function settle(
+  message: LocalMessage,
+  status: 'completed' | 'failed',
+  children?: LocalChild[],
+): LocalMessage {
+  return {
+    ...message,
+    content: children ? '{"children":[]}' : '{"error":"task requires 1-3 independent tasks."}',
+    tool: { ...message.tool!, status, completedAt: at(3) },
+    ...(children ? { children } : {}),
+  };
+}
+
 describe('localThreadSnapshot', () => {
+  it('lists a task call only by its children unless it started none', () => {
+    const turn = new Turn('turn-1');
+    turn.startTool(1, 'task');
+    turn.updateTool(1, (message) => settle(message, 'completed', [child('complete')]));
+    turn.startTool(2, 'task');
+    turn.updateTool(2, (message) => settle(message, 'failed'));
+    const snapshot = localThreadSnapshot(turn.thread(), context());
+    expect(
+      snapshot.acpSnapshot?.tools.map((tool) => [tool.id, tool.status, tool.title, tool.subagent]),
+    ).toEqual([
+      ['child:thread-1:child-1', 'completed', 'explore child', true],
+      ['call-2', 'failed', 'Run sub-agents', false],
+    ]);
+    // The refused call maps to a typed failed row, not an empty sub-agent card.
+    expect(
+      mapChat(toRawThread(snapshot)).messages.map((message) => [
+        message.role,
+        message.toolMeta?.title ?? null,
+        message.toolMeta?.status ?? null,
+      ]),
+    ).toEqual([
+      ['user', null, null],
+      ['activity', null, null],
+      ['tool', 'Run sub-agents', 'failed'],
+    ]);
+  });
+
   it('describes every tool of a thread with a single pass over its calls', () => {
     const turn = new Turn('turn-1');
     for (let index = 1; index <= TOOLS; index += 1) {

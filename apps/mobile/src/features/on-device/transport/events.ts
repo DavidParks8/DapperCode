@@ -17,6 +17,7 @@ import {
   localThreadPath,
   localThreadSummary,
   localToolCalls,
+  localToolHasRow,
   localWorkspacePaths,
   localToolStatus,
   type LocalThreadProjectionContext,
@@ -430,30 +431,31 @@ export class LocalEventProjector {
       return;
     }
     this.diffChildren(thread.id, previous, message, run, out);
-    // Only a new tool or a status change is described; unchanged history (including an identical
-    // message) skips the lookup and the parse of its possibly whole-file arguments. A settled tool
-    // is reported only by the change that settled it: re-sent to a later run without its start and
-    // metadata, its result would render as a separate row titled with the raw result JSON.
-    const changed = previous?.tool?.status !== tool.status;
-    if (changed) {
-      const described = describeLocalToolMessage(thread, message, toolCalls());
-      if (!previous) {
-        this.startTool(thread, tool.callId, described.title, run, out, toolCalls());
-      }
-      this.emit(out, thread.id, run, {
-        type: EventType.CUSTOM,
-        name: TOOL_META_EVENT_NAME,
-        value: {
-          toolCallId: tool.callId,
-          kind: described.kind,
-          ...localToolStatus(tool.status),
-          title: described.title,
-          startedAtMs: Date.parse(tool.startedAt),
-          ...(tool.completedAt ? { completedAtMs: Date.parse(tool.completedAt) } : {}),
-        },
-      });
+    // Only a tool row that is new or changed status is described; unchanged history (including an
+    // identical message) skips the lookup and the parse of its possibly whole-file arguments. A
+    // settled tool is reported only by the change that settled it: re-sent to a later run without
+    // its start and metadata, its result would render as a separate row titled with the raw JSON.
+    if (!localToolHasRow(message) || previous?.tool?.status === tool.status) {
+      return;
     }
-    if (changed && TERMINAL_TOOL_STATUSES.has(tool.status) && !run.endedTools.has(tool.callId)) {
+    const described = describeLocalToolMessage(thread, message, toolCalls());
+    // A `task` call's row starts only once it settles without children, so it was already seen.
+    if (!previous || !localToolHasRow(previous)) {
+      this.startTool(thread, tool.callId, described.title, run, out, toolCalls());
+    }
+    this.emit(out, thread.id, run, {
+      type: EventType.CUSTOM,
+      name: TOOL_META_EVENT_NAME,
+      value: {
+        toolCallId: tool.callId,
+        kind: described.kind,
+        ...localToolStatus(tool.status),
+        title: described.title,
+        startedAtMs: Date.parse(tool.startedAt),
+        ...(tool.completedAt ? { completedAtMs: Date.parse(tool.completedAt) } : {}),
+      },
+    });
+    if (TERMINAL_TOOL_STATUSES.has(tool.status) && !run.endedTools.has(tool.callId)) {
       run.endedTools.add(tool.callId);
       this.emit(out, thread.id, run, { type: EventType.TOOL_CALL_END, toolCallId: tool.callId });
       this.emit(out, thread.id, run, {

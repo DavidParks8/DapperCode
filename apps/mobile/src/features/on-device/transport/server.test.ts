@@ -431,6 +431,11 @@ describe('LocalBridgeServer', () => {
       { kind: 'read', title: 'Read skill review', activity: 'Loading skill review' },
     ],
     ['skill', {}, { kind: 'read', title: 'Read skill list', activity: 'Loading skill list' }],
+    [
+      'task',
+      { tasks: [{ agent: 'explore', prompt: 'List files' }] },
+      { kind: 'other', title: 'Run sub-agents', activity: 'Starting sub-agents' },
+    ],
   ])(
     'describes %s accurately in the shared live and historical transcript',
     (name, args, expected) => {

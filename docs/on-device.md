@@ -1277,9 +1277,12 @@ returns its transcript. Live, the projector emits `thread/started` plus `thread/
 when a child is admitted, then streams the child's own run, text, and tool events under its thread
 ID while the parent's activity card (`subagent:child:<parent>:<child>`, `receiverThreadIds` =
 the child thread) reports its status and latest tool or answer. Tapping the card opens the live
-transcript. Child approvals and questions still surface in the parent chat, and every mutating
-method rejects a child ID with `on_device_subagent_read_only`; continue a child by asking the parent
-to resume it.
+transcript. The `task` call itself is not a row: like an ACP sub-agent tool, it is presented by the
+cards of the children it started, live and in snapshots alike. Only a call that settles without
+starting a child (refused, stopped before admission, or only resuming earlier children) is a
+**Run sub-agents** row of its own, so its result or error stays visible. Child approvals and
+questions still surface in the parent chat, and every mutating method rejects a child ID with
+`on_device_subagent_read_only`; continue a child by asking the parent to resume it.
 
 Stop, and backgrounding that stops the turn, cancel every child and queued generation. The parent
 stays busy, including its Stop/composer controls, until all admitted children and in-flight native

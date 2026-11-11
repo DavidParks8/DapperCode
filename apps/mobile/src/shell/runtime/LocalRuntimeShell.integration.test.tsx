@@ -55,6 +55,8 @@ import {
 } from '../../features/on-device/runtime/testing';
 import { MainScreen } from '../../features/chat/screen/MainScreen';
 import { ToolInvocationRow } from '../../features/chat/message/ChatMessage';
+import type { ToolInvocation } from '../../features/chat/message/toolInvocationModel';
+import { resolveToolInvocationHeader } from '../../features/chat/message/toolInvocationPresentation';
 import { LocalProfileSection } from '../../features/settings/LocalProfileSection';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { DrawerContent } from '@shell/navigation/DrawerContent';
@@ -2107,6 +2109,84 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     expectSettledControls(root);
     act(() => tree.unmount());
   });
+
+  it.each([
+    {
+      outcome: 'a completed child',
+      tasks: [{ agent: 'explore', prompt: 'List files' }],
+      replies: [{ content: 'Child answer.' }, { content: 'Parent answer.' }],
+      stop: false,
+      rows: [
+        'user: Delegate it',
+        'activity: • Sub-agent completed\n  Status: completed\n  Latest: Child answer.',
+        'assistant: Parent answer.',
+      ],
+    },
+    {
+      outcome: 'a stopped child',
+      tasks: [{ agent: 'explore', prompt: 'List files' }],
+      replies: [],
+      stop: true,
+      rows: [
+        'user: Delegate it',
+        'activity: • Sub-agent failed\n  Status: cancelled\n  Latest: Stopped. Completed edits are preserved.',
+      ],
+    },
+    {
+      outcome: 'no child started',
+      tasks: [],
+      replies: [{ content: 'Could not delegate.' }],
+      stop: false,
+      rows: ['user: Delegate it', 'tool failed: Run sub-agents', 'assistant: Could not delegate.'],
+    },
+  ])(
+    'presents a task call with $outcome the same live and after reopening',
+    async ({ tasks, replies, stop, rows }) => {
+      const { tree, root, runtime, store } = await renderShell();
+      store.set(showToolCallsAtom, true);
+      mockLlama.reply({ toolCalls: [{ name: 'task', arguments: { tasks } }] }, ...replies);
+      mockLlama.holdCompletions = stop;
+      await submit(root, 'Delegate it');
+      if (stop) {
+        await drive(() => mockLlama.finishCompletion());
+        await press(root, 'Stop agent');
+        mockLlama.holdCompletions = false;
+      }
+      // The client-side stop notice is not part of the conversation.
+      const shown = () => timeline(root).filter((row) => !row.startsWith('system: '));
+      const failedRow = () =>
+        root
+          .findAllByType(ToolInvocationRow)
+          .map((node) => node.props['invocation'] as ToolInvocation)
+          .find((invocation) => invocation.status === 'failed');
+      const expectFailedRowReadable = () => {
+        if (tasks.length) {
+          expect(failedRow()).toBeUndefined();
+          return;
+        }
+        const invocation = failedRow()!;
+        expect(resolveToolInvocationHeader(invocation, false).label).toBe('Run sub-agents');
+        expect(invocation.textLines.join('\n')).toContain('task requires 1-3 independent tasks.');
+      };
+      expect(shown()).toEqual(rows);
+      expectFailedRowReadable();
+      expectSettledControls(root);
+
+      const thread = runtime.threads.list()[0]!;
+      act(() => setActiveProfile(store, 'bridge-1'));
+      await settle();
+      act(() => setActiveProfile(store, LOCAL_PROFILE_ID));
+      await settle();
+      await act(async () => {
+        store.set(selectChatAtom, thread.id);
+        await flush();
+      });
+      await settle();
+      expect(shown()).toEqual(rows);
+      expectFailedRowReadable();
+      act(() => tree.unmount());
+    },
+  );
 
   it('runs a model push only after Allow on the shared banner, and retries a failed turn in place', async () => {
     const { tree, root, runtime } = await renderShell();
