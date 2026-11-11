@@ -408,6 +408,44 @@ test('an explore child that loads a skill gets only the allowed tools its role a
   await h.runtime.dispose();
 });
 
+test('a missing, blank, or listing-word name lists skills, while a skill with that ID still loads', async () => {
+  const h = await harness({ 'ws-one:.github/skills/review/SKILL.md': skill('review') });
+  h.llama.reply(
+    call('skill', { name: 'list' }),
+    call('skill', { name: 'All' }),
+    call('skill', { name: '*' }),
+    call('skill', { name: ' ' }),
+    call('skill', { name: null }),
+    call('skill', {}),
+    call('skill', { name: 'nope' }),
+    { content: 'Done.' },
+  );
+  const result = await h.runtime.loop.send(h.thread.id, 'Which skills exist?', 'listing');
+  const listing = {
+    skills: [{ name: 'review', description: 'review description.' }],
+    total: 1,
+    nextOffset: null,
+  };
+  const tools = h.tools(result);
+  expect(tools.slice(0, 6).map((message) => [message.tool.status, h.output(message)])).toEqual(
+    Array.from({ length: 6 }, () => ['completed', listing]),
+  );
+  expect(tools[6]).toMatchObject({
+    tool: { status: 'failed' },
+    content: expect.stringContaining('No enabled skill is named \\"nope\\"'),
+  });
+  await h.runtime.dispose();
+
+  const named = await harness({ 'ws-one:.github/skills/list/SKILL.md': skill('list') });
+  named.llama.reply(call('skill', { name: 'list' }), { content: 'Done.' });
+  const loaded = await named.runtime.loop.send(named.thread.id, 'Load it.', 'named-list');
+  expect(named.tools(loaded)[0]).toMatchObject({
+    tool: { status: 'completed' },
+    content: expect.stringContaining('LIST BODY'),
+  });
+  await named.runtime.dispose();
+});
+
 test('import, remove, and enable/disable persist across a runtime reload', async () => {
   const h = await harness({
     'ws-one:.github/skills/review/SKILL.md': skill('review'),

@@ -142,7 +142,7 @@ const TOOL_VERBS: Record<
   ask_user: { kind: 'think', verb: 'Ask user', activity: 'Waiting for answers' },
   todo_read: { kind: 'think', verb: 'Todo read', activity: 'Reading tasks' },
   todo_write: { kind: 'think', verb: 'Todo write', activity: 'Updating tasks' },
-  skill: { kind: 'read', verb: 'Use skill', activity: 'Loading skill', pathKey: 'name' },
+  skill: { kind: 'read', verb: 'Read skill', activity: 'Loading skill', pathKey: 'name' },
 };
 
 /**
@@ -161,6 +161,8 @@ export function describeLocalTool(
   let subject = known.pathKey ? toolArgument(argumentsJson, known.pathKey) : null;
   if (name === 'list_directory' && (subject === null || subject === '.')) {
     subject = 'workspace root';
+  } else if (name === 'skill' && subject === null) {
+    subject = 'list';
   }
   const quoted = subject && known.pathKey === 'query' ? `“${subject}”` : subject;
   return {

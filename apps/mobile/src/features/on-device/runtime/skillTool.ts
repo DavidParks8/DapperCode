@@ -59,6 +59,8 @@ const MENTION_LIMIT = 3;
 const PROMPT_LIMIT = 32_768;
 const TRUNCATED = `\n[Request truncated to ${String(PROMPT_LIMIT)} characters.]`;
 const LIST_PAGE = 32;
+/** Small models name the listing instead of omitting `name`; a skill with that ID still wins. */
+const LIST_NAMES = new Set(['list', 'all', '*']);
 const LOADED_NOTE =
   'Follow these instructions for the current task. Read bundled files with skill name and resource only as needed; they are UTF-8 text and scripts cannot run on this device.';
 const TOOL_ALIASES = new Map([
@@ -117,6 +119,18 @@ function listSkills(
   }));
   const next = offset + page.length;
   return { skills: page, total: visible.length, nextOffset: next < visible.length ? next : null };
+}
+
+/** A missing, null or blank name, or a listing word that is no skill's ID, lists skills. */
+function listsSkills(catalog: LocalSkillCatalog, name: unknown): boolean {
+  if (name === undefined || name === null || (typeof name === 'string' && !name.trim())) {
+    return true;
+  }
+  return (
+    typeof name === 'string' &&
+    LIST_NAMES.has(name.trim().toLowerCase()) &&
+    !catalog.skills.some((skill) => skill.name === name)
+  );
 }
 
 /**
@@ -335,7 +349,7 @@ export async function executeLocalSkill(
   if (!skills.toolEnabled(catalog, context.agent)) {
     throw new LocalToolInputError('Skills are turned off for this agent.');
   }
-  if (args['name'] === undefined) {
+  if (listsSkills(catalog, args['name'])) {
     return listSkills(skills, catalog, context, offset);
   }
   const skill = invocableSkill(skills, catalog, text(args, 'name', 64), context);

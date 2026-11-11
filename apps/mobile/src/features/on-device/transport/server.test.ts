@@ -424,6 +424,13 @@ describe('LocalBridgeServer', () => {
         activity: 'Searching web “IANA Example Domain”',
       },
     ],
+    // `read` rows prefix their status, so the title must read as one phrase with it.
+    [
+      'skill',
+      { name: 'review' },
+      { kind: 'read', title: 'Read skill review', activity: 'Loading skill review' },
+    ],
+    ['skill', {}, { kind: 'read', title: 'Read skill list', activity: 'Loading skill list' }],
   ])(
     'describes %s accurately in the shared live and historical transcript',
     (name, args, expected) => {

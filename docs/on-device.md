@@ -128,10 +128,12 @@ reports each skipped or shadowed skill (severity `skipped`) and each warning (se
 The model first sees only IDs (with any display name) and descriptions of advertised skills, as many
 as fit the guidance budget (one quarter of the loaded context window, at most 8,192 UTF-8 bytes,
 shared with rules); the prompt says how many were omitted, and `skill` without a name lists them all,
-in pages. `skill` with a name returns the whole `SKILL.md` in 8 KiB pages (follow `nextOffset`) plus
-every bundled file path; `skill` with `resource` reads one bundled file by path relative to the skill
-directory, also paged. Skill results are never offloaded to saved-output artifacts. Bundled files are
-UTF-8 text only; binary files fail with an explicit error.
+in pages (so does a blank name, or `list`, `all`, or `*` when no skill has that ID, because small
+models name the listing instead of omitting `name`). `skill` with a name returns the whole
+`SKILL.md` in 8 KiB pages (follow `nextOffset`) plus every bundled file path; `skill` with
+`resource` reads one bundled file by path relative to the skill directory, also paged. Skill results
+are never offloaded to saved-output artifacts. Bundled files are UTF-8 text only; binary files fail
+with an explicit error.
 
 - **Slash commands and mentions.** A message that starts with `/<id>` (optionally followed by
   arguments), and up to three `@<id>` mentions anywhere in it (at a word boundary, exact ID), load

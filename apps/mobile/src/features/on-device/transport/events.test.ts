@@ -285,18 +285,32 @@ describe('LocalEventProjector', () => {
       `${EventType.TOOL_CALL_END} call-2`,
       `${EventType.TOOL_CALL_RESULT} call-2`,
       EventType.RUN_FINISHED,
-      // A new run reports earlier settled tools once, as it always has.
+      // A new run reports only its own tools: the first turn's settled results are not re-sent
+      // without their start and metadata, which would render them as raw-JSON rows.
       EventType.RUN_STARTED,
-      `${EventType.TOOL_CALL_END} call-1`,
-      `${EventType.TOOL_CALL_RESULT} call-1`,
-      `${EventType.TOOL_CALL_END} call-2`,
-      `${EventType.TOOL_CALL_RESULT} call-2`,
       `${EventType.TOOL_CALL_START} call-3 Edit src/file-3.ts`,
       `${EventType.TOOL_CALL_ARGS} call-3 ${args}`,
       'META call-3 in_progress Edit src/file-3.ts',
       'META call-3 completed Edit src/file-3.ts',
       `${EventType.TOOL_CALL_END} call-3`,
       `${EventType.TOOL_CALL_RESULT} call-3`,
+      EventType.RUN_FINISHED,
+    ]);
+  });
+
+  it('does not re-send tools that settled before the projector was primed', () => {
+    const turn = new Turn('turn-1');
+    turn.startTool(1);
+    turn.finishTool(1);
+    const projector = new LocalEventProjector(context);
+    projector.prime([turn.thread()]);
+
+    turn.stream('Done');
+    turn.settle();
+    expect(summarize(projector.diff([turn.thread()]))).toEqual([
+      EventType.TEXT_MESSAGE_START,
+      `${EventType.TEXT_MESSAGE_CONTENT} answer Done`,
+      EventType.TEXT_MESSAGE_END,
       EventType.RUN_FINISHED,
     ]);
   });

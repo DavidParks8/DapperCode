@@ -6,7 +6,8 @@ jest.mock('@expo/vector-icons', () => ({
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 jest.mock('react-native-markdown-display', () => 'Markdown');
 jest.mock('../../features/chat/message/ChatMessage', () => ({
-  ChatMessage: ({ message }: { message: { content: string } }) => message.content,
+  ChatMessage: ({ message }: { message: { content: string | { text: string } } }) =>
+    typeof message.content === 'string' ? message.content : message.content.text,
   ToolInvocationRow: ({ invocation }: { invocation: { title: string } }) =>
     `tool:${invocation.title}`,
 }));
@@ -197,6 +198,24 @@ function texts(root: Node): string[] {
 
 function hasText(root: Node, text: string): boolean {
   return texts(root).some((entry) => entry.includes(text));
+}
+
+/** Transcript rows oldest first: messages by role and text, tool rows by status and title. */
+function timeline(root: Node): string[] {
+  const items = (root.findAllByType(FlatList)[0]?.props['data'] ?? []) as {
+    kind?: string;
+    message?: ChatMessage;
+    invocation?: { status: string; title: string; statusLanguage?: boolean };
+  }[];
+  return [...items].reverse().flatMap((item) => {
+    if (item.message) {
+      return [`${item.message.role}: ${getMessageText(item.message)}`];
+    }
+    const invocation = item.invocation;
+    return invocation
+      ? [`tool ${invocation.statusLanguage ? invocation.status : 'untyped'}: ${invocation.title}`]
+      : [];
+  });
 }
 
 function deniedPushCopies(root: Node): number {
@@ -2019,6 +2038,73 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     expect(labeled(root, 'Stop agent')).toBeUndefined();
     expect(drawerStatus(root)).toBe("Couldn't load Qwen3 1.7B Q4_K_M");
     expect(composerText(root)).toBe('Try again');
+    act(() => tree.unmount());
+  });
+
+  it('lists skills when the model names the listing, and keeps settled sub-agent results out of the next turn', async () => {
+    const { tree, root, runtime, store } = await renderShell({
+      files: {
+        'ws-one:.agents/skills/demo/SKILL.md':
+          '---\nname: demo\ndescription: Demo skill.\n---\nDo the demo.\n',
+      },
+    });
+    store.set(showToolCallsAtom, true);
+    // The first turn delegates to a child, which is stopped while it generates.
+    mockLlama.reply({
+      toolCalls: [
+        { name: 'task', arguments: { tasks: [{ agent: 'explore', prompt: 'List files' }] } },
+      ],
+    });
+    mockLlama.holdCompletions = true;
+    await submit(root, 'What files can you access?');
+    await drive(() => mockLlama.finishCompletion());
+    await press(root, 'Stop agent');
+    mockLlama.holdCompletions = false;
+    const thread = runtime.threads.list()[0]!;
+    const task = runtime.threads.get(thread.id).messages.find((entry) => entry.tool);
+    expect(task).toMatchObject({ tool: { name: 'task', status: 'interrupted' } });
+    expect(task?.content).toMatch(/^\{"error":"This local run was interrupted/u);
+
+    // A small model names the listing instead of omitting `name`.
+    mockLlama.reply(
+      { toolCalls: [{ name: 'skill', arguments: { name: 'list' } }] },
+      { content: 'The demo skill is available.' },
+    );
+    const question = 'Check for any skills that might be available to load?';
+    await submit(root, question);
+    const skill = runtime.threads
+      .get(thread.id)
+      .messages.filter((entry) => entry.tool)
+      .at(-1);
+    expect(skill?.tool).toMatchObject({ name: 'skill', status: 'completed' });
+    expect(JSON.parse(skill?.content ?? '{}')).toEqual({
+      skills: [{ name: 'demo', description: 'Demo skill.' }],
+      total: 1,
+      nextOffset: null,
+    });
+    // The new turn shows only its own typed rows: the earlier task result is not re-sent into it
+    // as a row titled with its raw JSON.
+    const latestTurn = () => {
+      const rows = timeline(root);
+      return rows.slice(rows.lastIndexOf(`user: ${question}`) + 1);
+    };
+    const expected = ['tool completed: Read skill list', 'assistant: The demo skill is available.'];
+    expect(latestTurn()).toEqual(expected);
+    expect(timeline(root).filter((row) => /^tool untyped|^tool \w+: \{/u.test(row))).toEqual([]);
+
+    // Reopening the chat from its snapshot shows the same turn.
+    act(() => setActiveProfile(store, 'bridge-1'));
+    await settle();
+    act(() => setActiveProfile(store, LOCAL_PROFILE_ID));
+    await settle();
+    await act(async () => {
+      store.set(selectChatAtom, thread.id);
+      await flush();
+    });
+    await settle();
+    expect(latestTurn()).toEqual(expected);
+    expect(timeline(root).filter((row) => /^tool untyped|^tool \w+: \{/u.test(row))).toEqual([]);
+    expectSettledControls(root);
     act(() => tree.unmount());
   });
 
