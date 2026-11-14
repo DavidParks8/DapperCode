@@ -2674,13 +2674,12 @@ mod tests {
             .values
             .contains_key("PHONE_CALL_SIP_PASSWORD"));
 
-        secrets
-            .store_sip_password(&paths, "broker-sip-secret")
-            .unwrap();
+        let sip_password = random_token().unwrap();
+        secrets.store_sip_password(&paths, &sip_password).unwrap();
         let mut ready = base_config();
         apply_worker_phone_call(&mut ready, &paths, &secrets).unwrap();
         assert_eq!(ready.values["PHONE_CALL_SIP_SERVER"], "sip.telnyx.com:5061");
-        assert_eq!(ready.values["PHONE_CALL_SIP_PASSWORD"], "broker-sip-secret");
+        assert_eq!(ready.values["PHONE_CALL_SIP_PASSWORD"], sip_password);
         assert_eq!(ready.values["PHONE_CALL_CALLER_ID"], "+15551234567");
     }
 }

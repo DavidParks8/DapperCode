@@ -1708,6 +1708,14 @@ mod tests {
             "http://127.0.0.1@evil.com:11434/v1",
             "http://127.0.0.1:0/v1",
             "http://[2001:db8::1]:11434/v1",
+            "",
+            &format!("http://127.0.0.1/{}", "v".repeat(1024)),
+            "http://127.0.0.1:11434/\tv1",
+            "http://127.0.0.1 :11434/v1",
+            "127.0.0.1:11434/v1",
+            "http:///v1",
+            "http://[::2]/v1",
+            "http://[::1/v1",
         ] {
             let mut invalid = valid.clone();
             invalid.llm_base_url = bad_url.to_string();
@@ -1725,6 +1733,12 @@ mod tests {
             "http://sip.telnyx.com:5061",
             "999.999.999.999:5060",
             "sip.telnyx.com:5061\n",
+            &format!("{}.example:5060", "a".repeat(260)),
+            "sip..telnyx.com:5061",
+            ".sip.telnyx.com:5061",
+            "-sip.telnyx.com:5061",
+            "sip.telnyx.com-:5061",
+            "sip_telnyx.com:5061",
         ] {
             let mut invalid = valid.clone();
             invalid.sip_server = bad_server.to_string();

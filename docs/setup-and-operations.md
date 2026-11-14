@@ -356,6 +356,21 @@ Active ACP sessions can place user-approved outbound phone calls through the bri
 `start_phone_call`, `steer_phone_call`, `get_phone_call`, and `hangup_phone_call` MCP tools when
 voice settings and a SIP trunk are configured on desktop.
 
+The voice assistant waits through incomplete replies and ordinary pauses. Single-word
+transcriptions are provisional and cannot authorize autonomous hang-up, even if the model invents a
+completed outcome. Otherwise a spoken closing and two-second quiet grace period are required. A
+short reply such as "Bye" or a noise burst after the closing still ends the call; a substantive
+reply or user steering cancels the hang-up and gives the assistant another turn. User hang-up and
+remote disconnect always work.
+
+When asked to hold, the assistant acknowledges and waits silently through music, silence, and
+recorded queue announcements until a live person returns. The mobile card shows **On hold** while
+keeping **Hang Up** available; `get_phone_call` reports `onHold: true` and `status: "in_progress"`.
+SIP hold/resume via in-dialog `INVITE` or `UPDATE` is also supported, including renegotiated RTP
+ports and offerless re-`INVITE`s answered in the `ACK`. Live steering remains available while held.
+Hold time counts toward the existing 15-minute maximum call duration; user hang-up, remote
+disconnect, and shutdown still end the call.
+
 By default, speech-to-text, tool-calling voice turns, and 24 kHz streaming text-to-speech run
 against one local Ollama daemon (`>= v0.40.9`, `http://127.0.0.1:11434/v1`):
 
@@ -369,6 +384,8 @@ ollama pull phonon
 override narrowband 8 kHz transcription with a dedicated local server—for example `mlx_audio.server`
 serving `mlx-community/parakeet-tdt-0.6b-v2`—pass `--stt-base-url` and `--stt-model` (and optionally
 `--llm-base-url` / `--llm-model` or `--tts-base-url` / `--tts-model`).
+The local LLM endpoint must support streaming tool calls and OpenAI-compatible JSON-schema
+`response_format` for silent hold-listening decisions.
 
 Configure, inspect, or remove voice settings through the operator CLI (`dappercode voice ...` or
 `pnpm run operator voice ...` from a source checkout), piping the SIP password over stdin so it
@@ -399,8 +416,10 @@ Security and storage boundaries:
   modal before sending a single SIP packet. Declining or timing out cancels the call locally.
 - **Outbound-only SIP/RTP**: the bridge dials outbound SIP (`udp` or `tls`) and 20 ms G.711 PCMU RTP
   directly from ephemeral local ports—no public webhooks, tunnels, or inbound listeners are opened.
-- **AI disclosure and text-only transcripts**: the voice system prompt enforces immediate AI
-  disclosure on behalf of `--display-name`, and only bounded text transcripts (never raw call audio)
+- **Caller-identifying introductions and text-only transcripts**: the assistant's first sentence
+  says who it is calling for and why (for example, "Hi, I'm calling for Your Name to book a table"),
+  without volunteering that it is an AI. It must not impersonate the user or claim to be human, and
+  must answer identity questions truthfully. Only bounded text transcripts (never raw call audio)
   are shown in the live card or enqueued back to the owning ACP session when the call settles.
 
 ## Process Ownership

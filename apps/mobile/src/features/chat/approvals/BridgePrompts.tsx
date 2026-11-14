@@ -206,9 +206,7 @@ export function MainScreenApprovalAndBridgePrompts({ context }: { context: Conte
       {modalBridgeUiSurface ? (
         <BridgeUiModal
           surface={modalBridgeUiSurface}
-          onAction={(nextSurface, action) => {
-            void handleBridgeUiAction(nextSurface, action);
-          }}
+          onAction={handleBridgeUiAction}
           onDismiss={(surface) => {
             void dismissBridgeUiSurface(surface);
           }}

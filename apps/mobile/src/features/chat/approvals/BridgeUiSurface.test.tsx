@@ -286,6 +286,77 @@ describe('BridgeUiWorkflowCard', () => {
     act(() => tree.unmount());
   });
 
+  it('keeps approval choices honest: busy while pending, restored with an inline error on failure', async () => {
+    const objective =
+      'Request a prescription refill and ask when it can be ready for pickup at the counter.';
+    const surface: BridgeUiSurface = {
+      id: 'phone-call-approval:call-1',
+      threadId: 'thread-1',
+      turnId: null,
+      kind: 'phone-call',
+      presentation: 'modal',
+      tone: 'warning',
+      title: 'Approve outbound phone call',
+      subtitle: '+15551234567',
+      bodyMarkdown: null,
+      blocks: [
+        {
+          type: 'keyValue',
+          items: [
+            { label: 'To', value: '+15551234567' },
+            { label: 'Objective', value: objective },
+          ],
+        },
+      ],
+      actions: [
+        { id: 'approve', label: 'Approve & Call', style: 'primary', dismissesSurface: true },
+        { id: 'cancel', label: 'Cancel', style: 'destructive', dismissesSurface: true },
+      ],
+      dismissible: false,
+    };
+    let settle: (ok: boolean) => void = () => undefined;
+    const onAction = jest.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          settle = resolve;
+        }),
+    );
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <BridgeUiModal surface={surface} onAction={onAction} onDismiss={jest.fn()} />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    const root = expectValue(rendered).root as QueryableTestInstance;
+    const objectiveText = root.findAll(
+      (node) => node.children.includes(objective) && node.props['style'] !== undefined,
+    )[0];
+    expect(objectiveText).toBeDefined();
+    expect(
+      StyleSheet.flatten(objectiveText?.props['style'] as never) as { textAlign?: string },
+    ).not.toHaveProperty('textAlign', 'right');
+
+    act(() => readOnPress(findPressableByLabel(root, 'Approve & Call').props)());
+    expect(findPressableByLabel(root, 'Approve & Call').props['disabled']).toBe(true);
+    expect(findPressableByLabel(root, 'Cancel').props['disabled']).toBe(true);
+    act(() => readOnPress(findPressableByLabel(root, 'Cancel').props)());
+    expect(onAction).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      settle(false);
+      await Promise.resolve();
+    });
+    expect(findText(root, "That didn't go through. Check the connection and try again.")).toBe(
+      true,
+    );
+    expect(findPressableByLabel(root, 'Approve & Call').props['disabled']).toBe(false);
+    act(() => expectValue(rendered).unmount());
+  });
+
   it('fires selection haptic on collapse/expand toggle', () => {
     const surface: BridgeUiSurface = {
       id: 'haptic-test',

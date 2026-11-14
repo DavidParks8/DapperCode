@@ -1449,14 +1449,14 @@ mod tests {
 
         // Non-5061 port defaults transport to UDP, and IPv6 [::1]:5060 unbrackets host.
         set_test_var("PHONE_CALL_SIP_SERVER", "[::1]:5060");
-        set_test_var("PHONE_CALL_USER_DISPLAY_NAME", "David Parks");
+        set_test_var("PHONE_CALL_USER_DISPLAY_NAME", "Alex Example");
         let udp_default = PhoneCallRuntimeConfig::from_env()
             .expect("valid IPv6 UDP config")
             .expect("present");
         assert_eq!(udp_default.server_host, "::1");
         assert_eq!(udp_default.server_port, 5060);
         assert_eq!(udp_default.transport, SipTransportKind::Udp);
-        assert_eq!(udp_default.user_display_name, "David Parks");
+        assert_eq!(udp_default.user_display_name, "Alex Example");
 
         // Invalid E.164, invalid transport, bad host:port, and non-loopback model URL must fail.
         set_test_var("PHONE_CALL_CALLER_ID", "15551234567");
@@ -1473,5 +1473,211 @@ mod tests {
 
         set_test_var("PHONE_CALL_LLM_BASE_URL", "https://api.openai.com/v1");
         assert!(PhoneCallRuntimeConfig::from_env().is_err());
+    }
+
+    #[test]
+    fn phone_call_runtime_config_rejects_each_invalid_field_and_honors_explicit_tls() {
+        const PHONE_VARS: &[&str] = &[
+            "PHONE_CALL_SIP_SERVER",
+            "PHONE_CALL_SIP_TRANSPORT",
+            "PHONE_CALL_SIP_USERNAME",
+            "PHONE_CALL_SIP_PASSWORD",
+            "PHONE_CALL_CALLER_ID",
+            "PHONE_CALL_USER_DISPLAY_NAME",
+            "PHONE_CALL_STT_BASE_URL",
+            "PHONE_CALL_STT_MODEL",
+            "PHONE_CALL_LLM_BASE_URL",
+            "PHONE_CALL_LLM_MODEL",
+            "PHONE_CALL_TTS_BASE_URL",
+            "PHONE_CALL_TTS_MODEL",
+            "PHONE_CALL_TTS_VOICE",
+        ];
+        let _guards = PHONE_VARS
+            .iter()
+            .map(|name| DirEnvGuard::unset(*name))
+            .collect::<Vec<_>>();
+        let generated_secret = format!("sip-secret-{}", std::process::id());
+
+        // Any SIP credential or transport without a server is a partial configuration.
+        for (name, value) in [
+            ("PHONE_CALL_SIP_TRANSPORT", "tls".to_string()),
+            ("PHONE_CALL_SIP_USERNAME", "sip-user".to_string()),
+            ("PHONE_CALL_SIP_PASSWORD", generated_secret.clone()),
+        ] {
+            set_test_var(name, value);
+            let err = PhoneCallRuntimeConfig::from_env().expect_err("partial phone config");
+            assert!(
+                err.contains("PHONE_CALL_SIP_SERVER is required"),
+                "{name}: {err}"
+            );
+            remove_test_var(name);
+        }
+
+        // Blank values are treated as absent rather than as partial configuration.
+        set_test_var("PHONE_CALL_SIP_TRANSPORT", "   ");
+        set_test_var("PHONE_CALL_SIP_PASSWORD", "");
+        assert_eq!(PhoneCallRuntimeConfig::from_env().unwrap(), None);
+
+        let baseline = [
+            ("PHONE_CALL_SIP_SERVER", "sip.example.com:5070".to_string()),
+            ("PHONE_CALL_SIP_TRANSPORT", "TLS".to_string()),
+            ("PHONE_CALL_SIP_USERNAME", "sip-user".to_string()),
+            ("PHONE_CALL_SIP_PASSWORD", generated_secret.clone()),
+            ("PHONE_CALL_CALLER_ID", "+15551234567".to_string()),
+            ("PHONE_CALL_USER_DISPLAY_NAME", "Alex Example".to_string()),
+        ];
+        let apply_baseline = || {
+            for (name, value) in &baseline {
+                set_test_var(name, value);
+            }
+        };
+        apply_baseline();
+        let explicit_tls = PhoneCallRuntimeConfig::from_env()
+            .expect("valid explicit TLS config")
+            .expect("present phone call config");
+        assert_eq!(explicit_tls.transport, SipTransportKind::Tls);
+        assert_eq!(explicit_tls.server_host, "sip.example.com");
+        assert_eq!(explicit_tls.server_port, 5070);
+        assert_eq!(explicit_tls.sip_password, generated_secret);
+
+        const USERNAME_ERROR: &str = "PHONE_CALL_SIP_USERNAME must be at most";
+        const PASSWORD_ERROR: &str = "PHONE_CALL_SIP_PASSWORD must be non-empty";
+        const DISPLAY_NAME_ERROR: &str = "PHONE_CALL_USER_DISPLAY_NAME must be at most";
+        const CALLER_ID_ERROR: &str =
+            "PHONE_CALL_CALLER_ID must start with '+' followed by 7 to 15";
+        const SERVER_ERROR: &str = "PHONE_CALL_SIP_SERVER must be a valid host:port";
+        const HOST_ERROR: &str = "PHONE_CALL_SIP_SERVER contains an invalid host";
+        let cases = [
+            (
+                "PHONE_CALL_SIP_USERNAME",
+                "u".repeat(MAX_SIP_USERNAME_BYTES + 1),
+                USERNAME_ERROR,
+            ),
+            (
+                "PHONE_CALL_SIP_USERNAME",
+                "sip\u{7}user".to_string(),
+                USERNAME_ERROR,
+            ),
+            (
+                "PHONE_CALL_SIP_PASSWORD",
+                " ".repeat(generated_secret.len()),
+                PASSWORD_ERROR,
+            ),
+            (
+                "PHONE_CALL_SIP_PASSWORD",
+                generated_secret.clone() + &"x".repeat(MAX_SIP_PASSWORD_BYTES),
+                PASSWORD_ERROR,
+            ),
+            (
+                "PHONE_CALL_SIP_PASSWORD",
+                generated_secret.clone() + "\r",
+                PASSWORD_ERROR,
+            ),
+            (
+                "PHONE_CALL_SIP_PASSWORD",
+                generated_secret.clone() + "\n",
+                PASSWORD_ERROR,
+            ),
+            (
+                "PHONE_CALL_SIP_PASSWORD",
+                generated_secret.clone() + "\0",
+                PASSWORD_ERROR,
+            ),
+            (
+                "PHONE_CALL_USER_DISPLAY_NAME",
+                "D".repeat(MAX_USER_DISPLAY_NAME_BYTES + 1),
+                DISPLAY_NAME_ERROR,
+            ),
+            (
+                "PHONE_CALL_USER_DISPLAY_NAME",
+                "David\u{1b}Parks".to_string(),
+                DISPLAY_NAME_ERROR,
+            ),
+            (
+                "PHONE_CALL_CALLER_ID",
+                "+123456".to_string(),
+                CALLER_ID_ERROR,
+            ),
+            (
+                "PHONE_CALL_CALLER_ID",
+                "+1234567890123456".to_string(),
+                CALLER_ID_ERROR,
+            ),
+            (
+                "PHONE_CALL_CALLER_ID",
+                "+1555123456a".to_string(),
+                CALLER_ID_ERROR,
+            ),
+            (
+                "PHONE_CALL_SIP_SERVER",
+                "h".repeat(266) + ":5060",
+                SERVER_ERROR,
+            ),
+            (
+                "PHONE_CALL_SIP_SERVER",
+                "sip\u{1}example.com:5060".to_string(),
+                SERVER_ERROR,
+            ),
+            (
+                "PHONE_CALL_SIP_SERVER",
+                "sip example.com:5060".to_string(),
+                SERVER_ERROR,
+            ),
+            ("PHONE_CALL_SIP_SERVER", ":5060".to_string(), HOST_ERROR),
+            (
+                "PHONE_CALL_SIP_SERVER",
+                "sip:example.com:5060".to_string(),
+                HOST_ERROR,
+            ),
+            (
+                "PHONE_CALL_SIP_SERVER",
+                "sip..example.com:5060".to_string(),
+                HOST_ERROR,
+            ),
+            (
+                "PHONE_CALL_SIP_SERVER",
+                ".example.com:5060".to_string(),
+                HOST_ERROR,
+            ),
+            (
+                "PHONE_CALL_SIP_SERVER",
+                "-example.com:5060".to_string(),
+                HOST_ERROR,
+            ),
+            (
+                "PHONE_CALL_SIP_SERVER",
+                "example-:5060".to_string(),
+                HOST_ERROR,
+            ),
+            (
+                "PHONE_CALL_SIP_SERVER",
+                "sip_example.com:5060".to_string(),
+                HOST_ERROR,
+            ),
+        ];
+        // Failures name the case index, never the value: password cases carry the generated secret.
+        for (index, (name, value, expected)) in cases.into_iter().enumerate() {
+            apply_baseline();
+            set_test_var(name, &value);
+            let err = PhoneCallRuntimeConfig::from_env()
+                .expect_err("invalid phone call field must be rejected");
+            assert!(
+                err.contains(expected),
+                "case {index} ({name}): unexpected error {err}"
+            );
+            assert!(
+                !err.contains(&generated_secret),
+                "errors must not echo the SIP secret"
+            );
+        }
+
+        assert_eq!(
+            parse_sip_server_host_port(""),
+            Err(SERVER_ERROR.to_string())
+        );
+        assert_eq!(
+            normalize_browser_origin("https://:secret@example.com"),
+            None
+        );
     }
 }

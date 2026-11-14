@@ -11,6 +11,7 @@ import { READABLE_COLUMN_WIDTH, type WindowTraits } from '@shell/layout/windowLa
 import { sidebarHiddenAtom } from '@shell/state/appState/settings';
 import { windowTraitsAtom } from '@shell/state/layout/atoms';
 import { createTestStore, withAppStore } from '@shell/state/testing';
+import type { BridgeUiSurface } from '@bridge/types/types';
 import type { AppStore } from '@shell/state/types';
 import { keyboardVisibleAtom } from '../state/composer';
 import { useMainScreenStyles } from '../styles/useStyles';
@@ -56,6 +57,8 @@ function baseContext(
     },
     draftController: { snapshot: () => ({ scopeKey: 'test-scope' }) },
     bannerBridgeUiSurfaces: [],
+    callBridgeUiSurfaces: [],
+    supersededCallBridgeUiSurfaces: [],
     canCancelQueuedMessage: false,
     canEditQueuedMessage: false,
     canSteerQueuedMessage: false,
@@ -266,6 +269,67 @@ describe('mainScreenComposerRenderer suggestion surfaces', () => {
     expect(
       root(tree).findAll((node) => node.props['testID'] === 'transcript-activity-event'),
     ).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it('docks a live call above the input inside the rail-aware composer column', () => {
+    const call: BridgeUiSurface = {
+      id: 'phone-call-live:call-1',
+      threadId: 'chat-1',
+      kind: 'phone-call',
+      presentation: 'workflowCard',
+      tone: 'success',
+      title: 'Phone call · +15551234567',
+      subtitle: 'In call',
+      blocks: [{ type: 'keyValue', items: [{ label: 'Status', value: 'In call' }] }],
+      actions: [{ id: 'hangup', label: 'Hang Up', style: 'destructive' }],
+      dismissible: false,
+    };
+    const tree = render(baseContext({ callBridgeUiSurfaces: [call] }), true);
+    const column = root(tree).findAll((node) => {
+      const style = StyleSheet.flatten(node.props['style'] as StyleProp<ViewStyle>);
+      return typeof style?.marginLeft === 'number' && typeof style.marginRight === 'number';
+    })[0];
+
+    expect(
+      requireTestValue(column, 'composer column').findAll(
+        (node) => node.props['testID'] === 'phone-call-dock',
+      ),
+    ).not.toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  it('dismissing the docked call result also retires the results it superseded', () => {
+    const settled = (id: string): BridgeUiSurface => ({
+      id,
+      threadId: 'chat-1',
+      kind: 'phone-call',
+      presentation: 'workflowCard',
+      tone: 'neutral',
+      title: 'Phone call ended',
+      blocks: [{ type: 'keyValue', items: [{ label: 'Status', value: 'Ended' }] }],
+      actions: [],
+      dismissible: true,
+    });
+    const older = settled('phone-call-live:a');
+    const newest = settled('phone-call-live:b');
+    const dismissBridgeUiSurface = jest.fn();
+    const tree = render(
+      baseContext({
+        callBridgeUiSurfaces: [newest],
+        supersededCallBridgeUiSurfaces: [older],
+        dismissBridgeUiSurface,
+      }),
+      true,
+    );
+    const dismiss = root(tree).findAll(
+      (node) =>
+        node.props['testID'] === 'phone-call-dock-dismiss' &&
+        typeof node.props['onPress'] === 'function',
+    )[0];
+
+    act(() => (requireTestValue(dismiss, 'dismiss button').props['onPress'] as () => void)());
+    expect(dismissBridgeUiSurface.mock.calls).toEqual([[newest], [older]]);
     act(() => tree.unmount());
   });
 

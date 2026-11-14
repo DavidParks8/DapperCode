@@ -316,8 +316,16 @@ pub enum SipCallState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SipCallEvent {
     Ringing,
-    Connected { negotiated_dtmf_pt: Option<u8> },
-    Ended { reason: String },
+    Connected {
+        negotiated_dtmf_pt: Option<u8>,
+    },
+    HoldChanged {
+        on_hold: bool,
+        negotiated_dtmf_pt: Option<u8>,
+    },
+    Ended {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -820,6 +828,33 @@ pub struct SdpAnswer {
     pub remote_media_ip: IpAddr,
     pub remote_audio_port: u16,
     pub negotiated_dtmf_pt: Option<u8>,
+    direction: SdpDirection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum SdpDirection {
+    #[default]
+    SendRecv,
+    SendOnly,
+    RecvOnly,
+    Inactive,
+}
+
+impl SdpDirection {
+    fn answer(self) -> &'static str {
+        match self {
+            Self::SendRecv => "sendrecv",
+            Self::SendOnly => "recvonly",
+            Self::RecvOnly => "sendonly",
+            Self::Inactive => "inactive",
+        }
+    }
+}
+
+impl SdpAnswer {
+    fn on_hold(&self) -> bool {
+        self.remote_media_ip.is_unspecified() || self.direction != SdpDirection::SendRecv
+    }
 }
 
 #[must_use]
@@ -850,6 +885,9 @@ pub fn parse_sdp_answer(sdp: &str) -> Result<SdpAnswer, SipError> {
     let mut audio_formats: Vec<u8> = Vec::new();
     let mut rtpmap_dtmf_pts: Vec<u8> = Vec::new();
     let mut in_audio_section = false;
+    let mut in_media_section = false;
+    let mut session_direction = SdpDirection::SendRecv;
+    let mut audio_direction = None;
 
     for raw_line in sdp.lines() {
         let line = raw_line.trim();
@@ -857,6 +895,7 @@ pub fn parse_sdp_answer(sdp: &str) -> Result<SdpAnswer, SipError> {
             continue;
         }
         if let Some(rest) = line.strip_prefix("m=") {
+            in_media_section = true;
             if let Some(audio_rest) = rest.strip_prefix("audio ") {
                 in_audio_section = true;
                 let mut parts = audio_rest.split_whitespace();
@@ -886,9 +925,21 @@ pub fn parse_sdp_answer(sdp: &str) -> Result<SdpAnswer, SipError> {
             if let Some(ip) = parse_sdp_connection_ip(conn) {
                 if in_audio_section {
                     audio_ip = Some(ip);
-                } else {
+                } else if !in_media_section {
                     session_ip = Some(ip);
                 }
+            }
+        } else if let Some(direction) = match line {
+            "a=sendrecv" => Some(SdpDirection::SendRecv),
+            "a=sendonly" => Some(SdpDirection::SendOnly),
+            "a=recvonly" => Some(SdpDirection::RecvOnly),
+            "a=inactive" => Some(SdpDirection::Inactive),
+            _ => None,
+        } {
+            if in_audio_section {
+                audio_direction = Some(direction);
+            } else if !in_media_section {
+                session_direction = direction;
             }
         } else if in_audio_section {
             if let Some(attr) = line.strip_prefix("a=rtpmap:") {
@@ -913,6 +964,11 @@ pub fn parse_sdp_answer(sdp: &str) -> Result<SdpAnswer, SipError> {
         .ok_or_else(|| SipError::Protocol("SDP answer missing c= connection IP".to_owned()))?;
     let remote_audio_port =
         audio_port.ok_or_else(|| SipError::Protocol("SDP answer missing m=audio".to_owned()))?;
+    if !audio_formats.contains(&PCMU_PAYLOAD_TYPE) {
+        return Err(SipError::Protocol(
+            "SDP audio must support PCMU/8000".to_owned(),
+        ));
+    }
 
     let negotiated_dtmf_pt = rtpmap_dtmf_pts
         .into_iter()
@@ -922,6 +978,7 @@ pub fn parse_sdp_answer(sdp: &str) -> Result<SdpAnswer, SipError> {
         remote_media_ip,
         remote_audio_port,
         negotiated_dtmf_pt,
+        direction: audio_direction.unwrap_or(session_direction),
     })
 }
 
@@ -938,6 +995,25 @@ fn parse_sdp_connection_ip(conn_value: &str) -> Option<IpAddr> {
     }
     let ip_part = raw_addr.split('/').next().unwrap_or(raw_addr);
     ip_part.parse::<IpAddr>().ok()
+}
+
+#[cfg(test)]
+#[test]
+fn sdp_hold_direction_and_legacy_zero_address_are_negotiated_per_audio_stream() {
+    let sdp = "v=0\r\nc=IN IP4 127.0.0.1\r\na=sendonly\r\nm=audio 4000 RTP/AVP 0\r\n";
+    assert!(parse_sdp_answer(sdp).unwrap().on_hold());
+    let resumed =
+        format!("{sdp}a=sendrecv\r\nm=video 5000 RTP/AVP 96\r\nc=IN IP4 0.0.0.0\r\na=inactive\r\n");
+    let answer = parse_sdp_answer(&resumed).unwrap();
+    assert!(!answer.on_hold(), "video hold must not affect audio");
+    assert_eq!(answer.remote_media_ip, IpAddr::V4(Ipv4Addr::LOCALHOST));
+    for direction in ["sendonly", "recvonly", "inactive"] {
+        let held = resumed.replace("a=sendrecv", &format!("a={direction}"));
+        assert!(parse_sdp_answer(&held).unwrap().on_hold());
+    }
+    let legacy = resumed.replacen("c=IN IP4 127.0.0.1", "c=IN IP4 0.0.0.0", 1);
+    assert!(parse_sdp_answer(&legacy).unwrap().on_hold());
+    assert!(parse_sdp_answer(&sdp.replace("RTP/AVP 0", "RTP/AVP 8")).is_err());
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1651,6 +1727,7 @@ struct OutboundMediaState {
     was_playing_voice: bool,
     current_outbound_pcmu: [u8; PCMU_FRAME_BYTES],
     active_dtmf_timestamp: Option<u32>,
+    remote_media: Option<SdpAnswer>,
 }
 
 impl Default for OutboundMediaState {
@@ -1662,6 +1739,7 @@ impl Default for OutboundMediaState {
             was_playing_voice: false,
             current_outbound_pcmu: [PCMU_SILENCE_BYTE; PCMU_FRAME_BYTES],
             active_dtmf_timestamp: None,
+            remote_media: None,
         }
     }
 }
@@ -1711,9 +1789,16 @@ fn spawn_rtp_media_tasks(
                 () = tokio::time::sleep_until(deadline) => {}
             }
 
-            let packet_bytes = {
+            let (packet_bytes, destination, held) = {
                 let mut state = lock_unpoisoned(&tx_state);
-                if let Some(dtmf_step) = state.dtmf_queue.pop_front() {
+                let destination = state
+                    .remote_media
+                    .as_ref()
+                    .map_or(remote_rtp_addr, |remote| {
+                        SocketAddr::new(remote.remote_media_ip, remote.remote_audio_port)
+                    });
+                let held = state.remote_media.as_ref().is_some_and(SdpAnswer::on_hold);
+                let packet = if let Some(dtmf_step) = state.dtmf_queue.pop_front() {
                     state.outbound_playing = false;
                     state.was_playing_voice = false;
                     state.current_outbound_pcmu = [PCMU_SILENCE_BYTE; PCMU_FRAME_BYTES];
@@ -1778,11 +1863,14 @@ fn spawn_rtp_media_tasks(
                         ssrc,
                         &[PCMU_SILENCE_BYTE; PCMU_FRAME_BYTES],
                     )
-                }
+                };
+                (packet, destination, held)
             };
 
-            let _ = tx_socket.send_to(&packet_bytes, remote_rtp_addr).await;
-            tx_counter.fetch_add(1, Ordering::Relaxed);
+            if !held {
+                let _ = tx_socket.send_to(&packet_bytes, destination).await;
+                tx_counter.fetch_add(1, Ordering::Relaxed);
+            }
             seq = seq.wrapping_add(1);
             stream_ts = stream_ts.wrapping_add(RTP_TIMESTAMP_STEP);
             packet_index = packet_index.saturating_add(1);
@@ -1806,6 +1894,15 @@ fn spawn_rtp_media_tasks(
                         Ok((n, _peer)) => {
                             let slice = scratch.get(..n).unwrap_or(&[]);
                             if let Some(parsed) = parse_rtp_packet(slice) {
+                                let state = lock_unpoisoned(&rx_state);
+                                if let Some(remote) = &state.remote_media {
+                                    reorder.negotiated_dtmf_pt = remote.negotiated_dtmf_pt;
+                                    if remote.direction == SdpDirection::Inactive
+                                        || remote.remote_media_ip.is_unspecified()
+                                    {
+                                        continue;
+                                    }
+                                }
                                 reorder.push_rtp_packet(&parsed)
                             } else {
                                 Vec::new()
@@ -2280,6 +2377,8 @@ async fn run_signaling_loop(mut transport: SipTransport, mut ctx: SignalingLoopC
     let mut auth_attempts: usize = 0;
 
     let mut dialog: Option<ConnectedDialog> = None;
+    let mut last_remote_offer: Option<(u32, String, Vec<u8>)> = None;
+    let mut awaiting_ack_answer: Option<u32> = None;
     let rtp_cancel = CancellationToken::new();
     let mut rtp_tasks: Option<(JoinHandle<()>, JoinHandle<()>)> = None;
 
@@ -2379,6 +2478,13 @@ async fn run_signaling_loop(mut transport: SipTransport, mut ctx: SignalingLoopC
                                     rtp_tasks = Some(tasks);
                                     let _ = ctx.state_tx.send(SipCallState::Connected { negotiated_dtmf_pt });
                                     let _ = ctx.event_tx.send(SipCallEvent::Connected { negotiated_dtmf_pt }).await;
+                                    let held = lock_unpoisoned(&ctx.media_state)
+                                        .remote_media.as_ref().is_some_and(SdpAnswer::on_hold);
+                                    if held {
+                                        let _ = ctx.event_tx.send(SipCallEvent::HoldChanged {
+                                            on_hold: true, negotiated_dtmf_pt,
+                                        }).await;
+                                    }
                                 }
                                 Err(err) => {
                                     let text = format!("sdp_error: {err}");
@@ -2501,7 +2607,110 @@ async fn run_signaling_loop(mut transport: SipTransport, mut ctx: SignalingLoopC
                         }
                     }
                     SipStartLine::Request { method, .. } => {
-                        if method.eq_ignore_ascii_case("BYE") {
+                        if method.eq_ignore_ascii_case("INVITE") || method.eq_ignore_ascii_case("UPDATE") {
+                            let Some(dlg) = &mut dialog else { continue; };
+                            let (code, reason) = if msg.first_header("Call-ID") != Some(ctx.call_id.as_str())
+                                || header_tag(msg.first_header("To").unwrap_or("")) != Some(ctx.from_tag.as_str())
+                                || header_tag(msg.first_header("From").unwrap_or("")) != header_tag(&dlg.remote_to_header)
+                            { (481, "Call/Transaction Does Not Exist") } else { (200, "OK") };
+                            if code != 200 {
+                                let response = build_response_for_request(&ctx, &msg, code, reason, None);
+                                if let Err(error) = transport.send(response.as_bytes()).await {
+                                    eprintln!("SIP dialog rejection response failed: {error}");
+                                }
+                                continue;
+                            }
+                            let Some((cseq, _)) = msg.cseq() else { continue; };
+                            if let Some((previous, previous_method, response)) = &last_remote_offer {
+                                if cseq == *previous && method == previous_method {
+                                    if let Err(error) = transport.send(response).await {
+                                        eprintln!("SIP offer retransmission response failed: {error}");
+                                    }
+                                    continue;
+                                }
+                                if cseq <= *previous {
+                                    let response = build_response_for_request(&ctx, &msg, 500, "CSeq Out of Order", None);
+                                    if let Err(error) = transport.send(response.as_bytes()).await {
+                                        eprintln!("SIP CSeq rejection response failed: {error}");
+                                    }
+                                    continue;
+                                }
+                            }
+                            let local_rtp = match ctx.rtp_socket.local_addr() {
+                                Ok(addr) => addr,
+                                Err(error) => break (error.to_string(), Some(SipCallFailure::Transport(error.to_string()))),
+                            };
+                            // An offerless UPDATE is a session refresh. An offerless re-INVITE
+                            // requires an offer in the 2xx and carries the answer in the ACK
+                            // (RFC 3261 section 14.2).
+                            if msg.body.is_empty() {
+                                let offer = method.eq_ignore_ascii_case("INVITE").then(|| {
+                                    build_sdp_offer(ctx.local_sip_addr.ip(), local_rtp.port(), u64::from(cseq))
+                                });
+                                let response = build_response_for_request(&ctx, &msg, 200, "OK", offer.as_deref());
+                                if let Err(error) = transport.send(response.as_bytes()).await {
+                                    eprintln!("SIP offerless request response failed: {error}");
+                                }
+                                if offer.is_some() {
+                                    awaiting_ack_answer = Some(cseq);
+                                    if let Some(target) = msg.first_header("Contact").and_then(extract_sip_uri) {
+                                        dlg.remote_target_uri = target;
+                                    }
+                                }
+                                last_remote_offer = Some((cseq, method.clone(), response.into_bytes()));
+                                continue;
+                            }
+                            let offer = std::str::from_utf8(&msg.body).ok()
+                                .and_then(|sdp| parse_sdp_answer(sdp).ok());
+                            let Some(offer) = offer else {
+                                let response = build_response_for_request(&ctx, &msg, 488, "Not Acceptable Here", None);
+                                if let Err(error) = transport.send(response.as_bytes()).await {
+                                    eprintln!("SIP unsupported SDP response failed: {error}");
+                                }
+                                continue;
+                            };
+                            let mut answer = build_sdp_offer(ctx.local_sip_addr.ip(), local_rtp.port(), u64::from(cseq));
+                            answer = answer.replace("a=sendrecv", &format!("a={}", offer.direction.answer()));
+                            answer = match offer.negotiated_dtmf_pt {
+                                Some(pt) => answer
+                                    .replace("RTP/AVP 0 101", &format!("RTP/AVP 0 {pt}"))
+                                    .replace("a=rtpmap:101 ", &format!("a=rtpmap:{pt} "))
+                                    .replace("a=fmtp:101 ", &format!("a=fmtp:{pt} ")),
+                                None => answer
+                                    .replace("RTP/AVP 0 101", "RTP/AVP 0")
+                                    .replace("a=rtpmap:101 telephone-event/8000\r\n", "")
+                                    .replace("a=fmtp:101 0-15\r\n", ""),
+                            };
+                            let response = build_response_for_request(&ctx, &msg, 200, "OK", Some(&answer));
+                            if let Err(error) = transport.send(response.as_bytes()).await {
+                                break (error.to_string(), Some(SipCallFailure::Transport(error.to_string())));
+                            }
+                            awaiting_ack_answer = None;
+                            let hold_changed = apply_remote_media(&ctx.media_state, offer);
+                            if let Some(target) = msg.first_header("Contact").and_then(extract_sip_uri) {
+                                dlg.remote_target_uri = target;
+                            }
+                            last_remote_offer = Some((cseq, method.clone(), response.into_bytes()));
+                            let _ = ctx.event_tx.send(hold_changed).await;
+                        } else if method.eq_ignore_ascii_case("ACK") {
+                            let acks_offer = awaiting_ack_answer.is_some()
+                                && msg.first_header("Call-ID") == Some(ctx.call_id.as_str())
+                                && msg.cseq().map(|(cseq, _)| cseq) == awaiting_ack_answer;
+                            if !acks_offer {
+                                continue;
+                            }
+                            awaiting_ack_answer = None;
+                            // Without an acceptable answer the previously negotiated media stays active.
+                            let answer = std::str::from_utf8(&msg.body).ok()
+                                .and_then(|sdp| parse_sdp_answer(sdp).ok());
+                            match answer {
+                                Some(answer) => {
+                                    let hold_changed = apply_remote_media(&ctx.media_state, answer);
+                                    let _ = ctx.event_tx.send(hold_changed).await;
+                                }
+                                None => eprintln!("SIP ACK did not carry an acceptable SDP answer; keeping current media"),
+                            }
+                        } else if method.eq_ignore_ascii_case("BYE") {
                             let ok_resp = build_200_ok_for_request(&ctx, &msg);
                             let _ = transport.send(ok_resp.as_bytes()).await;
                             break ("remote_bye".to_owned(), None);
@@ -2577,6 +2786,7 @@ async fn handle_invite_200_ok(
         ctx.discarded_early_rtp.fetch_add(1, Ordering::Relaxed);
     }
 
+    let _ = apply_remote_media(&ctx.media_state, sdp_answer.clone());
     let tasks = spawn_rtp_media_tasks(
         Arc::clone(&ctx.rtp_socket),
         remote_rtp_addr,
@@ -2815,7 +3025,40 @@ fn build_bye_request(
 }
 
 fn build_200_ok_for_request(ctx: &SignalingLoopContext, req: &SipMessage) -> String {
-    let mut resp = String::from("SIP/2.0 200 OK\r\n");
+    build_response_for_request(ctx, req, 200, "OK", None)
+}
+
+fn header_tag(header: &str) -> Option<&str> {
+    header
+        .split(';')
+        .find_map(|param| param.trim().strip_prefix("tag="))
+}
+
+fn apply_remote_media(state: &Mutex<OutboundMediaState>, offer: SdpAnswer) -> SipCallEvent {
+    let hold_changed = SipCallEvent::HoldChanged {
+        on_hold: offer.on_hold(),
+        negotiated_dtmf_pt: offer.negotiated_dtmf_pt,
+    };
+    let mut state = lock_unpoisoned(state);
+    if offer.on_hold() {
+        state.voice_queue.clear();
+        state.dtmf_queue.clear();
+        state.outbound_playing = false;
+        state.was_playing_voice = false;
+        state.current_outbound_pcmu = [PCMU_SILENCE_BYTE; PCMU_FRAME_BYTES];
+    }
+    state.remote_media = Some(offer);
+    hold_changed
+}
+
+fn build_response_for_request(
+    ctx: &SignalingLoopContext,
+    req: &SipMessage,
+    code: u16,
+    reason: &str,
+    body: Option<&str>,
+) -> String {
+    let mut resp = format!("SIP/2.0 {code} {reason}\r\n");
     for via in req.headers_named("Via") {
         resp.push_str(&format!("Via: {via}\r\n"));
     }
@@ -2836,12 +3079,19 @@ fn build_200_ok_for_request(ctx: &SignalingLoopContext, req: &SipMessage) -> Str
         resp.push_str(&format!("CSeq: {cseq}\r\n"));
     }
     resp.push_str(&format!(
-        "Contact: <sip:{}@{}{}>\r\n\
-         Content-Length: 0\r\n\r\n",
+        "Contact: <sip:{}@{}{}>\r\n",
         ctx.config.caller_id.trim(),
         ctx.local_sip_addr,
         ctx.config.transport.contact_transport_param(),
     ));
+    if let Some(sdp) = body {
+        resp.push_str(&format!(
+            "Content-Type: application/sdp\r\nContent-Length: {}\r\n\r\n{sdp}",
+            sdp.len()
+        ));
+    } else {
+        resp.push_str("Content-Length: 0\r\n\r\n");
+    }
     resp
 }
 
@@ -3422,6 +3672,7 @@ mod tests {
             client_rtp_addr
         });
 
+        let trunk_secret = random_hex_token(16);
         let config = SipDialConfig::new(
             "127.0.0.1",
             trunk_sip_addr.port(),
@@ -3431,11 +3682,11 @@ mod tests {
         )
         .with_domain("trunk.test")
         .with_display_name("Dapper Agent")
-        .with_credentials("trunk-user", "super-secret-pw");
+        .with_credentials("trunk-user", &trunk_secret);
 
         let debug_text = format!("{config:?}");
         assert!(
-            !debug_text.contains("super-secret-pw"),
+            !debug_text.contains(&trunk_secret),
             "Debug impl must redact password"
         );
 
@@ -3898,7 +4149,7 @@ mod tests {
         )
         .with_domain("localhost")
         .with_tls_server_name("localhost")
-        .with_credentials("tls-alice", "tls-pass")
+        .with_credentials("tls-alice", random_hex_token(16))
         .with_custom_tls_config(client_tls_cfg);
         config.keepalive_interval = Duration::from_millis(50);
 
@@ -4012,6 +4263,147 @@ mod tests {
         server_task.await.expect("server done");
     }
 
+    #[tokio::test]
+    async fn offerless_reinvite_answers_with_offer_and_applies_answer_from_ack() {
+        let trunk_sip = UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+            .await
+            .expect("bind trunk SIP");
+        let trunk_addr = trunk_sip.local_addr().expect("trunk addr");
+        let trunk_rtp = UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+            .await
+            .expect("bind trunk RTP");
+        let rtp_port = trunk_rtp.local_addr().expect("trunk RTP addr").port();
+        let sdp = move |direction: &str| {
+            format!(
+                "v=0\r\no=trunk 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio {rtp_port} RTP/AVP 0 101\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:101 telephone-event/8000\r\na={direction}\r\n"
+            )
+        };
+
+        let server_task = tokio::spawn(async move {
+            let mut buf = vec![0_u8; 65535];
+            let (n, client) = timeout(TEST_TIMEOUT, trunk_sip.recv_from(&mut buf))
+                .await
+                .expect("recv INVITE timeout")
+                .expect("recv INVITE");
+            let invite = std::str::from_utf8(&buf[..n]).expect("INVITE utf8");
+            let via = extract_header(invite, "Via:");
+            let from = extract_header(invite, "From:");
+            let to = extract_header(invite, "To:");
+            let call_id = extract_header(invite, "Call-ID:");
+            let answer = sdp("sendrecv");
+            let ok = format!(
+                "SIP/2.0 200 OK\r\nVia: {via}\r\nFrom: {from}\r\nTo: {to};tag=uas1\r\nCall-ID: {call_id}\r\nCSeq: 1 INVITE\r\nContact: <sip:uas@{trunk_addr}>\r\nContent-Type: application/sdp\r\nContent-Length: {}\r\n\r\n{answer}",
+                answer.len()
+            );
+            trunk_sip
+                .send_to(ok.as_bytes(), client)
+                .await
+                .expect("send 200");
+            let (n_ack, _) = timeout(TEST_TIMEOUT, trunk_sip.recv_from(&mut buf))
+                .await
+                .expect("recv ACK timeout")
+                .expect("recv ACK");
+            assert!(std::str::from_utf8(&buf[..n_ack])
+                .expect("ACK utf8")
+                .starts_with("ACK "));
+
+            let in_dialog = |method: &str, cseq: u32, body: &str| {
+                let content_type = if body.is_empty() {
+                    ""
+                } else {
+                    "Content-Type: application/sdp\r\n"
+                };
+                format!(
+                    "{method} sip:caller@{client} SIP/2.0\r\nVia: SIP/2.0/UDP {trunk_addr};branch=z9hG4bKoffer{cseq}{method}\r\nFrom: {to};tag=uas1\r\nTo: {from}\r\nCall-ID: {call_id}\r\nCSeq: {cseq} {method}\r\nContact: <sip:uas@{trunk_addr}>\r\n{content_type}Content-Length: {}\r\n\r\n{body}",
+                    body.len()
+                )
+            };
+            let reinvite = in_dialog("INVITE", 2, "");
+            let mut responses = Vec::new();
+            for _ in 0..2 {
+                trunk_sip
+                    .send_to(reinvite.as_bytes(), client)
+                    .await
+                    .expect("send offerless re-INVITE");
+                let (n_resp, _) = timeout(TEST_TIMEOUT, trunk_sip.recv_from(&mut buf))
+                    .await
+                    .expect("re-INVITE response timeout")
+                    .expect("re-INVITE response");
+                responses.push(String::from_utf8(buf[..n_resp].to_vec()).expect("response utf8"));
+            }
+            let offer = &responses[0];
+            assert!(offer.starts_with("SIP/2.0 200 OK\r\n"), "{offer}");
+            assert!(offer.contains("CSeq: 2 INVITE\r\n"), "{offer}");
+            assert!(
+                offer.contains("Content-Type: application/sdp\r\n"),
+                "{offer}"
+            );
+            assert!(offer.contains("m=audio "), "{offer}");
+            assert!(offer.contains("a=sendrecv\r\n"), "{offer}");
+            assert_eq!(
+                responses[1], *offer,
+                "a retransmission receives the cached offer"
+            );
+
+            let hold_answer = sdp("sendonly");
+            trunk_sip
+                .send_to(in_dialog("ACK", 2, &hold_answer).as_bytes(), client)
+                .await
+                .expect("send ACK with answer");
+            trunk_sip
+                .send_to(in_dialog("BYE", 3, "").as_bytes(), client)
+                .await
+                .expect("send BYE");
+            let (n_bye, _) = timeout(TEST_TIMEOUT, trunk_sip.recv_from(&mut buf))
+                .await
+                .expect("BYE response timeout")
+                .expect("BYE response");
+            assert!(std::str::from_utf8(&buf[..n_bye])
+                .expect("BYE response utf8")
+                .starts_with("SIP/2.0 200 OK\r\n"));
+        });
+
+        let config = SipDialConfig::new(
+            "127.0.0.1",
+            trunk_addr.port(),
+            SipTransportKind::Udp,
+            "+15551112222",
+            "+15553334444",
+        );
+        let mut session = SipCallSession::dial(config).await.expect("dial");
+        let mut events = Vec::new();
+        timeout(TEST_TIMEOUT, async {
+            loop {
+                let event = session.next_event().await.expect("event");
+                let ended = matches!(event, SipCallEvent::Ended { .. });
+                events.push(event);
+                if ended {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("call events timeout");
+        assert_eq!(
+            events,
+            vec![
+                SipCallEvent::Connected {
+                    negotiated_dtmf_pt: Some(101)
+                },
+                SipCallEvent::HoldChanged {
+                    on_hold: true,
+                    negotiated_dtmf_pt: Some(101)
+                },
+                SipCallEvent::Ended {
+                    reason: "remote_bye".to_owned()
+                },
+            ]
+        );
+        server_task
+            .await
+            .expect("mock trunk verified offer exchange");
+    }
+
     fn extract_header(msg: &str, prefix: &str) -> String {
         msg.lines()
             .find_map(|line| {
@@ -4075,5 +4467,1230 @@ mod tests {
             assert!(n > 0, "unexpected TLS EOF");
             buf.extend_from_slice(&scratch[..n]);
         }
+    }
+
+    async fn bind_loopback_udp() -> (UdpSocket, SocketAddr) {
+        let socket = UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+            .await
+            .expect("bind loopback UDP");
+        let addr = socket.local_addr().expect("loopback UDP addr");
+        (socket, addr)
+    }
+
+    async fn send_udp_text(socket: &UdpSocket, text: &str, peer: SocketAddr) {
+        socket
+            .send_to(text.as_bytes(), peer)
+            .await
+            .expect("send mock trunk datagram");
+    }
+
+    async fn recv_udp_text(socket: &UdpSocket) -> (String, SocketAddr) {
+        let mut buf = vec![0_u8; 65535];
+        let (n, peer) = timeout(TEST_TIMEOUT, socket.recv_from(&mut buf))
+            .await
+            .expect("mock trunk recv timeout")
+            .expect("mock trunk recv");
+        (
+            String::from_utf8(buf[..n].to_vec()).expect("SIP datagram utf8"),
+            peer,
+        )
+    }
+
+    fn trunk_sdp(ip: &str, rtp_port: u16, direction: &str) -> String {
+        format!(
+            "v=0\r\no=trunk 1 1 IN IP4 {ip}\r\ns=-\r\nc=IN IP4 {ip}\r\nt=0 0\r\nm=audio {rtp_port} RTP/AVP 0 101\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:101 telephone-event/8000\r\na={direction}\r\n"
+        )
+    }
+
+    fn localhost_tls_configs() -> (TlsAcceptor, Arc<rustls::ClientConfig>) {
+        let cert = CertificateDer::from(
+            BASE64_STANDARD
+                .decode(TEST_LOCALHOST_CERT_B64)
+                .expect("decode test cert DER"),
+        );
+        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
+            BASE64_STANDARD
+                .decode(TEST_LOCALHOST_PKCS8_B64)
+                .expect("decode test key DER"),
+        ));
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let server_cfg = rustls::ServerConfig::builder_with_provider(Arc::clone(&provider))
+            .with_safe_default_protocol_versions()
+            .expect("server TLS versions")
+            .with_no_client_auth()
+            .with_single_cert(vec![cert.clone()], key)
+            .expect("server single cert");
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(cert).expect("add custom root cert");
+        let client_cfg = rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .expect("client TLS versions")
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        (
+            TlsAcceptor::from(Arc::new(server_cfg)),
+            Arc::new(client_cfg),
+        )
+    }
+
+    type ConfigMutation = fn(&mut SipDialConfig);
+
+    fn detached_call_handle() -> (
+        SipCallHandle,
+        mpsc::Receiver<SignalingCommand>,
+        watch::Sender<SipCallState>,
+    ) {
+        let (cmd_tx, cmd_rx) = mpsc::channel(1);
+        let (state_tx, state_rx) = watch::channel(SipCallState::Dialing);
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let handle = SipCallHandle {
+            call_id: "detached".to_owned(),
+            local_sip_addr: addr,
+            local_rtp_addr: addr,
+            media_state: Arc::new(Mutex::new(OutboundMediaState::default())),
+            cmd_tx,
+            state_rx,
+            discarded_early_rtp: Arc::new(AtomicU64::new(0)),
+            sent_rtp_packets: Arc::new(AtomicU64::new(0)),
+            _lifeline: Arc::new(SessionLifeline {
+                cancel: CancellationToken::new(),
+            }),
+        };
+        (handle, cmd_rx, state_tx)
+    }
+
+    #[test]
+    fn dial_config_validation_rejects_blank_fields_and_header_injection() {
+        let base = SipDialConfig::new(
+            "sip.example.test",
+            5060,
+            SipTransportKind::Udp,
+            "+15551112222",
+            "+15553334444",
+        );
+        assert!(base.validate().is_ok());
+        let mut blank_domain = base.clone();
+        blank_domain.domain = "  ".to_owned();
+        assert_eq!(blank_domain.effective_domain(), "sip.example.test");
+
+        let cases: [(ConfigMutation, &str); 7] = [
+            (
+                |c| c.server_host = " ".to_owned(),
+                "server_host must not be empty",
+            ),
+            (|c| c.server_port = 0, "server_port must be non-zero"),
+            (
+                |c| c.caller_id = String::new(),
+                "caller_id must not be empty",
+            ),
+            (
+                |c| c.target_number = "\t".to_owned(),
+                "target_number must not be empty",
+            ),
+            (
+                |c| c.username = "alice\r\nX-Injected: 1".to_owned(),
+                "username contains forbidden control characters",
+            ),
+            (
+                |c| c.display_name = "Agent\nBob".to_owned(),
+                "display_name contains forbidden control characters",
+            ),
+            (
+                |c| c.domain = "example.test\0".to_owned(),
+                "domain contains forbidden control characters",
+            ),
+        ];
+        for (mutate, expected) in cases {
+            let mut config = base.clone();
+            mutate(&mut config);
+            let err = config.validate().expect_err(expected);
+            assert!(
+                matches!(err, SipError::InvalidConfig(ref msg) if msg == expected),
+                "{err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn digest_kv_parser_handles_spacing_escapes_and_malformed_params() {
+        let cases: [(&str, &[(&str, &str)]); 6] = [
+            (
+                r#"realm = "a\"b\\c" , nonce= n1,,opaque="o""#,
+                &[("realm", r#"a"b\c"#), ("nonce", "n1"), ("opaque", "o")],
+            ),
+            (
+                "flag stray, bare,=orphan, realm=r, tail ",
+                &[("realm", "r")],
+            ),
+            (r#"realm="unterminated\"#, &[("realm", "unterminated")]),
+            ("nonce=", &[("nonce", "")]),
+            ("realm=x, foo", &[("realm", "x")]),
+            ("realm=x, ", &[("realm", "x")]),
+        ];
+        for (input, expected) in cases {
+            let expected: Vec<(String, String)> = expected
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect();
+            assert_eq!(parse_digest_kv_pairs(input), expected, "input={input:?}");
+        }
+    }
+
+    #[test]
+    fn digest_challenge_parser_reads_sha256_sess_and_stale_and_rejects_unsupported() {
+        let challenge = parse_digest_challenge(
+            r#"digest realm="r", nonce="n", qop="auth,,auth-int", algorithm=sha-256-SESS, stale=TRUE, domain="sip:x""#,
+        )
+        .expect("valid SHA-256-sess challenge");
+        assert_eq!(
+            challenge,
+            DigestChallenge {
+                realm: "r".to_owned(),
+                nonce: "n".to_owned(),
+                opaque: None,
+                qop_options: vec!["auth".to_owned(), "auth-int".to_owned()],
+                algorithm: DigestAlgorithm::Sha256Sess,
+                stale: true,
+            }
+        );
+        let fresh = parse_digest_challenge(r#"Digest realm="r", nonce="n", stale=false"#)
+            .expect("valid MD5 challenge");
+        assert!(!fresh.stale);
+        assert_eq!(fresh.algorithm, DigestAlgorithm::Md5);
+
+        for (header, expected) in [
+            ("Digest   ", "empty Digest challenge"),
+            ("Basic realm=\"x\"", "authenticate header is not Digest"),
+            ("Dig", "authenticate header is not Digest"),
+            (
+                r#"Digest realm="r", nonce="n", algorithm=SHA-512"#,
+                "unsupported Digest algorithm 'SHA-512'",
+            ),
+            (r#"Digest nonce="n""#, "Digest challenge missing realm"),
+            (r#"Digest realm="r""#, "Digest challenge missing nonce"),
+        ] {
+            let err = parse_digest_challenge(header).expect_err(header);
+            assert!(
+                matches!(err, SipError::Protocol(ref msg) if msg == expected),
+                "{header}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn digest_response_handles_legacy_session_and_auth_int_variants() {
+        let secret = random_hex_token(16);
+        let creds = DigestCredentials {
+            username: "alice",
+            password: &secret,
+            method: "INVITE",
+            digest_uri: "sip:bob@example.test",
+            entity_body: b"v=0\r\n",
+            cnonce: "c0ffee",
+            nonce_count: 2,
+        };
+        let challenge = |qop: &[&str], algorithm: DigestAlgorithm| DigestChallenge {
+            realm: "example.test".to_owned(),
+            nonce: "n0nce".to_owned(),
+            opaque: None,
+            qop_options: qop.iter().map(|q| (*q).to_owned()).collect(),
+            algorithm,
+            stale: false,
+        };
+        let ha1 = md5_hex(format!("alice:example.test:{secret}").as_bytes());
+        let ha2 = md5_hex(b"INVITE:sip:bob@example.test");
+
+        let legacy = challenge(&[], DigestAlgorithm::Md5);
+        let (legacy_resp, legacy_qop) =
+            compute_digest_response(&legacy, &creds).expect("RFC 2069 digest");
+        assert_eq!(legacy_qop, None);
+        assert_eq!(
+            legacy_resp,
+            md5_hex(format!("{ha1}:n0nce:{ha2}").as_bytes())
+        );
+        let legacy_header =
+            build_digest_authorization_header(&legacy, &creds).expect("legacy header");
+        assert!(
+            legacy_header.ends_with(&format!("response=\"{legacy_resp}\", algorithm=MD5")),
+            "{legacy_header}"
+        );
+
+        let sess = challenge(&[], DigestAlgorithm::Md5Sess);
+        let sess_ha1 = md5_hex(format!("{ha1}:n0nce:c0ffee").as_bytes());
+        let (sess_resp, sess_qop) =
+            compute_digest_response(&sess, &creds).expect("MD5-sess digest");
+        assert_eq!(sess_qop, None);
+        assert_eq!(
+            sess_resp,
+            md5_hex(format!("{sess_ha1}:n0nce:{ha2}").as_bytes())
+        );
+        let sess_header = build_digest_authorization_header(&sess, &creds).expect("sess header");
+        assert!(
+            sess_header.ends_with(", algorithm=MD5-sess, cnonce=\"c0ffee\""),
+            "{sess_header}"
+        );
+
+        let auth_int = challenge(&["auth-int"], DigestAlgorithm::Sha256);
+        let sha_ha1 = sha256_hex(format!("alice:example.test:{secret}").as_bytes());
+        let sha_ha2 = sha256_hex(
+            format!("INVITE:sip:bob@example.test:{}", sha256_hex(b"v=0\r\n")).as_bytes(),
+        );
+        let (int_resp, int_qop) =
+            compute_digest_response(&auth_int, &creds).expect("auth-int digest");
+        assert_eq!(int_qop, Some("auth-int"));
+        assert_eq!(
+            int_resp,
+            sha256_hex(format!("{sha_ha1}:n0nce:00000002:c0ffee:auth-int:{sha_ha2}").as_bytes())
+        );
+
+        let err = compute_digest_response(&challenge(&["auth-conf"], DigestAlgorithm::Md5), &creds)
+            .expect_err("unsupported qop");
+        assert!(
+            matches!(err, SipError::Protocol(ref msg) if msg.contains("auth-conf")),
+            "{err:?}"
+        );
+        let no_cnonce = DigestCredentials {
+            cnonce: "",
+            ..creds
+        };
+        let err = compute_digest_response(&challenge(&["auth"], DigestAlgorithm::Md5), &no_cnonce)
+            .expect_err("qop requires cnonce");
+        assert!(matches!(err, SipError::InvalidConfig(_)), "{err:?}");
+        assert!(compute_digest_response(&legacy, &no_cnonce).is_ok());
+    }
+
+    #[test]
+    fn sdp_answer_parser_skips_malformed_lines_and_rejects_disabled_audio() {
+        let answer = "v=0\r\n\r\n\
+            c=ATM NSAP 47.0005\r\n\
+            c=IN IPX 10.0.0.1\r\n\
+            m=audio 4000 RTP/AVP 0 abc 101\r\n\
+            c=IN IP6 ::1\r\n\
+            a=rtpmap:abc telephone-event/8000\r\n\
+            a=rtpmap:101\r\n\
+            a=rtpmap:101 telephone-event/8000\r\n";
+        let parsed = parse_sdp_answer(answer).expect("valid IPv6 SDP answer");
+        assert_eq!(parsed.remote_media_ip, IpAddr::V6(Ipv6Addr::LOCALHOST));
+        assert_eq!(parsed.remote_audio_port, 4000);
+        assert_eq!(parsed.negotiated_dtmf_pt, Some(101));
+
+        for (conn, expected) in [
+            (
+                "IN IP4 10.0.0.1/127",
+                Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
+            ),
+            ("in ip6 ::1", Some(IpAddr::V6(Ipv6Addr::LOCALHOST))),
+            ("ATM NSAP 47.0005", None),
+            ("IN IPX 10.0.0.1", None),
+            ("IN IP4", None),
+            ("IN IP4 not-an-ip", None),
+        ] {
+            assert_eq!(parse_sdp_connection_ip(conn), expected, "c={conn}");
+        }
+
+        let rejected = parse_sdp_answer("v=0\r\nc=IN IP4 127.0.0.1\r\nm=audio 0 RTP/AVP 0\r\n")
+            .expect_err("port 0 disables audio");
+        assert!(
+            matches!(rejected, SipError::Protocol(ref msg) if msg.contains("port 0")),
+            "{rejected:?}"
+        );
+        let missing_ip = parse_sdp_answer("v=0\r\nc=ATM NSAP 1\r\nm=audio 4000 RTP/AVP 0\r\n")
+            .expect_err("no usable connection address");
+        assert!(
+            matches!(missing_ip, SipError::Protocol(ref msg) if msg.contains("missing c=")),
+            "{missing_ip:?}"
+        );
+    }
+
+    #[test]
+    fn rtp_parser_honours_csrc_extension_and_padding_bounds() {
+        let base = build_rtp_packet(true, PCMU_PAYLOAD_TYPE, 7, 160, 0xABCD, &[]);
+        let with_header = |first: u8, tail: &[u8]| {
+            let mut packet = base.clone();
+            packet[0] = first;
+            packet.extend_from_slice(tail);
+            packet
+        };
+
+        let csrc = with_header(0x81, &[9, 9, 9, 9, 1, 2]);
+        let parsed = parse_rtp_packet(&csrc).expect("CSRC packet");
+        assert!(parsed.marker);
+        assert_eq!(
+            (
+                parsed.payload_type,
+                parsed.sequence_number,
+                parsed.timestamp,
+                parsed.ssrc
+            ),
+            (PCMU_PAYLOAD_TYPE, 7, 160, 0xABCD)
+        );
+        assert_eq!(parsed.payload, &[1, 2]);
+
+        let valid: [(&str, Vec<u8>, &[u8]); 2] = [
+            (
+                "header extension",
+                with_header(0x90, &[0xBE, 0xDE, 0, 1, 7, 7, 7, 7, 5, 6]),
+                &[5, 6],
+            ),
+            ("padding", with_header(0xA0, &[5, 6, 0, 0, 3]), &[5, 6]),
+        ];
+        for (label, packet, payload) in valid {
+            let parsed = parse_rtp_packet(&packet).expect(label);
+            assert_eq!(parsed.payload, payload, "{label}");
+        }
+
+        let invalid: [(&str, Vec<u8>); 6] = [
+            ("shorter than fixed header", base[..11].to_vec()),
+            ("RTP version 1", with_header(0x40, &[1])),
+            ("CSRC list past end", with_header(0x8F, &[1, 2, 3, 4])),
+            (
+                "truncated header extension",
+                with_header(0x90, &[0xBE, 0xDE, 0, 2, 7, 7, 7, 7]),
+            ),
+            ("zero padding length", with_header(0xA0, &[5, 6, 0])),
+            ("padding past payload", with_header(0xA0, &[5, 200])),
+        ];
+        for (label, packet) in invalid {
+            assert_eq!(parse_rtp_packet(&packet), None, "{label}");
+        }
+    }
+
+    #[test]
+    fn reorder_buffer_drops_unknown_late_and_duplicate_packets_and_resyncs_after_jumps() {
+        let push = |reorder: &mut RtpReorderBuffer, pt: u8, seq: u16, byte: u8| {
+            let packet = build_rtp_packet(
+                false,
+                pt,
+                seq,
+                u32::from(seq) * RTP_TIMESTAMP_STEP,
+                7,
+                &[byte; PCMU_FRAME_BYTES],
+            );
+            reorder
+                .push_rtp_packet(&parse_rtp_packet(&packet).expect("valid RTP"))
+                .iter()
+                .map(|frame| (frame.sequence_number, frame.pcmu[0]))
+                .collect::<Vec<_>>()
+        };
+        let drain = |frames: Vec<OrderedInboundPayload>| {
+            frames
+                .iter()
+                .map(|frame| (frame.sequence_number, frame.pcmu[0]))
+                .collect::<Vec<_>>()
+        };
+        let mut reorder = RtpReorderBuffer::default();
+
+        assert!(
+            push(&mut reorder, 8, 10, 0xAA).is_empty(),
+            "PCMA is ignored"
+        );
+        assert!(!reorder.has_pending());
+        assert!(
+            push(&mut reorder, DEFAULT_TELEPHONE_EVENT_PT, 10, 0x01).is_empty(),
+            "a leading telephone-event anchors the sequence without audio"
+        );
+        assert!(push(&mut reorder, PCMU_PAYLOAD_TYPE, 12, 0x12).is_empty());
+        assert!(reorder.has_pending());
+        assert!(push(&mut reorder, PCMU_PAYLOAD_TYPE, 12, 0x99).is_empty());
+        assert!(push(&mut reorder, PCMU_PAYLOAD_TYPE, 9, 0x09).is_empty());
+
+        assert_eq!(
+            drain(reorder.flush_expired()),
+            vec![(11, PCMU_SILENCE_BYTE), (12, 0x12)],
+            "flush fills the gap and keeps the first copy of a duplicate"
+        );
+        assert!(reorder.flush_expired().is_empty());
+
+        assert!(push(&mut reorder, PCMU_PAYLOAD_TYPE, 14, 0x14).is_empty());
+        assert_eq!(
+            push(&mut reorder, PCMU_PAYLOAD_TYPE, 100, 0x64),
+            vec![(13, PCMU_SILENCE_BYTE), (14, 0x14), (100, 0x64)],
+            "a large jump flushes buffered audio before resyncing"
+        );
+        assert!(push(&mut reorder, DEFAULT_TELEPHONE_EVENT_PT, 5000, 0x01).is_empty());
+        assert!(!reorder.has_pending());
+        assert_eq!(
+            push(&mut reorder, PCMU_PAYLOAD_TYPE, 5001, 0x51),
+            vec![(5001, 0x51)]
+        );
+    }
+
+    #[test]
+    fn sip_parser_unfolds_headers_accepts_compact_forms_and_enforces_framing_limits() {
+        assert_eq!(parse_sip_datagram(b"\r\n\r\n").expect("keepalive"), None);
+        let unterminated = parse_sip_datagram(b"\r\nOPTIONS sip:a SIP/2.0\r\nVia: x");
+        assert!(
+            matches!(unterminated, Err(SipError::Protocol(ref msg)) if msg.contains("CRLFCRLF")),
+            "{unterminated:?}"
+        );
+
+        let folded = parse_sip_datagram(
+            b"\nMESSAGE sip:a@b SIP/2.0\nSubject: first\n  second\n\tthird\nmalformed-line\nc: text/plain\nl: 3\n\nhey-extra",
+        )
+        .expect("parse folded message")
+        .expect("message present");
+        assert_eq!(
+            folded.start_line,
+            SipStartLine::Request {
+                method: "MESSAGE".to_owned(),
+                uri: "sip:a@b".to_owned(),
+            }
+        );
+        assert_eq!(folded.headers.len(), 3);
+        assert_eq!(folded.first_header("Subject"), Some("first second third"));
+        assert_eq!(folded.first_header("Content-Type"), Some("text/plain"));
+        assert_eq!(folded.first_header("Content-Length"), Some("3"));
+        assert_eq!(folded.body, b"hey");
+
+        let unframed = parse_sip_datagram(b"OPTIONS sip:a SIP/2.0\r\nVia: x\r\n\r\nbody")
+            .expect("parse")
+            .expect("message present");
+        assert_eq!(unframed.body, b"body");
+
+        let orphan = parse_sip_headers_section(
+            b"OPTIONS sip:a SIP/2.0\r\n orphan-continuation\r\n\r\nVia: x",
+        )
+        .expect("headers");
+        assert_eq!(orphan.headers, vec![("Via".to_owned(), "x".to_owned())]);
+        assert_eq!(orphan.content_length, None);
+
+        let version = parse_sip_start_line("OPTIONS sip:a SIP/3.0");
+        assert!(
+            matches!(version, Err(SipError::Protocol(ref msg)) if msg.contains("SIP/3.0")),
+            "{version:?}"
+        );
+
+        let mut unterminated_stream = vec![b'a'; MAX_SIP_HEADER_BYTES + 1];
+        let mut long_headers = b"OPTIONS sip:a SIP/2.0\r\nX-Pad: ".to_vec();
+        long_headers.extend(vec![b'a'; MAX_SIP_HEADER_BYTES]);
+        long_headers.extend_from_slice(b"\r\nContent-Length: 0\r\n\r\n");
+        for (label, buf) in [
+            ("unterminated", &mut unterminated_stream),
+            ("terminated", &mut long_headers),
+        ] {
+            let result = try_extract_stream_sip_message(buf);
+            assert!(
+                matches!(result, Err(SipError::Protocol(ref msg)) if msg == "SIP stream headers exceed maximum size"),
+                "{label}: {result:?}"
+            );
+        }
+        let mut huge_body = format!(
+            "OPTIONS sip:a SIP/2.0\r\nContent-Length: {}\r\n\r\n",
+            MAX_SIP_BODY_BYTES + 1
+        )
+        .into_bytes();
+        let result = try_extract_stream_sip_message(&mut huge_body);
+        assert!(
+            matches!(result, Err(SipError::Protocol(ref msg)) if msg.contains("exceeds maximum")),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn header_helpers_split_quoted_lists_extract_uris_and_escape_values() {
+        for (header, expected) in [
+            (
+                "<sip:alice@example.test>;tag=1",
+                Some("sip:alice@example.test"),
+            ),
+            (
+                "\"Bob\" <sips:bob@example.test;transport=tls>",
+                Some("sips:bob@example.test;transport=tls"),
+            ),
+            (
+                "sip:carol@example.test;expires=60",
+                Some("sip:carol@example.test"),
+            ),
+            ("sips:dave@example.test", Some("sips:dave@example.test")),
+            ("<>", None),
+            ("tel:+15551234567", None),
+        ] {
+            assert_eq!(
+                extract_sip_uri(header).as_deref(),
+                expected,
+                "header={header:?}"
+            );
+        }
+
+        assert_eq!(
+            split_comma_outside_angles(r#""A, \"B\" <x>" <sip:a@x>,<sip:b,c@y>, sip:z\q"#),
+            vec![r#""A, \"B\" <x>" <sip:a@x>"#, "<sip:b,c@y>", r" sip:z\q"]
+        );
+
+        let routed = SipMessage {
+            start_line: SipStartLine::Response {
+                status_code: 200,
+                reason: "OK".to_owned(),
+            },
+            headers: vec![
+                (
+                    "Record-Route".to_owned(),
+                    "<sip:p1;lr>, ,<sip:p2;lr>".to_owned(),
+                ),
+                ("Record-Route".to_owned(), "<sip:p3;lr>".to_owned()),
+            ],
+            body: Vec::new(),
+        };
+        assert_eq!(
+            extract_reversed_record_routes(&routed),
+            vec!["<sip:p3;lr>", "<sip:p2;lr>", "<sip:p1;lr>"]
+        );
+
+        assert_eq!(
+            escape_quoted_string(r#"say "hi" \o/"#),
+            r#"say \"hi\" \\o/"#
+        );
+    }
+
+    #[tokio::test]
+    async fn call_handle_spaces_dtmf_digits_and_tolerates_closed_signaling_channels() {
+        let (handle, cmd_rx, state_tx) = detached_call_handle();
+        handle.enqueue_pcmu_frames(Vec::new());
+        handle.enqueue_rfc4733_dtmf(DEFAULT_TELEPHONE_EVENT_PT, Vec::new());
+        assert!(!handle.has_pending_outbound_media());
+
+        handle.enqueue_rfc4733_dtmf(
+            DEFAULT_TELEPHONE_EVENT_PT,
+            vec![
+                [1, 10, 0x00, 0xA0],
+                [1, 0x80 | 10, 0x01, 0x40],
+                [2, 10, 0x00, 0xA0],
+                [2, 0x80 | 10, 0x01, 0x40],
+            ],
+        );
+        assert!(handle.has_pending_outbound_media());
+        let steps: Vec<Option<(u8, bool)>> = lock_unpoisoned(&handle.media_state)
+            .dtmf_queue
+            .iter()
+            .map(|step| match step {
+                QueuedDtmfStep::Packet {
+                    payload,
+                    first_of_digit,
+                    ..
+                } => Some((payload[0], *first_of_digit)),
+                QueuedDtmfStep::InterDigitSilence => None,
+            })
+            .collect();
+        assert_eq!(
+            steps,
+            vec![
+                Some((1, true)),
+                Some((1, false)),
+                None,
+                None,
+                Some((2, true)),
+                Some((2, false)),
+                None,
+                None,
+            ],
+            "each digit restarts its event and is separated by inter-digit silence"
+        );
+
+        drop(cmd_rx);
+        handle
+            .hangup()
+            .await
+            .expect("hangup after the signaling loop exited is a no-op");
+
+        state_tx
+            .send(SipCallState::Ended {
+                reason: "remote_bye".to_owned(),
+                failure: None,
+            })
+            .expect("publish ended state");
+        let ended = handle
+            .wait_for_connected()
+            .await
+            .expect_err("ended call never connects");
+        assert!(
+            matches!(ended, SipError::Closed(ref reason) if reason == "remote_bye"),
+            "{ended:?}"
+        );
+
+        let (dialing, _dialing_cmd_rx, dialing_state_tx) = detached_call_handle();
+        drop(dialing_state_tx);
+        let exited = dialing
+            .wait_for_connected()
+            .await
+            .expect_err("dropped state channel ends the wait");
+        assert!(
+            matches!(exited, SipError::Closed(ref reason) if reason == "SIP signaling task exited"),
+            "{exited:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn udp_transport_binds_loopback_only_for_loopback_servers() {
+        for host in ["192.0.2.10", "2001:db8::10", "::1"] {
+            let config = SipDialConfig::new(
+                host,
+                5060,
+                SipTransportKind::Udp,
+                "+15551112222",
+                "+15553334444",
+            );
+            let expected_remote = SocketAddr::new(host.parse().expect("literal IP"), 5060);
+            match SipTransport::connect(&config).await {
+                Ok((_transport, local, remote)) => {
+                    assert_eq!(remote, expected_remote);
+                    assert_eq!(local.is_ipv6(), remote.is_ipv6(), "{host}");
+                    assert_eq!(
+                        local.ip().is_loopback(),
+                        remote.ip().is_loopback(),
+                        "{host}"
+                    );
+                }
+                // Hosts without a route (or IPv6) for this family fail at bind/connect time.
+                Err(err) => assert!(matches!(err, SipError::Io(_)), "{host}: {err:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn tls_peer_close_before_answer_ends_call_with_transport_failure() {
+        let (acceptor, client_tls_cfg) = localhost_tls_configs();
+        let listener = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+            .await
+            .expect("bind TLS listener");
+        let server_addr = listener.local_addr().expect("TLS listener addr");
+
+        let server_task = tokio::spawn(async move {
+            let (tcp, _) = timeout(TEST_TIMEOUT, listener.accept())
+                .await
+                .expect("accept timeout")
+                .expect("accept TCP");
+            let mut tls = timeout(TEST_TIMEOUT, acceptor.accept(tcp))
+                .await
+                .expect("TLS accept timeout")
+                .expect("TLS accept");
+            let mut buf = Vec::new();
+            let invite = read_one_tls_sip_message(&mut tls, &mut buf).await;
+            assert!(invite.starts_with("INVITE sip:+15557778888@localhost SIP/2.0\r\n"));
+            tls.shutdown().await.expect("send TLS close_notify");
+            tls
+        });
+
+        let config = SipDialConfig::new(
+            "127.0.0.1",
+            server_addr.port(),
+            SipTransportKind::Tls,
+            "+15550001111",
+            "+15557778888",
+        )
+        .with_domain("localhost")
+        .with_tls_server_name("localhost")
+        .with_custom_tls_config(client_tls_cfg);
+        let session = SipCallSession::dial(config).await.expect("dial TLS");
+        let err = timeout(TEST_TIMEOUT, session.wait_for_connected())
+            .await
+            .expect("transport failure timeout")
+            .expect_err("closed TLS stream ends the call");
+        assert!(
+            matches!(
+                err,
+                SipError::Closed(ref text)
+                    if text == "transport_error: SIP session closed: SIP TLS stream closed by peer"
+            ),
+            "{err:?}"
+        );
+        let _closed_server_stream = server_task.await.expect("TLS server finished");
+    }
+
+    async fn dial_against_challenges(
+        username: &str,
+        challenges: Vec<String>,
+    ) -> (SipError, Vec<String>) {
+        let (trunk_sip, trunk_addr) = bind_loopback_udp().await;
+        let server_task = tokio::spawn(async move {
+            let mut invites = Vec::new();
+            for challenge in challenges {
+                let (invite, client) = recv_udp_text(&trunk_sip).await;
+                let response = format!(
+                    "SIP/2.0 {challenge}\r\nVia: {}\r\nFrom: {}\r\nTo: {};tag=auth\r\nCall-ID: {}\r\nCSeq: {}\r\nContent-Length: 0\r\n\r\n",
+                    extract_header(&invite, "Via:"),
+                    extract_header(&invite, "From:"),
+                    extract_header(&invite, "To:"),
+                    extract_header(&invite, "Call-ID:"),
+                    extract_header(&invite, "CSeq:"),
+                );
+                send_udp_text(&trunk_sip, &response, client).await;
+                let (ack, _) = recv_udp_text(&trunk_sip).await;
+                assert!(ack.starts_with("ACK "), "{ack}");
+                invites.push(invite);
+            }
+            invites
+        });
+        let mut config = SipDialConfig::new(
+            "127.0.0.1",
+            trunk_addr.port(),
+            SipTransportKind::Udp,
+            "+15551112222",
+            "+15553334444",
+        );
+        if !username.is_empty() {
+            config = config.with_credentials(username, random_hex_token(16));
+        }
+        let session = SipCallSession::dial(config).await.expect("dial");
+        let err = timeout(TEST_TIMEOUT, session.wait_for_connected())
+            .await
+            .expect("auth outcome timeout")
+            .expect_err("authentication must fail");
+        (err, server_task.await.expect("mock trunk"))
+    }
+
+    #[tokio::test]
+    async fn udp_digest_auth_stops_without_credentials_unsupported_schemes_or_repeated_challenges()
+    {
+        let digest = |nonce: &str, stale: bool| {
+            format!(
+                "401 Unauthorized\r\nWWW-Authenticate: Digest realm=\"trunk.test\", nonce=\"{nonce}\", qop=\"auth\", stale={stale}"
+            )
+        };
+        let is_auth_failure = |err: &SipError, code: u16, expected_reason: &str| {
+            matches!(
+                err,
+                SipError::AuthFailed { status_code, reason }
+                    if *status_code == code && reason == expected_reason
+            )
+        };
+
+        let (err, invites) = dial_against_challenges("", vec![digest("n1", false)]).await;
+        assert!(is_auth_failure(&err, 401, "Unauthorized"), "{err:?}");
+        assert_eq!(invites.len(), 1, "no credentials means no retry");
+
+        let (err, invites) = dial_against_challenges(
+            "alice",
+            vec!["407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"trunk.test\"".to_owned()],
+        )
+        .await;
+        assert!(
+            is_auth_failure(&err, 407, "missing supported Digest challenge"),
+            "{err:?}"
+        );
+        assert_eq!(invites.len(), 1);
+
+        let (err, invites) =
+            dial_against_challenges("alice", vec![digest("n1", false), digest("n2", false)]).await;
+        assert!(is_auth_failure(&err, 401, "Unauthorized"), "{err:?}");
+        assert_eq!(
+            invites.len(),
+            2,
+            "a fresh challenge after credentials is final"
+        );
+        assert!(extract_header(&invites[1], "Authorization:").contains("nonce=\"n1\""));
+
+        let (err, invites) = dial_against_challenges(
+            "alice",
+            vec![digest("n1", false), digest("n2", true), digest("n3", true)],
+        )
+        .await;
+        assert!(is_auth_failure(&err, 401, "Unauthorized"), "{err:?}");
+        assert_eq!(
+            invites.len(),
+            3,
+            "stale nonces retry until the attempt limit"
+        );
+        assert!(invites[2].contains("CSeq: 3 INVITE\r\n"));
+        assert!(extract_header(&invites[2], "Authorization:").contains("nonce=\"n2\""));
+    }
+
+    #[tokio::test]
+    async fn pre_answer_hangup_ignores_unrelated_cancel_drain_traffic_without_487() {
+        let (trunk_sip, trunk_addr) = bind_loopback_udp().await;
+        let server_task = tokio::spawn(async move {
+            let (invite, client) = recv_udp_text(&trunk_sip).await;
+            let via = extract_header(&invite, "Via:");
+            let from = extract_header(&invite, "From:");
+            let to = extract_header(&invite, "To:");
+            let call_id = extract_header(&invite, "Call-ID:");
+            send_udp_text(
+                &trunk_sip,
+                &format!("SIP/2.0 180 Ringing\r\nVia: {via}\r\nFrom: {from}\r\nTo: {to};tag=ring\r\nCall-ID: {call_id}\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n"),
+                client,
+            )
+            .await;
+            let (cancel, _) = recv_udp_text(&trunk_sip).await;
+            assert!(cancel.starts_with("CANCEL "), "{cancel}");
+            send_udp_text(
+                &trunk_sip,
+                &format!("OPTIONS sip:caller@{client} SIP/2.0\r\nVia: SIP/2.0/UDP {trunk_addr};branch=z9hG4bKdrain\r\nCall-ID: {call_id}\r\nCSeq: 5 OPTIONS\r\nContent-Length: 0\r\n\r\n"),
+                client,
+            )
+            .await;
+            send_udp_text(
+                &trunk_sip,
+                &format!("SIP/2.0 481 Call/Transaction Does Not Exist\r\nVia: {via}\r\nFrom: {from}\r\nTo: {to};tag=ring\r\nCall-ID: {call_id}\r\nCSeq: 1 CANCEL\r\nContent-Length: 0\r\n\r\n"),
+                client,
+            )
+            .await;
+            let mut buf = vec![0_u8; 2048];
+            assert!(
+                timeout(Duration::from_millis(400), trunk_sip.recv_from(&mut buf))
+                    .await
+                    .is_err(),
+                "without a final INVITE response there is nothing to ACK"
+            );
+        });
+
+        let config = SipDialConfig::new(
+            "127.0.0.1",
+            trunk_addr.port(),
+            SipTransportKind::Udp,
+            "+15551110000",
+            "+15550009999",
+        );
+        let mut session = SipCallSession::dial(config).await.expect("dial");
+        let ringing = timeout(TEST_TIMEOUT, session.next_event())
+            .await
+            .expect("ringing timeout")
+            .expect("ringing event");
+        assert_eq!(ringing, SipCallEvent::Ringing);
+        session
+            .hangup()
+            .await
+            .expect("CANCEL drain tolerates a missing 487");
+        let ended = timeout(TEST_TIMEOUT, session.next_event())
+            .await
+            .expect("ended timeout")
+            .expect("ended event");
+        assert_eq!(
+            ended,
+            SipCallEvent::Ended {
+                reason: "local_hangup".to_owned()
+            }
+        );
+        assert_eq!(
+            session.state(),
+            SipCallState::Ended {
+                reason: "local_hangup".to_owned(),
+                failure: None
+            }
+        );
+        server_task.await.expect("mock trunk verified CANCEL drain");
+    }
+
+    #[tokio::test]
+    async fn udp_dialog_ignores_stray_traffic_rejects_mismatched_requests_and_tracks_media_hold() {
+        let (trunk_sip, trunk_addr) = bind_loopback_udp().await;
+        let (trunk_rtp, trunk_rtp_addr) = bind_loopback_udp().await;
+        let rtp_port = trunk_rtp_addr.port();
+
+        let server_task = tokio::spawn(async move {
+            let (invite, client) = recv_udp_text(&trunk_sip).await;
+            let via = extract_header(&invite, "Via:");
+            let from = extract_header(&invite, "From:");
+            let to = extract_header(&invite, "To:");
+            let call_id = extract_header(&invite, "Call-ID:");
+            let from_tag = header_tag(&from).expect("INVITE From tag").to_owned();
+            let client_rtp = SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::LOCALHOST),
+                extract_sdp_audio_port(&invite),
+            );
+            let response = |status: &str, cseq: &str, body: &str| {
+                let content_type = if body.is_empty() {
+                    ""
+                } else {
+                    "Content-Type: application/sdp\r\n"
+                };
+                format!(
+                    "SIP/2.0 {status}\r\nVia: {via}\r\nFrom: {from}\r\nTo: {to};tag=uas1\r\nCall-ID: {call_id}\r\nCSeq: {cseq}\r\nContact: <sip:uas@{trunk_addr}>\r\n{content_type}Content-Length: {}\r\n\r\n{body}",
+                    body.len()
+                )
+            };
+            let request = |method: &str, cseq: u32, contact: &str, body: &str| {
+                let content_type = if body.is_empty() {
+                    ""
+                } else {
+                    "Content-Type: application/sdp\r\n"
+                };
+                format!(
+                    "{method} sip:caller@{client} SIP/2.0\r\nVia: SIP/2.0/UDP {trunk_addr};branch=z9hG4bK{method}{cseq}\r\nFrom: {to};tag=uas1\r\nTo: {from}\r\nCall-ID: {call_id}\r\nCSeq: {cseq} {method}\r\n{contact}{content_type}Content-Length: {}\r\n\r\n{body}",
+                    body.len()
+                )
+            };
+            let probe = |branch: &str, headers: &str| {
+                format!(
+                    "OPTIONS sip:caller@{client} SIP/2.0\r\nVia: SIP/2.0/UDP {trunk_addr};branch=z9hG4bK{branch}\r\n{headers}Content-Length: 0\r\n\r\n"
+                )
+            };
+            let mut rtp_buf = vec![0_u8; 2048];
+
+            // Stray traffic before the final response must not disturb the INVITE transaction.
+            for stray in [
+                "\r\n\r\n".to_owned(),
+                format!("SIP/2.0 100 Trying\r\nVia: {via}\r\nContent-Length: 0\r\n\r\n"),
+                response("200 OK", "1 OPTIONS", ""),
+                response("486 Busy Here", "9 INVITE", ""),
+                request("INVITE", 1, "", ""),
+                response("099 Unknown", "1 INVITE", ""),
+                response(
+                    "200 OK",
+                    "1 INVITE",
+                    &trunk_sdp("127.0.0.1", rtp_port, "sendonly"),
+                ),
+            ] {
+                send_udp_text(&trunk_sip, &stray, client).await;
+            }
+            let (ack, _) = recv_udp_text(&trunk_sip).await;
+            assert!(
+                ack.starts_with(&format!("ACK sip:uas@{trunk_addr} SIP/2.0\r\n")),
+                "{ack}"
+            );
+            assert!(
+                timeout(
+                    Duration::from_millis(120),
+                    trunk_rtp.recv_from(&mut rtp_buf)
+                )
+                .await
+                .is_err(),
+                "a sendonly answer holds outbound RTP"
+            );
+            send_udp_text(&trunk_sip, &response("180 Ringing", "1 INVITE", ""), client).await;
+
+            let reinvite = request("INVITE", 2, "", "");
+            for mismatched in [
+                reinvite.replace(&call_id, "other-call-id"),
+                reinvite.replace(&from_tag, "wrong-local-tag"),
+                reinvite.replace("tag=uas1", "tag=wrong-remote-tag"),
+            ] {
+                send_udp_text(&trunk_sip, &mismatched, client).await;
+                let (rejected, _) = recv_udp_text(&trunk_sip).await;
+                assert!(
+                    rejected.starts_with("SIP/2.0 481 Call/Transaction Does Not Exist\r\n"),
+                    "{rejected}"
+                );
+            }
+
+            let update = request("UPDATE", 2, "", "");
+            send_udp_text(
+                &trunk_sip,
+                &update.replace("CSeq: 2 UPDATE\r\n", ""),
+                client,
+            )
+            .await;
+            send_udp_text(&trunk_sip, &update, client).await;
+            let (refresh, _) = recv_udp_text(&trunk_sip).await;
+            assert!(
+                refresh.starts_with("SIP/2.0 200 OK\r\n") && refresh.contains("CSeq: 2 UPDATE\r\n"),
+                "{refresh}"
+            );
+            assert!(!refresh.contains("Content-Type:"), "{refresh}");
+            send_udp_text(&trunk_sip, &reinvite, client).await;
+            let (out_of_order, _) = recv_udp_text(&trunk_sip).await;
+            assert!(
+                out_of_order.starts_with("SIP/2.0 500 CSeq Out of Order\r\n")
+                    && out_of_order.contains("CSeq: 2 INVITE\r\n"),
+                "{out_of_order}"
+            );
+
+            send_udp_text(&trunk_sip, &request("INVITE", 3, "", ""), client).await;
+            let (offer, _) = recv_udp_text(&trunk_sip).await;
+            assert!(
+                offer.starts_with("SIP/2.0 200 OK\r\n") && offer.contains("m=audio "),
+                "{offer}"
+            );
+            let foreign_ack = request("ACK", 3, "", &trunk_sdp("127.0.0.1", rtp_port, "inactive"))
+                .replace(&call_id, "other-call-id");
+            send_udp_text(&trunk_sip, &foreign_ack, client).await;
+            send_udp_text(
+                &trunk_sip,
+                &request("ACK", 3, "", &trunk_sdp("127.0.0.1", rtp_port, "sendrecv")),
+                client,
+            )
+            .await;
+            send_udp_text(
+                &trunk_sip,
+                &probe("probe1", "To: <sip:probe@trunk.test>\r\n"),
+                client,
+            )
+            .await;
+            let (tagged, _) = recv_udp_text(&trunk_sip).await;
+            assert!(tagged.starts_with("SIP/2.0 200 OK\r\n"), "{tagged}");
+            assert!(
+                tagged.contains(&format!("To: <sip:probe@trunk.test>;tag={from_tag}\r\n")),
+                "{tagged}"
+            );
+            assert!(
+                !tagged.contains("From:")
+                    && !tagged.contains("Call-ID:")
+                    && !tagged.contains("CSeq:"),
+                "{tagged}"
+            );
+            let (_, rtp_from) = timeout(TEST_TIMEOUT, trunk_rtp.recv_from(&mut rtp_buf))
+                .await
+                .expect("RTP resumes timeout")
+                .expect("RTP resumes");
+            assert_eq!(rtp_from, client_rtp);
+
+            send_udp_text(
+                &trunk_sip,
+                &request("INVITE", 4, "", "not an sdp body"),
+                client,
+            )
+            .await;
+            let (unacceptable, _) = recv_udp_text(&trunk_sip).await;
+            assert!(
+                unacceptable.starts_with("SIP/2.0 488 Not Acceptable Here\r\n"),
+                "{unacceptable}"
+            );
+
+            let inbound = |seq: u16, byte: u8| {
+                build_rtp_packet(
+                    false,
+                    PCMU_PAYLOAD_TYPE,
+                    seq,
+                    u32::from(seq) * RTP_TIMESTAMP_STEP,
+                    0x0102_0304,
+                    &[byte; PCMU_FRAME_BYTES],
+                )
+            };
+            let held_offers = [
+                (
+                    5,
+                    trunk_sdp("127.0.0.1", rtp_port, "inactive"),
+                    "a=inactive\r\n",
+                ),
+                (
+                    6,
+                    trunk_sdp("0.0.0.0", rtp_port, "sendrecv"),
+                    "a=sendrecv\r\n",
+                ),
+            ];
+            for (cseq, sdp, answer_direction) in held_offers {
+                send_udp_text(&trunk_sip, &request("INVITE", cseq, "", &sdp), client).await;
+                let (answer, _) = recv_udp_text(&trunk_sip).await;
+                assert!(
+                    answer.starts_with("SIP/2.0 200 OK\r\n") && answer.contains(answer_direction),
+                    "{answer}"
+                );
+                send_udp_text(&trunk_sip, &request("INFO", 20 + cseq, "", ""), client).await;
+                send_udp_text(&trunk_sip, &probe("probe2", ""), client).await;
+                let (bare, _) = recv_udp_text(&trunk_sip).await;
+                assert!(
+                    bare.starts_with("SIP/2.0 200 OK\r\n") && !bare.contains("To:"),
+                    "INFO is ignored and a bare OPTIONS is answered: {bare}"
+                );
+                let seq = u16::try_from(cseq).expect("small CSeq");
+                trunk_rtp
+                    .send_to(&inbound(seq, 0x11), client_rtp)
+                    .await
+                    .expect("send held RTP");
+                tokio::time::sleep(Duration::from_millis(30)).await;
+            }
+
+            let refreshed_contact = format!("Contact: <sip:refreshed@{trunk_addr}>\r\n");
+            send_udp_text(
+                &trunk_sip,
+                &request(
+                    "INVITE",
+                    9,
+                    &refreshed_contact,
+                    &trunk_sdp("127.0.0.1", rtp_port, "sendrecv"),
+                ),
+                client,
+            )
+            .await;
+            let (resumed, _) = recv_udp_text(&trunk_sip).await;
+            assert!(resumed.starts_with("SIP/2.0 200 OK\r\n"), "{resumed}");
+            send_udp_text(&trunk_sip, &probe("probe3", ""), client).await;
+            let _ = recv_udp_text(&trunk_sip).await;
+            trunk_rtp
+                .send_to(b"junk", client_rtp)
+                .await
+                .expect("send non-RTP datagram");
+            trunk_rtp
+                .send_to(&inbound(7, 0x5A), client_rtp)
+                .await
+                .expect("send resumed RTP");
+
+            let (bye, _) = recv_udp_text(&trunk_sip).await;
+            assert!(
+                bye.starts_with(&format!("BYE sip:refreshed@{trunk_addr} SIP/2.0\r\n")),
+                "{bye}"
+            );
+            assert!(bye.contains("CSeq: 2 BYE\r\n"), "{bye}");
+            let bye_via = extract_header(&bye, "Via:");
+            // Unrelated traffic during the BYE drain is ignored and the missing 200 lets it time out.
+            for stray in [
+                request("OPTIONS", 30, "", ""),
+                format!("SIP/2.0 100 Trying\r\nVia: {bye_via}\r\nCall-ID: {call_id}\r\nCSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n"),
+                response("200 OK", "9 INVITE", ""),
+            ] {
+                send_udp_text(&trunk_sip, &stray, client).await;
+            }
+            let mut sip_buf = vec![0_u8; 2048];
+            assert!(
+                timeout(
+                    Duration::from_millis(400),
+                    trunk_sip.recv_from(&mut sip_buf)
+                )
+                .await
+                .is_err(),
+                "requests during teardown are not answered"
+            );
+        });
+
+        let mut config = SipDialConfig::new(
+            "127.0.0.1",
+            trunk_addr.port(),
+            SipTransportKind::Udp,
+            "+15551112222",
+            "+15553334444",
+        );
+        config.keepalive_interval = Duration::ZERO;
+        let mut session = SipCallSession::dial(config).await.expect("dial");
+        let mut events = Vec::new();
+        for _ in 0..6 {
+            events.push(
+                timeout(TEST_TIMEOUT, session.next_event())
+                    .await
+                    .expect("event timeout")
+                    .expect("event"),
+            );
+        }
+        let hold = |on_hold| SipCallEvent::HoldChanged {
+            on_hold,
+            negotiated_dtmf_pt: Some(DEFAULT_TELEPHONE_EVENT_PT),
+        };
+        assert_eq!(
+            events,
+            vec![
+                SipCallEvent::Connected {
+                    negotiated_dtmf_pt: Some(DEFAULT_TELEPHONE_EVENT_PT)
+                },
+                hold(true),
+                hold(false),
+                hold(true),
+                hold(true),
+                hold(false),
+            ]
+        );
+        let frame = timeout(TEST_TIMEOUT, session.next_inbound_audio())
+            .await
+            .expect("inbound audio timeout")
+            .expect("inbound audio");
+        assert_eq!(
+            (frame.rtp_sequence, frame.inbound_pcmu),
+            (7, [0x5A; PCMU_FRAME_BYTES]),
+            "RTP received while inactive or addressed to 0.0.0.0 is discarded"
+        );
+
+        session
+            .hangup()
+            .await
+            .expect("hangup tolerates an unanswered BYE");
+        let ended = timeout(TEST_TIMEOUT, session.next_event())
+            .await
+            .expect("ended timeout")
+            .expect("ended event");
+        assert_eq!(
+            ended,
+            SipCallEvent::Ended {
+                reason: "local_hangup".to_owned()
+            }
+        );
+        server_task
+            .await
+            .expect("mock trunk verified dialog handling");
     }
 }

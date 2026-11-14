@@ -154,11 +154,13 @@ pub(crate) struct Keychain {
 }
 
 impl Keychain {
-    const SYSTEM: Self = Self {
-        get: keychain_get,
-        set: keychain_set,
-        delete: keychain_delete,
-    };
+    fn system() -> Self {
+        Self {
+            get: keychain_get,
+            set: keychain_set,
+            delete: keychain_delete,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -195,7 +197,7 @@ impl SecretStore {
             .unwrap_or(false);
         Self {
             prefer_file,
-            keychain: Keychain::SYSTEM,
+            keychain: Keychain::system(),
             credential_layout: platform::credential_layout(),
             vault_cache: Arc::new(Mutex::new(None)),
         }
@@ -205,7 +207,7 @@ impl SecretStore {
     pub fn file_backend_for_tests() -> Self {
         Self {
             prefer_file: true,
-            keychain: Keychain::SYSTEM,
+            keychain: Keychain::system(),
             credential_layout: platform::credential_layout(),
             vault_cache: Arc::new(Mutex::new(None)),
         }
@@ -1914,6 +1916,7 @@ mod tests {
         let temp = tempdir().unwrap();
         let paths = AppPaths::for_tests(temp.path().to_path_buf());
         let store = SecretStore::with_keychain(memory_keychain());
+        let sip_password = generate_token();
 
         assert_eq!(store.load_sip_password(&paths).unwrap(), None);
         assert_eq!(
@@ -1922,7 +1925,7 @@ mod tests {
         );
 
         assert_eq!(
-            store.store_sip_password(&paths, "sip-s3cr3t").unwrap(),
+            store.store_sip_password(&paths, &sip_password).unwrap(),
             SecretBackend::Keychain
         );
         assert_eq!(MEMORY_KEYCHAIN.lock().unwrap().len(), 1);
@@ -1932,7 +1935,7 @@ mod tests {
             .contains_key(VAULT_ENTRY_ACCOUNT));
         assert_eq!(
             store.load_sip_password(&paths).unwrap(),
-            Some(("sip-s3cr3t".to_string(), SecretBackend::Keychain))
+            Some((sip_password.clone(), SecretBackend::Keychain))
         );
         assert_eq!(
             store.get(&paths, "alpha").unwrap().unwrap().token,
@@ -1963,9 +1966,11 @@ mod tests {
         let temp = tempdir().unwrap();
         let paths = AppPaths::for_tests(temp.path().to_path_buf());
         let store = SecretStore::with_windows_keychain(windows_memory_keychain());
+        let sip_password = generate_token();
+        let fallback_password = generate_token();
 
         assert_eq!(
-            store.store_sip_password(&paths, "win-sip-secret").unwrap(),
+            store.store_sip_password(&paths, &sip_password).unwrap(),
             SecretBackend::Keychain
         );
         assert_eq!(
@@ -1975,11 +1980,11 @@ mod tests {
                 .entries
                 .get(WINDOWS_SIP_PASSWORD_ACCOUNT)
                 .map(String::as_str),
-            Some("win-sip-secret")
+            Some(sip_password.as_str())
         );
         assert_eq!(
             store.load_sip_password(&paths).unwrap(),
-            Some(("win-sip-secret".to_string(), SecretBackend::Keychain))
+            Some((sip_password.clone(), SecretBackend::Keychain))
         );
         store.delete_sip_password(&paths).unwrap();
         assert_eq!(store.load_sip_password(&paths).unwrap(), None);
@@ -1989,13 +1994,15 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .reject_all_sets = true;
         assert_eq!(
-            store.store_sip_password(&paths, "fallback-sip").unwrap(),
+            store
+                .store_sip_password(&paths, &fallback_password)
+                .unwrap(),
             SecretBackend::File
         );
         assert!(paths.sip_secret_file_path().is_file());
         assert_eq!(
             store.load_sip_password(&paths).unwrap(),
-            Some(("fallback-sip".to_string(), SecretBackend::File))
+            Some((fallback_password.clone(), SecretBackend::File))
         );
         store.delete_sip_password(&paths).unwrap();
         assert!(!paths.sip_secret_file_path().exists());
@@ -2007,15 +2014,16 @@ mod tests {
         let temp = tempdir().unwrap();
         let paths = AppPaths::for_tests(temp.path().to_path_buf());
         let store = file_store();
+        let generated = generate_token();
         for invalid in [
-            "",
-            "   ",
-            "bad\nline",
-            "bad\rline",
-            "bad\0null",
-            &"x".repeat(MAX_TOKEN_BYTES + 1),
+            String::new(),
+            String::new() + "   ",
+            generated.clone() + "\nline",
+            generated.clone() + "\rline",
+            generated.clone() + "\0null",
+            generated.repeat(MAX_TOKEN_BYTES),
         ] {
-            assert!(store.store_sip_password(&paths, invalid).is_err());
+            assert!(store.store_sip_password(&paths, &invalid).is_err());
         }
     }
 }

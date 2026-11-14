@@ -46,6 +46,7 @@ import {
   modelModalVisibleAtom,
 } from '../state/modals';
 import { resolveQueuedMessageSteerDisabledReason } from './queuePresentation';
+import { isPhoneCallSurface, selectDockedPhoneCalls } from '../approvals/phoneCallModel';
 
 export type MainScreenWorkflowQueueStateContext = MainScreenHeaderActivityViewModelContext &
   MainScreenHeaderActivityViewModelResult;
@@ -60,7 +61,7 @@ function resolveSelectedThreadRuntimeSnapshot(
   return threadRuntimeSnapshotsRef.current[selectedChat.id] ?? null;
 }
 
-function resolveBridgeUiSurfaceBuckets(
+export function resolveBridgeUiSurfaceBuckets(
   selectedChat: ChatSummary | null,
   activeBridgeUiSurfaces: BridgeUiSurface[],
 ) {
@@ -68,6 +69,8 @@ function resolveBridgeUiSurfaceBuckets(
     selectedBridgeUiSurfaces: [] as BridgeUiSurface[],
     workflowBridgeUiSurfaces: [] as BridgeUiSurface[],
     bannerBridgeUiSurfaces: [] as BridgeUiSurface[],
+    callBridgeUiSurfaces: [] as BridgeUiSurface[],
+    supersededCallBridgeUiSurfaces: [] as BridgeUiSurface[],
     modalBridgeUiSurface: null as BridgeUiSurface | null,
   };
   if (!selectedChat) {
@@ -79,6 +82,11 @@ function resolveBridgeUiSurfaceBuckets(
       continue;
     }
     buckets.selectedBridgeUiSurfaces.push(surface);
+    // A call is ambient context beside the conversation, so it docks above the composer.
+    if (isPhoneCallSurface(surface)) {
+      buckets.callBridgeUiSurfaces.push(surface);
+      continue;
+    }
     if (surface.presentation === 'workflowCard') {
       buckets.workflowBridgeUiSurfaces.push(surface);
       continue;
@@ -92,6 +100,9 @@ function resolveBridgeUiSurfaceBuckets(
     }
   }
 
+  const { docked, superseded } = selectDockedPhoneCalls(buckets.callBridgeUiSurfaces);
+  buckets.callBridgeUiSurfaces = docked;
+  buckets.supersededCallBridgeUiSurfaces = superseded;
   return buckets;
 }
 
@@ -405,6 +416,8 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     selectedBridgeUiSurfaces,
     workflowBridgeUiSurfaces,
     bannerBridgeUiSurfaces,
+    callBridgeUiSurfaces,
+    supersededCallBridgeUiSurfaces,
     modalBridgeUiSurface,
   } = resolveBridgeUiSurfaceBuckets(selectedChat, activeBridgeUiSurfaces);
   const {
@@ -501,6 +514,8 @@ export function useMainScreenWorkflowQueueState(context: MainScreenWorkflowQueue
     selectedBridgeUiSurfaces,
     workflowBridgeUiSurfaces,
     bannerBridgeUiSurfaces,
+    callBridgeUiSurfaces,
+    supersededCallBridgeUiSurfaces,
     modalBridgeUiSurface,
     selectedBridgeQueuedMessages,
     selectedOptimisticQueuedMessages,

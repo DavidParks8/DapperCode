@@ -35,7 +35,7 @@ pub const VAD_PREROLL_FRAMES: usize = 15;
 pub const VAD_PREROLL_SAMPLES: usize = VAD_PREROLL_FRAMES * RTP_FRAME_SAMPLES;
 pub const VAD_SPEECH_ONSET_FRAMES: usize = 7;
 pub const VAD_BARGE_IN_ONSET_FRAMES: usize = 12;
-pub const VAD_DEFAULT_HANGOVER_FRAMES: usize = 30;
+pub const VAD_DEFAULT_HANGOVER_FRAMES: usize = 50;
 pub const VAD_IVR_HANGOVER_FRAMES: usize = 55;
 pub const VAD_MAX_UTTERANCE_SAMPLES: usize = 200_000;
 pub const VAD_ECHO_MARGIN: u32 = 500;
@@ -400,6 +400,10 @@ impl TelephonyVad {
 
     pub fn is_in_speech(&self) -> bool {
         self.in_speech
+    }
+
+    pub fn has_pending_speech(&self) -> bool {
+        self.in_speech || self.speech_streak > 0
     }
 
     pub fn noise_floor(&self) -> u32 {
@@ -976,14 +980,13 @@ mod tests {
             }
         }
 
-        // Feed 29 silence frames: still inside 30-frame (600 ms) hangover.
+        // A full second of silence ends a normal turn.
         let silence_frame = [0_i16; RTP_FRAME_SAMPLES];
         for _ in 0..(VAD_DEFAULT_HANGOVER_FRAMES - 1) {
             assert_eq!(vad.process_frame(&silence_frame, false, 0), None);
             assert!(vad.is_in_speech());
         }
 
-        // 30th silence frame completes the utterance!
         let event = vad.process_frame(&silence_frame, false, 0);
         assert!(!vad.is_in_speech());
         let utterance = match event {
@@ -992,15 +995,36 @@ mod tests {
         };
 
         // Pre-roll at onset (7th speech frame) held 9 pre-speech frames (markers 12..=20) + 6 speech frames,
-        // followed by 4 remaining speech frames + 30 hangover silence frames = 49 frames = 7840 samples.
-        assert_eq!(utterance.len(), 49 * RTP_FRAME_SAMPLES);
+        // followed by 4 remaining speech frames + 50 hangover silence frames = 69 frames.
+        assert_eq!(utterance.len(), 69 * RTP_FRAME_SAMPLES);
         // First frame of the utterance must be pre-speech frame marker 12 (9 frames = 180 ms before speech frame 1,
         // i.e. 15 frames = 300 ms before the 7th onset frame!).
         assert_eq!(utterance[0], 12);
         assert_eq!(utterance[8 * RTP_FRAME_SAMPLES], 20);
         assert_eq!(utterance[9 * RTP_FRAME_SAMPLES], 2_400);
 
-        // Verify IVR mode extends hangover from 30 frames (600 ms) to 55 frames (1100 ms).
+        for _ in 0..7 {
+            assert_eq!(vad.process_frame(&speech_frame, false, 0), None);
+        }
+        for _ in 0..30 {
+            assert_eq!(vad.process_frame(&silence_frame, false, 0), None);
+        }
+        assert!(
+            vad.has_pending_speech(),
+            "a 600 ms hesitation must not end the answer"
+        );
+        for _ in 0..7 {
+            assert_eq!(vad.process_frame(&speech_frame, false, 0), None);
+        }
+        for _ in 0..49 {
+            assert_eq!(vad.process_frame(&silence_frame, false, 0), None);
+        }
+        assert!(matches!(
+            vad.process_frame(&silence_frame, false, 0),
+            Some(VadEvent::UtteranceComplete(_))
+        ));
+
+        // IVR menus tolerate 1100 ms pauses.
         vad.set_ivr_mode(true);
         assert!(vad.is_ivr_mode());
         assert_eq!(vad.hangover_frames(), VAD_IVR_HANGOVER_FRAMES);
@@ -1100,6 +1124,133 @@ mod tests {
         vad.reset();
         assert!(!vad.is_in_speech());
         assert_eq!(vad.noise_floor(), VAD_INITIAL_NOISE_FLOOR);
+    }
+
+    const LOUD_SPEECH_FRAME: [i16; RTP_FRAME_SAMPLES] = [2_800; RTP_FRAME_SAMPLES];
+    const PLAYBACK_MEAN_ABS: u32 = 3_600;
+
+    fn start_speech_before_playback(vad: &mut TelephonyVad) {
+        for _ in 0..VAD_SPEECH_ONSET_FRAMES {
+            assert_eq!(vad.process_frame(&LOUD_SPEECH_FRAME, false, 0), None);
+        }
+        assert!(vad.is_in_speech());
+    }
+
+    fn continue_speech_without_playback(vad: &mut TelephonyVad, frames: usize) {
+        for _ in 0..frames {
+            assert_eq!(vad.process_frame(&LOUD_SPEECH_FRAME, false, 0), None);
+        }
+    }
+
+    #[test]
+    fn vad_playback_starting_mid_utterance_drops_echo_and_needs_sustained_speech_to_barge_in() {
+        let mut vad = TelephonyVad::new();
+        let echo_frame = [1_000_i16; RTP_FRAME_SAMPLES];
+        assert!(
+            mean_abs_pcm(&echo_frame) < vad.speech_threshold(true, PLAYBACK_MEAN_ABS)
+                && mean_abs_pcm(&LOUD_SPEECH_FRAME)
+                    >= vad.speech_threshold(true, PLAYBACK_MEAN_ABS)
+        );
+
+        // Playback that begins while the caller is mid-utterance only contributes echo, which is
+        // never captured and eventually closes the utterance after the normal hangover.
+        start_speech_before_playback(&mut vad);
+        for _ in 0..(VAD_DEFAULT_HANGOVER_FRAMES - 1) {
+            assert_eq!(
+                vad.process_frame(&echo_frame, true, PLAYBACK_MEAN_ABS),
+                None
+            );
+            assert!(vad.is_in_speech());
+        }
+        assert_eq!(
+            vad.process_frame(&echo_frame, true, PLAYBACK_MEAN_ABS),
+            Some(VadEvent::UtteranceComplete(vec![
+                2_800;
+                VAD_SPEECH_ONSET_FRAMES
+                    * RTP_FRAME_SAMPLES
+            ]))
+        );
+        assert!(!vad.is_in_speech());
+
+        // Loud speech that continues over playback must persist for the barge-in onset window.
+        start_speech_before_playback(&mut vad);
+        for step in 0..(VAD_BARGE_IN_ONSET_FRAMES - 1) {
+            assert_eq!(
+                vad.process_frame(&LOUD_SPEECH_FRAME, true, PLAYBACK_MEAN_ABS),
+                None,
+                "premature mid-utterance barge-in at frame {step}"
+            );
+        }
+        assert_eq!(
+            vad.process_frame(&LOUD_SPEECH_FRAME, true, PLAYBACK_MEAN_ABS),
+            Some(VadEvent::BargeIn)
+        );
+        assert!(vad.is_in_speech());
+
+        let silence = [0_i16; RTP_FRAME_SAMPLES];
+        for _ in 0..(VAD_DEFAULT_HANGOVER_FRAMES - 1) {
+            assert_eq!(vad.process_frame(&silence, false, 0), None);
+        }
+        match vad.process_frame(&silence, false, 0) {
+            Some(VadEvent::UtteranceComplete(samples)) => {
+                let speech_frames = VAD_SPEECH_ONSET_FRAMES + VAD_BARGE_IN_ONSET_FRAMES;
+                assert_eq!(
+                    samples.len(),
+                    (speech_frames + VAD_DEFAULT_HANGOVER_FRAMES) * RTP_FRAME_SAMPLES
+                );
+                assert!(samples[..speech_frames * RTP_FRAME_SAMPLES]
+                    .iter()
+                    .all(|&sample| sample == 2_800));
+                assert!(samples[speech_frames * RTP_FRAME_SAMPLES..]
+                    .iter()
+                    .all(|&sample| sample == 0));
+            }
+            other => panic!("expected UtteranceComplete after barge-in hangover, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn vad_caps_utterances_that_fill_during_playback_and_barge_in_capture() {
+        let max_frames = VAD_MAX_UTTERANCE_SAMPLES / RTP_FRAME_SAMPLES;
+
+        // The final frame that fills the buffer arrives while playback is active but before the
+        // barge-in onset window is reached.
+        let mut vad = TelephonyVad::new();
+        start_speech_before_playback(&mut vad);
+        continue_speech_without_playback(&mut vad, max_frames - VAD_SPEECH_ONSET_FRAMES - 1);
+        match vad.process_frame(&LOUD_SPEECH_FRAME, true, PLAYBACK_MEAN_ABS) {
+            Some(VadEvent::UtteranceComplete(samples)) => {
+                assert_eq!(samples.len(), VAD_MAX_UTTERANCE_SAMPLES);
+            }
+            other => panic!("expected capped UtteranceComplete during playback, got {other:?}"),
+        }
+        assert!(!vad.is_in_speech());
+
+        // A barge-in that lands exactly on the cap is reported first; the next frame is not
+        // appended beyond the cap and completes the utterance.
+        let mut vad = TelephonyVad::new();
+        start_speech_before_playback(&mut vad);
+        continue_speech_without_playback(
+            &mut vad,
+            max_frames - VAD_SPEECH_ONSET_FRAMES - VAD_BARGE_IN_ONSET_FRAMES,
+        );
+        for _ in 0..(VAD_BARGE_IN_ONSET_FRAMES - 1) {
+            assert_eq!(
+                vad.process_frame(&LOUD_SPEECH_FRAME, true, PLAYBACK_MEAN_ABS),
+                None
+            );
+        }
+        assert_eq!(
+            vad.process_frame(&LOUD_SPEECH_FRAME, true, PLAYBACK_MEAN_ABS),
+            Some(VadEvent::BargeIn)
+        );
+        match vad.process_frame(&LOUD_SPEECH_FRAME, true, PLAYBACK_MEAN_ABS) {
+            Some(VadEvent::UtteranceComplete(samples)) => {
+                assert_eq!(samples.len(), VAD_MAX_UTTERANCE_SAMPLES);
+            }
+            other => panic!("expected capped UtteranceComplete after barge-in, got {other:?}"),
+        }
+        assert!(!vad.is_in_speech());
     }
 
     #[test]

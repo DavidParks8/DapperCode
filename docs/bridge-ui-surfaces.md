@@ -299,13 +299,15 @@ latest list as `commands`, and the projector emits each update as a `CUSTOM` eve
 
 ## Implemented Outbound Phone Call Surfaces
 
-Outbound agent phone calls (`services/rust-bridge/src/phone_call/mod.rs`) use `kind: "phone-call"`,
-which mobile maps to the `call-outline` icon in `surfaceHelpers.ts` without any call-specific screen:
+Outbound agent phone calls (`services/rust-bridge/src/phone_call/mod.rs`) use `kind: "phone-call"`.
+Mobile maps the approval modal to the `call-outline` icon in `surfaceHelpers.ts`, and docks the live
+card as a compact call bar above the composer (`PhoneCallDock.tsx`) instead of the top cards row:
 
 - **Pre-call approval (`presentation: "modal"`)**: emitted via `bridge/ui.present` with
   `id: "phone-call-approval:<callId>"`, `tone: "warning"`, and `dismissible: false`. Carries a
-  `keyValue` block (`To`, `From`, `On behalf of`, `Objective`), an optional opening-message
-  `markdown` block, and two actions: `approve` (`Approve & Call`, `style: "primary"`,
+  `keyValue` block (`To`, `From`, `On behalf of`, and the complete `Objective`), an optional
+  opening-message `markdown` block, an optional `**Background for the calling agent**` markdown
+  block carrying the request `context`, and two actions: `approve` (`Approve & Call`, `style: "primary"`,
   `dismissesSurface: true`) and `cancel` (`Cancel`, `style: "destructive"`,
   `dismissesSurface: true`). Resolving `cancel` or letting approval time out dismisses the modal
   without sending any SIP traffic.
@@ -314,9 +316,20 @@ which mobile maps to the `call-outline` icon in `surfaceHelpers.ts` without any 
   `style: "destructive"`, `dismissesSurface: false` so tapping Hang Up sends `bridge/ui/resolve`
   while keeping the card visible until SIP teardown completes). `bridge/ui.update` advances status
   (`Dialing` → `Ringing` → `In call`) and appends a bounded rolling `**Live transcript**` markdown
-  block (`**Assistant:**`, `**Callee:**`, `**[Steer]**`, and `[interrupted]`). When the call ends,
-  a final `bridge/ui.update` settles the card (`Ended`, `Cancelled`, or `Failed`) with `actions: []`
-  and `dismissible: true`.
+  block (`**Agent:**`, the callee name or `**Recipient:**`, `**Instruction (not spoken):**` for
+  live steering, and `[interrupted]`). The post-call report uses the same speaker labels. When the
+  call ends, a final `bridge/ui.update` settles the card (`Ended`, `Cancelled`, or `Failed`) with
+  `actions: []` and `dismissible: true`. Its `Summary` (the agent's outcome) or plain-language
+  `Reason` ("They hung up", "Line busy", "No answer") is written for the user; failures add a
+  secondary `Details` row with the raw SIP or voice-pipeline cause, which the agent's report keeps.
+  While waiting on hold, the same card shows **On hold**, retains **Hang Up**, and remains
+  non-dismissible. Resuming the conversation changes it back to **In call** without settling the
+  ACP call or delivering a premature final report.
+- **Mobile call bar**: the bar reads the `Status`, `To`, `From`, `Duration`, `Objective`, and
+  `Summary`/`Reason` key-value labels and the transcript block above, so keep those labels stable.
+  It rests as one row (callee, state with a locally ticking timer, and **Hang Up**), stays inside the
+  composer's rail-aware column, and expands on tap to the objective and a transcript that follows the
+  newest line. A settled call collapses to a dismissible one-line summary.
 
 ## Rules For Future Integrations
 

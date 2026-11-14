@@ -207,8 +207,9 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
     [api, removeThreadBridgeUiSurface, setActiveBridgeUiSurfaces, setError],
   );
 
+  // Resolves false on failure so a surface can show the outcome where the user acted.
   const handleBridgeUiAction = useCallback(
-    async (surface: BridgeUiSurface, action: BridgeUiAction) => {
+    async (surface: BridgeUiSurface, action: BridgeUiAction): Promise<boolean> => {
       try {
         await api.resolveBridgeUiSurface(surface.id, {
           threadId: surface.threadId,
@@ -221,8 +222,10 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
             removeBridgeUiSurfaceFromList(previous, surface.id),
           );
         }
+        return true;
       } catch (err) {
         setError((err as Error).message);
+        return false;
       }
     },
     [api, removeThreadBridgeUiSurface, setActiveBridgeUiSurfaces, setError],

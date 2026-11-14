@@ -1048,22 +1048,20 @@ mod tests {
             tts_voice: "default".to_string(),
         };
 
-        assert!(config.apply_phone_call(&settings, "bad\npassword").is_err());
+        let sip_password = crate::secrets::generate_token();
+        assert!(config
+            .apply_phone_call(&settings, &(sip_password.clone() + "\nline"))
+            .is_err());
         assert!(config.values.is_empty());
 
-        config
-            .apply_phone_call(&settings, "super-secret-sip-pass")
-            .unwrap();
+        config.apply_phone_call(&settings, &sip_password).unwrap();
         assert_eq!(
             config.values["PHONE_CALL_SIP_SERVER"],
             "sip.telnyx.com:5061"
         );
         assert_eq!(config.values["PHONE_CALL_SIP_TRANSPORT"], "tls");
         assert_eq!(config.values["PHONE_CALL_SIP_USERNAME"], "sip-user");
-        assert_eq!(
-            config.values["PHONE_CALL_SIP_PASSWORD"],
-            "super-secret-sip-pass"
-        );
+        assert_eq!(config.values["PHONE_CALL_SIP_PASSWORD"], sip_password);
         assert_eq!(config.values["PHONE_CALL_CALLER_ID"], "+15559876543");
         assert_eq!(
             config.values["PHONE_CALL_USER_DISPLAY_NAME"],
@@ -1087,7 +1085,7 @@ mod tests {
         assert_eq!(config.values["PHONE_CALL_TTS_VOICE"], "default");
 
         for debug_repr in [format!("{config:?}"), format!("{config:#?}")] {
-            assert!(!debug_repr.contains("super-secret-sip-pass"));
+            assert!(!debug_repr.contains(&sip_password));
             assert!(debug_repr.contains("[REDACTED]"));
         }
     }

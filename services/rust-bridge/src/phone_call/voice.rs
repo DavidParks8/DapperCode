@@ -27,7 +27,7 @@ const STT_REQUEST_TIMEOUT_SECS: u64 = 30;
 const ERROR_BODY_MAX_BYTES: usize = 4_096;
 const SSE_LINE_MAX_BYTES: usize = 256 * 1024;
 const SILENT_PICKUP_USER_CUE: &str =
-    "[The phone call has connected. Begin with your opening greeting and mandatory AI disclosure.]";
+    "[The phone call has connected. Open by saying who you are calling for and why.]";
 
 #[derive(Debug, thiserror::Error)]
 pub enum VoiceError {
@@ -366,14 +366,16 @@ pub fn build_system_prompt(params: &VoiceCallPromptParams) -> String {
     };
 
     let mut prompt = format!(
-        "You are speaking live on a phone call as an AI assistant calling on behalf of {caller_name}.\n\
+        "You are an automated phone assistant carrying out a request for {caller_name}. This is a live two-way conversation.\n\
          \n\
-         Mandatory compliance & spoken-voice rules:\n\
-         1. OPENING DISCLOSURE: In your very first spoken turn, you MUST explicitly identify yourself as an AI assistant calling on behalf of {caller_name} before stating your request.\n\
+         Spoken-voice & identity rules:\n\
+         1. CALLER-IDENTIFYING OPENING: Your first sentence MUST say who you are calling for and why, such as \"Hi, I'm calling for {caller_name} to book a table for four.\" Do not volunteer that you are an AI, a model, or an automated assistant. Never pretend to be {caller_name} or claim to be human. If asked who is calling or whether you are automated, answer truthfully that you are an automated assistant calling for {caller_name}.\n\
          2. CONCISE SPOKEN TURNS: Speak naturally in one or two short sentences per turn, then pause so the other person can respond. Never output markdown, bullet points, numbered lists, stage directions, brackets, URLs, or emojis.\n\
          3. PHONON TTS WORD NORMALIZATION: Always write times, dates, quantities, phone numbers, and confirmation codes in natural spoken words (for example, write \"seven forty-five p m\" instead of \"7:45pm\", \"October twenty-third\" instead of \"10/23\", and \"party of four\" instead of \"4 ppl\") because the speech synthesizer reads digits and punctuation literally.\n\
-         4. PHONE TOOLS: Call send_dtmf with digits (0-9, *, #, A-D) when navigating automated IVR menus such as \"Press 1 for reservations\". Call wait_silently when placed on hold or while an automated menu or person is still mid-thought. Call end_call only AFTER speaking a brief, polite closing goodbye once the objective is fulfilled or cannot be completed.\n\
-         5. LIVE STEERING: Immediately honor any later system message prefixed with \"{LIVE_STEER_PREFIX}\" without breaking conversational flow."
+         4. PHONE TOOLS: Call send_dtmf with digits (0-9, *, #, A-D) when navigating automated IVR menus such as \"Press 1 for reservations\". A pause, fragment such as \"I\", hesitation, or silence is NOT a refusal or a completed answer: call wait_silently with on_hold=false and let the person finish. Call end_call only AFTER speaking a brief, polite closing goodbye, once the objective is explicitly fulfilled, the person explicitly refuses or cannot help, or they say goodbye. Never give up merely because information has not been provided yet.\n\
+         5. HOLD: When asked to hold or wait for someone, acknowledge briefly and call wait_silently with on_hold=true. Remain silent through hold music, silence, queue announcements, repeated recordings, and transfers. None of these means the call is over. While on hold, use only wait_silently; call resume_call only when a live person clearly addresses you again or the user explicitly asks you to speak. Do not speak or call end_call while on hold. After resume_call, answer in your next turn.\n\
+         6. TURN DECISION: Every turn MUST include exactly one phone tool. After an ordinary spoken reply, use wait_silently with on_hold=false to listen. After acknowledging a request to hold, use wait_silently with on_hold=true; saying you will wait without this tool does NOT put the call on hold. While already on hold, choose wait_silently or resume_call, never speak.\n\
+         7. LIVE STEERING: Immediately honor any later system message prefixed with \"{LIVE_STEER_PREFIX}\" without breaking conversational flow."
     );
 
     if let Some(callee) = params
@@ -398,11 +400,7 @@ pub fn build_system_prompt(params: &VoiceCallPromptParams) -> String {
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
-        prompt.push_str(
-            "\nOpening turn guidance (ensure you still include the mandatory AI disclosure for ",
-        );
-        prompt.push_str(caller_name);
-        prompt.push_str("): ");
+        prompt.push_str("\nOpening turn guidance: ");
         prompt.push_str(first_message);
     }
 
@@ -419,11 +417,22 @@ pub fn build_system_prompt(params: &VoiceCallPromptParams) -> String {
     prompt
 }
 
+// A transcript with at least two words is a reply; shorter text is a provisional fragment.
+#[must_use]
+pub fn is_substantive_reply(text: &str) -> bool {
+    text.split_whitespace()
+        .filter(|word| word.chars().any(char::is_alphanumeric))
+        .take(2)
+        .count()
+        == 2
+}
+
 #[derive(Debug, Clone)]
 pub struct VoiceConversation {
     messages: Vec<ChatMessage>,
     transcript: Vec<TranscriptEntry>,
     stt_vocabulary_prompt: String,
+    on_hold: bool,
 }
 
 impl VoiceConversation {
@@ -439,6 +448,7 @@ impl VoiceConversation {
             messages: vec![ChatMessage::system(system_prompt)],
             transcript: Vec::new(),
             stt_vocabulary_prompt,
+            on_hold: false,
         }
     }
 
@@ -465,6 +475,33 @@ impl VoiceConversation {
     #[must_use]
     pub fn transcript(&self) -> &[TranscriptEntry] {
         &self.transcript
+    }
+
+    pub fn is_on_hold(&self) -> bool {
+        self.on_hold
+    }
+
+    // A one-word ASR snippet is provisional, even when the model invents a successful outcome.
+    // User hang-up and remote BYE remain available regardless of transcript length.
+    pub fn can_end_call(&self) -> bool {
+        !self.on_hold
+            && self
+                .transcript
+                .iter()
+                .rev()
+                .find(|entry| entry.speaker == TranscriptSpeaker::Callee)
+                .is_some_and(|entry| is_substantive_reply(&entry.text))
+    }
+
+    pub fn set_on_hold(&mut self, on_hold: bool) {
+        if self.on_hold != on_hold {
+            self.on_hold = on_hold;
+            self.messages.push(ChatMessage::system(if on_hold {
+                "The call is now ON HOLD. Do not speak or end the call. Music, silence, queue announcements and transfers are not the recipient returning. Use wait_silently until a live person clearly addresses you, then call resume_call without speaking."
+            } else {
+                "The call has resumed. Respond to the recipient and continue the objective."
+            }));
+        }
     }
 
     pub fn push_callee_utterance(&mut self, text: &str) {
@@ -774,6 +811,10 @@ pub enum VoiceToolCall {
     WaitSilently {
         call_id: String,
         reason: String,
+        on_hold: bool,
+    },
+    ResumeCall {
+        call_id: String,
     },
 }
 
@@ -784,7 +825,8 @@ impl VoiceToolCall {
         match self {
             Self::SendDtmf { call_id, .. }
             | Self::EndCall { call_id, .. }
-            | Self::WaitSilently { call_id, .. } => call_id,
+            | Self::WaitSilently { call_id, .. }
+            | Self::ResumeCall { call_id } => call_id,
         }
     }
 }
@@ -822,7 +864,7 @@ pub fn voice_tool_definitions() -> Value {
             "type": "function",
             "function": {
                 "name": "end_call",
-                "description": "Hang up politely AFTER speaking a closing goodbye once the call objective is complete or cannot continue.",
+                "description": "End only after a spoken closing goodbye and explicit resolution, refusal, or farewell. Never end because of a partial reply, silence, missing information, hold music, or a request to wait.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -844,16 +886,32 @@ pub fn voice_tool_definitions() -> Value {
             "type": "function",
             "function": {
                 "name": "wait_silently",
-                "description": "Stay silent and extend VAD listening patience while on hold or listening to an incomplete IVR menu.",
+                "description": "Wait without ending the call. Set on_hold=true when asked to hold or wait for a person; false for an unfinished sentence or IVR menu. On hold, stay silent through music, silence and announcements until a live person returns.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "reason": {
                             "type": "string",
                             "description": "Why the assistant is waiting silently."
+                        },
+                        "on_hold": {
+                            "type": "boolean",
+                            "description": "True when the recipient has put the call on hold; false for an incomplete sentence or IVR menu."
                         }
                     },
-                    "required": ["reason"],
+                    "required": ["reason", "on_hold"],
+                    "additionalProperties": false
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "resume_call",
+                "description": "Resume a held conversation only when a live person clearly addresses the assistant again, or the user explicitly requests speech. Not for music, silence or recorded queue announcements. Speak in the next turn, not alongside this tool.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
                     "additionalProperties": false
                 }
             }
@@ -1075,13 +1133,43 @@ impl VoicePipelineClient {
         }
 
         let endpoint = append_endpoint_path(&self.endpoints.llm_base, "chat/completions");
-        let request_messages = conversation.build_request_messages();
+        let mut request_messages = conversation.build_request_messages();
+        let held = conversation.is_on_hold();
+        if held {
+            request_messages.push(ChatMessage::system(
+                "This is an ON-HOLD listening check, NOT a spoken turn. Return only JSON with decision=wait_silently for silence, music, recorded announcements, or a request to keep waiting. Choose decision=resume_call only when a live person clearly addresses you again or the user explicitly asks you to speak. Do not speak or end the call.",
+            ));
+        }
+        let mut tools = voice_tool_definitions();
+        if let Some(tools) = tools.as_array_mut() {
+            tools.retain(|tool| match tool["function"]["name"].as_str() {
+                Some("end_call") => conversation.can_end_call(),
+                Some("send_dtmf") => !conversation.is_on_hold(),
+                Some("resume_call") => conversation.is_on_hold(),
+                _ => true,
+            });
+        }
         let payload = ChatCompletionStreamRequest {
             model: self.config.llm_model.trim(),
             messages: &request_messages,
             stream: true,
             reasoning_effort: "none",
-            tools: voice_tool_definitions(),
+            tool_choice: (!held).then_some("required"),
+            parallel_tool_calls: (!held).then_some(false),
+            tools: if held { Value::Null } else { tools },
+            response_format: held.then(|| json!({
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "hold_decision",
+                    "strict": true,
+                    "schema": {
+                        "type": "object",
+                        "properties": {"decision": {"type": "string", "enum": ["wait_silently", "resume_call"]}},
+                        "required": ["decision"],
+                        "additionalProperties": false
+                    }
+                }
+            })),
         };
 
         let response = tokio::select! {
@@ -1110,6 +1198,11 @@ impl VoicePipelineClient {
         let mut chunker = ClauseChunker::new();
         let mut tool_accumulators: BTreeMap<usize, ToolCallAccumulator> = BTreeMap::new();
         let mut stream_done = false;
+        let mut emit_clause = |clause| {
+            if !held {
+                on_clause(clause);
+            }
+        };
 
         while !stream_done {
             let maybe_chunk = tokio::select! {
@@ -1151,7 +1244,7 @@ impl VoicePipelineClient {
                     &mut chunker,
                     &mut clauses,
                     &mut tool_accumulators,
-                    &mut on_clause,
+                    &mut emit_clause,
                 )? {
                     stream_done = true;
                     break;
@@ -1170,15 +1263,41 @@ impl VoicePipelineClient {
                 &mut chunker,
                 &mut clauses,
                 &mut tool_accumulators,
-                &mut on_clause,
+                &mut emit_clause,
             )?;
         }
 
         if let Some(tail_clause) = chunker.finish() {
-            on_clause(tail_clause.clone());
+            emit_clause(tail_clause.clone());
             clauses.push(tail_clause);
         }
 
+        // Compatible servers may still return native tool calls. Neither response format is
+        // spoken while held; schema decisions are normalized into the same validated actions.
+        if held && tool_accumulators.is_empty() {
+            let decision: HoldDecision =
+                serde_json::from_str(&full_text).map_err(|err| VoiceError::InvalidResponse {
+                    endpoint: endpoint.to_string(),
+                    reason: format!("invalid on-hold listening decision: {err}"),
+                })?;
+            let (name, arguments) = match decision.decision {
+                HoldAction::Wait => (
+                    "wait_silently",
+                    json!({"reason": "Still on hold", "on_hold": true}),
+                ),
+                HoldAction::Resume => ("resume_call", json!({})),
+            };
+            tool_accumulators.insert(
+                0,
+                ToolCallAccumulator {
+                    id: format!("hold_{}", Uuid::new_v4()),
+                    name: name.to_string(),
+                    arguments: arguments.to_string(),
+                },
+            );
+            full_text.clear();
+            clauses.clear();
+        }
         let (tool_calls, raw_tool_calls) = finalize_tool_calls(tool_accumulators)?;
 
         Ok(AssistantTurnOutput {
@@ -1298,7 +1417,28 @@ struct ChatCompletionStreamRequest<'a> {
     messages: &'a [ChatMessage],
     stream: bool,
     reasoning_effort: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parallel_tool_calls: Option<bool>,
+    #[serde(skip_serializing_if = "Value::is_null")]
     tools: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HoldDecision {
+    decision: HoldAction,
+}
+
+#[derive(Deserialize)]
+enum HoldAction {
+    #[serde(rename = "wait_silently")]
+    Wait,
+    #[serde(rename = "resume_call")]
+    Resume,
 }
 
 #[derive(Debug, Serialize)]
@@ -1379,7 +1519,13 @@ struct EndCallArgs {
 struct WaitSilentlyArgs {
     #[serde(default)]
     reason: Option<String>,
+    #[serde(default)]
+    on_hold: bool,
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResumeCallArgs {}
 
 fn process_sse_line<F>(
     line_bytes: &[u8],
@@ -1574,6 +1720,17 @@ fn parse_single_tool_call(
             Ok(VoiceToolCall::WaitSilently {
                 call_id: call_id.to_string(),
                 reason,
+                on_hold: args.on_hold,
+            })
+        }
+        "resume_call" => {
+            let _: ResumeCallArgs =
+                serde_json::from_str(raw_arguments).map_err(|err| VoiceError::InvalidToolCall {
+                    tool_name: tool_name.to_string(),
+                    reason: format!("invalid JSON arguments: {err}"),
+                })?;
+            Ok(VoiceToolCall::ResumeCall {
+                call_id: call_id.to_string(),
             })
         }
         other => Err(VoiceError::InvalidToolCall {
@@ -1835,6 +1992,163 @@ mod tests {
         Json, Router,
     };
     use tokio::{net::TcpListener, sync::Mutex};
+
+    #[tokio::test]
+    #[ignore = "requires locally installed Ollama and gemma4:e4b; run under the local E2E resource lease"]
+    async fn local_ollama_caller_identifying_opening_and_truthful_identity() {
+        let client = VoicePipelineClient::new(VoicePipelineConfig::default()).unwrap();
+        let cancel = CancellationToken::new();
+        for first_message in [
+            None,
+            Some("Greet warmly and ask for a table for four.".to_string()),
+        ] {
+            let callee_greeted = first_message.is_some();
+            let mut conversation = VoiceConversation::new(VoiceCallPromptParams {
+                user_display_name: "Test Caller".to_string(),
+                callee_name: Some("Local test restaurant".to_string()),
+                objective: "Book a table for four at seven p m.".to_string(),
+                first_message,
+                context: None,
+            });
+            if callee_greeted {
+                conversation
+                    .push_callee_utterance("Hello, this is the restaurant. How can I help you?");
+            }
+            let opening = client
+                .stream_assistant_turn(&conversation, &cancel, |_| {})
+                .await
+                .unwrap();
+            let spoken = opening.full_text.to_lowercase();
+            let words: Vec<_> = spoken
+                .split(|ch: char| !ch.is_alphanumeric())
+                .filter(|word| !word.is_empty())
+                .collect();
+            assert!(
+                spoken.contains("test caller"),
+                "the opening must identify who the call is for: {opening:?}"
+            );
+            for identity_word in ["ai", "artificial", "automated", "assistant", "model"] {
+                assert!(
+                    !words.contains(&identity_word),
+                    "unsolicited identity introduction: {opening:?}"
+                );
+            }
+            assert!(
+                spoken.contains("table") || spoken.contains("reservation"),
+                "{opening:?}"
+            );
+            conversation.record_assistant_turn(&opening);
+            for tool in &opening.tool_calls {
+                conversation
+                    .record_tool_result(tool.call_id(), "Waiting for the recipient to respond.");
+            }
+            conversation.push_callee_utterance(
+                "Before we continue, are you a human or an automated assistant, and who are you helping?",
+            );
+            let identity = client
+                .stream_assistant_turn(&conversation, &cancel, |_| {})
+                .await
+                .unwrap();
+            let spoken = identity.full_text.to_lowercase();
+            assert!(
+                spoken.contains("automated")
+                    || spoken.contains("artificial intelligence")
+                    || spoken
+                        .split_whitespace()
+                        .any(|word| word.trim_matches(|ch: char| !ch.is_alphanumeric()) == "ai"),
+                "identity questions must be answered truthfully: {identity:?}"
+            );
+            assert!(spoken.contains("test caller"), "{identity:?}");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires locally installed Ollama and gemma4:e4b; run under the local E2E resource lease"]
+    async fn local_ollama_partial_reply_hold_and_resume() {
+        let client = VoicePipelineClient::new(VoicePipelineConfig::default()).unwrap();
+        let cancel = CancellationToken::new();
+        for _ in 0..3 {
+            let mut conversation = VoiceConversation::new(VoiceCallPromptParams {
+                user_display_name: "Test Caller".to_string(),
+                callee_name: Some("Local test business".to_string()),
+                objective: "Ask for the business address, then thank the person.".to_string(),
+                first_message: None,
+                context: None,
+            });
+            conversation.messages.push(ChatMessage::assistant(
+                "Hello, could you tell me your business address?",
+            ));
+            conversation.push_callee_utterance("I");
+            let reply = client
+                .stream_assistant_turn(&conversation, &cancel, |_| {})
+                .await
+                .unwrap();
+            assert!(
+                !reply
+                    .tool_calls
+                    .iter()
+                    .any(|tool| matches!(tool, VoiceToolCall::EndCall { .. })),
+                "a fragment is not a refusal: {reply:?}"
+            );
+            assert!(
+                !reply
+                    .tool_calls
+                    .iter()
+                    .any(|tool| matches!(tool, VoiceToolCall::WaitSilently { on_hold: true, .. })),
+                "a fragment alone is not a request to go on hold: {reply:?}"
+            );
+
+            conversation
+                .push_callee_utterance("Could you hold for a moment while I check, please?");
+            let held = client
+                .stream_assistant_turn(&conversation, &cancel, |_| {})
+                .await
+                .unwrap();
+            assert!(
+                held.tool_calls
+                    .iter()
+                    .any(|tool| matches!(tool, VoiceToolCall::WaitSilently { on_hold: true, .. })),
+                "{held:?}"
+            );
+            conversation.record_assistant_turn(&held);
+            for tool in &held.tool_calls {
+                conversation.record_tool_result(tool.call_id(), "Waiting on hold.");
+            }
+            conversation.set_on_hold(true);
+            conversation.push_callee_utterance(
+                "Your call is important to us. Please continue to hold for the next available representative.",
+            );
+            let waiting = client
+                .stream_assistant_turn(&conversation, &cancel, |_| {})
+                .await
+                .unwrap();
+            assert!(
+                !waiting.tool_calls.iter().any(|tool| matches!(
+                    tool,
+                    VoiceToolCall::ResumeCall { .. } | VoiceToolCall::EndCall { .. }
+                )),
+                "{waiting:?}"
+            );
+            conversation.record_assistant_turn(&waiting);
+            for tool in &waiting.tool_calls {
+                conversation.record_tool_result(tool.call_id(), "Still waiting on hold.");
+            }
+            conversation.push_callee_utterance(
+                "Hello, this is Morgan. Thanks for holding. Are you still there?",
+            );
+            let resumed = client
+                .stream_assistant_turn(&conversation, &cancel, |_| {})
+                .await
+                .unwrap();
+            assert!(
+                resumed
+                    .tool_calls
+                    .iter()
+                    .any(|tool| matches!(tool, VoiceToolCall::ResumeCall { .. })),
+                "{resumed:?}"
+            );
+        }
+    }
 
     #[derive(Debug, Default)]
     struct CapturedTranscription {
@@ -2177,7 +2491,7 @@ mod tests {
         .expect("create voice client");
 
         let params = VoiceCallPromptParams {
-            user_display_name: "David Parks".to_string(),
+            user_display_name: "Alex Example".to_string(),
             callee_name: Some("Osteria Bella".to_string()),
             objective: "Book a dinner reservation for a party of four at seven forty-five p m"
                 .to_string(),
@@ -2186,7 +2500,7 @@ mod tests {
         };
         let conv = VoiceConversation::new(params);
         assert!(conv.stt_vocabulary_prompt().len() <= STT_PROMPT_MAX_BYTES);
-        assert!(conv.stt_vocabulary_prompt().contains("David Parks"));
+        assert!(conv.stt_vocabulary_prompt().contains("Alex Example"));
         assert!(conv.stt_vocabulary_prompt().contains("Osteria Bella"));
 
         let fake_wav = b"RIFF\x24\x00\x00\x00WAVEfmt mock-pcm-payload";
@@ -2213,8 +2527,11 @@ mod tests {
             );
         }
 
-        let huge_prompt =
-            build_stt_vocabulary_prompt("David Parks", Some("Osteria Bella"), &"word ".repeat(200));
+        let huge_prompt = build_stt_vocabulary_prompt(
+            "Alex Example",
+            Some("Osteria Bella"),
+            &"word ".repeat(200),
+        );
         assert!(huge_prompt.len() <= STT_PROMPT_MAX_BYTES);
 
         for artifact in [
@@ -2250,7 +2567,7 @@ mod tests {
         .expect("create voice client");
 
         let params = VoiceCallPromptParams {
-            user_display_name: "David Parks".to_string(),
+            user_display_name: "Alex Example".to_string(),
             callee_name: Some("Osteria Bella".to_string()),
             objective: "Reserve a table for four on October twenty-third at seven forty-five p m"
                 .to_string(),
@@ -2258,7 +2575,13 @@ mod tests {
             context: Some("Anniversary dinner; quiet table preferred.".to_string()),
         };
         let expected_system_prompt = build_system_prompt(&params);
-        assert!(expected_system_prompt.contains("AI assistant calling on behalf of David Parks"));
+        assert!(expected_system_prompt.contains("CALLER-IDENTIFYING OPENING"));
+        assert!(expected_system_prompt.contains("I'm calling for Alex Example"));
+        assert!(expected_system_prompt.contains("Never pretend to be Alex Example"));
+        assert!(expected_system_prompt.contains("answer truthfully"));
+        assert!(!expected_system_prompt.contains("mandatory AI disclosure"));
+        assert!(expected_system_prompt
+            .contains("Opening turn guidance: Greet warmly and ask for reservations."));
         assert!(expected_system_prompt.contains("seven forty-five p m"));
         assert!(expected_system_prompt.contains("7:45pm"));
         assert!(expected_system_prompt.contains("Osteria Bella"));
@@ -2273,7 +2596,7 @@ mod tests {
 
         let sse_lines = [
             b": keep-alive\r\n\r\n".to_vec(),
-            b"data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"Hi, I am an AI assistant calling on behalf of David Parks.\"}}]}\n\n".to_vec(),
+            b"data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"Hi, I am an AI assistant calling on behalf of Alex Example.\"}}]}\n\n".to_vec(),
             b"data: {\"choices\":[{\"delta\":{\"content\":\" Pressing one for reservations now!\"}}]}\n\n".to_vec(),
             b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_dtmf_1\",\"type\":\"function\",\"function\":{\"name\":\"send_\",\"arguments\":\"{\\\"dig\"}}]}}]}\n\n".to_vec(),
             b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"dtmf\",\"arguments\":\"its\\\":\\\"1\\\"}\"}},{\"index\":1,\"id\":\"call_wait_2\",\"type\":\"function\",\"function\":{\"name\":\"wait_silently\",\"arguments\":\"{\\\"reason\\\":\\\"navigating IVR\\\"}\"}},{\"index\":2,\"id\":\"call_end_3\",\"type\":\"function\",\"function\":{\"name\":\"end_call\",\"arguments\":\"{\\\"reason\\\":\\\"done\\\",\\\"outcome_summary\\\":\\\"Pressed 1 and confirmed\\\"}\"}}]}}]}\n\n".to_vec(),
@@ -2293,7 +2616,7 @@ mod tests {
         assert_eq!(
             live_clauses,
             vec![
-                "Hi, I am an AI assistant calling on behalf of David Parks.",
+                "Hi, I am an AI assistant calling on behalf of Alex Example.",
                 "Pressing one for reservations now!",
             ]
         );
@@ -2308,6 +2631,7 @@ mod tests {
                 VoiceToolCall::WaitSilently {
                     call_id: "call_wait_2".to_string(),
                     reason: "navigating IVR".to_string(),
+                    on_hold: false,
                 },
                 VoiceToolCall::EndCall {
                     call_id: "call_end_3".to_string(),
@@ -2333,7 +2657,7 @@ mod tests {
         conv.record_tool_result("call_dtmf_1", "sent DTMF 1");
 
         conv.mark_last_assistant_interrupted(
-            "Hi, I am an AI assistant calling on behalf of David Parks.",
+            "Hi, I am an AI assistant calling on behalf of Alex Example.",
         );
 
         conv.inject_steer("Ask if the heated patio is open tonight.");
@@ -2354,7 +2678,7 @@ mod tests {
             .expect("assistant message in history");
         assert_eq!(
             assistant_msg.content.as_deref(),
-            Some("Hi, I am an AI assistant calling on behalf of David Parks. [interrupted]")
+            Some("Hi, I am an AI assistant calling on behalf of Alex Example. [interrupted]")
         );
         assert_eq!(assistant_msg.tool_calls.len(), 1);
         assert_eq!(assistant_msg.tool_calls[0].id, "call_dtmf_1");
@@ -2372,7 +2696,7 @@ mod tests {
                 TranscriptEntry {
                     speaker: TranscriptSpeaker::Assistant,
                     text: format!(
-                        "Hi, I am an AI assistant calling on behalf of David Parks. {INTERRUPTED_MARKER}"
+                        "Hi, I am an AI assistant calling on behalf of Alex Example. {INTERRUPTED_MARKER}"
                     ),
                     interrupted: true,
                 },
@@ -2401,7 +2725,16 @@ mod tests {
         assert_eq!(req1["reasoning_effort"], "none");
         assert_eq!(req1["stream"], true);
         assert_eq!(req1["model"], DEFAULT_LLM_MODEL);
-        assert_eq!(req1["tools"], voice_tool_definitions());
+        let normal_tools: Vec<Value> = voice_tool_definitions()
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|tool| tool["function"]["name"] != "resume_call")
+            .cloned()
+            .collect();
+        assert_eq!(req1["tools"], json!(normal_tools));
+        assert_eq!(req1["tool_choice"], "required");
+        assert_eq!(req1["parallel_tool_calls"], false);
 
         assert_eq!(req1["messages"][0], req2["messages"][0]);
         assert_eq!(req2["messages"][0]["role"], "system");
@@ -2414,6 +2747,60 @@ mod tests {
             trailing["content"],
             "[Live instruction from user via mobile app]: Ask if the heated patio is open tonight."
         );
+        drop(recorded_requests);
+
+        conv.push_callee_utterance("I");
+        client
+            .stream_assistant_turn(&conv, &cancel, |_| {})
+            .await
+            .unwrap();
+        conv.set_on_hold(true);
+        for action in ["wait_silently", "resume_call"] {
+            *state.chat_sse_chunks.lock().await =
+                vec![
+                format!("data: {}\n\n", json!({
+                    "choices": [{"delta": {"content": json!({"decision": action}).to_string()}}]
+                })).into_bytes(),
+                b"data: [DONE]\n\n".to_vec(),
+            ];
+            let result = client
+                .stream_assistant_turn(&conv, &cancel, |_| panic!("hold decisions are not speech"))
+                .await
+                .unwrap();
+            assert!(result.full_text.is_empty());
+            assert!(result.clauses.is_empty());
+            assert_eq!(result.raw_tool_calls[0].function.name, action);
+        }
+        let requests = state.chat_requests.lock().await;
+        let names = |request: &Value| -> Vec<String> {
+            request["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|tool| tool["function"]["name"].as_str().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(names(&requests[2]), vec!["send_dtmf", "wait_silently"]);
+        assert!(requests[3]["tools"].is_null());
+        assert!(requests[3]["tool_choice"].is_null());
+        assert_eq!(
+            requests[3]["response_format"]["json_schema"]["schema"]["properties"]["decision"]
+                ["enum"],
+            json!(["wait_silently", "resume_call"])
+        );
+        drop(requests);
+        *state.chat_sse_chunks.lock().await = vec![
+            format!(
+                "data: {}\n\n",
+                json!({"choices": [{"delta": {"content": "{\"decision\":\"end_call\"}"}}]})
+            )
+            .into_bytes(),
+            b"data: [DONE]\n\n".to_vec(),
+        ];
+        assert!(matches!(
+            client.stream_assistant_turn(&conv, &cancel, |_| {}).await,
+            Err(VoiceError::InvalidResponse { .. })
+        ));
     }
 
     #[tokio::test]
@@ -2548,6 +2935,11 @@ mod tests {
             let reqs = state.chat_requests.lock().await;
             assert_eq!(reqs[0]["messages"][0]["role"], "system");
             assert_eq!(reqs[0]["messages"][1]["role"], "user");
+            assert_eq!(reqs[0]["messages"][1]["content"], SILENT_PICKUP_USER_CUE);
+            assert!(!reqs[0]["messages"][0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("mandatory AI disclosure"));
         }
 
         conv.push_callee_utterance("Please hold while I check.");
@@ -2625,5 +3017,485 @@ mod tests {
             status_err,
             VoiceError::HttpStatus { status: 500, .. }
         ));
+    }
+
+    async fn spawn_status_server(status: StatusCode, body: Vec<u8>) -> String {
+        let app = Router::new()
+            .route("/v1/audio/transcriptions", post(handle_status_reply))
+            .route("/v1/audio/speech", post(handle_status_reply))
+            .with_state(Arc::new((status, body)));
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind loopback status server");
+        let addr = listener.local_addr().expect("status server local_addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("run status server");
+        });
+        format!("http://{addr}/v1")
+    }
+
+    async fn handle_status_reply(
+        State(reply): State<Arc<(StatusCode, Vec<u8>)>>,
+        _request_body: axum::body::Bytes,
+    ) -> Response {
+        (reply.0, reply.1.clone()).into_response()
+    }
+
+    fn no_context_params(user_display_name: &str, objective: &str) -> VoiceCallPromptParams {
+        VoiceCallPromptParams {
+            user_display_name: user_display_name.to_string(),
+            callee_name: None,
+            objective: objective.to_string(),
+            first_message: None,
+            context: None,
+        }
+    }
+
+    #[test]
+    fn endpoint_paths_and_prompts_handle_root_paths_credentials_and_blank_fields() {
+        let err = validate_loopback_base_url("tts_base_url", "http://:secret@127.0.0.1:11434/v1")
+            .expect_err("password-only credentials must be rejected");
+        assert!(matches!(
+            err,
+            VoiceError::InvalidEndpointUrl { field: "tts_base_url", ref reason }
+                if reason.contains("credentials")
+        ));
+
+        let root = validate_loopback_base_url("llm_base_url", "http://127.0.0.1:11434/").unwrap();
+        assert_eq!(
+            append_endpoint_path(&root, "/chat/completions").as_str(),
+            "http://127.0.0.1:11434/chat/completions"
+        );
+        assert_eq!(
+            derive_ollama_api_chat_url(&root).as_str(),
+            "http://127.0.0.1:11434/api/chat"
+        );
+        let proxied =
+            validate_loopback_base_url("llm_base_url", "http://localhost:8080/proxy/v1/").unwrap();
+        assert_eq!(
+            append_endpoint_path(&proxied, "audio/speech").as_str(),
+            "http://localhost:8080/proxy/v1/audio/speech"
+        );
+        assert_eq!(
+            derive_ollama_api_chat_url(&proxied).as_str(),
+            "http://localhost:8080/proxy/api/chat"
+        );
+
+        assert_eq!(build_stt_vocabulary_prompt(" ", None, "\t"), "");
+        assert_eq!(
+            build_stt_vocabulary_prompt("", Some(" Osteria   Bella "), ""),
+            "Callee: Osteria Bella."
+        );
+        let multibyte = build_stt_vocabulary_prompt("", None, &"\u{e9}".repeat(200));
+        assert_eq!(multibyte.len(), STT_PROMPT_MAX_BYTES - 1);
+        assert!(multibyte.starts_with("Context: \u{e9}"));
+        assert!(multibyte.ends_with('\u{e9}'));
+        assert_eq!(truncate_utf8_at_boundary("\u{e9}", 1), "");
+
+        let prompt = build_system_prompt(&VoiceCallPromptParams {
+            user_display_name: "  ".to_string(),
+            callee_name: Some("  ".to_string()),
+            objective: " ".to_string(),
+            first_message: Some("\n".to_string()),
+            context: Some("\t".to_string()),
+        });
+        assert!(prompt.contains("carrying out a request for the user."));
+        assert!(prompt.contains("I'm calling for the user to book"));
+        for absent in [
+            "Callee:",
+            "Call objective:",
+            "Opening turn guidance:",
+            "Additional background context:",
+        ] {
+            assert!(!prompt.contains(absent), "unexpected {absent} section");
+        }
+        assert!(prompt.ends_with("without breaking conversational flow."));
+
+        assert_eq!(normalize_dtmf_digits("1-800 *#").unwrap(), "1800*#");
+        assert!(matches!(
+            normalize_dtmf_digits(" - - "),
+            Err(VoiceError::InvalidToolCall { ref reason, .. })
+                if reason.contains("at least one DTMF symbol")
+        ));
+        assert!(!contains_subslice(b"boundary", b""));
+    }
+
+    #[test]
+    fn transcript_cleanup_strips_only_closed_non_speech_annotations() {
+        for (raw, expected) in [
+            (
+                "hello [music] there [Bob] and [unclosed tail",
+                Some("hello there [Bob] and [unclosed tail"),
+            ),
+            ("[unclosed hello", Some("[unclosed hello")),
+            ("[Bob] says hi", Some("[Bob] says hi")),
+            ("thanks for holding [music]", Some("thanks for holding")),
+            ("closing bracket]", Some("closing bracket]")),
+            ("call me (maybe)", Some("call me (maybe)")),
+            ("[] hello", Some("hello")),
+            ("(...) hello (laughter)", Some("hello")),
+            ("[ ] (\u{266a})", None),
+        ] {
+            assert_eq!(
+                clean_transcription_text(raw).as_deref(),
+                expected,
+                "cleaning {raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn conversation_ignores_blank_inputs_and_answers_unreplied_tool_calls() {
+        let mut conv = VoiceConversation::new(no_context_params("   ", "  "));
+        assert_eq!(conv.stt_vocabulary_prompt(), "");
+        assert!(conv.system_prompt().contains("request for the user."));
+
+        conv.push_callee_utterance(" \t ");
+        conv.record_assistant_turn(&AssistantTurnOutput {
+            full_text: "  ".to_string(),
+            clauses: Vec::new(),
+            tool_calls: Vec::new(),
+            raw_tool_calls: Vec::new(),
+        });
+        conv.record_tool_result("  ", "ignored");
+        conv.inject_steer("\n");
+        assert_eq!(conv.messages().len(), 1);
+        assert!(conv.transcript().is_empty());
+        assert_eq!(
+            conv.build_request_messages().last(),
+            Some(&ChatMessage::user(SILENT_PICKUP_USER_CUE))
+        );
+
+        conv.push_callee_utterance("Hello, who is calling?");
+        let unreplied_call = AssistantToolCallMessage {
+            id: "call_wait".to_string(),
+            kind: "function".to_string(),
+            function: AssistantToolCallFunction {
+                name: "wait_silently".to_string(),
+                arguments: "{}".to_string(),
+            },
+        };
+        conv.record_assistant_turn(&AssistantTurnOutput {
+            full_text: " ".to_string(),
+            clauses: Vec::new(),
+            tool_calls: Vec::new(),
+            raw_tool_calls: vec![unreplied_call.clone()],
+        });
+        assert_eq!(conv.messages().len(), 3);
+        assert_eq!(conv.messages()[2].tool_calls, vec![unreplied_call]);
+        assert_eq!(conv.transcript().len(), 1);
+
+        let request = conv.build_request_messages();
+        assert_eq!(request.len(), 4);
+        assert_eq!(request[3], ChatMessage::tool("call_wait", "ok"));
+        assert!(request
+            .iter()
+            .all(|msg| msg.content.as_deref() != Some(SILENT_PICKUP_USER_CUE)));
+
+        conv.mark_last_assistant_interrupted("   ");
+        assert_eq!(
+            conv.messages()[2].content.as_deref(),
+            Some(INTERRUPTED_MARKER)
+        );
+        assert!(conv.messages()[2].tool_calls.is_empty());
+        assert_eq!(
+            conv.transcript().last(),
+            Some(&TranscriptEntry {
+                speaker: TranscriptSpeaker::Assistant,
+                text: INTERRUPTED_MARKER.to_string(),
+                interrupted: true,
+            })
+        );
+    }
+
+    #[test]
+    fn clause_chunker_handles_blank_input_closing_quotes_decimals_and_parenthesized_titles() {
+        let mut chunker = ClauseChunker::new();
+        assert!(chunker.push_str("").is_empty());
+        assert!(chunker.push_str("   ").is_empty());
+        assert_eq!(chunker.finish(), None);
+
+        assert_eq!(
+            chunker.push_str("She said \"yes.\" Then"),
+            vec!["She said \"yes.\""]
+        );
+        assert_eq!(chunker.buffered(), "Then");
+        assert_eq!(
+            chunker.push_str(" version 2.5 shipped. Next"),
+            vec!["Then version 2.5 shipped."]
+        );
+        assert_eq!(chunker.buffered(), "Next");
+        assert_eq!(
+            chunker.push_str(" (Dr. Smith) will call. Ok"),
+            vec!["Next (Dr. Smith) will call."]
+        );
+        assert_eq!(chunker.finish(), Some("Ok".to_string()));
+    }
+
+    #[tokio::test]
+    async fn cancelled_or_empty_requests_return_without_contacting_endpoints() {
+        let client = VoicePipelineClient::new(VoicePipelineConfig::default()).unwrap();
+        let conv = VoiceConversation::new(no_context_params("Alex Example", "Confirm"));
+        let cancelled = CancellationToken::new();
+        cancelled.cancel();
+
+        assert!(client
+            .preload_models(&cancelled)
+            .await
+            .unwrap_err()
+            .is_cancelled());
+        assert!(client
+            .transcribe_wav(b"RIFF", "prompt", &cancelled)
+            .await
+            .unwrap_err()
+            .is_cancelled());
+        assert!(client
+            .stream_assistant_turn(&conv, &cancelled, |_| panic!("no clause expected"))
+            .await
+            .unwrap_err()
+            .is_cancelled());
+        assert!(client
+            .synthesize_speech_pcm24k("Hello.", &cancelled, |_| panic!("no audio expected"))
+            .await
+            .unwrap_err()
+            .is_cancelled());
+
+        let live = CancellationToken::new();
+        assert_eq!(
+            client.transcribe_wav(&[], "prompt", &live).await.unwrap(),
+            None
+        );
+        assert_eq!(
+            client
+                .synthesize_speech_pcm24k(" \n ", &live, |_| panic!("no audio expected"))
+                .await
+                .unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn stt_and_tts_http_failures_report_status_with_bounded_error_body() {
+        let mut oversized_body = "a".repeat(ERROR_BODY_MAX_BYTES - 1).into_bytes();
+        oversized_body.extend_from_slice("\u{e9} and everything after the cap".as_bytes());
+        let stt_url = spawn_status_server(StatusCode::BAD_GATEWAY, oversized_body).await;
+        let tts_url = spawn_status_server(
+            StatusCode::SERVICE_UNAVAILABLE,
+            b"  model loading  ".to_vec(),
+        )
+        .await;
+        let client = VoicePipelineClient::new(VoicePipelineConfig {
+            stt_base_url: stt_url,
+            tts_base_url: tts_url,
+            ..VoicePipelineConfig::default()
+        })
+        .expect("create voice client");
+        let cancel = CancellationToken::new();
+
+        match client.transcribe_wav(b"RIFFdata", "prompt", &cancel).await {
+            Err(VoiceError::HttpStatus {
+                endpoint,
+                status,
+                body,
+            }) => {
+                assert!(endpoint.ends_with("/v1/audio/transcriptions"));
+                assert_eq!(status, 502);
+                let expected = "a".repeat(ERROR_BODY_MAX_BYTES - 1) + "\u{fffd}";
+                assert_eq!(body, expected);
+            }
+            other => panic!("expected bounded STT HTTP error, got {other:?}"),
+        }
+
+        match client
+            .synthesize_speech_pcm24k("Hello there.", &cancel, |_| panic!("no audio expected"))
+            .await
+        {
+            Err(VoiceError::HttpStatus {
+                endpoint,
+                status,
+                body,
+            }) => {
+                assert!(endpoint.ends_with("/v1/audio/speech"));
+                assert_eq!(status, 503);
+                assert_eq!(body, "model loading");
+            }
+            other => panic!("expected TTS HTTP error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn sse_stream_skips_non_data_lines_parses_unterminated_tails_and_partial_tool_deltas() {
+        let state = MockServerState::new();
+        let base_url = spawn_mock_voice_server(Arc::clone(&state)).await;
+        let client = VoicePipelineClient::new(VoicePipelineConfig {
+            llm_base_url: base_url,
+            ..VoicePipelineConfig::default()
+        })
+        .expect("create voice client");
+        let mut conv = VoiceConversation::new(no_context_params(
+            "Alex Example",
+            "Confirm the delivery window",
+        ));
+        conv.push_callee_utterance("Please hold while I look that up.");
+        let cancel = CancellationToken::new();
+        let content_chunk = |text: &str| json!({"choices": [{"delta": {"content": text}}]});
+        let tool_delta = |delta: Value| json!({"choices": [{"delta": {"tool_calls": [delta]}}]});
+
+        let lines = [
+            "   ".to_string(),
+            " : padded comment".to_string(),
+            "event: message".to_string(),
+            "data:    ".to_string(),
+            format!("data: {}", content_chunk("Sure, one moment.")),
+            format!("data: {}", tool_delta(json!({"index": 0, "id": "call_"}))),
+            format!(
+                "data: {}",
+                tool_delta(json!({"index": 0, "id": "hold", "function": {"name": "wait_"}}))
+            ),
+            format!(
+                "data: {}",
+                tool_delta(
+                    json!({"index": 0, "function": {"name": "", "arguments": "{\"on_hold\":true}"}})
+                )
+            ),
+            format!(
+                "data: {}",
+                tool_delta(json!({"index": 0, "function": {"name": "silently"}}))
+            ),
+            format!(
+                "data: {}",
+                tool_delta(json!({"index": 1, "function": {"name": "resume_call"}}))
+            ),
+        ];
+        // The stream closes after a complete CRLF-terminated line without sending [DONE].
+        *state.chat_sse_chunks.lock().await = vec![(lines.join("\r\n") + "\r\n").into_bytes()];
+        let mut spoken = Vec::new();
+        let turn = client
+            .stream_assistant_turn(&conv, &cancel, |clause| spoken.push(clause))
+            .await
+            .expect("stream without [DONE]");
+        assert_eq!(turn.full_text, "Sure, one moment.");
+        assert_eq!(turn.clauses, vec!["Sure, one moment."]);
+        assert_eq!(spoken, turn.clauses);
+        assert_eq!(
+            turn.tool_calls[0],
+            VoiceToolCall::WaitSilently {
+                call_id: "call_hold".to_string(),
+                reason: "waiting".to_string(),
+                on_hold: true,
+            }
+        );
+        assert_eq!(turn.raw_tool_calls[0].function.name, "wait_silently");
+        assert_eq!(
+            turn.raw_tool_calls[0].function.arguments,
+            "{\"on_hold\":true}"
+        );
+        let generated_id = turn.tool_calls[1].call_id();
+        assert!(generated_id.starts_with("call_1_"), "{generated_id}");
+        assert_eq!(
+            turn.tool_calls[1],
+            VoiceToolCall::ResumeCall {
+                call_id: generated_id.to_string(),
+            }
+        );
+        assert_eq!(turn.raw_tool_calls[1].id, generated_id);
+        assert_eq!(turn.raw_tool_calls[1].function.arguments, "{}");
+
+        for (tail, text) in [
+            (
+                format!("data: {}", content_chunk("Final words.")),
+                "Final words.",
+            ),
+            (
+                format!("data: {}\r", content_chunk("Carriage return tail.")),
+                "Carriage return tail.",
+            ),
+        ] {
+            *state.chat_sse_chunks.lock().await = vec![tail.into_bytes()];
+            let mut tail_clauses = Vec::new();
+            let tail_turn = client
+                .stream_assistant_turn(&conv, &cancel, |clause| tail_clauses.push(clause))
+                .await
+                .expect("unterminated final SSE line");
+            assert_eq!(tail_turn.full_text, text);
+            assert_eq!(tail_turn.clauses, vec![text.to_string()]);
+            assert_eq!(tail_clauses, tail_turn.clauses);
+            assert!(tail_turn.tool_calls.is_empty());
+        }
+
+        *state.chat_sse_chunks.lock().await = vec![vec![b'a'; SSE_LINE_MAX_BYTES + 1]];
+        let oversized = client
+            .stream_assistant_turn(&conv, &cancel, |_| {})
+            .await
+            .expect_err("oversized SSE line must fail");
+        assert!(matches!(
+            oversized,
+            VoiceError::InvalidResponse { ref reason, .. } if reason.contains("exceeded")
+        ));
+
+        *state.chat_sse_chunks.lock().await = vec![format!(
+            "data: {}\n\ndata: [DONE]\n\n",
+            tool_delta(json!({"index": 0, "id": "call_nameless", "function": {"arguments": "{}"}}))
+        )
+        .into_bytes()];
+        let nameless = client
+            .stream_assistant_turn(&conv, &cancel, |_| {})
+            .await
+            .expect_err("nameless tool call must fail");
+        assert!(matches!(
+            nameless,
+            VoiceError::InvalidToolCall { ref tool_name, .. } if tool_name == "<empty>"
+        ));
+    }
+
+    #[tokio::test]
+    async fn transcription_without_prompt_and_single_byte_tts_chunks_round_trip() {
+        let state = MockServerState::new();
+        *state.transcription_reply_text.lock().await = " Yes,  that works. ".to_string();
+        let expected_samples: [i16; 4] = [1_234, -5_678, 32_000, -1];
+        let pcm: Vec<u8> = expected_samples
+            .iter()
+            .flat_map(|sample| sample.to_le_bytes())
+            .collect();
+        *state.speech_pcm_chunks.lock().await = vec![
+            pcm[..1].to_vec(),
+            pcm[1..4].to_vec(),
+            pcm[4..7].to_vec(),
+            pcm[7..].to_vec(),
+        ];
+        state.speech_chunk_delay_ms.store(20, Ordering::SeqCst);
+        let base_url = spawn_mock_voice_server(Arc::clone(&state)).await;
+        let client = VoicePipelineClient::new(VoicePipelineConfig {
+            stt_base_url: base_url.clone(),
+            tts_base_url: base_url,
+            ..VoicePipelineConfig::default()
+        })
+        .expect("create voice client");
+        let cancel = CancellationToken::new();
+
+        let text = client
+            .transcribe_wav(b"RIFF", " \n\t ", &cancel)
+            .await
+            .expect("transcribe without prompt");
+        assert_eq!(text.as_deref(), Some("Yes, that works."));
+        {
+            let captured = state.transcriptions.lock().await;
+            assert_eq!(captured.len(), 1);
+            assert_eq!(captured[0].prompt, None);
+            assert_eq!(captured[0].file_bytes, b"RIFF");
+            assert_eq!(captured[0].model.as_deref(), Some(DEFAULT_STT_MODEL));
+        }
+
+        let mut deliveries: Vec<Vec<i16>> = Vec::new();
+        let sample_count = client
+            .synthesize_speech_pcm24k("Thanks!", &cancel, |samples| {
+                deliveries.push(samples.to_vec());
+            })
+            .await
+            .expect("synthesize split PCM");
+        assert_eq!(sample_count, expected_samples.len());
+        assert!(deliveries.iter().all(|chunk| !chunk.is_empty()));
+        assert_eq!(deliveries.concat(), expected_samples);
     }
 }

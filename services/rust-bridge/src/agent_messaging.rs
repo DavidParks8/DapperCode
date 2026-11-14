@@ -842,7 +842,7 @@ struct StartPhoneCallArguments {
     callee_name: Option<String>,
     #[serde(default)]
     #[schemars(
-        description = "Optional guidance for the opening spoken turn; mandatory AI disclosure is always included"
+        description = "Optional guidance for the opening spoken turn. Default: say who the call is for and why, without volunteering that it is an AI; never impersonate the user and answer identity questions truthfully"
     )]
     first_message: Option<String>,
     #[serde(default)]
