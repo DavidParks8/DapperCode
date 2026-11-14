@@ -350,6 +350,59 @@ returns one snapshot per configured workspace without waking workers. `stop --al
 and all workers while preserving the remembered launch intent for the next desktop app launch.
 `forget` removes a workspace's profile, token, and profile directory once the broker is stopped.
 
+## Agent Phone Calls (Optional)
+
+Active ACP sessions can place user-approved outbound phone calls through the bridge-owned
+`start_phone_call`, `steer_phone_call`, `get_phone_call`, and `hangup_phone_call` MCP tools when
+voice settings and a SIP trunk are configured on desktop.
+
+By default, speech-to-text, tool-calling voice turns, and 24 kHz streaming text-to-speech run
+against one local Ollama daemon (`>= v0.40.9`, `http://127.0.0.1:11434/v1`):
+
+```bash
+ollama pull gemma4:e4b
+ollama pull phonon
+```
+
+`gemma4:e4b` handles `/v1/audio/transcriptions` and low-latency `/v1/chat/completions` voice turns;
+`phonon` handles `/v1/audio/speech` 24 kHz PCM synthesis (`--tts-voice` defaults to `default`). To
+override narrowband 8 kHz transcription with a dedicated local server—for example `mlx_audio.server`
+serving `mlx-community/parakeet-tdt-0.6b-v2`—pass `--stt-base-url` and `--stt-model` (and optionally
+`--llm-base-url` / `--llm-model` or `--tts-base-url` / `--tts-model`).
+
+Configure, inspect, or remove voice settings through the operator CLI (`dappercode voice ...` or
+`pnpm run operator voice ...` from a source checkout), piping the SIP password over stdin so it
+never appears in process arguments:
+
+```bash
+printf '%s\n' "$SIP_PASSWORD" | dappercode voice configure \
+  --sip-server sip.provider.example:5061 \
+  --sip-transport tls \
+  --sip-username sip-user \
+  --caller-id +15551234567 \
+  --display-name "Your Name" \
+  --sip-password-stdin
+dappercode voice status --human
+dappercode voice clear
+```
+
+Security and storage boundaries:
+
+- **Secrets vs. config**: the SIP password is stored in `SecretStore` under service
+  `dev.dappercode.desktop` (shared Keychain vault on macOS, Credential Manager entry
+  `__phone-call-sip-password` on Windows, or restrictive `0600` file fallback under `secrets/`) and
+  injected into bridge workers only in memory (`PHONE_CALL_*`). Non-secret SIP and model settings
+  live in `config.json`.
+- **Loopback-only inference**: `--stt-base-url`, `--llm-base-url`, and `--tts-base-url` must resolve
+  to loopback hosts (`localhost`, `127.0.0.1`, or `::1`); remote model URLs are rejected.
+- **Mandatory mobile approval**: `start_phone_call` blocks on a non-dismissible mobile approval
+  modal before sending a single SIP packet. Declining or timing out cancels the call locally.
+- **Outbound-only SIP/RTP**: the bridge dials outbound SIP (`udp` or `tls`) and 20 ms G.711 PCMU RTP
+  directly from ephemeral local ports—no public webhooks, tunnels, or inbound listeners are opened.
+- **AI disclosure and text-only transcripts**: the voice system prompt enforces immediate AI
+  disclosure on behalf of `--display-name`, and only bounded text transcripts (never raw call audio)
+  are shown in the live card or enqueued back to the owning ACP session when the call settles.
+
 ## Process Ownership
 
 The desktop operator serializes start/stop/restart with a private broker file lease. It stores

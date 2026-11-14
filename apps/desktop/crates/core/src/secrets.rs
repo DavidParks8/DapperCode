@@ -21,6 +21,8 @@ use crate::{
 const KEYCHAIN_SERVICE: &str = "dev.dappercode.desktop";
 const LEGACY_TOKEN_ENTRY_PREFIX: &str = "bridge-auth-token";
 pub(crate) const VAULT_ENTRY_ACCOUNT: &str = "bridge-auth-vault:v1";
+#[cfg(any(target_os = "windows", test))]
+pub(crate) const WINDOWS_SIP_PASSWORD_ACCOUNT: &str = "__phone-call-sip-password";
 pub(crate) const VAULT_VERSION: u32 = 1;
 const MAX_VAULT_BYTES: usize = 1024 * 1024;
 const MAX_VAULT_PROFILES: usize = 5_000;
@@ -73,11 +75,20 @@ struct SecretFile {
     bridge_auth_token: String,
 }
 
+#[cfg(any(target_os = "windows", test))]
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SipPasswordFile {
+    sip_password: String,
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SecretVault {
     pub(crate) version: u32,
     pub(crate) bridge_auth_tokens: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) sip_password: Option<String>,
 }
 
 impl Default for SecretVault {
@@ -85,6 +96,7 @@ impl Default for SecretVault {
         Self {
             version: VAULT_VERSION,
             bridge_auth_tokens: BTreeMap::new(),
+            sip_password: None,
         }
     }
 }
@@ -109,8 +121,21 @@ impl SecretVault {
                 bail!("bridge credential vault contains an invalid profile credential");
             }
         }
+        if let Some(sip_password) = &self.sip_password {
+            validate_sip_password(sip_password)?;
+        }
         Ok(())
     }
+}
+
+pub(crate) fn validate_sip_password(password: &str) -> Result<()> {
+    if password.trim().is_empty()
+        || password.len() > MAX_TOKEN_BYTES
+        || password.contains(['\n', '\r', '\0'])
+    {
+        bail!("SIP password must be non-empty, at most {MAX_TOKEN_BYTES} bytes, and free of control characters");
+    }
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -493,6 +518,108 @@ impl SecretStore {
         }
         remove_file_if_exists(&paths.secret_file_path(profile_id))
     }
+
+    pub fn store_sip_password(&self, paths: &AppPaths, password: &str) -> Result<SecretBackend> {
+        validate_sip_password(password)?;
+        match self.effective_credential_layout() {
+            CredentialLayout::SharedVault => {
+                let _lease = FileLease::acquire(&paths.secret_vault_lock_path())?;
+                let existing = self.load_vault_fresh(paths)?;
+                let previous_backend = existing.as_ref().map(|state| state.backend);
+                let mut vault = existing.map(|state| state.vault).unwrap_or_default();
+                vault.sip_password = Some(password.to_string());
+                self.persist_vault(paths, vault, previous_backend)
+            }
+            #[cfg(any(target_os = "windows", test))]
+            CredentialLayout::WindowsPerProfile => {
+                if password.encode_utf16().count()
+                    > platform::windows_credentials::MAX_WINDOWS_CREDENTIAL_UTF16_UNITS
+                {
+                    bail!("SIP password exceeds the Windows Credential Manager size limit");
+                }
+                let _lease = FileLease::acquire(&paths.secret_vault_lock_path())?;
+                let existed = (self.keychain.get)(WINDOWS_SIP_PASSWORD_ACCOUNT)?.is_some();
+                match (self.keychain.set)(WINDOWS_SIP_PASSWORD_ACCOUNT, password) {
+                    Ok(()) => {
+                        remove_file_if_exists(&paths.sip_secret_file_path())?;
+                        Ok(SecretBackend::Keychain)
+                    }
+                    Err(error) if existed => {
+                        Err(error).context("failed to update the Windows SIP password credential")
+                    }
+                    Err(_) => {
+                        let contents = serde_json::to_vec_pretty(&SipPasswordFile {
+                            sip_password: password.to_string(),
+                        })?;
+                        atomic_private_write(&paths.sip_secret_file_path(), &contents)?;
+                        Ok(SecretBackend::File)
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn load_sip_password(&self, paths: &AppPaths) -> Result<Option<(String, SecretBackend)>> {
+        match self.effective_credential_layout() {
+            CredentialLayout::SharedVault => {
+                let Some(state) = self.load_vault_fresh(paths)? else {
+                    return Ok(None);
+                };
+                Ok(state
+                    .vault
+                    .sip_password
+                    .map(|password| (password, state.backend)))
+            }
+            #[cfg(any(target_os = "windows", test))]
+            CredentialLayout::WindowsPerProfile => {
+                if let Some(password) = (self.keychain.get)(WINDOWS_SIP_PASSWORD_ACCOUNT)? {
+                    validate_sip_password(&password)?;
+                    return Ok(Some((password, SecretBackend::Keychain)));
+                }
+                Ok(sip_password_file_get(&paths.sip_secret_file_path())?
+                    .map(|password| (password, SecretBackend::File)))
+            }
+        }
+    }
+
+    pub fn delete_sip_password(&self, paths: &AppPaths) -> Result<()> {
+        match self.effective_credential_layout() {
+            CredentialLayout::SharedVault => {
+                let _lease = FileLease::acquire(&paths.secret_vault_lock_path())?;
+                if let Some(state) = self.load_vault_fresh(paths)? {
+                    let mut vault = state.vault;
+                    if vault.sip_password.take().is_some() {
+                        self.persist_vault(paths, vault, Some(state.backend))?;
+                    }
+                }
+                Ok(())
+            }
+            #[cfg(any(target_os = "windows", test))]
+            CredentialLayout::WindowsPerProfile => {
+                let _lease = FileLease::acquire(&paths.secret_vault_lock_path())?;
+                if (self.keychain.get)(WINDOWS_SIP_PASSWORD_ACCOUNT)?.is_some() {
+                    (self.keychain.delete)(WINDOWS_SIP_PASSWORD_ACCOUNT)
+                        .context("failed to remove the Windows SIP password credential")?;
+                }
+                remove_file_if_exists(&paths.sip_secret_file_path())
+            }
+        }
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn sip_password_file_get(path: &Path) -> Result<Option<String>> {
+    let contents = match std::fs::read(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to read {}", path.display()))
+        }
+    };
+    let file: SipPasswordFile = serde_json::from_slice(&contents)
+        .with_context(|| format!("invalid stored SIP secret at {}", path.display()))?;
+    validate_sip_password(&file.sip_password)?;
+    Ok(Some(file.sip_password))
 }
 
 pub(crate) fn legacy_entry_account(profile_id: &str) -> String {
@@ -1775,5 +1902,120 @@ mod tests {
                 .token,
             "explicit-token"
         );
+    }
+
+    #[test]
+    fn shared_vault_deserializes_legacy_v1_and_round_trips_sip_password_in_single_item() {
+        MEMORY_KEYCHAIN.lock().unwrap().clear();
+        MEMORY_KEYCHAIN.lock().unwrap().insert(
+            VAULT_ENTRY_ACCOUNT.to_string(),
+            r#"{"version":1,"bridgeAuthTokens":{"alpha":"legacy-token"}}"#.to_string(),
+        );
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        let store = SecretStore::with_keychain(memory_keychain());
+
+        assert_eq!(store.load_sip_password(&paths).unwrap(), None);
+        assert_eq!(
+            store.get(&paths, "alpha").unwrap().unwrap().token,
+            "legacy-token"
+        );
+
+        assert_eq!(
+            store.store_sip_password(&paths, "sip-s3cr3t").unwrap(),
+            SecretBackend::Keychain
+        );
+        assert_eq!(MEMORY_KEYCHAIN.lock().unwrap().len(), 1);
+        assert!(MEMORY_KEYCHAIN
+            .lock()
+            .unwrap()
+            .contains_key(VAULT_ENTRY_ACCOUNT));
+        assert_eq!(
+            store.load_sip_password(&paths).unwrap(),
+            Some(("sip-s3cr3t".to_string(), SecretBackend::Keychain))
+        );
+        assert_eq!(
+            store.get(&paths, "alpha").unwrap().unwrap().token,
+            "legacy-token"
+        );
+
+        store.delete_sip_password(&paths).unwrap();
+        assert_eq!(store.load_sip_password(&paths).unwrap(), None);
+        assert_eq!(
+            store.get(&paths, "alpha").unwrap().unwrap().token,
+            "legacy-token"
+        );
+        let persisted = MEMORY_KEYCHAIN
+            .lock()
+            .unwrap()
+            .get(VAULT_ENTRY_ACCOUNT)
+            .cloned()
+            .unwrap();
+        assert!(!persisted.contains("sipPassword"));
+    }
+
+    #[test]
+    fn windows_stores_sip_password_under_dedicated_entry_and_file_fallback() {
+        let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        reset_windows_memory_keychain();
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        let store = SecretStore::with_windows_keychain(windows_memory_keychain());
+
+        assert_eq!(
+            store.store_sip_password(&paths, "win-sip-secret").unwrap(),
+            SecretBackend::Keychain
+        );
+        assert_eq!(
+            WINDOWS_MEMORY_KEYCHAIN
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .entries
+                .get(WINDOWS_SIP_PASSWORD_ACCOUNT)
+                .map(String::as_str),
+            Some("win-sip-secret")
+        );
+        assert_eq!(
+            store.load_sip_password(&paths).unwrap(),
+            Some(("win-sip-secret".to_string(), SecretBackend::Keychain))
+        );
+        store.delete_sip_password(&paths).unwrap();
+        assert_eq!(store.load_sip_password(&paths).unwrap(), None);
+
+        WINDOWS_MEMORY_KEYCHAIN
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .reject_all_sets = true;
+        assert_eq!(
+            store.store_sip_password(&paths, "fallback-sip").unwrap(),
+            SecretBackend::File
+        );
+        assert!(paths.sip_secret_file_path().is_file());
+        assert_eq!(
+            store.load_sip_password(&paths).unwrap(),
+            Some(("fallback-sip".to_string(), SecretBackend::File))
+        );
+        store.delete_sip_password(&paths).unwrap();
+        assert!(!paths.sip_secret_file_path().exists());
+        assert_eq!(store.load_sip_password(&paths).unwrap(), None);
+    }
+
+    #[test]
+    fn rejects_invalid_sip_passwords() {
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        let store = file_store();
+        for invalid in [
+            "",
+            "   ",
+            "bad\nline",
+            "bad\rline",
+            "bad\0null",
+            &"x".repeat(MAX_TOKEN_BYTES + 1),
+        ] {
+            assert!(store.store_sip_password(&paths, invalid).is_err());
+        }
     }
 }

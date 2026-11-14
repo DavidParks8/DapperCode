@@ -25,6 +25,7 @@ pub use setup::{
     SetupResult,
 };
 pub use store::{
-    profile_id_for, AppConfig, AppPaths, BrokerEndpoint, BrokerSettings, FileLease, Profile,
-    ProfileAgent,
+    profile_id_for, AppConfig, AppPaths, BrokerEndpoint, BrokerSettings, FileLease,
+    PhoneCallSettings, Profile, ProfileAgent, DEFAULT_SIP_TRANSPORT, DEFAULT_VOICE_BASE_URL,
+    DEFAULT_VOICE_LLM_MODEL, DEFAULT_VOICE_TTS_MODEL, DEFAULT_VOICE_TTS_VOICE,
 };

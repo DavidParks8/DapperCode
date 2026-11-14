@@ -76,6 +76,7 @@ mod config;
 mod health;
 mod observability;
 mod owner_watchdog;
+mod phone_call;
 mod preview;
 mod push;
 mod replay;
@@ -229,17 +230,28 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    let phone_calls = phone_call::PhoneCallService::new(
+        config.phone_call.clone(),
+        hub.clone(),
+        Arc::downgrade(&queue),
+    );
     if let Err(error) = backend
-        .attach_thread_lifecycle(Arc::downgrade(&queue), Arc::downgrade(&scheduler))
+        .attach_thread_lifecycle_with_phone_calls(
+            Arc::downgrade(&queue),
+            Arc::downgrade(&scheduler),
+            Arc::downgrade(&phone_calls),
+        )
         .await
     {
         eprintln!("{error}");
+        phone_calls.shutdown().await;
         scheduler.shutdown().await;
         backend.shutdown().await;
         std::process::exit(1);
     }
     if let Err(error) = scheduler.start_worker() {
         eprintln!("{error}");
+        phone_calls.shutdown().await;
         scheduler.shutdown().await;
         backend.shutdown().await;
         std::process::exit(1);
@@ -248,12 +260,14 @@ async fn main() {
         Arc::downgrade(&backend),
         Arc::downgrade(&queue),
         scheduler.clone(),
+        phone_calls.clone(),
     )
     .await
     {
         Ok(service) => service,
         Err(error) => {
             eprintln!("{error}");
+            phone_calls.shutdown().await;
             scheduler.shutdown().await;
             backend.shutdown().await;
             std::process::exit(1);
@@ -261,6 +275,7 @@ async fn main() {
     };
     if let Err(error) = backend.attach_agent_messaging(agent_messaging).await {
         eprintln!("{error}");
+        phone_calls.shutdown().await;
         scheduler.shutdown().await;
         backend.shutdown().await;
         std::process::exit(1);
@@ -279,6 +294,7 @@ async fn main() {
         Ok(state) => state,
         Err(error) => {
             eprintln!("{error}");
+            phone_calls.shutdown().await;
             backend.shutdown().await;
             std::process::exit(1);
         }
@@ -292,6 +308,7 @@ async fn main() {
         backend,
         queue,
         scheduler: scheduler.clone(),
+        phone_calls,
         operation_dedupe: Arc::new(Mutex::new(operation_dedupe)),
         thread_create_actor: Arc::new(Mutex::new(())),
         thread_fork_actor: Arc::new(Mutex::new(())),
@@ -357,6 +374,7 @@ async fn main() {
             }
         })
     });
+    let shutdown_phone_calls = state.phone_calls.clone();
     let shutdown_backend = state.backend.clone();
     let shutdown_signal_tx = shutdown_tx.clone();
     let serve_result = axum::serve(listener, app)
@@ -367,11 +385,13 @@ async fn main() {
             };
             eprintln!("shutdown signal received ({signal}), terminating managed backends");
             let _ = shutdown_signal_tx.send(true);
+            shutdown_phone_calls.shutdown().await;
             shutdown_backend.shutdown().await;
         })
         .await;
 
     let _ = shutdown_tx.send(true);
+    state.phone_calls.shutdown().await;
     state.backend.shutdown().await;
     if let Some(task) = preview_task {
         let _ = task.await;

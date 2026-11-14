@@ -110,6 +110,7 @@ impl BrokerServer {
         let watched_bridge_binary = bridge_binary.clone();
         let launcher = Arc::new(ProcessWorkerLauncher {
             paths: self.paths.clone(),
+            secrets: self.secrets.clone(),
             bridge_binary,
             settings: self.settings.clone(),
             http: worker_http_client()?,
@@ -1049,9 +1050,23 @@ trait WorkerLauncher: Send + Sync {
 
 struct ProcessWorkerLauncher {
     paths: AppPaths,
+    secrets: SecretStore,
     bridge_binary: PathBuf,
     settings: BrokerSettings,
     http: Client,
+}
+
+fn apply_worker_phone_call(
+    config: &mut BridgeRuntimeConfig,
+    paths: &AppPaths,
+    secrets: &SecretStore,
+) -> Result<()> {
+    if let Some(settings) = paths.load_config()?.phone_call {
+        if let Some((password, _)) = secrets.load_sip_password(paths)? {
+            config.apply_phone_call(&settings, &password)?;
+        }
+    }
+    Ok(())
 }
 
 /// Re-registers a workspace's agent before waking its runtime.
@@ -1126,6 +1141,7 @@ impl WorkerLauncher for ProcessWorkerLauncher {
         config
             .values
             .insert("BRIDGE_OWNER_PID".into(), std::process::id().to_string());
+        apply_worker_phone_call(&mut config, &self.paths, &self.secrets)?;
 
         let log_path = self.paths.log_path(&profile.profile_id);
         let stdout = OpenOptions::new()
@@ -2606,5 +2622,65 @@ mod tests {
         std::fs::write(paths.config_path(), b"revision-b").unwrap();
         let second = config_revision(&paths).unwrap();
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn worker_phone_call_env_requires_both_settings_and_stored_sip_password() {
+        use dappercode_desktop_core::PhoneCallSettings;
+
+        let root = tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let paths = AppPaths::for_tests(root.path().to_path_buf());
+        let secrets = SecretStore::file_backend_for_tests();
+        let mut prof = profile("workspace-1", workspace);
+        prof.agent.executable = std::env::current_exe().unwrap();
+        paths.prepare_profile(&prof.profile_id).unwrap();
+        std::fs::write(paths.manifest_path(&prof.profile_id), b"{}").unwrap();
+
+        let base_config = || {
+            BridgeRuntimeConfig::from_profile(&prof, "internal-token", SecretBackend::File, &paths)
+                .unwrap()
+        };
+
+        let mut unconfigured = base_config();
+        apply_worker_phone_call(&mut unconfigured, &paths, &secrets).unwrap();
+        assert!(!unconfigured.values.contains_key("PHONE_CALL_SIP_SERVER"));
+
+        let settings = PhoneCallSettings {
+            sip_server: "sip.telnyx.com:5061".to_string(),
+            sip_transport: "tls".to_string(),
+            sip_username: "telnyx-user".to_string(),
+            caller_id: "+15551234567".to_string(),
+            user_display_name: "Caller".to_string(),
+            stt_base_url: "http://127.0.0.1:11434/v1".to_string(),
+            stt_model: "gemma4:e4b".to_string(),
+            llm_base_url: "http://127.0.0.1:11434/v1".to_string(),
+            llm_model: "gemma4:e4b".to_string(),
+            tts_base_url: "http://127.0.0.1:11434/v1".to_string(),
+            tts_model: "phonon".to_string(),
+            tts_voice: "default".to_string(),
+        };
+        paths
+            .update_config(|config| {
+                config.phone_call = Some(settings.clone());
+                Ok(())
+            })
+            .unwrap();
+
+        let mut missing_secret = base_config();
+        apply_worker_phone_call(&mut missing_secret, &paths, &secrets).unwrap();
+        assert!(!missing_secret
+            .values
+            .contains_key("PHONE_CALL_SIP_PASSWORD"));
+
+        secrets
+            .store_sip_password(&paths, "broker-sip-secret")
+            .unwrap();
+        let mut ready = base_config();
+        apply_worker_phone_call(&mut ready, &paths, &secrets).unwrap();
+        assert_eq!(ready.values["PHONE_CALL_SIP_SERVER"], "sip.telnyx.com:5061");
+        assert_eq!(ready.values["PHONE_CALL_SIP_PASSWORD"], "broker-sip-secret");
+        assert_eq!(ready.values["PHONE_CALL_CALLER_ID"], "+15551234567");
     }
 }

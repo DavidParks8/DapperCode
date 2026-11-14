@@ -9,6 +9,7 @@ pub(super) struct AppState {
     pub(super) backend: Arc<RuntimeBackend>,
     pub(super) queue: Arc<BridgeQueueService>,
     pub(super) scheduler: Arc<crate::scheduled_prompts::ScheduledPromptService>,
+    pub(super) phone_calls: Arc<crate::phone_call::PhoneCallService>,
     pub(super) operation_dedupe: Arc<Mutex<DurableOperationDedupe>>,
     pub(super) thread_create_actor: Arc<Mutex<()>>,
     pub(super) thread_fork_actor: Arc<Mutex<()>>,
@@ -241,6 +242,7 @@ impl AppState {
         let request_metrics = self.metrics.request_snapshot();
         let in_flight_requests = manager_other
             .saturating_add(scheduled_prompts)
+            .saturating_add(self.phone_calls.live_work_count())
             .saturating_add(usize::try_from(request_metrics.pending).unwrap_or(usize::MAX))
             .saturating_add(self.push.pending_delivery_count())
             .saturating_add(usize::from(

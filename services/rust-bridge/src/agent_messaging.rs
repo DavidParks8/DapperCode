@@ -33,6 +33,7 @@ use uuid::Uuid;
 
 use crate::acp::runtime::McpTransportPreference;
 use crate::bridge_protocol::BridgeQueueService;
+use crate::phone_call::{PhoneCallError, PhoneCallService, StartPhoneCallRequest};
 use crate::runtime_backend::RuntimeBackend;
 use crate::scheduled_prompts::{ScheduledPromptError, ScheduledPromptService};
 use dappercode_bridge_core::resource_limits::QUEUE_MAX_CONTENT_BYTES;
@@ -624,6 +625,7 @@ impl McpCredentialStore {
 pub(crate) struct AgentMessagingService {
     config: AgentMessagingMcpConfig,
     scheduler: Arc<ScheduledPromptService>,
+    phone_calls: Arc<PhoneCallService>,
     cancellation: CancellationToken,
     task: tokio::task::JoinHandle<()>,
 }
@@ -633,6 +635,7 @@ impl AgentMessagingService {
         backend: Weak<RuntimeBackend>,
         queue: Weak<BridgeQueueService>,
         scheduler: Arc<ScheduledPromptService>,
+        phone_calls: Arc<PhoneCallService>,
     ) -> Result<Self, String> {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -649,6 +652,7 @@ impl AgentMessagingService {
             backend,
             queue,
             scheduler: scheduler.clone(),
+            phone_calls: phone_calls.clone(),
             credentials: credentials.clone(),
             legacy_sessions: Arc::new(Mutex::new(HashMap::new())),
             message_url: format!("{base_url}/message"),
@@ -699,6 +703,7 @@ impl AgentMessagingService {
                 credentials,
             ),
             scheduler,
+            phone_calls,
             cancellation,
             task,
         })
@@ -719,6 +724,7 @@ impl AgentMessagingService {
             task.abort();
             let _ = task.await;
         }
+        self.phone_calls.shutdown().await;
         self.scheduler.shutdown().await;
     }
 }
@@ -727,6 +733,7 @@ struct AgentMessagingRouterState {
     backend: Weak<RuntimeBackend>,
     queue: Weak<BridgeQueueService>,
     scheduler: Arc<ScheduledPromptService>,
+    phone_calls: Arc<PhoneCallService>,
     credentials: Arc<McpCredentialStore>,
     legacy_sessions: Arc<Mutex<HashMap<String, LegacySseSession>>>,
     message_url: String,
@@ -819,6 +826,53 @@ struct SchedulePromptArguments {
 struct CancelScheduledPromptArguments {
     #[schemars(description = "scheduleId returned by schedule_prompt or list_scheduled_prompts")]
     schedule_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StartPhoneCallArguments {
+    #[schemars(description = "Destination phone number in E.164 format, e.g. +15551234567")]
+    phone_number: String,
+    #[schemars(
+        description = "Clear objective describing what the local voice assistant should accomplish on the phone call"
+    )]
+    objective: String,
+    #[serde(default)]
+    #[schemars(description = "Optional name of the person or business being called")]
+    callee_name: Option<String>,
+    #[serde(default)]
+    #[schemars(
+        description = "Optional guidance for the opening spoken turn; mandatory AI disclosure is always included"
+    )]
+    first_message: Option<String>,
+    #[serde(default)]
+    #[schemars(
+        description = "Optional background context, preferences, or fallback details for the call"
+    )]
+    context: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SteerPhoneCallArguments {
+    #[schemars(description = "callId returned by start_phone_call")]
+    call_id: String,
+    #[schemars(description = "Live instruction to inject into the active phone call")]
+    instruction: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GetPhoneCallArguments {
+    #[schemars(description = "callId returned by start_phone_call")]
+    call_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HangupPhoneCallArguments {
+    #[schemars(description = "callId returned by start_phone_call")]
+    call_id: String,
 }
 
 #[tool_router]
@@ -968,13 +1022,92 @@ impl AgentMessagingMcpHandler {
             .map_err(scheduled_prompt_tool_error)?;
         json_tool_result(cancelled)
     }
+
+    #[tool(
+        description = "Place an outbound phone call on behalf of the user after mandatory mobile approval. Returns immediately with status in_progress once the call connects (200 OK) so this session stays open for live steering; a full transcript report is delivered to this session when the call ends"
+    )]
+    async fn start_phone_call(
+        &self,
+        Parameters(arguments): Parameters<StartPhoneCallArguments>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let (_, caller_thread_id) = self.active_caller()?;
+        let started = self
+            .state
+            .phone_calls
+            .start_phone_call(
+                &caller_thread_id,
+                StartPhoneCallRequest {
+                    phone_number: arguments.phone_number,
+                    objective: arguments.objective,
+                    callee_name: arguments.callee_name,
+                    first_message: arguments.first_message,
+                    context: arguments.context,
+                },
+            )
+            .await
+            .map_err(phone_call_tool_error)?;
+        json_tool_result(started)
+    }
+
+    #[tool(
+        description = "Inject a live steering instruction into an active phone call owned by this ACP session. A callId belonging to another session is reported as not_found"
+    )]
+    async fn steer_phone_call(
+        &self,
+        Parameters(arguments): Parameters<SteerPhoneCallArguments>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let (_, caller_thread_id) = self.active_caller()?;
+        let steered = self
+            .state
+            .phone_calls
+            .steer_phone_call(
+                &caller_thread_id,
+                &arguments.call_id,
+                &arguments.instruction,
+            )
+            .map_err(phone_call_tool_error)?;
+        json_tool_result(steered)
+    }
+
+    #[tool(
+        description = "Read the current status and rolling or completed transcript of a phone call owned by this ACP session. A callId belonging to another session is reported as not_found"
+    )]
+    async fn get_phone_call(
+        &self,
+        Parameters(arguments): Parameters<GetPhoneCallArguments>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let (_, caller_thread_id) = self.active_caller()?;
+        let snapshot = self
+            .state
+            .phone_calls
+            .get_phone_call(&caller_thread_id, &arguments.call_id)
+            .map_err(phone_call_tool_error)?;
+        json_tool_result(snapshot)
+    }
+
+    #[tool(
+        description = "Hang up an active or pending phone call owned by this ACP session. A callId belonging to another session is reported as not_found"
+    )]
+    async fn hangup_phone_call(
+        &self,
+        Parameters(arguments): Parameters<HangupPhoneCallArguments>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let (_, caller_thread_id) = self.active_caller()?;
+        let hung_up = self
+            .state
+            .phone_calls
+            .hangup_phone_call(&caller_thread_id, &arguments.call_id)
+            .await
+            .map_err(phone_call_tool_error)?;
+        json_tool_result(hung_up)
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for AgentMessagingMcpHandler {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Use messaging tools only for explicit one-way communication with direct parent and sub-agent sessions. Scheduled-prompt tools operate only on this authenticated ACP session and accept one-time absolute RFC 3339 timestamps.",
+            "Use messaging tools only for explicit one-way communication with direct parent and sub-agent sessions. Scheduled-prompt tools operate only on this authenticated ACP session and accept one-time absolute RFC 3339 timestamps. Phone-call tools place user-approved outbound calls for this ACP session and deliver a structured transcript report when the call ends.",
         )
     }
 }
@@ -1006,6 +1139,15 @@ fn scheduled_prompt_tool_error(error: ScheduledPromptError) -> ErrorData {
     match error {
         ScheduledPromptError::Invalid(message) => ErrorData::invalid_params(message, None),
         ScheduledPromptError::Internal(message) => ErrorData::internal_error(message, None),
+    }
+}
+
+fn phone_call_tool_error(error: PhoneCallError) -> ErrorData {
+    match error {
+        PhoneCallError::Invalid(message) | PhoneCallError::Rejected(message) => {
+            ErrorData::invalid_params(message, None)
+        }
+        PhoneCallError::Internal(message) => ErrorData::internal_error(message, None),
     }
 }
 
@@ -1439,6 +1581,7 @@ mod tests {
                 backend: Weak::new(),
                 queue: Weak::new(),
                 scheduler: ScheduledPromptService::inert_for_test(),
+                phone_calls: PhoneCallService::inert_for_test(),
                 credentials,
                 legacy_sessions: Arc::new(Mutex::new(HashMap::new())),
                 message_url: "http://unused/message".to_string(),
@@ -1492,6 +1635,7 @@ mod tests {
                 backend: Weak::new(),
                 queue: Weak::new(),
                 scheduler: scheduler.clone(),
+                phone_calls: PhoneCallService::inert_for_test(),
                 credentials,
                 legacy_sessions: Arc::new(Mutex::new(HashMap::new())),
                 message_url: "http://unused/message".to_string(),
@@ -1788,6 +1932,7 @@ mod tests {
             backend: Weak::new(),
             queue: Weak::new(),
             scheduler: ScheduledPromptService::inert_for_test(),
+            phone_calls: PhoneCallService::inert_for_test(),
             credentials,
             legacy_sessions: Arc::new(Mutex::new(HashMap::new())),
             message_url: "http://unused/message".into(),
@@ -1843,6 +1988,7 @@ mod tests {
             backend: Weak::new(),
             queue: Weak::new(),
             scheduler: ScheduledPromptService::inert_for_test(),
+            phone_calls: PhoneCallService::inert_for_test(),
             credentials: credentials.clone(),
             legacy_sessions: Arc::new(Mutex::new(HashMap::new())),
             message_url: "http://unused/message".into(),
@@ -2036,6 +2182,7 @@ mod tests {
             Weak::<RuntimeBackend>::new(),
             Weak::<BridgeQueueService>::new(),
             ScheduledPromptService::inert_for_test(),
+            PhoneCallService::inert_for_test(),
         )
         .await
         .expect("shared MCP listener starts");
@@ -2092,6 +2239,7 @@ mod tests {
             Weak::<RuntimeBackend>::new(),
             Weak::<BridgeQueueService>::new(),
             ScheduledPromptService::inert_for_test(),
+            PhoneCallService::inert_for_test(),
         )
         .await
         .expect("shared MCP listener starts");
@@ -2149,6 +2297,10 @@ mod tests {
             "schedule_prompt",
             "list_scheduled_prompts",
             "cancel_scheduled_prompt",
+            "start_phone_call",
+            "steer_phone_call",
+            "get_phone_call",
+            "hangup_phone_call",
         ] {
             assert!(tools.contains(name), "missing MCP tool schema for {name}");
         }
@@ -2234,6 +2386,7 @@ mod tests {
             Weak::<RuntimeBackend>::new(),
             Weak::<BridgeQueueService>::new(),
             ScheduledPromptService::inert_for_test(),
+            PhoneCallService::inert_for_test(),
         )
         .await
         .expect("shared MCP listener starts");
@@ -2286,5 +2439,87 @@ mod tests {
 
         drop(response);
         service.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn authenticated_handler_routes_phone_call_tools_with_caller_session_isolation() {
+        let credentials = Arc::new(McpCredentialStore::default());
+        let config = AgentMessagingMcpConfig::new(
+            "http://unused".into(),
+            "http://unused".into(),
+            credentials.clone(),
+        );
+        let pending = config.stage_credential("agent").unwrap();
+        let token = pending.token.clone();
+        let thread_id = crate::acp::identity::AgentSessionId::new("agent", "phone-owner")
+            .unwrap()
+            .encode();
+        config
+            .activate_credential(pending, &thread_id)
+            .expect("credential activates");
+
+        let phone_calls = PhoneCallService::inert_for_test();
+        let handler = AgentMessagingMcpHandler::new(
+            AuthenticatedMcpCredential {
+                token,
+                agent_id: "agent".to_string(),
+            },
+            Arc::new(AgentMessagingRouterState {
+                backend: Weak::new(),
+                queue: Weak::new(),
+                scheduler: ScheduledPromptService::inert_for_test(),
+                phone_calls,
+                credentials,
+                legacy_sessions: Arc::new(Mutex::new(HashMap::new())),
+                message_url: "http://unused/message".to_string(),
+            }),
+        );
+
+        let unconfigured_err = handler
+            .start_phone_call(Parameters(StartPhoneCallArguments {
+                phone_number: "+15551234567".to_string(),
+                objective: "Check reservation".to_string(),
+                callee_name: None,
+                first_message: None,
+                context: None,
+            }))
+            .await
+            .expect_err("unconfigured phone calls must return MCP invalid_params");
+        assert!(unconfigured_err.message.contains("not configured"));
+
+        let get_unknown = handler
+            .get_phone_call(Parameters(GetPhoneCallArguments {
+                call_id: "missing-call".to_string(),
+            }))
+            .await
+            .expect("get_phone_call returns not_found snapshot");
+        let get_val: serde_json::Value =
+            serde_json::from_str(&get_unknown.content[0].as_text().expect("text").text)
+                .expect("parse get json");
+        assert_eq!(get_val["status"], "not_found");
+        assert_eq!(get_val["callId"], "missing-call");
+
+        let steer_unknown = handler
+            .steer_phone_call(Parameters(SteerPhoneCallArguments {
+                call_id: "missing-call".to_string(),
+                instruction: "Ask about patio".to_string(),
+            }))
+            .await
+            .expect("steer_phone_call returns not_found result");
+        let steer_val: serde_json::Value =
+            serde_json::from_str(&steer_unknown.content[0].as_text().expect("text").text)
+                .expect("parse steer json");
+        assert_eq!(steer_val["status"], "not_found");
+
+        let hangup_unknown = handler
+            .hangup_phone_call(Parameters(HangupPhoneCallArguments {
+                call_id: "missing-call".to_string(),
+            }))
+            .await
+            .expect("hangup_phone_call returns not_found result");
+        let hangup_val: serde_json::Value =
+            serde_json::from_str(&hangup_unknown.content[0].as_text().expect("text").text)
+                .expect("parse hangup json");
+        assert_eq!(hangup_val["status"], "not_found");
     }
 }

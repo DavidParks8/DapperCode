@@ -14,8 +14,8 @@ use std::env::var_os as discovery_env;
 
 use crate::{
     platform,
-    secrets::SecretBackend,
-    store::{AppConfig, AppPaths, Profile},
+    secrets::{validate_sip_password, SecretBackend},
+    store::{AppConfig, AppPaths, PhoneCallSettings, Profile},
 };
 
 #[derive(Clone, Debug)]
@@ -212,40 +212,53 @@ impl BridgeRuntimeConfig {
         paths.prepare_profile(&profile.profile_id)?;
 
         let mut values = BTreeMap::new();
-        let mut insert = |key: &str, value: String| -> Result<()> {
-            if value.contains(['\n', '\r', '\0']) {
-                bail!("generated configuration value contains a control character");
-            }
-            values.insert(key.to_string(), value);
-            Ok(())
-        };
-
-        insert("BRIDGE_HOST", profile.bridge_host.clone())?;
-        insert("BRIDGE_PORT", profile.bridge_port.to_string())?;
-        insert("BRIDGE_PREVIEW_HOST", profile.bridge_host.clone())?;
-        insert("BRIDGE_PREVIEW_PORT", profile.preview_port.to_string())?;
-        insert("BRIDGE_CONNECT_URL", profile.connect_url.clone())?;
-        insert(
+        insert_env(&mut values, "BRIDGE_HOST", profile.bridge_host.clone())?;
+        insert_env(&mut values, "BRIDGE_PORT", profile.bridge_port.to_string())?;
+        insert_env(
+            &mut values,
+            "BRIDGE_PREVIEW_HOST",
+            profile.bridge_host.clone(),
+        )?;
+        insert_env(
+            &mut values,
+            "BRIDGE_PREVIEW_PORT",
+            profile.preview_port.to_string(),
+        )?;
+        insert_env(
+            &mut values,
+            "BRIDGE_CONNECT_URL",
+            profile.connect_url.clone(),
+        )?;
+        insert_env(
+            &mut values,
             "BRIDGE_PREVIEW_CONNECT_URL",
             profile.preview_connect_url.clone(),
         )?;
-        insert("BRIDGE_AUTH_TOKEN", token.to_string())?;
-        insert(
+        insert_env(&mut values, "BRIDGE_AUTH_TOKEN", token.to_string())?;
+        insert_env(
+            &mut values,
             "BRIDGE_ALLOW_QUERY_TOKEN_AUTH",
             profile.allow_query_token_auth.to_string(),
         )?;
-        insert("BRIDGE_WORKDIR", path_value(&workspace)?)?;
-        insert(
+        insert_env(&mut values, "BRIDGE_WORKDIR", path_value(&workspace)?)?;
+        insert_env(
+            &mut values,
             "BRIDGE_STATE_DIR",
             path_value(&paths.state_dir(&profile.profile_id))?,
         )?;
-        insert(
+        insert_env(
+            &mut values,
             "BRIDGE_ATTACHMENTS_DIR",
             path_value(&paths.attachments_dir(&profile.profile_id))?,
         )?;
-        insert("ACP_AGENT_MANIFEST", path_value(&manifest_path)?)?;
-        insert("ACP_AGENT_ROOTS", path_value(executable_root)?)?;
-        insert(
+        insert_env(
+            &mut values,
+            "ACP_AGENT_MANIFEST",
+            path_value(&manifest_path)?,
+        )?;
+        insert_env(&mut values, "ACP_AGENT_ROOTS", path_value(executable_root)?)?;
+        insert_env(
+            &mut values,
             "ACP_INITIALIZE_TIMEOUT_MS",
             profile.acp_initialize_timeout_ms.to_string(),
         )?;
@@ -258,6 +271,42 @@ impl BridgeRuntimeConfig {
             auth_token: token.to_string(),
             secret_backend,
         })
+    }
+
+    pub fn apply_phone_call(
+        &mut self,
+        settings: &PhoneCallSettings,
+        sip_password: &str,
+    ) -> Result<()> {
+        settings.validate()?;
+        validate_sip_password(sip_password)?;
+        let entries = [
+            ("PHONE_CALL_SIP_SERVER", settings.sip_server.as_str()),
+            ("PHONE_CALL_SIP_TRANSPORT", settings.sip_transport.as_str()),
+            ("PHONE_CALL_SIP_USERNAME", settings.sip_username.as_str()),
+            ("PHONE_CALL_SIP_PASSWORD", sip_password),
+            ("PHONE_CALL_CALLER_ID", settings.caller_id.as_str()),
+            (
+                "PHONE_CALL_USER_DISPLAY_NAME",
+                settings.user_display_name.as_str(),
+            ),
+            ("PHONE_CALL_STT_BASE_URL", settings.stt_base_url.as_str()),
+            ("PHONE_CALL_STT_MODEL", settings.stt_model.as_str()),
+            ("PHONE_CALL_LLM_BASE_URL", settings.llm_base_url.as_str()),
+            ("PHONE_CALL_LLM_MODEL", settings.llm_model.as_str()),
+            ("PHONE_CALL_TTS_BASE_URL", settings.tts_base_url.as_str()),
+            ("PHONE_CALL_TTS_MODEL", settings.tts_model.as_str()),
+            ("PHONE_CALL_TTS_VOICE", settings.tts_voice.as_str()),
+        ];
+        for (_, value) in entries {
+            if value.contains(['\n', '\r', '\0']) {
+                bail!("generated configuration value contains a control character");
+            }
+        }
+        for (key, value) in entries {
+            insert_env(&mut self.values, key, value.to_string())?;
+        }
+        Ok(())
     }
 
     pub fn pairing_payload(&self, workspace_id: &str) -> Result<String> {
@@ -277,6 +326,14 @@ impl BridgeRuntimeConfig {
             "bridgeToken": token,
         }))?)
     }
+}
+
+fn insert_env(values: &mut BTreeMap<String, String>, key: &str, value: String) -> Result<()> {
+    if value.contains(['\n', '\r', '\0']) {
+        bail!("generated configuration value contains a control character");
+    }
+    values.insert(key.to_string(), value);
+    Ok(())
 }
 
 fn path_value(path: &Path) -> Result<String> {
@@ -566,11 +623,7 @@ mod tests {
     #[test]
     fn allocates_a_free_pair_that_skips_ports_owned_by_other_profiles() {
         let workspace = tempdir().unwrap();
-        let mut config = AppConfig {
-            version: 2,
-            broker: None,
-            profiles: Vec::new(),
-        };
+        let mut config = AppConfig::empty();
         config.upsert(profile("beta-000000000002", workspace.path(), 18801));
 
         let (bridge, preview) = allocate_port_pair(
@@ -587,11 +640,7 @@ mod tests {
 
     #[test]
     fn reuses_the_requested_pair_when_nothing_else_claims_it() {
-        let config = AppConfig {
-            version: 2,
-            broker: None,
-            profiles: Vec::new(),
-        };
+        let config = AppConfig::empty();
         let (bridge, preview) = allocate_port_pair(
             &config,
             "alpha-000000000001",
@@ -606,11 +655,7 @@ mod tests {
     #[test]
     fn rejects_an_explicit_port_that_another_workspace_owns() {
         let workspace = tempdir().unwrap();
-        let mut config = AppConfig {
-            version: 2,
-            broker: None,
-            profiles: Vec::new(),
-        };
+        let mut config = AppConfig::empty();
         config.upsert(profile("beta-000000000002", workspace.path(), 18811));
 
         let error = allocate_port_pair(
@@ -715,11 +760,7 @@ mod tests {
 
     #[test]
     fn refuses_to_allocate_when_the_port_range_is_exhausted() {
-        let config = AppConfig {
-            version: 2,
-            broker: None,
-            profiles: Vec::new(),
-        };
+        let config = AppConfig::empty();
         let error = allocate_port_pair(
             &config,
             "alpha-000000000001",
@@ -744,11 +785,7 @@ mod tests {
     fn rejects_an_explicit_pair_that_a_process_already_holds() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let taken = listener.local_addr().unwrap().port();
-        let config = AppConfig {
-            version: 2,
-            broker: None,
-            profiles: Vec::new(),
-        };
+        let config = AppConfig::empty();
 
         let error = allocate_port_pair(
             &config,
@@ -763,11 +800,7 @@ mod tests {
 
     #[test]
     fn defaults_to_the_standard_pair_when_no_port_is_requested() {
-        let config = AppConfig {
-            version: 2,
-            broker: None,
-            profiles: Vec::new(),
-        };
+        let config = AppConfig::empty();
         let (bridge, preview) =
             allocate_port_pair(&config, "alpha-000000000001", "127.0.0.1", None, false).unwrap();
         assert_eq!(preview, bridge + 1);
@@ -870,11 +903,7 @@ mod tests {
     #[test]
     fn rejects_an_explicit_port_whose_preview_slot_another_workspace_owns() {
         let workspace = tempdir().unwrap();
-        let mut config = AppConfig {
-            version: 2,
-            broker: None,
-            profiles: Vec::new(),
-        };
+        let mut config = AppConfig::empty();
         config.upsert(profile("beta-000000000002", workspace.path(), 18861));
 
         // 18860 is free, but its preview slot 18861 belongs to the other workspace.
@@ -908,9 +937,8 @@ mod tests {
                 port: alias_port,
             });
         let config = AppConfig {
-            version: 2,
             broker: Some(broker),
-            profiles: Vec::new(),
+            ..AppConfig::empty()
         };
 
         assert_ne!(
@@ -934,11 +962,7 @@ mod tests {
         let taken = listener.local_addr().unwrap().port();
         assert!(port_is_bindable("192.0.2.1", taken) == wildcard_port_is_bindable(taken));
 
-        let config = AppConfig {
-            version: 2,
-            broker: None,
-            profiles: Vec::new(),
-        };
+        let config = AppConfig::empty();
         let (bridge, preview) = allocate_port_pair(
             &config,
             "alpha-000000000001",
@@ -956,11 +980,7 @@ mod tests {
         let taken = listener.local_addr().unwrap().port();
         assert!(!port_is_bindable("127.0.0.1", taken));
 
-        let config = AppConfig {
-            version: 2,
-            broker: None,
-            profiles: Vec::new(),
-        };
+        let config = AppConfig::empty();
         let (bridge, _) = allocate_port_pair(
             &config,
             "alpha-000000000001",
@@ -977,12 +997,11 @@ mod tests {
         let first = tempdir().unwrap();
         let second = tempdir().unwrap();
         let mut config = AppConfig {
-            version: 2,
-            broker: None,
             profiles: vec![
                 profile("alpha-000000000001", first.path(), 18_871),
                 profile("beta-000000000002", second.path(), 18_871),
             ],
+            ..AppConfig::empty()
         };
         config.profiles[0].preview_port = 18_872;
         config.profiles[1].preview_port = 18_873;
@@ -1002,5 +1021,74 @@ mod tests {
         .unwrap_err()
         .to_string()
         .contains("browser preview"));
+    }
+
+    #[test]
+    fn apply_phone_call_populates_exact_worker_env_keys_and_redacts_debug_output() {
+        let mut config = BridgeRuntimeConfig {
+            values: BTreeMap::new(),
+            host: "127.0.0.1".to_string(),
+            port: 8787,
+            connect_url: "http://127.0.0.1:8787".to_string(),
+            auth_token: "bridge-token".to_string(),
+            secret_backend: SecretBackend::File,
+        };
+        let settings = PhoneCallSettings {
+            sip_server: "sip.telnyx.com:5061".to_string(),
+            sip_transport: "tls".to_string(),
+            sip_username: "sip-user".to_string(),
+            caller_id: "+15559876543".to_string(),
+            user_display_name: "Operator User".to_string(),
+            stt_base_url: "http://127.0.0.1:11434/v1".to_string(),
+            stt_model: "gemma4:e4b".to_string(),
+            llm_base_url: "http://localhost:11434/v1".to_string(),
+            llm_model: "gemma4:e4b".to_string(),
+            tts_base_url: "http://[::1]:11434/v1".to_string(),
+            tts_model: "phonon".to_string(),
+            tts_voice: "default".to_string(),
+        };
+
+        assert!(config.apply_phone_call(&settings, "bad\npassword").is_err());
+        assert!(config.values.is_empty());
+
+        config
+            .apply_phone_call(&settings, "super-secret-sip-pass")
+            .unwrap();
+        assert_eq!(
+            config.values["PHONE_CALL_SIP_SERVER"],
+            "sip.telnyx.com:5061"
+        );
+        assert_eq!(config.values["PHONE_CALL_SIP_TRANSPORT"], "tls");
+        assert_eq!(config.values["PHONE_CALL_SIP_USERNAME"], "sip-user");
+        assert_eq!(
+            config.values["PHONE_CALL_SIP_PASSWORD"],
+            "super-secret-sip-pass"
+        );
+        assert_eq!(config.values["PHONE_CALL_CALLER_ID"], "+15559876543");
+        assert_eq!(
+            config.values["PHONE_CALL_USER_DISPLAY_NAME"],
+            "Operator User"
+        );
+        assert_eq!(
+            config.values["PHONE_CALL_STT_BASE_URL"],
+            "http://127.0.0.1:11434/v1"
+        );
+        assert_eq!(config.values["PHONE_CALL_STT_MODEL"], "gemma4:e4b");
+        assert_eq!(
+            config.values["PHONE_CALL_LLM_BASE_URL"],
+            "http://localhost:11434/v1"
+        );
+        assert_eq!(config.values["PHONE_CALL_LLM_MODEL"], "gemma4:e4b");
+        assert_eq!(
+            config.values["PHONE_CALL_TTS_BASE_URL"],
+            "http://[::1]:11434/v1"
+        );
+        assert_eq!(config.values["PHONE_CALL_TTS_MODEL"], "phonon");
+        assert_eq!(config.values["PHONE_CALL_TTS_VOICE"], "default");
+
+        for debug_repr in [format!("{config:?}"), format!("{config:#?}")] {
+            assert!(!debug_repr.contains("super-secret-sip-pass"));
+            assert!(debug_repr.contains("[REDACTED]"));
+        }
     }
 }

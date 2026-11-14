@@ -58,6 +58,7 @@ pub(super) struct RuntimeBackend {
 struct ThreadLifecycleServices {
     queue: std::sync::Weak<BridgeQueueService>,
     scheduler: std::sync::Weak<crate::scheduled_prompts::ScheduledPromptService>,
+    phone_calls: std::sync::Weak<crate::phone_call::PhoneCallService>,
 }
 
 #[cfg(not(test))]
@@ -1641,10 +1642,21 @@ impl RuntimeBackend {
         }))
     }
 
+    #[cfg(test)]
     pub(crate) async fn attach_thread_lifecycle(
         &self,
         queue: std::sync::Weak<BridgeQueueService>,
         scheduler: std::sync::Weak<crate::scheduled_prompts::ScheduledPromptService>,
+    ) -> Result<(), String> {
+        self.attach_thread_lifecycle_with_phone_calls(queue, scheduler, std::sync::Weak::new())
+            .await
+    }
+
+    pub(crate) async fn attach_thread_lifecycle_with_phone_calls(
+        &self,
+        queue: std::sync::Weak<BridgeQueueService>,
+        scheduler: std::sync::Weak<crate::scheduled_prompts::ScheduledPromptService>,
+        phone_calls: std::sync::Weak<crate::phone_call::PhoneCallService>,
     ) -> Result<(), String> {
         let mut attached = self.thread_lifecycle.lock().await;
         if attached.is_some() {
@@ -1665,7 +1677,11 @@ impl RuntimeBackend {
         )
         .await
         .map_err(|error| format!("failed to recover thread retirement journal: {error}"))?;
-        *attached = Some(ThreadLifecycleServices { queue, scheduler });
+        *attached = Some(ThreadLifecycleServices {
+            queue,
+            scheduler,
+            phone_calls,
+        });
         Ok(())
     }
 
@@ -1675,6 +1691,7 @@ impl RuntimeBackend {
         (
             Arc<BridgeQueueService>,
             Arc<crate::scheduled_prompts::ScheduledPromptService>,
+            Option<Arc<crate::phone_call::PhoneCallService>>,
         ),
         String,
     > {
@@ -1690,8 +1707,9 @@ impl RuntimeBackend {
             .queue
             .upgrade()
             .ok_or_else(|| "thread queue service is shutting down".to_string())?;
+        let phone_calls = services.phone_calls.upgrade();
         drop(attached);
-        Ok((queue, scheduler))
+        Ok((queue, scheduler, phone_calls))
     }
 
     pub(crate) async fn attach_agent_messaging(
@@ -2017,7 +2035,7 @@ impl RuntimeBackend {
             }
             "thread/delete" => {
                 let thread_id = required_string(&params, "threadId")?;
-                let (queue, scheduler) = self.thread_lifecycle_services().await?;
+                let (queue, scheduler, phone_calls) = self.thread_lifecycle_services().await?;
                 let admission_barrier = queue.block_retirement_admissions().await;
                 let deletion_plan = match self.manager.prepare_session_deletion(&thread_id).await {
                     Ok(deletion_plan) => deletion_plan,
@@ -2041,6 +2059,11 @@ impl RuntimeBackend {
                     }
                 };
                 drop(admission_barrier);
+                if let Some(phone_calls) = phone_calls {
+                    phone_calls
+                        .cancel_for_retiring_threads(&authoritative_thread_ids)
+                        .await;
+                }
                 let deletion = deletion_plan
                     .execute()
                     .await

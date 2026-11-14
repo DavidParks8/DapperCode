@@ -7,6 +7,7 @@ import { feedback } from '@shared/feedback';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { AppSheet } from '@shared/ui/AppSheet';
 import { BridgeUiBanner, BridgeUiModal, BridgeUiWorkflowCard } from './BridgeUiSurface';
+import { getSurfaceIconName } from './surfaceHelpers';
 import { createBridgeUiSurfaceStyles } from './surfaceStyles';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
@@ -422,6 +423,90 @@ describe('BridgeUiWorkflowCard', () => {
     } finally {
       Platform.OS = originalOS;
     }
+  });
+});
+
+describe('getSurfaceIconName', () => {
+  const theme = createAppTheme('dark');
+  const baseSurface: BridgeUiSurface = {
+    id: 'surface-1',
+    threadId: 'thread-1',
+    turnId: null,
+    kind: null,
+    presentation: 'workflowCard',
+    tone: 'info',
+    title: 'Surface',
+    subtitle: null,
+    bodyMarkdown: null,
+    blocks: [],
+    actions: [],
+    dismissible: true,
+  };
+
+  it('maps phone-call surfaces to call-outline for modal and workflowCard while preserving existing icons', () => {
+    const modalCallSurface: BridgeUiSurface = {
+      ...baseSurface,
+      id: 'call-modal',
+      kind: 'phone-call',
+      presentation: 'modal',
+      tone: 'info',
+      title: 'Call me?',
+    };
+    const cardCallSurface: BridgeUiSurface = {
+      ...baseSurface,
+      id: 'call-card',
+      kind: 'phone-call',
+      presentation: 'workflowCard',
+      tone: 'warning',
+      title: 'Active phone call',
+    };
+
+    expect(getSurfaceIconName(modalCallSurface)).toBe('call-outline');
+    expect(getSurfaceIconName(cardCallSurface)).toBe('call-outline');
+    expect(getSurfaceIconName({ ...baseSurface, kind: 'goal', tone: 'warning' })).toBe(
+      'flag-outline',
+    );
+    expect(getSurfaceIconName({ ...baseSurface, kind: 'review', tone: 'warning' })).toBe(
+      'warning-outline',
+    );
+    expect(getSurfaceIconName({ ...baseSurface, kind: 'status', tone: 'error' })).toBe(
+      'alert-circle-outline',
+    );
+    expect(getSurfaceIconName({ ...baseSurface, kind: 'status', tone: 'success' })).toBe(
+      'checkmark-circle-outline',
+    );
+    expect(getSurfaceIconName({ ...baseSurface, kind: 'status', tone: 'info' })).toBe(
+      'layers-outline',
+    );
+
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <BridgeUiModal surface={modalCallSurface} onAction={jest.fn()} onDismiss={jest.fn()} />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    const tree = expectValue(rendered);
+    expect(findText(tree.root as QueryableTestInstance, 'call-outline')).toBe(true);
+
+    act(() => {
+      tree.update(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <BridgeUiWorkflowCard
+              surface={cardCallSurface}
+              onAction={jest.fn()}
+              onDismiss={jest.fn()}
+            />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    expect(findText(tree.root as QueryableTestInstance, 'call-outline')).toBe(true);
+    act(() => tree.unmount());
   });
 });
 

@@ -1,9 +1,23 @@
-use std::{collections::HashSet, env, net::IpAddr, path::PathBuf, time::Duration};
+use std::{
+    collections::HashSet,
+    env, fmt,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    path::PathBuf,
+    time::Duration,
+};
 
 use axum::http::{header::ORIGIN, HeaderMap};
 use dappercode_bridge_core::protocol_constants::DEFAULT_ATTACHMENTS_DIR_NAME;
 use dappercode_bridge_path_policy::PathPolicy;
 use reqwest::Url;
+
+use crate::phone_call::{
+    sip::SipTransportKind,
+    voice::{
+        VoicePipelineConfig, DEFAULT_LLM_MODEL, DEFAULT_OLLAMA_OPENAI_BASE_URL, DEFAULT_STT_MODEL,
+        DEFAULT_TTS_MODEL, DEFAULT_TTS_VOICE,
+    },
+};
 
 #[cfg(not(test))]
 use std::env::var as config_env;
@@ -53,6 +67,34 @@ pub(crate) struct BridgeConfig {
     pub(crate) allow_outside_root_cwd: bool,
     pub(crate) show_pairing_qr: bool,
     pub(crate) ws_limits: WebSocketResourceLimits,
+    pub(crate) phone_call: Option<PhoneCallRuntimeConfig>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct PhoneCallRuntimeConfig {
+    pub(crate) server_host: String,
+    pub(crate) server_port: u16,
+    pub(crate) transport: SipTransportKind,
+    pub(crate) sip_username: String,
+    pub(crate) sip_password: String,
+    pub(crate) caller_id: String,
+    pub(crate) user_display_name: String,
+    pub(crate) voice: VoicePipelineConfig,
+}
+
+impl fmt::Debug for PhoneCallRuntimeConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PhoneCallRuntimeConfig")
+            .field("server_host", &self.server_host)
+            .field("server_port", &self.server_port)
+            .field("transport", &self.transport)
+            .field("sip_username", &self.sip_username)
+            .field("sip_password", &"[REDACTED]")
+            .field("caller_id", &self.caller_id)
+            .field("user_display_name", &self.user_display_name)
+            .field("voice", &self.voice)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +167,7 @@ impl BridgeConfig {
             parse_bool_env_with_default("BRIDGE_ALLOW_OUTSIDE_ROOT_CWD", true);
         let show_pairing_qr = parse_bool_env_with_default("BRIDGE_SHOW_PAIRING_QR", true);
         let ws_limits = WebSocketResourceLimits::from_env()?;
+        let phone_call = PhoneCallRuntimeConfig::from_env()?;
 
         Ok(Self {
             host,
@@ -148,6 +191,7 @@ impl BridgeConfig {
             allow_outside_root_cwd,
             show_pairing_qr,
             ws_limits,
+            phone_call,
         })
     }
 
@@ -248,6 +292,222 @@ impl WebSocketResourceLimits {
         }
         Ok(())
     }
+}
+
+const MAX_SIP_USERNAME_BYTES: usize = 256;
+const MAX_SIP_PASSWORD_BYTES: usize = 4_096;
+const MAX_USER_DISPLAY_NAME_BYTES: usize = 128;
+
+impl PhoneCallRuntimeConfig {
+    pub(crate) fn from_env() -> Result<Option<Self>, String> {
+        let sip_server = read_optional_env_trimmed("PHONE_CALL_SIP_SERVER")?;
+        let sip_transport = read_optional_env_trimmed("PHONE_CALL_SIP_TRANSPORT")?;
+        let sip_username = read_optional_env_trimmed("PHONE_CALL_SIP_USERNAME")?;
+        let sip_password = read_optional_env_raw("PHONE_CALL_SIP_PASSWORD")?;
+        let caller_id = read_optional_env_trimmed("PHONE_CALL_CALLER_ID")?;
+
+        if sip_server.is_none()
+            && sip_transport.is_none()
+            && sip_username.is_none()
+            && sip_password.is_none()
+            && caller_id.is_none()
+        {
+            return Ok(None);
+        }
+
+        let raw_server = sip_server.ok_or_else(|| {
+            "PHONE_CALL_SIP_SERVER is required when phone call configuration is partially set"
+                .to_string()
+        })?;
+        let (server_host, server_port) = parse_sip_server_host_port(&raw_server)?;
+
+        let raw_caller_id = caller_id.ok_or_else(|| {
+            "PHONE_CALL_CALLER_ID is required when phone call configuration is partially set"
+                .to_string()
+        })?;
+        let caller_id = validate_e164_phone_number("PHONE_CALL_CALLER_ID", &raw_caller_id)?;
+
+        let transport = match sip_transport.as_deref() {
+            Some(raw) if raw.eq_ignore_ascii_case("udp") => SipTransportKind::Udp,
+            Some(raw) if raw.eq_ignore_ascii_case("tls") => SipTransportKind::Tls,
+            Some(other) => {
+                return Err(format!(
+                    "PHONE_CALL_SIP_TRANSPORT must be 'udp' or 'tls' (got '{other}')"
+                ));
+            }
+            None => {
+                if server_port == SipTransportKind::Tls.default_port() {
+                    SipTransportKind::Tls
+                } else {
+                    SipTransportKind::Udp
+                }
+            }
+        };
+
+        let (sip_username, sip_password) = match (sip_username, sip_password) {
+            (Some(username), Some(password)) => {
+                if username.len() > MAX_SIP_USERNAME_BYTES || username.chars().any(char::is_control)
+                {
+                    return Err(format!(
+                        "PHONE_CALL_SIP_USERNAME must be at most {MAX_SIP_USERNAME_BYTES} bytes and free of control characters"
+                    ));
+                }
+                if password.trim().is_empty()
+                    || password.len() > MAX_SIP_PASSWORD_BYTES
+                    || password.contains(['\r', '\n', '\0'])
+                {
+                    return Err(format!(
+                        "PHONE_CALL_SIP_PASSWORD must be non-empty, at most {MAX_SIP_PASSWORD_BYTES} bytes, and free of control characters"
+                    ));
+                }
+                (username, password)
+            }
+            (None, None) => (String::new(), String::new()),
+            (Some(_), None) => {
+                return Err(
+                    "PHONE_CALL_SIP_PASSWORD is required when PHONE_CALL_SIP_USERNAME is set"
+                        .to_string(),
+                );
+            }
+            (None, Some(_)) => {
+                return Err(
+                    "PHONE_CALL_SIP_USERNAME is required when PHONE_CALL_SIP_PASSWORD is set"
+                        .to_string(),
+                );
+            }
+        };
+
+        let user_display_name =
+            read_optional_env_trimmed("PHONE_CALL_USER_DISPLAY_NAME")?.unwrap_or_default();
+        if user_display_name.len() > MAX_USER_DISPLAY_NAME_BYTES
+            || user_display_name.chars().any(char::is_control)
+        {
+            return Err(format!(
+                "PHONE_CALL_USER_DISPLAY_NAME must be at most {MAX_USER_DISPLAY_NAME_BYTES} bytes and free of control characters"
+            ));
+        }
+
+        let voice = VoicePipelineConfig {
+            stt_base_url: read_optional_env_trimmed("PHONE_CALL_STT_BASE_URL")?
+                .unwrap_or_else(|| DEFAULT_OLLAMA_OPENAI_BASE_URL.to_string()),
+            stt_model: read_optional_env_trimmed("PHONE_CALL_STT_MODEL")?
+                .unwrap_or_else(|| DEFAULT_STT_MODEL.to_string()),
+            llm_base_url: read_optional_env_trimmed("PHONE_CALL_LLM_BASE_URL")?
+                .unwrap_or_else(|| DEFAULT_OLLAMA_OPENAI_BASE_URL.to_string()),
+            llm_model: read_optional_env_trimmed("PHONE_CALL_LLM_MODEL")?
+                .unwrap_or_else(|| DEFAULT_LLM_MODEL.to_string()),
+            tts_base_url: read_optional_env_trimmed("PHONE_CALL_TTS_BASE_URL")?
+                .unwrap_or_else(|| DEFAULT_OLLAMA_OPENAI_BASE_URL.to_string()),
+            tts_model: read_optional_env_trimmed("PHONE_CALL_TTS_MODEL")?
+                .unwrap_or_else(|| DEFAULT_TTS_MODEL.to_string()),
+            tts_voice: read_optional_env_trimmed("PHONE_CALL_TTS_VOICE")?
+                .unwrap_or_else(|| DEFAULT_TTS_VOICE.to_string()),
+        };
+        voice
+            .validate()
+            .map_err(|err| format!("invalid phone call voice configuration: {err}"))?;
+
+        Ok(Some(Self {
+            server_host,
+            server_port,
+            transport,
+            sip_username,
+            sip_password,
+            caller_id,
+            user_display_name,
+            voice,
+        }))
+    }
+}
+
+pub(crate) fn validate_e164_phone_number(field: &str, raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    let Some(digits) = trimmed.strip_prefix('+') else {
+        return Err(format!("{field} must be in E.164 format starting with '+'"));
+    };
+    if !(7..=15).contains(&digits.len()) || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(format!(
+            "{field} must start with '+' followed by 7 to 15 ASCII digits"
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn read_optional_env_trimmed(name: &str) -> Result<Option<String>, String> {
+    match config_env(name) {
+        Ok(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(trimmed.to_string()))
+            }
+        }
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(env::VarError::NotUnicode(_)) => Err(format!("{name} contains invalid UTF-8")),
+    }
+}
+
+fn read_optional_env_raw(name: &str) -> Result<Option<String>, String> {
+    match config_env(name) {
+        Ok(raw) => {
+            if raw.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(raw))
+            }
+        }
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(env::VarError::NotUnicode(_)) => Err(format!("{name} contains invalid UTF-8")),
+    }
+}
+
+fn parse_sip_server_host_port(value: &str) -> Result<(String, u16), String> {
+    if value.is_empty()
+        || value.len() > 265
+        || value.chars().any(|c| c.is_control() || c.is_whitespace())
+    {
+        return Err("PHONE_CALL_SIP_SERVER must be a valid host:port".to_string());
+    }
+    let (host, port_str) = if let Some(rest) = value.strip_prefix('[') {
+        let (ipv6_str, port_part) = rest
+            .split_once("]:")
+            .ok_or_else(|| "PHONE_CALL_SIP_SERVER IPv6 address must use [host]:port".to_string())?;
+        ipv6_str
+            .parse::<Ipv6Addr>()
+            .map_err(|_| "PHONE_CALL_SIP_SERVER contains an invalid IPv6 address".to_string())?;
+        (ipv6_str.to_string(), port_part)
+    } else {
+        let (host_part, port_part) = value
+            .rsplit_once(':')
+            .ok_or_else(|| "PHONE_CALL_SIP_SERVER must include a :port".to_string())?;
+        if host_part.is_empty()
+            || host_part.contains(':')
+            || host_part.contains("..")
+            || host_part.starts_with('.')
+            || host_part.starts_with('-')
+            || host_part.ends_with('-')
+            || !host_part
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'))
+        {
+            return Err("PHONE_CALL_SIP_SERVER contains an invalid host".to_string());
+        }
+        if host_part.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
+            host_part.parse::<Ipv4Addr>().map_err(|_| {
+                "PHONE_CALL_SIP_SERVER contains an invalid IPv4 address".to_string()
+            })?;
+        }
+        (host_part.to_string(), port_part)
+    };
+
+    let port = port_str
+        .parse::<u16>()
+        .map_err(|_| "PHONE_CALL_SIP_SERVER port must be in 1..=65535".to_string())?;
+    if port == 0 {
+        return Err("PHONE_CALL_SIP_SERVER port must be non-zero".to_string());
+    }
+    Ok((host, port))
 }
 
 fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
@@ -721,6 +981,7 @@ mod tests {
                 per_client_in_flight: DEFAULT_WS_PER_CLIENT_IN_FLIGHT,
                 global_in_flight: DEFAULT_WS_GLOBAL_IN_FLIGHT,
             },
+            phone_call: None,
         }
     }
 
@@ -1033,6 +1294,19 @@ mod tests {
             "BRIDGE_WS_MAX_MESSAGE_BYTES",
             "BRIDGE_WS_PER_CLIENT_IN_FLIGHT",
             "BRIDGE_WS_GLOBAL_IN_FLIGHT",
+            "PHONE_CALL_SIP_SERVER",
+            "PHONE_CALL_SIP_TRANSPORT",
+            "PHONE_CALL_SIP_USERNAME",
+            "PHONE_CALL_SIP_PASSWORD",
+            "PHONE_CALL_CALLER_ID",
+            "PHONE_CALL_USER_DISPLAY_NAME",
+            "PHONE_CALL_STT_BASE_URL",
+            "PHONE_CALL_STT_MODEL",
+            "PHONE_CALL_LLM_BASE_URL",
+            "PHONE_CALL_LLM_MODEL",
+            "PHONE_CALL_TTS_BASE_URL",
+            "PHONE_CALL_TTS_MODEL",
+            "PHONE_CALL_TTS_VOICE",
         ];
 
         let _environment = NAMES
@@ -1114,5 +1388,90 @@ mod tests {
             normalize_browser_origin("https://example.com/#fragment"),
             None
         );
+    }
+
+    #[test]
+    fn phone_call_runtime_config_parses_defaults_redacts_password_and_rejects_partial_or_invalid() {
+        const PHONE_VARS: &[&str] = &[
+            "PHONE_CALL_SIP_SERVER",
+            "PHONE_CALL_SIP_TRANSPORT",
+            "PHONE_CALL_SIP_USERNAME",
+            "PHONE_CALL_SIP_PASSWORD",
+            "PHONE_CALL_CALLER_ID",
+            "PHONE_CALL_USER_DISPLAY_NAME",
+            "PHONE_CALL_STT_BASE_URL",
+            "PHONE_CALL_STT_MODEL",
+            "PHONE_CALL_LLM_BASE_URL",
+            "PHONE_CALL_LLM_MODEL",
+            "PHONE_CALL_TTS_BASE_URL",
+            "PHONE_CALL_TTS_MODEL",
+            "PHONE_CALL_TTS_VOICE",
+        ];
+        let _guards = PHONE_VARS
+            .iter()
+            .map(|name| DirEnvGuard::unset(*name))
+            .collect::<Vec<_>>();
+
+        assert_eq!(PhoneCallRuntimeConfig::from_env().unwrap(), None);
+
+        // Partial configuration must fail cleanly.
+        set_test_var("PHONE_CALL_SIP_SERVER", "sip.telnyx.com:5061");
+        assert!(PhoneCallRuntimeConfig::from_env().is_err());
+
+        remove_test_var("PHONE_CALL_SIP_SERVER");
+        set_test_var("PHONE_CALL_CALLER_ID", "+15551234567");
+        assert!(PhoneCallRuntimeConfig::from_env().is_err());
+
+        set_test_var("PHONE_CALL_SIP_SERVER", "sip.telnyx.com:5061");
+        set_test_var("PHONE_CALL_SIP_USERNAME", "sip-user");
+        assert!(PhoneCallRuntimeConfig::from_env().is_err());
+
+        remove_test_var("PHONE_CALL_SIP_USERNAME");
+        set_test_var("PHONE_CALL_SIP_PASSWORD", "top-secret-sip-pw");
+        assert!(PhoneCallRuntimeConfig::from_env().is_err());
+
+        // Port 5061 defaults transport to TLS and applies Ollama/Phonon defaults.
+        set_test_var("PHONE_CALL_SIP_USERNAME", "sip-user");
+        let tls_default = PhoneCallRuntimeConfig::from_env()
+            .expect("valid phone call config")
+            .expect("present phone call config");
+        assert_eq!(tls_default.server_host, "sip.telnyx.com");
+        assert_eq!(tls_default.server_port, 5061);
+        assert_eq!(tls_default.transport, SipTransportKind::Tls);
+        assert_eq!(tls_default.sip_username, "sip-user");
+        assert_eq!(tls_default.sip_password, "top-secret-sip-pw");
+        assert_eq!(tls_default.caller_id, "+15551234567");
+        assert_eq!(tls_default.voice, VoicePipelineConfig::default());
+
+        let debug_repr = format!("{tls_default:?}");
+        assert!(!debug_repr.contains("top-secret-sip-pw"));
+        assert!(debug_repr.contains("[REDACTED]"));
+
+        // Non-5061 port defaults transport to UDP, and IPv6 [::1]:5060 unbrackets host.
+        set_test_var("PHONE_CALL_SIP_SERVER", "[::1]:5060");
+        set_test_var("PHONE_CALL_USER_DISPLAY_NAME", "David Parks");
+        let udp_default = PhoneCallRuntimeConfig::from_env()
+            .expect("valid IPv6 UDP config")
+            .expect("present");
+        assert_eq!(udp_default.server_host, "::1");
+        assert_eq!(udp_default.server_port, 5060);
+        assert_eq!(udp_default.transport, SipTransportKind::Udp);
+        assert_eq!(udp_default.user_display_name, "David Parks");
+
+        // Invalid E.164, invalid transport, bad host:port, and non-loopback model URL must fail.
+        set_test_var("PHONE_CALL_CALLER_ID", "15551234567");
+        assert!(PhoneCallRuntimeConfig::from_env().is_err());
+        set_test_var("PHONE_CALL_CALLER_ID", "+15551234567");
+
+        set_test_var("PHONE_CALL_SIP_TRANSPORT", "tcp");
+        assert!(PhoneCallRuntimeConfig::from_env().is_err());
+        set_test_var("PHONE_CALL_SIP_TRANSPORT", "udp");
+
+        set_test_var("PHONE_CALL_SIP_SERVER", "sip.telnyx.com:0");
+        assert!(PhoneCallRuntimeConfig::from_env().is_err());
+        set_test_var("PHONE_CALL_SIP_SERVER", "127.0.0.1:5060");
+
+        set_test_var("PHONE_CALL_LLM_BASE_URL", "https://api.openai.com/v1");
+        assert!(PhoneCallRuntimeConfig::from_env().is_err());
     }
 }
