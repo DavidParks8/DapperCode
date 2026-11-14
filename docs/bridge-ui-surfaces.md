@@ -330,6 +330,8 @@ card as a compact call bar above the composer (`PhoneCallDock.tsx`) instead of t
   It rests as one row (callee, state with a locally ticking timer, and **Hang Up**), stays inside the
   composer's rail-aware column, and expands on tap to the objective and a transcript that follows the
   newest line. A settled call collapses to a dismissible one-line summary.
+  The timer anchors bridge-reported duration to local surface receipt time, so host/phone clock
+  skew and remounting cannot add time or freeze it. Receipt metadata stays off the wire.
 
 ## Rules For Future Integrations
 

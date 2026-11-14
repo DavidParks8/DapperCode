@@ -17,6 +17,12 @@ import {
 
 const BRIDGE_UI_PRESENTATIONS = ['workflowCard', 'modal', 'banner'] as const;
 const BRIDGE_UI_TONES = ['info', 'success', 'warning', 'error', 'neutral'] as const;
+// Runtime snapshots retain surface objects across dock remounts; receipt timing stays off the wire.
+const surfaceReceivedAt = new WeakMap<BridgeUiSurface, number>();
+
+export function getBridgeUiSurfaceReceivedAt(surface: BridgeUiSurface): number | undefined {
+  return surfaceReceivedAt.get(surface);
+}
 
 function readUserInputFieldType(
   value: unknown,
@@ -175,7 +181,7 @@ export function toBridgeUiSurface(value: unknown): BridgeUiSurface | null {
     .map(toBridgeUiAction)
     .filter((action): action is BridgeUiAction => action !== null);
 
-  return {
+  const surface: BridgeUiSurface = {
     ...baseSurface,
     turnId: readString(record['turnId']) ?? null,
     kind: readString(record['kind']) ?? null,
@@ -188,6 +194,8 @@ export function toBridgeUiSurface(value: unknown): BridgeUiSurface | null {
     createdAt: readString(record['createdAt']) ?? null,
     updatedAt: readString(record['updatedAt']) ?? null,
   };
+  surfaceReceivedAt.set(surface, Date.now());
+  return surface;
 }
 
 export function parseGoalSlashObjective(input: string): string | null {

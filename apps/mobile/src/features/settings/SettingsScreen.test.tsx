@@ -307,6 +307,49 @@ describe('SettingsScreen behavior', () => {
     });
   });
 
+  it('keeps calling off with host setup guidance when the bridge has no SIP credentials', async () => {
+    const { tree } = await renderSettings({
+      api: {
+        readBridgeCapabilities: jest.fn().mockResolvedValue({
+          ...capabilities,
+          supports: { ...capabilities.supports, phoneCalls: false },
+        }),
+      },
+    });
+    const root = tree.root as Queryable;
+    expect(hasText(root, 'Phone calls')).toBe(true);
+    expect(hasText(root, 'Off')).toBe(true);
+    expect(hasText(root, 'Configure a SIP password and calling settings on the desktop host')).toBe(
+      true,
+    );
+    const row = findPressableByText(root, 'Phone calls');
+    expect(row.props['disabled']).toBe(true);
+    await press(row);
+    expect(router.push).not.toHaveBeenCalled();
+    expect(hasText(root, 'Show tool calls')).toBe(true);
+    await act(async () => tree.unmount());
+  });
+
+  it('reflects configured calling without claiming a disconnected host is ready', async () => {
+    const { tree, store } = await renderSettings({
+      api: {
+        readBridgeCapabilities: jest.fn().mockResolvedValue({
+          ...capabilities,
+          supports: { ...capabilities.supports, phoneCalls: true },
+        }),
+      },
+    });
+    const root = tree.root as Queryable;
+    expect(hasText(root, 'Phone calls')).toBe(true);
+    expect(hasText(root, 'Calling is enabled on this host')).toBe(true);
+    expect(hasText(root, 'Every outbound call still needs your approval')).toBe(true);
+    await act(async () => store.set(bridgeConnectedAtom, false));
+    expect(hasText(root, 'Connect to the desktop host to check calling setup.')).toBe(true);
+    expect(hasText(root, 'Unavailable')).toBe(true);
+    expect(hasText(root, 'Calling is enabled on this host')).toBe(false);
+    await act(async () => tree.unmount());
+  });
+
   it('renders capabilities and drives settings, profile, legal, retry, and drawer actions', async () => {
     const drawerToggle = jest.fn();
     const persistenceError = new AppStatePersistenceError('write_failed', 'write', 'save failed');

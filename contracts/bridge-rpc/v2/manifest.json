@@ -134,13 +134,15 @@
       "supports": {
         "turnSteer": true,
         "threadFork": true,
-        "threadDelete": true
+        "threadDelete": true,
+        "phoneCalls": false
       },
       "supportsByAgent": {
         "local-primary": {
           "turnSteer": true,
           "threadFork": true,
-          "threadDelete": true
+          "threadDelete": true,
+          "phoneCalls": false
         }
       }
     },

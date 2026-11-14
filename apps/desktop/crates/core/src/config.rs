@@ -14,8 +14,8 @@ use std::env::var_os as discovery_env;
 
 use crate::{
     platform,
-    secrets::{validate_sip_password, SecretBackend},
-    store::{AppConfig, AppPaths, PhoneCallSettings, Profile},
+    secrets::SecretBackend,
+    store::{AppConfig, AppPaths, Profile},
 };
 
 #[derive(Clone, Debug)]
@@ -273,42 +273,6 @@ impl BridgeRuntimeConfig {
         })
     }
 
-    pub fn apply_phone_call(
-        &mut self,
-        settings: &PhoneCallSettings,
-        sip_password: &str,
-    ) -> Result<()> {
-        settings.validate()?;
-        validate_sip_password(sip_password)?;
-        let entries = [
-            ("PHONE_CALL_SIP_SERVER", settings.sip_server.as_str()),
-            ("PHONE_CALL_SIP_TRANSPORT", settings.sip_transport.as_str()),
-            ("PHONE_CALL_SIP_USERNAME", settings.sip_username.as_str()),
-            ("PHONE_CALL_SIP_PASSWORD", sip_password),
-            ("PHONE_CALL_CALLER_ID", settings.caller_id.as_str()),
-            (
-                "PHONE_CALL_USER_DISPLAY_NAME",
-                settings.user_display_name.as_str(),
-            ),
-            ("PHONE_CALL_STT_BASE_URL", settings.stt_base_url.as_str()),
-            ("PHONE_CALL_STT_MODEL", settings.stt_model.as_str()),
-            ("PHONE_CALL_LLM_BASE_URL", settings.llm_base_url.as_str()),
-            ("PHONE_CALL_LLM_MODEL", settings.llm_model.as_str()),
-            ("PHONE_CALL_TTS_BASE_URL", settings.tts_base_url.as_str()),
-            ("PHONE_CALL_TTS_MODEL", settings.tts_model.as_str()),
-            ("PHONE_CALL_TTS_VOICE", settings.tts_voice.as_str()),
-        ];
-        for (_, value) in entries {
-            if value.contains(['\n', '\r', '\0']) {
-                bail!("generated configuration value contains a control character");
-            }
-        }
-        for (key, value) in entries {
-            insert_env(&mut self.values, key, value.to_string())?;
-        }
-        Ok(())
-    }
-
     pub fn pairing_payload(&self, workspace_id: &str) -> Result<String> {
         Self::pairing_payload_for(&self.connect_url, workspace_id, &self.auth_token)
     }
@@ -328,7 +292,11 @@ impl BridgeRuntimeConfig {
     }
 }
 
-fn insert_env(values: &mut BTreeMap<String, String>, key: &str, value: String) -> Result<()> {
+pub(crate) fn insert_env(
+    values: &mut BTreeMap<String, String>,
+    key: &str,
+    value: String,
+) -> Result<()> {
     if value.contains(['\n', '\r', '\0']) {
         bail!("generated configuration value contains a control character");
     }
@@ -1025,6 +993,10 @@ mod tests {
 
     #[test]
     fn apply_phone_call_populates_exact_worker_env_keys_and_redacts_debug_output() {
+        use crate::{PhoneCallSettings, SecretStore};
+        let directory = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(directory.path().to_path_buf());
+        let secrets = SecretStore::file_backend_for_tests();
         let mut config = BridgeRuntimeConfig {
             values: BTreeMap::new(),
             host: "127.0.0.1".to_string(),
@@ -1049,12 +1021,15 @@ mod tests {
         };
 
         let sip_password = crate::secrets::generate_token();
-        assert!(config
-            .apply_phone_call(&settings, &(sip_password.clone() + "\nline"))
+        assert!(secrets
+            .store_sip_password(&paths, &(sip_password.clone() + "\nline"))
             .is_err());
         assert!(config.values.is_empty());
 
-        config.apply_phone_call(&settings, &sip_password).unwrap();
+        paths
+            .configure_phone_call(&secrets, Some(&sip_password), |_| Ok(settings))
+            .unwrap();
+        config.apply_phone_call(&paths, &secrets).unwrap();
         assert_eq!(
             config.values["PHONE_CALL_SIP_SERVER"],
             "sip.telnyx.com:5061"

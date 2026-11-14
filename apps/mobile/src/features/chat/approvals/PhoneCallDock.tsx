@@ -21,6 +21,7 @@ import {
   useAccessibilityAnnouncement,
 } from '@shared/accessibility';
 import { createWorkflowMarkdownStyles } from '../styles/styles';
+import { getBridgeUiSurfaceReceivedAt } from '../helpers/bridgeUi';
 import type { BridgeUiActionHandler } from './SurfaceRenderers';
 import {
   formatCallElapsed,
@@ -77,7 +78,7 @@ export function PhoneCallDock({
   const model = useMemo(() => phoneCallModel(surface), [surface]);
   const [expanded, setExpanded] = useState(false);
   const [hangup, setHangup] = useState<HangupState>('idle');
-  const elapsed = useCallElapsedSeconds(model, surface.updatedAt);
+  const elapsed = useCallElapsedSeconds(model, getBridgeUiSurfaceReceivedAt(surface));
   const statusLine = phoneCallStatusLine(model, elapsed, hangup);
   const accent = phaseColor(theme, model.phase);
   const hangupAction = model.hangupAction;
@@ -309,7 +310,7 @@ function DetailField({
 /** Ticks locally between bridge updates; the bridge's duration stays the source of truth. */
 function useCallElapsedSeconds(
   model: PhoneCallModel,
-  updatedAt: string | null | undefined,
+  receivedAt: number | undefined,
 ): number | null {
   const running = model.phase === 'live' || model.phase === 'held';
   const [now, setNow] = useState(() => Date.now());
@@ -321,14 +322,13 @@ function useCallElapsedSeconds(
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [running]);
+  }, [running, receivedAt]);
 
   if (model.durationSeconds === null || !running) {
     return model.durationSeconds;
   }
-  const publishedAt = updatedAt ? Date.parse(updatedAt) : Number.NaN;
-  const sincePublished = Number.isFinite(publishedAt) ? Math.max(0, now - publishedAt) : 0;
-  return model.durationSeconds + Math.floor(sincePublished / 1000);
+  const sinceReceived = receivedAt === undefined ? 0 : Math.max(0, now - receivedAt);
+  return model.durationSeconds + Math.floor(sinceReceived / 1000);
 }
 
 function phaseColor(theme: AppTheme, phase: PhoneCallPhase): string {

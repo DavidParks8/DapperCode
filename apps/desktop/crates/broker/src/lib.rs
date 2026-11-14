@@ -1056,19 +1056,6 @@ struct ProcessWorkerLauncher {
     http: Client,
 }
 
-fn apply_worker_phone_call(
-    config: &mut BridgeRuntimeConfig,
-    paths: &AppPaths,
-    secrets: &SecretStore,
-) -> Result<()> {
-    if let Some(settings) = paths.load_config()?.phone_call {
-        if let Some((password, _)) = secrets.load_sip_password(paths)? {
-            config.apply_phone_call(&settings, &password)?;
-        }
-    }
-    Ok(())
-}
-
 /// Re-registers a workspace's agent before waking its runtime.
 ///
 /// A package-manager upgrade replaces the pinned executable, so healing here lets the first device
@@ -1141,7 +1128,7 @@ impl WorkerLauncher for ProcessWorkerLauncher {
         config
             .values
             .insert("BRIDGE_OWNER_PID".into(), std::process::id().to_string());
-        apply_worker_phone_call(&mut config, &self.paths, &self.secrets)?;
+        config.apply_phone_call(&self.paths, &self.secrets)?;
 
         let log_path = self.paths.log_path(&profile.profile_id);
         let stdout = OpenOptions::new()
@@ -2644,7 +2631,7 @@ mod tests {
         };
 
         let mut unconfigured = base_config();
-        apply_worker_phone_call(&mut unconfigured, &paths, &secrets).unwrap();
+        unconfigured.apply_phone_call(&paths, &secrets).unwrap();
         assert!(!unconfigured.values.contains_key("PHONE_CALL_SIP_SERVER"));
 
         let settings = PhoneCallSettings {
@@ -2669,7 +2656,7 @@ mod tests {
             .unwrap();
 
         let mut missing_secret = base_config();
-        apply_worker_phone_call(&mut missing_secret, &paths, &secrets).unwrap();
+        missing_secret.apply_phone_call(&paths, &secrets).unwrap();
         assert!(!missing_secret
             .values
             .contains_key("PHONE_CALL_SIP_PASSWORD"));
@@ -2677,7 +2664,7 @@ mod tests {
         let sip_password = random_token().unwrap();
         secrets.store_sip_password(&paths, &sip_password).unwrap();
         let mut ready = base_config();
-        apply_worker_phone_call(&mut ready, &paths, &secrets).unwrap();
+        ready.apply_phone_call(&paths, &secrets).unwrap();
         assert_eq!(ready.values["PHONE_CALL_SIP_SERVER"], "sip.telnyx.com:5061");
         assert_eq!(ready.values["PHONE_CALL_SIP_PASSWORD"], sip_password);
         assert_eq!(ready.values["PHONE_CALL_CALLER_ID"], "+15551234567");

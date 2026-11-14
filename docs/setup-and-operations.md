@@ -356,6 +356,11 @@ Active ACP sessions can place user-approved outbound phone calls through the bri
 `start_phone_call`, `steer_phone_call`, `get_phone_call`, and `hangup_phone_call` MCP tools when
 voice settings and a SIP trunk are configured on desktop.
 
+Calling is optional: a host without SIP settings or a stored SIP password still starts the bridge
+and runs coding agents normally. Mobile **Settings > Integrations > Phone calls** shows **Off**
+with host setup guidance until both are configured. This is host-managed, not a mobile credential
+editor; every enabled call still requires mobile approval.
+
 The voice assistant waits through incomplete replies and ordinary pauses. Single-word
 transcriptions are provisional and cannot authorize autonomous hang-up, even if the model invents a
 completed outcome. Otherwise a spoken closing and two-second quiet grace period are required. A
@@ -384,6 +389,8 @@ ollama pull phonon
 override narrowband 8 kHz transcription with a dedicated local server—for example `mlx_audio.server`
 serving `mlx-community/parakeet-tdt-0.6b-v2`—pass `--stt-base-url` and `--stt-model` (and optionally
 `--llm-base-url` / `--llm-model` or `--tts-base-url` / `--tts-model`).
+All three URLs, all three model IDs, and the TTS voice can be changed independently with
+`voice configure`; omitted flags preserve the existing values rather than resetting them to defaults.
 The local LLM endpoint must support streaming tool calls and OpenAI-compatible JSON-schema
 `response_format` for silent hold-listening decisions.
 
@@ -410,6 +417,10 @@ Security and storage boundaries:
   `__phone-call-sip-password` on Windows, or restrictive `0600` file fallback under `secrets/`) and
   injected into bridge workers only in memory (`PHONE_CALL_*`). Non-secret SIP and model settings
   live in `config.json`.
+- **Consistent account reads**: configuration changes and worker startup read/write SIP settings
+  and credentials under the same central config lease. Platform-specific credential handling stays
+  inside the desktop platform adapter. Returning from the Windows file backend preserves the SIP
+  secret before retiring its shared fallback vault.
 - **Loopback-only inference**: `--stt-base-url`, `--llm-base-url`, and `--tts-base-url` must resolve
   to loopback hosts (`localhost`, `127.0.0.1`, or `::1`); remote model URLs are rejected.
 - **Mandatory mobile approval**: `start_phone_call` blocks on a non-dismissible mobile approval

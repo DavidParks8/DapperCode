@@ -157,6 +157,14 @@ mod tests {
         assert_eq!(missing["data"], error.data.unwrap());
         assert_eq!(manifest["fixtures"]["capabilities"]["agUiEvents"], true);
         assert_eq!(
+            manifest["fixtures"]["capabilities"]["supports"]["phoneCalls"],
+            false
+        );
+        assert_eq!(
+            manifest["fixtures"]["capabilities"]["supportsByAgent"]["local-primary"]["phoneCalls"],
+            false
+        );
+        assert_eq!(
             manifest["fixtures"]["capabilities"]["preferredAgentId"],
             "local-primary"
         );

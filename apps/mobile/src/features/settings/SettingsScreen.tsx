@@ -64,6 +64,7 @@ import {
 import { ICON_ROW_SEPARATOR_INSET } from './settingsListStyles';
 import { approvalModeTitle, useApprovalModeSettings } from './useApprovalModeSettings';
 import { LocalProfileSection } from './LocalProfileSection';
+import { CallingIntegrationSection } from './CallingIntegrationSection';
 
 function cycleWorkspaceChatLimit(current: WorkspaceChatLimit): WorkspaceChatLimit {
   if (current === 5) {
@@ -406,6 +407,12 @@ export function SettingsScreen() {
             router={router}
           />
           {localProfile ? <LocalProfileSection /> : null}
+
+          <CallingIntegrationSection
+            connected={bridgeConnected}
+            capabilities={capabilities}
+            localProfile={localProfile}
+          />
 
           <InstalledAgentsSection
             loading={loading}

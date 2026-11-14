@@ -26,6 +26,8 @@ interface ContractManifest {
     capabilities: {
       protocolVersion: number;
       agUiEvents: boolean;
+      supports: { phoneCalls: boolean };
+      supportsByAgent: { 'local-primary': { phoneCalls: boolean } };
     };
     notification: {
       method: string;
@@ -116,6 +118,8 @@ describe('HostBridgeWsClient', () => {
     expect(manifest.bridgeMethods).toContain('bridge/push/presence');
     expect(manifest.fixtures.capabilities.protocolVersion).toBe(manifest.protocolVersion);
     expect(manifest.fixtures.capabilities.agUiEvents).toBe(true);
+    expect(manifest.fixtures.capabilities.supports.phoneCalls).toBe(false);
+    expect(manifest.fixtures.capabilities.supportsByAgent['local-primary'].phoneCalls).toBe(false);
     expect(manifest.fixtures.notification).toMatchObject({
       protocolVersion: manifest.protocolVersion,
       eventId: 7,

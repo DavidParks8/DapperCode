@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import Animated, {
   Easing,
@@ -390,6 +390,7 @@ function SurfaceActions({
   const theme = useAppTheme();
   const styles = useMemo(() => createBridgeUiSurfaceStyles(theme), [theme]);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const inFlight = useRef(false);
   const [failed, setFailed] = useState(false);
 
   if (surface.actions.length === 0) {
@@ -398,20 +399,28 @@ function SurfaceActions({
 
   const run = (action: BridgeUiAction) => {
     // A second tap can land before the disabled state renders; one decision at a time.
-    if (pendingActionId !== null) {
+    if (inFlight.current) {
       return;
     }
-    void feedback.selection();
-    const outcome = onAction(surface, action);
-    if (!(outcome instanceof Promise)) {
-      return;
-    }
+    inFlight.current = true;
     setFailed(false);
     setPendingActionId(action.id);
-    void outcome.then((ok) => {
+    const settle = (ok: boolean) => {
+      inFlight.current = false;
       setPendingActionId(null);
       setFailed(!ok);
-    });
+    };
+    try {
+      void feedback.selection();
+      const outcome = onAction(surface, action);
+      if (outcome instanceof Promise) {
+        void outcome.then(settle, () => settle(false));
+      } else {
+        settle(true);
+      }
+    } catch {
+      settle(false);
+    }
   };
 
   return (

@@ -18,6 +18,7 @@ import {
   toRecord,
 } from '@shared/runtimeValidation';
 import { agentModelPreferenceKey, lastUsedModelPreference } from './preferences';
+import { getBridgeUiSurfaceReceivedAt } from './bridgeUi';
 
 interface ContractManifest {
   protocolVersion: number;
@@ -260,6 +261,37 @@ describe('mainScreenHelpers', () => {
       ],
     });
     expect(result['thread-2']).toBeUndefined();
+  });
+
+  it('records local surface receipt without trusting or serializing receipt metadata', () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1_000);
+    try {
+      const surface = requireTestValue(
+        helpers.toBridgeUiSurface({
+          id: 'phone-call-live:call-1',
+          threadId: 'thread-1',
+          kind: 'phone-call',
+          presentation: 'workflowCard',
+          title: 'Phone call',
+          updatedAt: '2026-11-14T08:00:00.000Z',
+          receivedAt: 99_000,
+        }) ?? undefined,
+      );
+      expect(getBridgeUiSurfaceReceivedAt(surface)).toBe(1_000);
+      expect(surface.updatedAt).toBe('2026-11-14T08:00:00.000Z');
+      const serialized = JSON.stringify({ version: 1, entries: { 'thread-1': [surface] } });
+      expect(JSON.parse(serialized).entries['thread-1'][0]).not.toHaveProperty('receivedAt');
+
+      now.mockReturnValue(4_000);
+      const restored = requireTestValue(
+        helpers.parseChatBridgeUiSurfaces(serialized)['thread-1']?.[0],
+      );
+      expect(restored).toEqual(surface);
+      expect(getBridgeUiSurfaceReceivedAt(restored)).toBe(4_000);
+      expect(getBridgeUiSurfaceReceivedAt(surface)).toBe(1_000);
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it('builds an optimistic replacement surface for new goal slash commands', () => {

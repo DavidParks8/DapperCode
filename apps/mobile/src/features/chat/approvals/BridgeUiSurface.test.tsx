@@ -1,6 +1,6 @@
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
-import { Platform, StyleSheet } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { BridgeUiAction, BridgeUiSurface } from '@bridge/types/types';
 import { feedback } from '@shared/feedback';
@@ -286,76 +286,144 @@ describe('BridgeUiWorkflowCard', () => {
     act(() => tree.unmount());
   });
 
-  it('keeps approval choices honest: busy while pending, restored with an inline error on failure', async () => {
-    const objective =
-      'Request a prescription refill and ask when it can be ready for pickup at the counter.';
-    const surface: BridgeUiSurface = {
-      id: 'phone-call-approval:call-1',
-      threadId: 'thread-1',
-      turnId: null,
-      kind: 'phone-call',
-      presentation: 'modal',
-      tone: 'warning',
-      title: 'Approve outbound phone call',
-      subtitle: '+15551234567',
-      bodyMarkdown: null,
-      blocks: [
-        {
-          type: 'keyValue',
-          items: [
-            { label: 'To', value: '+15551234567' },
-            { label: 'Objective', value: objective },
-          ],
-        },
-      ],
-      actions: [
-        { id: 'approve', label: 'Approve & Call', style: 'primary', dismissesSurface: true },
-        { id: 'cancel', label: 'Cancel', style: 'destructive', dismissesSurface: true },
-      ],
-      dismissible: false,
-    };
-    let settle: (ok: boolean) => void = () => undefined;
-    const onAction = jest.fn(
-      () =>
-        new Promise<boolean>((resolve) => {
-          settle = resolve;
-        }),
-    );
-    let rendered: ReactTestRenderer | undefined;
-    act(() => {
-      rendered = renderer.create(
-        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
-          <AppThemeProvider theme={theme}>
-            <BridgeUiModal surface={surface} onAction={onAction} onDismiss={jest.fn()} />
-          </AppThemeProvider>
-        </SafeAreaProvider>,
+  it.each(['success', 'failure', 'rejection'] as const)(
+    'guards same-batch approval choices and releases them after %s',
+    async (outcome) => {
+      const objective =
+        'Request a prescription refill and ask when it can be ready for pickup at the counter.';
+      const surface: BridgeUiSurface = {
+        id: 'phone-call-approval:call-1',
+        threadId: 'thread-1',
+        turnId: null,
+        kind: 'phone-call',
+        presentation: 'modal',
+        tone: 'warning',
+        title: 'Approve outbound phone call',
+        subtitle: '+15551234567',
+        bodyMarkdown: null,
+        blocks: [
+          {
+            type: 'keyValue',
+            items: [
+              { label: 'To', value: '+15551234567' },
+              { label: 'Objective', value: objective },
+            ],
+          },
+        ],
+        actions: [
+          { id: 'approve', label: 'Approve & Call', style: 'primary', dismissesSurface: true },
+          { id: 'cancel', label: 'Cancel', style: 'destructive', dismissesSurface: true },
+        ],
+        dismissible: false,
+      };
+      let settle: (ok: boolean) => void = () => undefined;
+      let reject: (error: Error) => void = () => undefined;
+      const onAction = jest.fn(
+        () =>
+          new Promise<boolean>((resolve, rejectPromise) => {
+            settle = resolve;
+            reject = rejectPromise;
+          }),
       );
-    });
-    const root = expectValue(rendered).root as QueryableTestInstance;
-    const objectiveText = root.findAll(
-      (node) => node.children.includes(objective) && node.props['style'] !== undefined,
-    )[0];
-    expect(objectiveText).toBeDefined();
-    expect(
-      StyleSheet.flatten(objectiveText?.props['style'] as never) as { textAlign?: string },
-    ).not.toHaveProperty('textAlign', 'right');
+      let rendered: ReactTestRenderer | undefined;
+      act(() => {
+        rendered = renderer.create(
+          <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+            <AppThemeProvider theme={theme}>
+              <BridgeUiModal surface={surface} onAction={onAction} onDismiss={jest.fn()} />
+            </AppThemeProvider>
+          </SafeAreaProvider>,
+        );
+      });
+      const root = expectValue(rendered).root as QueryableTestInstance;
+      const objectiveText = root.findAll(
+        (node) => node.children.includes(objective) && node.props['style'] !== undefined,
+      )[0];
+      expect(objectiveText).toBeDefined();
+      expect(
+        StyleSheet.flatten(objectiveText?.props['style'] as never) as { textAlign?: string },
+      ).not.toHaveProperty('textAlign', 'right');
 
-    act(() => readOnPress(findPressableByLabel(root, 'Approve & Call').props)());
-    expect(findPressableByLabel(root, 'Approve & Call').props['disabled']).toBe(true);
-    expect(findPressableByLabel(root, 'Cancel').props['disabled']).toBe(true);
-    act(() => readOnPress(findPressableByLabel(root, 'Cancel').props)());
-    expect(onAction).toHaveBeenCalledTimes(1);
+      const approve = readOnPress(findPressableByLabel(root, 'Approve & Call').props);
+      const cancel = readOnPress(findPressableByLabel(root, 'Cancel').props);
+      act(() => {
+        approve();
+        cancel();
+      });
+      expect(onAction).toHaveBeenCalledTimes(1);
+      expect(onAction).toHaveBeenLastCalledWith(surface, surface.actions[0]);
+      expect(findPressableByLabel(root, 'Approve & Call').props['disabled']).toBe(true);
+      expect(findPressableByLabel(root, 'Cancel').props['disabled']).toBe(true);
+      expect(findPressableByLabel(root, 'Approve & Call').props['accessibilityState']).toEqual({
+        disabled: true,
+        busy: true,
+      });
+      expect(findPressableByLabel(root, 'Cancel').props['accessibilityState']).toEqual({
+        disabled: true,
+        busy: false,
+      });
+      expect(root.findAll((node) => node.type === ActivityIndicator)).toHaveLength(1);
+      act(() => readOnPress(findPressableByLabel(root, 'Cancel').props)());
+      expect(onAction).toHaveBeenCalledTimes(1);
 
-    await act(async () => {
-      settle(false);
-      await Promise.resolve();
-    });
-    expect(findText(root, "That didn't go through. Check the connection and try again.")).toBe(
-      true,
-    );
-    expect(findPressableByLabel(root, 'Approve & Call').props['disabled']).toBe(false);
-    act(() => expectValue(rendered).unmount());
-  });
+      await act(async () => {
+        if (outcome === 'rejection') {
+          reject(new Error('Disconnected'));
+        } else {
+          settle(outcome === 'success');
+        }
+        await Promise.resolve();
+      });
+      expect(findText(root, "That didn't go through. Check the connection and try again.")).toBe(
+        outcome !== 'success',
+      );
+      expect(findPressableByLabel(root, 'Approve & Call').props['disabled']).toBe(false);
+      expect(findPressableByLabel(root, 'Cancel').props['disabled']).toBe(false);
+      expect(root.findAll((node) => node.type === ActivityIndicator)).toHaveLength(0);
+
+      act(() => {
+        cancel();
+        approve();
+      });
+      expect(onAction).toHaveBeenCalledTimes(2);
+      expect(onAction).toHaveBeenLastCalledWith(surface, surface.actions[1]);
+      expect(findPressableByLabel(root, 'Cancel').props['accessibilityState']).toEqual({
+        disabled: true,
+        busy: true,
+      });
+      expect(findText(root, "That didn't go through. Check the connection and try again.")).toBe(
+        false,
+      );
+      await act(async () => {
+        settle(true);
+        await Promise.resolve();
+      });
+      expect(findPressableByLabel(root, 'Cancel').props['disabled']).toBe(false);
+      expect(root.findAll((node) => node.type === ActivityIndicator)).toHaveLength(0);
+
+      onAction.mockImplementationOnce(() => {
+        throw new Error('Disconnected before dispatch');
+      });
+      act(() => approve());
+      expect(onAction).toHaveBeenCalledTimes(3);
+      expect(findText(root, "That didn't go through. Check the connection and try again.")).toBe(
+        true,
+      );
+      expect(findPressableByLabel(root, 'Approve & Call').props['disabled']).toBe(false);
+      expect(findPressableByLabel(root, 'Cancel').props['disabled']).toBe(false);
+      await act(async () => {
+        cancel();
+        settle(true);
+        await Promise.resolve();
+      });
+      expect(onAction).toHaveBeenCalledTimes(4);
+      expect(findText(root, "That didn't go through. Check the connection and try again.")).toBe(
+        false,
+      );
+      expect(findPressableByLabel(root, 'Cancel').props['disabled']).toBe(false);
+      act(() => expectValue(rendered).unmount());
+    },
+  );
 
   it('fires selection haptic on collapse/expand toggle', () => {
     const surface: BridgeUiSurface = {

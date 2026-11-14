@@ -1,18 +1,28 @@
 use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::path::Path;
 
 use crate::{
     secrets::{
-        generate_token, legacy_entry_account, parse_vault, vault_file_get, vault_file_set,
-        BridgeSecret, SecretBackend, SecretStore, SecretVault, VAULT_ENTRY_ACCOUNT, VAULT_VERSION,
+        generate_token, legacy_entry_account, parse_vault, validate_sip_password, vault_file_get,
+        vault_file_set, BridgeSecret, SecretBackend, SecretStore, SecretVault, VAULT_ENTRY_ACCOUNT,
+        VAULT_VERSION,
     },
-    store::{remove_file_if_exists, AppPaths, FileLease},
+    store::{atomic_private_write, remove_file_if_exists, AppPaths, FileLease},
 };
 
 pub(crate) const WINDOWS_TOKEN_ENTRY_PREFIX: &str = "bridge-auth-token:v2";
 pub(crate) const WINDOWS_LAYOUT_ENTRY_ACCOUNT: &str = "bridge-auth-vault:v2";
 pub(crate) const WINDOWS_LAYOUT_MARKER: &str = "per-profile-v1";
 pub(crate) const MAX_WINDOWS_CREDENTIAL_UTF16_UNITS: usize = 1_200;
+pub(crate) const WINDOWS_SIP_PASSWORD_ACCOUNT: &str = "__phone-call-sip-password";
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SipPasswordFile {
+    sip_password: String,
+}
 
 enum WindowsPreparation {
     Keychain,
@@ -75,6 +85,7 @@ fn migrate_keychain_vault(
         }
     }
 
+    migrate_sip_password(store, paths, vault)?;
     (store.keychain.delete)(VAULT_ENTRY_ACCOUNT)
         .context("failed to remove the migrated Windows bridge credential vault")?;
     remove_file_if_exists(&paths.secret_vault_file_path())
@@ -116,6 +127,7 @@ fn migrate_file_vault(
         created_accounts.push(windows_profile_entry_account(profile_id));
     }
 
+    migrate_sip_password(store, paths, &vault)?;
     remove_file_if_exists(&paths.secret_vault_file_path())
         .context("failed to remove the migrated bridge credential fallback")?;
     activate_layout(store)?;
@@ -124,21 +136,25 @@ fn migrate_file_vault(
 }
 
 fn prepare_keychain(store: &SecretStore, paths: &AppPaths) -> Result<WindowsPreparation> {
-    if layout_is_active(store)? {
-        return Ok(WindowsPreparation::Keychain);
-    }
+    let active = layout_is_active(store)?;
 
-    if let Some(contents) = (store.keychain.get)(VAULT_ENTRY_ACCOUNT)? {
-        let vault = parse_vault(&contents, "Windows Credential Manager")?;
-        migrate_keychain_vault(store, paths, &vault)?;
-        return Ok(WindowsPreparation::Keychain);
+    if !active {
+        if let Some(contents) = (store.keychain.get)(VAULT_ENTRY_ACCOUNT)? {
+            let vault = parse_vault(&contents, "Windows Credential Manager")?;
+            migrate_keychain_vault(store, paths, &vault)?;
+            return Ok(WindowsPreparation::Keychain);
+        }
     }
 
     if let Some(vault) = vault_file_get(&paths.secret_vault_file_path())? {
         return migrate_file_vault(store, paths, vault);
     }
 
-    Ok(WindowsPreparation::Uninitialized)
+    Ok(if active {
+        WindowsPreparation::Keychain
+    } else {
+        WindowsPreparation::Uninitialized
+    })
 }
 
 fn persist_file_vault(store: &SecretStore, paths: &AppPaths, vault: SecretVault) -> Result<()> {
@@ -155,14 +171,20 @@ pub(crate) fn get(
     validate_profile_id(profile_id)?;
     let active = layout_is_active(store)?;
     let direct_token = profile_get(store, profile_id)?;
-    if active {
+    let file_vault = vault_file_get(&paths.secret_vault_file_path())?;
+    if active && file_vault.is_none() {
         return Ok(direct_token.map(|token| BridgeSecret {
             token,
             backend: SecretBackend::Keychain,
         }));
     }
 
-    if let Some(contents) = (store.keychain.get)(VAULT_ENTRY_ACCOUNT)? {
+    let shared_contents = if active {
+        None
+    } else {
+        (store.keychain.get)(VAULT_ENTRY_ACCOUNT)?
+    };
+    if let Some(contents) = shared_contents {
         let vault = parse_vault(&contents, "Windows Credential Manager")?;
         let Some(token) = vault.bridge_auth_tokens.get(profile_id) else {
             return Ok(direct_token.map(|token| BridgeSecret {
@@ -179,7 +201,7 @@ pub(crate) fn get(
         }));
     }
 
-    if let Some(vault) = vault_file_get(&paths.secret_vault_file_path())? {
+    if let Some(vault) = file_vault {
         if let Some(token) = vault.bridge_auth_tokens.get(profile_id) {
             if direct_token.as_ref().is_some_and(|direct| direct != token) {
                 bail!("conflicting file and Windows credentials for profile {profile_id}");
@@ -441,7 +463,7 @@ fn delete_from_legacy_vault(store: &SecretStore, profile_id: &str) -> Result<()>
     if vault.bridge_auth_tokens.remove(profile_id).is_none() {
         return Ok(());
     }
-    if vault.bridge_auth_tokens.is_empty() {
+    if vault.bridge_auth_tokens.is_empty() && vault.sip_password.is_none() {
         (store.keychain.delete)(VAULT_ENTRY_ACCOUNT)
             .context("failed to remove the empty legacy Windows credential vault")
     } else {
@@ -449,6 +471,113 @@ fn delete_from_legacy_vault(store: &SecretStore, profile_id: &str) -> Result<()>
         (store.keychain.set)(VAULT_ENTRY_ACCOUNT, &contents)
             .context("failed to remove a profile from the legacy Windows credential vault")
     }
+}
+
+fn migrate_sip_password(store: &SecretStore, paths: &AppPaths, vault: &SecretVault) -> Result<()> {
+    let Some(password) = vault.sip_password.as_deref() else {
+        return Ok(());
+    };
+    let existing = (store.keychain.get)(WINDOWS_SIP_PASSWORD_ACCOUNT)?
+        .or(sip_password_file_get(&paths.sip_secret_file_path())?);
+    if existing.as_deref().is_some_and(|value| value != password) {
+        bail!("conflicting SIP passwords in the shared and Windows credential stores");
+    }
+    store_sip_password_locked(store, paths, password)?;
+    Ok(())
+}
+
+pub(crate) fn store_sip_password(
+    store: &SecretStore,
+    paths: &AppPaths,
+    password: &str,
+) -> Result<SecretBackend> {
+    let _lease = FileLease::acquire(&paths.secret_vault_lock_path())?;
+    match prepare_keychain(store, paths)? {
+        WindowsPreparation::File(mut vault) => {
+            vault.sip_password = Some(password.to_string());
+            persist_file_vault(store, paths, vault)?;
+            Ok(SecretBackend::File)
+        }
+        WindowsPreparation::Keychain | WindowsPreparation::Uninitialized => {
+            store_sip_password_locked(store, paths, password)
+        }
+    }
+}
+
+fn store_sip_password_locked(
+    store: &SecretStore,
+    paths: &AppPaths,
+    password: &str,
+) -> Result<SecretBackend> {
+    validate_sip_password(password)?;
+    if password.encode_utf16().count() > MAX_WINDOWS_CREDENTIAL_UTF16_UNITS {
+        bail!("SIP password exceeds the Windows Credential Manager size limit");
+    }
+    let existed = (store.keychain.get)(WINDOWS_SIP_PASSWORD_ACCOUNT)?.is_some();
+    match (store.keychain.set)(WINDOWS_SIP_PASSWORD_ACCOUNT, password) {
+        Ok(()) => {
+            remove_file_if_exists(&paths.sip_secret_file_path())?;
+            Ok(SecretBackend::Keychain)
+        }
+        Err(error) if existed => {
+            Err(error).context("failed to update the Windows SIP password credential")
+        }
+        Err(_) => {
+            let contents = serde_json::to_vec_pretty(&SipPasswordFile {
+                sip_password: password.to_string(),
+            })?;
+            atomic_private_write(&paths.sip_secret_file_path(), &contents)?;
+            Ok(SecretBackend::File)
+        }
+    }
+}
+
+pub(crate) fn load_sip_password(
+    store: &SecretStore,
+    paths: &AppPaths,
+) -> Result<Option<(String, SecretBackend)>> {
+    let _lease = FileLease::acquire(&paths.secret_vault_lock_path())?;
+    let shared_password = match prepare_keychain(store, paths)? {
+        WindowsPreparation::File(vault) => vault.sip_password,
+        WindowsPreparation::Keychain | WindowsPreparation::Uninitialized => None,
+    };
+    if let Some(password) = shared_password {
+        return Ok(Some((password, SecretBackend::File)));
+    }
+    if let Some(password) = (store.keychain.get)(WINDOWS_SIP_PASSWORD_ACCOUNT)? {
+        validate_sip_password(&password)?;
+        return Ok(Some((password, SecretBackend::Keychain)));
+    }
+    Ok(sip_password_file_get(&paths.sip_secret_file_path())?
+        .map(|password| (password, SecretBackend::File)))
+}
+
+pub(crate) fn delete_sip_password(store: &SecretStore, paths: &AppPaths) -> Result<()> {
+    let _lease = FileLease::acquire(&paths.secret_vault_lock_path())?;
+    if let WindowsPreparation::File(mut vault) = prepare_keychain(store, paths)? {
+        if vault.sip_password.take().is_some() {
+            persist_file_vault(store, paths, vault)?;
+        }
+    }
+    if (store.keychain.get)(WINDOWS_SIP_PASSWORD_ACCOUNT)?.is_some() {
+        (store.keychain.delete)(WINDOWS_SIP_PASSWORD_ACCOUNT)
+            .context("failed to remove the Windows SIP password credential")?;
+    }
+    remove_file_if_exists(&paths.sip_secret_file_path())
+}
+
+fn sip_password_file_get(path: &Path) -> Result<Option<String>> {
+    let contents = match std::fs::read(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to read {}", path.display()))
+        }
+    };
+    let file: SipPasswordFile = serde_json::from_slice(&contents)
+        .with_context(|| format!("invalid stored SIP secret at {}", path.display()))?;
+    validate_sip_password(&file.sip_password)?;
+    Ok(Some(file.sip_password))
 }
 
 fn delete_from_file_vault(store: &SecretStore, paths: &AppPaths, profile_id: &str) -> Result<()> {

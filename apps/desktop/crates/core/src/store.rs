@@ -9,10 +9,12 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{
-    platform,
-    secrets::{SecretBackend, SecretStore},
+#[cfg(test)]
+use crate::phone_call::{
+    DEFAULT_VOICE_BASE_URL, DEFAULT_VOICE_LLM_MODEL, DEFAULT_VOICE_TTS_MODEL,
+    DEFAULT_VOICE_TTS_VOICE,
 };
+use crate::{phone_call::PhoneCallSettings, platform};
 
 const CONFIG_VERSION: u32 = 2;
 const LEGACY_CONFIG_VERSION: u32 = 1;
@@ -21,12 +23,6 @@ const DEFAULT_MAX_WORKERS: usize = 12;
 const DEFAULT_MAX_IDLE_WORKERS: usize = 2;
 const DEFAULT_WORKER_IDLE_GRACE_MS: u64 = 60_000;
 const DEFAULT_WORKER_START_TIMEOUT_MS: u64 = 60_000;
-
-pub const DEFAULT_SIP_TRANSPORT: &str = "tls";
-pub const DEFAULT_VOICE_BASE_URL: &str = "http://127.0.0.1:11434/v1";
-pub const DEFAULT_VOICE_LLM_MODEL: &str = "gemma4:e4b";
-pub const DEFAULT_VOICE_TTS_MODEL: &str = "phonon";
-pub const DEFAULT_VOICE_TTS_VOICE: &str = "default";
 
 /// Filesystem layout for the central, app-owned data directory.
 ///
@@ -248,69 +244,10 @@ impl AppPaths {
         FileLease::acquire(&self.config_lock_path())
     }
 
-    pub fn configure_phone_call(
-        &self,
-        secrets: &SecretStore,
-        new_password: Option<&str>,
-        mutate: impl FnOnce(Option<&PhoneCallSettings>) -> Result<PhoneCallSettings>,
-    ) -> Result<(PhoneCallSettings, SecretBackend)> {
-        let mut side_effects = PhoneCallSideEffects {
-            paths: self,
-            secrets,
-            new_password,
-            previous_password: None,
-        };
-        self.update_config_with_side_effects(
-            |config| {
-                let next = mutate(config.phone_call.as_ref())?;
-                config.phone_call = Some(next.clone());
-                Ok(next)
-            },
-            &mut side_effects,
-        )
-    }
-
     fn with_rollback_error(primary: anyhow::Error, rollback: Result<()>) -> anyhow::Error {
         match rollback {
             Ok(()) => primary,
             Err(rollback) => anyhow!("{primary:#}; side-effect rollback also failed: {rollback:#}"),
-        }
-    }
-}
-
-struct PhoneCallSideEffects<'a> {
-    paths: &'a AppPaths,
-    secrets: &'a SecretStore,
-    new_password: Option<&'a str>,
-    previous_password: Option<Option<String>>,
-}
-
-impl ConfigSideEffects for PhoneCallSideEffects<'_> {
-    type Output = SecretBackend;
-
-    fn apply(&mut self) -> Result<Self::Output> {
-        let existing = self.secrets.load_sip_password(self.paths)?;
-        match self.new_password {
-            Some(password) => {
-                self.previous_password = Some(existing.map(|(value, _)| value));
-                self.secrets.store_sip_password(self.paths, password)
-            }
-            None => existing
-                .map(|(_, backend)| backend)
-                .context("--sip-password-stdin is required when no SIP password is stored"),
-        }
-    }
-
-    fn rollback(&mut self) -> Result<()> {
-        let Some(previous) = self.previous_password.take() else {
-            return Ok(());
-        };
-        match previous {
-            Some(password) => self
-                .secrets
-                .store_sip_password(self.paths, &password)
-                .map(|_| ()),
-            None => self.secrets.delete_sip_password(self.paths),
         }
     }
 }
@@ -555,189 +492,6 @@ impl BrokerSettings {
 pub struct BrokerEndpoint {
     pub host: String,
     pub port: u16,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct PhoneCallSettings {
-    pub sip_server: String,
-    #[serde(default = "default_sip_transport")]
-    pub sip_transport: String,
-    pub sip_username: String,
-    pub caller_id: String,
-    pub user_display_name: String,
-    #[serde(default = "default_voice_base_url")]
-    pub stt_base_url: String,
-    #[serde(default = "default_voice_llm_model")]
-    pub stt_model: String,
-    #[serde(default = "default_voice_base_url")]
-    pub llm_base_url: String,
-    #[serde(default = "default_voice_llm_model")]
-    pub llm_model: String,
-    #[serde(default = "default_voice_base_url")]
-    pub tts_base_url: String,
-    #[serde(default = "default_voice_tts_model")]
-    pub tts_model: String,
-    #[serde(default = "default_voice_tts_voice")]
-    pub tts_voice: String,
-}
-
-impl PhoneCallSettings {
-    pub fn validate(&self) -> Result<()> {
-        validate_host_port(&self.sip_server)?;
-        if !matches!(self.sip_transport.as_str(), "udp" | "tls") {
-            bail!("sipTransport must be 'udp' or 'tls'");
-        }
-        validate_bounded_text("sipUsername", &self.sip_username, 256)?;
-        validate_e164(&self.caller_id)?;
-        validate_bounded_text("userDisplayName", &self.user_display_name, 128)?;
-        validate_loopback_url("sttBaseUrl", &self.stt_base_url)?;
-        validate_bounded_text("sttModel", &self.stt_model, 256)?;
-        validate_loopback_url("llmBaseUrl", &self.llm_base_url)?;
-        validate_bounded_text("llmModel", &self.llm_model, 256)?;
-        validate_loopback_url("ttsBaseUrl", &self.tts_base_url)?;
-        validate_bounded_text("ttsModel", &self.tts_model, 256)?;
-        validate_bounded_text("ttsVoice", &self.tts_voice, 256)?;
-        Ok(())
-    }
-}
-
-fn validate_bounded_text(field: &str, value: &str, max_bytes: usize) -> Result<()> {
-    if value.trim().is_empty() || value.len() > max_bytes || value.chars().any(char::is_control) {
-        bail!(
-            "{field} must be non-empty, at most {max_bytes} bytes, and free of control characters"
-        );
-    }
-    Ok(())
-}
-
-fn validate_host_port(value: &str) -> Result<()> {
-    if value.is_empty()
-        || value.len() > 265
-        || value.chars().any(|c| c.is_control() || c.is_whitespace())
-    {
-        bail!("sipServer must be a valid host:port");
-    }
-    let port_str = if let Some(rest) = value.strip_prefix('[') {
-        let (ipv6, port_part) = rest
-            .split_once("]:")
-            .context("sipServer IPv6 address must use [host]:port")?;
-        ipv6.parse::<std::net::Ipv6Addr>()
-            .context("sipServer contains an invalid IPv6 address")?;
-        port_part
-    } else {
-        let (host, port_part) = value
-            .rsplit_once(':')
-            .context("sipServer must include a :port")?;
-        if host.is_empty()
-            || host.contains(':')
-            || host.contains("..")
-            || host.starts_with('.')
-            || host.starts_with('-')
-            || host.ends_with('-')
-            || !host
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'))
-        {
-            bail!("sipServer contains an invalid host");
-        }
-        if host.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
-            host.parse::<std::net::Ipv4Addr>()
-                .context("sipServer contains an invalid IPv4 address")?;
-        }
-        port_part
-    };
-    let port: u16 = port_str
-        .parse()
-        .context("sipServer port must be an integer in 1..=65535")?;
-    if port == 0 {
-        bail!("sipServer port must be non-zero");
-    }
-    Ok(())
-}
-
-fn validate_e164(value: &str) -> Result<()> {
-    let Some(digits) = value.strip_prefix('+') else {
-        bail!("callerId must be in E.164 format starting with '+'");
-    };
-    if !(7..=15).contains(&digits.len()) || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        bail!("callerId must start with '+' followed by 7 to 15 ASCII digits");
-    }
-    Ok(())
-}
-
-fn validate_loopback_url(field: &str, value: &str) -> Result<()> {
-    if value.is_empty()
-        || value.len() > 1024
-        || value
-            .chars()
-            .any(|c| c.is_control() || c.is_whitespace() || matches!(c, '\\' | '@' | '?' | '#'))
-    {
-        bail!("{field} must be a valid loopback HTTP/HTTPS URL");
-    }
-    let Some((scheme, rest)) = value.split_once("://") else {
-        bail!("{field} must start with http:// or https://");
-    };
-    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
-        bail!("{field} must use http or https");
-    }
-    let (authority, _path) = rest.split_once('/').unwrap_or((rest, ""));
-    if authority.is_empty() {
-        bail!("{field} is missing a host");
-    }
-    let port_str = if let Some(bracketed) = authority.strip_prefix('[') {
-        if let Some(ipv6) = bracketed.strip_suffix(']') {
-            if ipv6 != "::1" {
-                bail!("{field} host must be 127.0.0.1, ::1, or localhost");
-            }
-            None
-        } else if let Some((ipv6, port)) = bracketed.split_once("]:") {
-            if ipv6 != "::1" {
-                bail!("{field} host must be 127.0.0.1, ::1, or localhost");
-            }
-            Some(port)
-        } else {
-            bail!("{field} contains an invalid IPv6 host");
-        }
-    } else {
-        let (host, port) = match authority.split_once(':') {
-            Some((host, port)) => (host, Some(port)),
-            None => (authority, None),
-        };
-        if host != "127.0.0.1" && !host.eq_ignore_ascii_case("localhost") {
-            bail!("{field} host must be 127.0.0.1, ::1, or localhost");
-        }
-        port
-    };
-    if let Some(port_str) = port_str {
-        let port: u16 = port_str
-            .parse()
-            .with_context(|| format!("{field} port must be an integer in 1..=65535"))?;
-        if port == 0 {
-            bail!("{field} port must be non-zero");
-        }
-    }
-    Ok(())
-}
-
-fn default_sip_transport() -> String {
-    DEFAULT_SIP_TRANSPORT.to_string()
-}
-
-fn default_voice_base_url() -> String {
-    DEFAULT_VOICE_BASE_URL.to_string()
-}
-
-fn default_voice_llm_model() -> String {
-    DEFAULT_VOICE_LLM_MODEL.to_string()
-}
-
-fn default_voice_tts_model() -> String {
-    DEFAULT_VOICE_TTS_MODEL.to_string()
-}
-
-fn default_voice_tts_voice() -> String {
-    DEFAULT_VOICE_TTS_VOICE.to_string()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

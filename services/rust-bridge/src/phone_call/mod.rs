@@ -385,6 +385,10 @@ impl PhoneCallService {
         self.live_work_count.load(Ordering::Acquire)
     }
 
+    pub(crate) fn is_configured(&self) -> bool {
+        self.config.is_some()
+    }
+
     pub(crate) fn start_phone_call<'a>(
         self: &'a Arc<Self>,
         caller_thread_id: &'a str,
@@ -421,14 +425,16 @@ impl PhoneCallService {
             ));
         }
 
-        if let Some(queue) = self.queue.upgrade() {
-            let _admission = queue
-                .retirement_fence
-                .admit(owner_thread_id)
-                .await
-                .map_err(PhoneCallError::Invalid)?;
-        }
-
+        let admission = match self.queue.upgrade() {
+            Some(queue) => Some(
+                queue
+                    .retirement_fence
+                    .admit(owner_thread_id)
+                    .await
+                    .map_err(PhoneCallError::Invalid)?,
+            ),
+            None => None,
+        };
         let voice_client =
             VoicePipelineClient::new(runtime_config.voice.clone()).map_err(|err| {
                 PhoneCallError::Internal(format!("invalid voice configuration: {err}"))
@@ -490,6 +496,7 @@ impl PhoneCallService {
             live_card_presented: false,
             armed: true,
         };
+        drop(admission);
 
         let approval_surface = build_approval_modal_surface(
             &approval_surface_id,
@@ -6249,6 +6256,111 @@ mod tests {
         assert!(!newest_giant.contains("We open at nine."));
         assert!(report("remote_bye", &[giant, short])
             .ends_with("Transcript:\n[earlier transcript omitted]\nRecipient: We open at nine."));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_thread_retirement_waits_for_call_slot_registration_then_cancels_start() {
+        let hub = Arc::new(ClientHub::new());
+        let (outbox, mut notifications) = client_outbox(128);
+        hub.add_client_with_metadata(outbox, ClientConnectionMetadata::default())
+            .await;
+        let (report_tx, mut reports) = mpsc::unbounded_channel();
+        let queue = BridgeQueueService::with_submission_store(
+            Arc::new(MockQueueDispatcher {
+                captured: report_tx,
+            }),
+            Arc::clone(&hub),
+            None,
+            crate::queue_service::DurableQueueSubmissions::default(),
+        );
+        let sip = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let service = PhoneCallService::with_options(
+            Some(sample_runtime_config(
+                sip.local_addr().unwrap().port(),
+                "http://127.0.0.1:9/v1",
+            )),
+            hub,
+            Arc::downgrade(&queue),
+            approval_timeouts(Duration::from_secs(1)),
+            None,
+        );
+
+        let (locked_tx, locked_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let registry = Arc::clone(&service.registry);
+        let holder = std::thread::spawn(move || {
+            let lock = lock_unpoisoned(&registry);
+            locked_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+            drop(lock);
+        });
+        locked_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let admitted = Arc::new(tokio::sync::Notify::new());
+        *lock_unpoisoned(&queue.retirement_fence.admission_acquired) = Some(Arc::clone(&admitted));
+        let starting = Arc::clone(&service);
+        let start = tokio::spawn(async move {
+            starting
+                .start_phone_call("retiring-owner", parking_request())
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), admitted.notified())
+            .await
+            .unwrap();
+
+        let (retiring_tx, mut retiring_rx) = oneshot::channel();
+        let retiring_queue = Arc::clone(&queue);
+        let retiring_service = Arc::clone(&service);
+        let deletion = tokio::spawn(async move {
+            let ids = vec!["retiring-owner".to_string()];
+            let barrier = retiring_queue.block_retirement_admissions().await;
+            let lease = retiring_queue
+                .retirement_fence
+                .begin_blocked(&ids, &barrier);
+            retiring_tx.send(()).unwrap();
+            drop(barrier);
+            retiring_service.cancel_for_retiring_threads(&ids).await;
+            lease.finish_deleted().await;
+        });
+        let blocked = tokio::time::timeout(Duration::from_millis(100), &mut retiring_rx)
+            .await
+            .is_err();
+        release_tx.send(()).unwrap();
+        holder.join().unwrap();
+        tokio::time::timeout(Duration::from_secs(2), deletion)
+            .await
+            .unwrap()
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(2), start)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            blocked,
+            "deletion must not scan calls before an admitted start is registered"
+        );
+        assert!(matches!(result, Err(PhoneCallError::Rejected(_))));
+        assert_eq!(service.live_work_count(), 0);
+        assert!(lock_unpoisoned(&service.registry).active.is_none());
+        assert!(reports.try_recv().is_err());
+        let mut packet = [0_u8; 1024];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), sip.recv_from(&mut packet))
+                .await
+                .is_err()
+        );
+        assert!(matches!(
+            service
+                .start_phone_call("retiring-owner", parking_request())
+                .await,
+            Err(PhoneCallError::Invalid(_))
+        ));
+        let mut dismissed = false;
+        while let Ok(message) = notifications.try_recv() {
+            if let axum::extract::ws::Message::Text(text) = message {
+                dismissed |= text.contains("bridge/ui.dismiss");
+            }
+        }
+        assert!(dismissed, "the cancelled approval must be dismissed");
     }
 
     #[tokio::test]

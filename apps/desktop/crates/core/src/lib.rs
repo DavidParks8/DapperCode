@@ -4,6 +4,7 @@
 
 mod broker_supervisor;
 mod config;
+mod phone_call;
 mod platform;
 mod secrets;
 mod setup;
@@ -15,6 +16,10 @@ pub use broker_supervisor::{BridgeSnapshot, BridgeState, BrokerLifecycleAction, 
 pub use config::{
     runtime_executable_available, validate_workspace, BridgeRuntimeConfig, RuntimePaths,
 };
+pub use phone_call::{
+    PhoneCallSettings, DEFAULT_SIP_TRANSPORT, DEFAULT_VOICE_BASE_URL, DEFAULT_VOICE_LLM_MODEL,
+    DEFAULT_VOICE_TTS_MODEL, DEFAULT_VOICE_TTS_VOICE,
+};
 pub use platform::{
     process_start_identity, resolve_bridge_host, stop_child, wait_for_shutdown_signal, NetworkMode,
     SetupPreflightError,
@@ -25,7 +30,6 @@ pub use setup::{
     SetupResult,
 };
 pub use store::{
-    profile_id_for, AppConfig, AppPaths, BrokerEndpoint, BrokerSettings, FileLease,
-    PhoneCallSettings, Profile, ProfileAgent, DEFAULT_SIP_TRANSPORT, DEFAULT_VOICE_BASE_URL,
-    DEFAULT_VOICE_LLM_MODEL, DEFAULT_VOICE_TTS_MODEL, DEFAULT_VOICE_TTS_VOICE,
+    profile_id_for, AppConfig, AppPaths, BrokerEndpoint, BrokerSettings, FileLease, Profile,
+    ProfileAgent,
 };

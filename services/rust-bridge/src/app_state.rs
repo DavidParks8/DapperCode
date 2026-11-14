@@ -169,6 +169,7 @@ pub(super) struct BridgeCapabilitySupport {
     pub(super) account_rate_limits: bool,
     pub(super) browser_preview: bool,
     pub(super) generic_ui_surface: bool,
+    pub(super) phone_calls: bool,
 }
 
 impl AppState {
@@ -217,9 +218,11 @@ impl AppState {
         capabilities.ag_ui_events = true;
         capabilities.supports.browser_preview = self.preview.is_available();
         capabilities.supports.generic_ui_surface = true;
+        capabilities.supports.phone_calls = self.phone_calls.is_configured();
         for supports in capabilities.supports_by_agent.values_mut() {
             supports.browser_preview = capabilities.supports.browser_preview;
             supports.generic_ui_surface = true;
+            supports.phone_calls = capabilities.supports.phone_calls;
         }
 
         capabilities

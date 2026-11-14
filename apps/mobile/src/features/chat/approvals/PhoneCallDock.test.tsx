@@ -5,6 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { BridgeUiSurface } from '@bridge/types/types';
 import { feedback } from '@shared/feedback';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import { toBridgeUiSurface, upsertBridgeUiSurfaceList } from '../helpers/bridgeUi';
 import { PhoneCallDock, phoneCallDetailsMaxHeight } from './PhoneCallDock';
 
 jest.mock('@shared/feedback', () => ({
@@ -27,8 +28,12 @@ const safeAreaMetrics = {
   insets: { top: 47, left: 0, right: 0, bottom: 34 },
 };
 
-function liveCall(status = 'In call', updatedAt = new Date().toISOString()): BridgeUiSurface {
-  return {
+function liveCall(
+  status = 'In call',
+  updatedAt = new Date().toISOString(),
+  duration = '0:13',
+): BridgeUiSurface {
+  const surface = toBridgeUiSurface({
     id: 'phone-call-live:call-1',
     threadId: 'thread-1',
     kind: 'phone-call',
@@ -43,7 +48,7 @@ function liveCall(status = 'In call', updatedAt = new Date().toISOString()): Bri
           { label: 'Status', value: status },
           { label: 'To', value: '+15551234567' },
           { label: 'From', value: '+15550000001' },
-          { label: 'Duration', value: '0:13' },
+          { label: 'Duration', value: duration },
           { label: 'Objective', value: 'Request a prescription refill for pickup.' },
         ],
       },
@@ -52,7 +57,11 @@ function liveCall(status = 'In call', updatedAt = new Date().toISOString()): Bri
     actions: [{ id: 'hangup', label: 'Hang Up', style: 'destructive', dismissesSurface: false }],
     dismissible: false,
     updatedAt,
-  };
+  });
+  if (!surface) {
+    throw new Error('Invalid phone call fixture');
+  }
+  return surface;
 }
 
 const endedCall: BridgeUiSurface = {
@@ -182,6 +191,70 @@ describe('PhoneCallDock', () => {
       jest.advanceTimersByTime(2_000);
     });
     expect(texts(tree)).toContain('On hold · 0:15');
+  });
+
+  it.each([-60_000, 60_000])(
+    'ticks from local receipt, not bridge time, with %d ms of phone clock skew',
+    (skew) => {
+      const bridgeTime = Date.parse('2026-11-14T08:00:00.000Z');
+      jest.useFakeTimers({ now: bridgeTime + skew });
+      const surface = liveCall('In call', new Date(bridgeTime).toISOString());
+
+      act(() => {
+        jest.advanceTimersByTime(4_000);
+      });
+      const { tree } = render(surface);
+      expect(texts(tree)).toContain('In call · 0:17');
+
+      act(() => {
+        jest.advanceTimersByTime(2_000);
+      });
+      expect(texts(tree)).toContain('In call · 0:19');
+    },
+  );
+
+  it('reanchors fresh duration updates and preserves receipt time through cached dock remounts', () => {
+    jest.useFakeTimers({ now: new Date('2026-11-14T08:01:00.000Z') });
+    let snapshots = upsertBridgeUiSurfaceList([], liveCall('In call', '2026-11-14T08:00:00.000Z'));
+    const { tree, onAction, onDismiss } = render(snapshots[0]!);
+    expect(texts(tree)).toContain('In call · 0:13');
+    act(() => {
+      jest.advanceTimersByTime(2_500);
+    });
+    expect(texts(tree)).toContain('In call · 0:15');
+
+    const update = liveCall('On hold', '2026-11-14T08:00:02.500Z', '1:00');
+    snapshots = upsertBridgeUiSurfaceList(snapshots, update);
+    act(() => {
+      tree.update(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <PhoneCallDock
+              surface={snapshots[0]!}
+              detailsMaxHeight={240}
+              onAction={onAction}
+              onDismiss={onDismiss}
+            />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    expect(texts(tree)).toContain('On hold · 1:00');
+    act(() => {
+      jest.advanceTimersByTime(2_000);
+    });
+    expect(texts(tree)).toContain('On hold · 1:02');
+
+    act(() => {
+      tree.unmount();
+      jest.advanceTimersByTime(3_000);
+    });
+    const { tree: remounted } = render(snapshots[0]!);
+    expect(texts(remounted)).toContain('On hold · 1:05');
+    act(() => {
+      jest.advanceTimersByTime(1_000);
+    });
+    expect(texts(remounted)).toContain('On hold · 1:06');
   });
 
   it('hangs up once and acknowledges the request until the call settles', () => {
