@@ -26,6 +26,7 @@ interface ChatHeaderProps {
   agent?: AgentDescriptor | null;
   /** Opens the rename sheet. Rendered as a dedicated button so the title stays draggable. */
   onRenameTitle?: () => void;
+  onNewChat?: () => void;
   /** Avoids nesting glass when the header shares a surface with adjacent chrome. */
   embeddedInGlass?: boolean;
   /** Pads for the top safe area; off when the header sits low on the screen. */
@@ -39,6 +40,7 @@ export function ChatHeader({
   title,
   agent,
   onRenameTitle,
+  onNewChat,
   embeddedInGlass = false,
   respectsTopSafeArea = true,
   rightIconName,
@@ -88,45 +90,14 @@ export function ChatHeader({
           <AgentIcon agent={agent} size={18} />
         </View>
         <View style={styles.headerSpacer} />
-        {onRenameTitle || rightIconName ? (
-          <View style={styles.toolbarActions} testID="chat-header-actions">
-            {onRenameTitle ? (
-              <CircularToolbarButton
-                onPress={onRenameTitle}
-                accessibilityLabel="Edit session title"
-                accessibilityHint="Opens the rename form for this session"
-              >
-                <Ionicons
-                  {...decorativeAccessibilityProps}
-                  name="pencil"
-                  size={18}
-                  color={colors.textPrimary}
-                />
-              </CircularToolbarButton>
-            ) : null}
-            {rightIconName ? (
-              onRightActionPress ? (
-                <CircularToolbarButton onPress={onRightActionPress} accessibilityLabel="Open Git">
-                  <Ionicons
-                    {...decorativeAccessibilityProps}
-                    name={rightIconName}
-                    size={18}
-                    color={colors.textPrimary}
-                  />
-                </CircularToolbarButton>
-              ) : (
-                <View style={styles.toolbarPlaceholder}>
-                  <Ionicons
-                    {...decorativeAccessibilityProps}
-                    name={rightIconName}
-                    size={18}
-                    color={colors.textPrimary}
-                  />
-                </View>
-              )
-            ) : null}
-          </View>
-        ) : null}
+        <HeaderActions
+          onRenameTitle={onRenameTitle}
+          rightIconName={rightIconName}
+          onRightActionPress={onRightActionPress}
+          onNewChat={onNewChat}
+          color={colors.textPrimary}
+          styles={styles}
+        />
       </View>
     </SafeAreaView>
   );
@@ -139,6 +110,61 @@ export function ChatHeader({
     <GlassSurface role="chrome" style={styles.headerContainer} testID="chat-header-glass-surface">
       {header}
     </GlassSurface>
+  );
+}
+
+function HeaderActions({
+  onRenameTitle,
+  rightIconName,
+  onRightActionPress,
+  onNewChat,
+  color,
+  styles,
+}: Pick<ChatHeaderProps, 'onRenameTitle' | 'rightIconName' | 'onRightActionPress' | 'onNewChat'> & {
+  color: string;
+  styles: ReturnType<typeof createStyles>;
+}) {
+  if (!onRenameTitle && !rightIconName && !onNewChat) {
+    return null;
+  }
+  return (
+    <View style={styles.toolbarActions} testID="chat-header-actions">
+      {onRenameTitle ? (
+        <CircularToolbarButton
+          onPress={onRenameTitle}
+          accessibilityLabel="Edit session title"
+          accessibilityHint="Opens the rename form for this session"
+        >
+          <Ionicons {...decorativeAccessibilityProps} name="pencil" size={18} color={color} />
+        </CircularToolbarButton>
+      ) : null}
+      {rightIconName ? (
+        onRightActionPress ? (
+          <CircularToolbarButton onPress={onRightActionPress} accessibilityLabel="Open Git">
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name={rightIconName}
+              size={18}
+              color={color}
+            />
+          </CircularToolbarButton>
+        ) : (
+          <View style={styles.toolbarPlaceholder}>
+            <Ionicons
+              {...decorativeAccessibilityProps}
+              name={rightIconName}
+              size={18}
+              color={color}
+            />
+          </View>
+        )
+      ) : null}
+      {onNewChat ? (
+        <CircularToolbarButton onPress={onNewChat} accessibilityLabel="New chat">
+          <Ionicons {...decorativeAccessibilityProps} name="add" size={24} color={color} />
+        </CircularToolbarButton>
+      ) : null}
+    </View>
   );
 }
 

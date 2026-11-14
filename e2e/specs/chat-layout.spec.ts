@@ -118,6 +118,28 @@ test.describe('chat screen layout', () => {
     await expectWithinViewport(topChrome);
   });
 
+  test('the header starts a new chat without obscuring its other controls', async ({
+    createApp,
+  }) => {
+    const app = await createApp({ chatId: E2E_THREADS.longTitle });
+    const newChat = selectors.chatHeaderNewChat(app.page);
+    const title = selectors.chatHeaderTitleRow(app.page);
+    const edit = selectors.chatHeaderEditTitle(app.page);
+    const git = selectors.chatHeaderGit(app.page);
+
+    await expectTouchTarget(newChat);
+    await expectWithinViewport(newChat);
+    await expectNoOverlap(title, edit);
+    await expectNoOverlap(edit, git);
+    await expectNoOverlap(git, newChat);
+    await newChat.click();
+    await expect(newChat).toHaveCount(0);
+    await expect(selectors.composerInput(app.page)).toBeVisible();
+    await expect(app.page).toHaveURL(/\/chats\/new$/);
+    await app.openDrawer();
+    await expect(selectors.drawerChatRow(app.page, E2E_THREADS.longTitle)).toBeVisible();
+  });
+
   test('a long assistant answer wraps instead of widening the rail', async ({ createApp }) => {
     const app = await createApp({ chatId: E2E_THREADS.layout });
     const assistantMessage = selectors

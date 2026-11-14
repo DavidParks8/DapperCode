@@ -232,6 +232,12 @@ export const selectors = {
   topChrome: (page: Page): Locator => page.getByTestId('main-screen-top-chrome'),
   chatHeaderRow: (page: Page): Locator => page.getByTestId('chat-header-row'),
   chatHeaderTitleRow: (page: Page): Locator => page.getByTestId('chat-header-title-row'),
+  chatHeaderNewChat: (page: Page): Locator =>
+    page.getByTestId('chat-header-row').getByRole('button', { name: 'New chat', exact: true }),
+  chatHeaderEditTitle: (page: Page): Locator =>
+    page.getByTestId('chat-header-row').getByLabel('Edit session title', { exact: true }),
+  chatHeaderGit: (page: Page): Locator =>
+    page.getByTestId('chat-header-row').getByLabel('Open Git', { exact: true }),
   sessionMetaRow: (page: Page): Locator => page.getByTestId('session-meta-row'),
 
   transcript: (page: Page): Locator => page.getByTestId('chat-transcript'),

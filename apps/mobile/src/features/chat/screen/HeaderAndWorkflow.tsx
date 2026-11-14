@@ -1,6 +1,6 @@
 import { useMainScreenStyles } from '../styles/useStyles';
 import { creatingAtom, sendingAtom, stoppingTurnAtom } from '../state/turn';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { Ionicons } from '@expo/vector-icons';
 import { type ComponentProps, useMemo, useState } from 'react';
 import {
@@ -22,6 +22,7 @@ import { useInlineToolbar } from '@shell/layout/SceneToolbar';
 import { resolveInlineHeaderButtons } from './chatToolbar';
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { activeProfileFeaturesAtom } from '@shell/state/bridge/atoms';
+import { startNewChatAtom } from '@shell/navigation/actions';
 import { AppSheet } from '@shared/ui/AppSheet';
 import { WorkflowCard } from '../workflow/Workflow';
 import { SESSION_META_CHIP_HEIGHT } from '../styles/sessionMetaChip';
@@ -466,6 +467,7 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
   } = context;
   const { theme, styles } = useMainScreenStyles();
   const inlineToolbar = useInlineToolbar();
+  const startNewChat = useSetAtom(startNewChatAtom);
   const sending = useAtomValue(sendingAtom);
   const creating = useAtomValue(creatingAtom);
   const stoppingTurn = useAtomValue(stoppingTurnAtom);
@@ -496,6 +498,7 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
           })}
           title={headerTitle}
           agent={activeAgent}
+          onNewChat={selectedChat ? () => startNewChat() : undefined}
           embeddedInGlass
         />
         {showSessionMetaRow ? (
