@@ -441,15 +441,19 @@ dependencies = [
  "regex",
  "reqwest",
  "rmcp",
+ "rustls",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "sha2",
  "thiserror",
  "tokio",
+ "tokio-rustls",
  "tokio-stream",
  "tokio-tungstenite",
  "tokio-util",
  "uuid",
+ "webpki-roots 1.0.7",
 ]
 
 [[package]]

@@ -597,6 +597,7 @@ pub(super) async fn handle_bridge_method(
                 return Err(BridgeError::invalid_params("actionId must not be empty"));
             }
 
+            state.phone_calls.resolve_ui_action(&request).await;
             state
                 .hub
                 .broadcast_notification(
@@ -1823,6 +1824,7 @@ mod tests {
                 per_client_in_flight: DEFAULT_WS_PER_CLIENT_IN_FLIGHT,
                 global_in_flight: DEFAULT_WS_GLOBAL_IN_FLIGHT,
             },
+            phone_call: None,
         }
     }
 

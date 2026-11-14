@@ -351,6 +351,7 @@ pub(crate) fn ensure_profiles(
                     let vault = SecretVault {
                         version: VAULT_VERSION,
                         bridge_auth_tokens: tokens,
+                        sip_password: None,
                     };
                     persist_file_vault(store, paths, vault)?;
                     return Ok(Some(SecretBackend::File));

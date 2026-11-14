@@ -95,7 +95,7 @@ type BridgeUiAction = {
 - Use `banner` for compact warnings or status updates near the composer.
 - Keep `title` short and user-facing.
 - Put provider-specific raw data in `code` only when it helps the user act.
-- Keep `kind` stable for semantic grouping, for example `goal`, `quota`, `compaction`, or `provider-warning`.
+- Keep `kind` stable for semantic grouping, for example `goal`, `phone-call`, `quota`, `compaction`, or `provider-warning`.
 
 ## Implemented ACP Plan Example
 
@@ -296,6 +296,27 @@ latest list as `commands`, and the projector emits each update as a `CUSTOM` eve
   the chat wins a name clash; one that cannot defers to the agent's command.
 - **Selecting a command only inserts its text.** Sending `/name args` delivers it to the agent as
   ordinary prompt text, so ACP agents and on-device skills each interpret their own commands.
+
+## Implemented Outbound Phone Call Surfaces
+
+Outbound agent phone calls (`services/rust-bridge/src/phone_call/mod.rs`) use `kind: "phone-call"`,
+which mobile maps to the `call-outline` icon in `surfaceHelpers.ts` without any call-specific screen:
+
+- **Pre-call approval (`presentation: "modal"`)**: emitted via `bridge/ui.present` with
+  `id: "phone-call-approval:<callId>"`, `tone: "warning"`, and `dismissible: false`. Carries a
+  `keyValue` block (`To`, `From`, `On behalf of`, `Objective`), an optional opening-message
+  `markdown` block, and two actions: `approve` (`Approve & Call`, `style: "primary"`,
+  `dismissesSurface: true`) and `cancel` (`Cancel`, `style: "destructive"`,
+  `dismissesSurface: true`). Resolving `cancel` or letting approval time out dismisses the modal
+  without sending any SIP traffic.
+- **Live and settled call card (`presentation: "workflowCard"`)**: presented after approval with
+  `id: "phone-call-live:<callId>"`, `dismissible: false`, and a `hangup` action (`Hang Up`,
+  `style: "destructive"`, `dismissesSurface: false` so tapping Hang Up sends `bridge/ui/resolve`
+  while keeping the card visible until SIP teardown completes). `bridge/ui.update` advances status
+  (`Dialing` → `Ringing` → `In call`) and appends a bounded rolling `**Live transcript**` markdown
+  block (`**Assistant:**`, `**Callee:**`, `**[Steer]**`, and `[interrupted]`). When the call ends,
+  a final `bridge/ui.update` settles the card (`Ended`, `Cancelled`, or `Failed`) with `actions: []`
+  and `dismissible: true`.
 
 ## Rules For Future Integrations
 
