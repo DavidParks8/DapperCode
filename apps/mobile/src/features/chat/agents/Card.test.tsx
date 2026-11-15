@@ -127,7 +127,7 @@ describe('SubAgentCard', () => {
   it('opens the agent chat when the user presses the full card target', async () => {
     const onOpen = jest.fn();
     const user = userEvent.setup();
-    const { getByRole, getByText } = renderWithTestingLibrary(
+    const { getByRole, getByText } = await renderWithTestingLibrary(
       wrap(
         <SubAgentCard
           idPrefix="sub-1"
@@ -156,8 +156,8 @@ describe('SubAgentCard', () => {
     expect(onOpen).toHaveBeenCalledWith('thread-1');
   });
 
-  it('disables the open affordance and omits onPress when there is no thread to open', () => {
-    const tree = render(
+  it('disables the open affordance and omits onPress when there is no thread to open', async () => {
+    const tree = await render(
       <SubAgentCard
         idPrefix="sub-1"
         entries={entries}

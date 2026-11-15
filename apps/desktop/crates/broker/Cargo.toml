@@ -17,13 +17,16 @@ axum.workspace = true
 dappercode-desktop-core.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
+hex.workspace = true
 reqwest.workspace = true
+rustls.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sha2.workspace = true
 sysinfo.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-tungstenite.workspace = true
+webpki-roots.workspace = true
 
 [dev-dependencies]
 dappercode-desktop-core = { workspace = true, features = ["test-support"] }

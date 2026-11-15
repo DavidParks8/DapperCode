@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { View } from 'react-native';
 
 export interface MockGestureEvent {
+  canceled?: boolean;
   x?: number;
   y?: number;
   absoluteX?: number;
@@ -44,7 +45,7 @@ export function latestMockGesture(kind: string): MockGesture {
 export function mockGestureByTestId(testId: string): MockGesture {
   for (let index = mockGestures.length - 1; index >= 0; index -= 1) {
     const gesture = mockGestures[index];
-    if (gesture?.config['withTestId'] === testId) {
+    if (gesture?.config['withTestId'] === testId || gesture?.config['testID'] === testId) {
       return gesture;
     }
   }
@@ -94,6 +95,22 @@ export const Gesture = {
   Exclusive: (...gestures: unknown[]) => gestures[0],
   Race: (...gestures: unknown[]) => gestures[0],
 };
+
+export function usePanGesture(config: Record<string, unknown>): MockGesture {
+  const gesture: MockGesture = { kind: 'Pan', config };
+  Object.assign(gesture, {
+    onStart: config['onActivate'],
+    onUpdate: config['onUpdate'],
+    onEnd: config['onDeactivate'],
+    onFinalize: config['onFinalize'],
+  });
+  mockGestures.push(gesture);
+  return gesture;
+}
+
+export function useSimultaneousGestures(...gestures: MockGesture[]): MockGesture | undefined {
+  return gestures[0];
+}
 
 export function GestureDetector({ children }: { children: ReactNode }) {
   return <>{children}</>;

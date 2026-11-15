@@ -24,7 +24,7 @@ pub(super) fn request_process_stop(
         ProcessStopRequest::Graceful => Signal::Term,
         ProcessStopRequest::Force => Signal::Kill,
     };
-    let mut system = System::new();
+    let mut system = System::new().context("failed to initialize process inspection")?;
     let sysinfo_pid = Pid::from_u32(pid);
     system.refresh_processes(ProcessesToUpdate::Some(&[sysinfo_pid]), true);
     let process = system
@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn process_stop_rejects_a_stale_start_identity_before_signalling() {
         let pid = std::process::id();
-        let mut system = System::new();
+        let mut system = System::new().unwrap();
         let sysinfo_pid = Pid::from_u32(pid);
         system.refresh_processes(ProcessesToUpdate::Some(&[sysinfo_pid]), true);
         let start_time = system.process(sysinfo_pid).unwrap().start_time();

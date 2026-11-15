@@ -260,7 +260,7 @@ fn forget_profile(
         (config.find(&profile_id).cloned(), config.broker.clone())
     {
         let broker = BrokerSupervisor::new(profile, settings, paths.clone(), secrets.clone(), None);
-        if broker.owns_running_process() {
+        if broker.owns_running_process()? {
             bail!("stop the desktop broker before forgetting a workspace");
         }
     }
@@ -355,7 +355,7 @@ fn stop_all(paths: &AppPaths, secrets: &SecretStore) -> Result<StopAllResult> {
             secrets.clone(),
             None,
         );
-        if supervisor.owns_running_process() {
+        if supervisor.owns_running_process()? {
             match supervisor.stop() {
                 Ok(snapshot) => {
                     stopped = 1;

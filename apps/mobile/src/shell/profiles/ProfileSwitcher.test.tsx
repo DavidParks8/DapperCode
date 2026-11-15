@@ -101,11 +101,11 @@ function storeWith(available: boolean) {
   return store;
 }
 
-function render(store: ReturnType<typeof storeWith>) {
+async function render(store: ReturnType<typeof storeWith>) {
   const Wrapper = ({ children }: PropsWithChildren) => (
     <AppStateProvider store={store}>{children}</AppStateProvider>
   );
-  return renderRouter(
+  return await renderRouter(
     {
       appDir: './src/app',
       overrides: {
@@ -125,18 +125,18 @@ const MODEL = 'qwen3-1.7b-q4-k-m';
 describe('profile switching', () => {
   it('switches a bridge chat to On this iPhone, guides setup, and switches back', async () => {
     const store = storeWith(true);
-    const result = render(store);
+    const result = await render(store);
     expect(screen.getByText('New chat in profile-1')).toBeTruthy();
 
     // New chat names where it runs and lists every profile with its state.
-    fireEvent.press(screen.getByTestId('new-chat-profile-switcher'));
+    await fireEvent.press(screen.getByTestId('new-chat-profile-switcher'));
     expect(screen.getByLabelText('Desk').props['accessibilityHint']).toBe('Connected · desk.test');
     expect(screen.getByLabelText('On this iPhone').props['accessibilityHint']).toBe(
       'Private offline models',
     );
     expect(screen.getByLabelText('Add bridge')).toBeTruthy();
 
-    fireEvent.press(screen.getByLabelText('On this iPhone'));
+    await fireEvent.press(screen.getByLabelText('On this iPhone'));
     await waitFor(() => {
       expect(store.get(activeProfileIdAtom)).toBe(LOCAL_PROFILE_ID);
     });
@@ -151,7 +151,7 @@ describe('profile switching', () => {
     });
     const transport = new LocalBridgeWsClient(new LocalBridgeServer(new FakeAgentPort()));
     transport.connect();
-    act(() => {
+    await act(() => {
       store.set(localRuntimeAtom, fake.runtime);
       store.set(localTransportAtom, transport);
     });
@@ -165,30 +165,30 @@ describe('profile switching', () => {
     expect(screen.getByLabelText('3. Add a Git author, Recommended')).toBeTruthy();
     expect(screen.getByLabelText('4. Start your first chat, After steps 1 and 2')).toBeTruthy();
 
-    act(() => fake.update({ downloadPhase: 'downloading' }));
+    await act(() => fake.update({ downloadPhase: 'downloading' }));
     expect(screen.getByLabelText('1. Download a model, Downloading')).toBeTruthy();
-    act(() => fake.update({ downloadPhase: 'ready' }));
+    await act(() => fake.update({ downloadPhase: 'ready' }));
     expect(screen.getByLabelText('1. Download a model, Done')).toBeTruthy();
     expect(screen.getByText('Choose or clone a workspace for the agent to work in.')).toBeTruthy();
 
-    fireEvent.press(screen.getByLabelText('2. Clone or create a workspace, Required'));
+    await fireEvent.press(screen.getByLabelText('2. Clone or create a workspace, Required'));
     expect(result.getPathname()).toBe('/profiles/on-device/chats/new/workspace-picker');
-    act(() => {
+    await act(() => {
       router.back();
     });
     await waitFor(() => {
       expect(result.getPathname()).toBe('/profiles/on-device/chats/new');
     });
-    fireEvent.press(screen.getByLabelText('1. Download a model, Done'));
+    await fireEvent.press(screen.getByLabelText('1. Download a model, Done'));
     expect(result.getPathname()).toBe(LOCAL_SETUP_DESTINATIONS.models);
-    act(() => {
+    await act(() => {
       router.back();
     });
     await waitFor(() => {
       expect(screen.getByText('New chat in on-device')).toBeTruthy();
     });
 
-    act(() => fake.update({ workspaceId: 'w1', workspaces: [{ id: 'w1', name: 'demo' }] }));
+    await act(() => fake.update({ workspaceId: 'w1', workspaces: [{ id: 'w1', name: 'demo' }] }));
     // A missing Git author never blocks chatting: the profile is ready and the guide says so.
     expect(screen.getByTestId('drawer-profile-switcher').props['accessibilityLabel']).toBe(
       'Where agents run, On this iPhone, Ready · Private offline models',
@@ -201,11 +201,11 @@ describe('profile switching', () => {
       ),
     ).toBeTruthy();
 
-    fireEvent.press(screen.getByLabelText('3. Add a Git author, Recommended'));
+    await fireEvent.press(screen.getByLabelText('3. Add a Git author, Recommended'));
     expect(result.getPathname()).toBe(LOCAL_SETUP_DESTINATIONS.author);
     expect(screen.getByText('Git and GitHub settings')).toBeTruthy();
-    act(() => fake.update({ author: { name: 'Ada', email: 'ada@example.com' } }));
-    act(() => {
+    await act(() => fake.update({ author: { name: 'Ada', email: 'ada@example.com' } }));
+    await act(() => {
       router.navigate('/profiles/on-device/chats/new');
     });
     await waitFor(() => {
@@ -215,14 +215,14 @@ describe('profile switching', () => {
     expect(screen.getByText('Type a message below to start your first chat.')).toBeTruthy();
 
     // An opened but empty chat is not a started one; the first message completes setup.
-    act(() => fake.update({ threadMessages: [0] }));
+    await act(() => fake.update({ threadMessages: [0] }));
     expect(screen.getByTestId('local-setup-guide')).toBeTruthy();
-    act(() => fake.update({ threadMessages: [0, 2] }));
+    await act(() => fake.update({ threadMessages: [0, 2] }));
     expect(screen.queryByTestId('local-setup-guide')).toBeNull();
 
     // The drawer switches back in two taps.
-    fireEvent.press(screen.getByTestId('drawer-profile-switcher'));
-    fireEvent.press(screen.getByLabelText('Desk'));
+    await fireEvent.press(screen.getByTestId('drawer-profile-switcher'));
+    await fireEvent.press(screen.getByLabelText('Desk'));
     await waitFor(() => {
       expect(store.get(activeProfileIdAtom)).toBe('profile-1');
     });
@@ -232,7 +232,7 @@ describe('profile switching', () => {
 
   it('follows the first model download, which starts without selecting a model', async () => {
     const store = storeWith(true);
-    render(store);
+    await render(store);
     const fake = createFakeSetupRuntime({
       modelId: null,
       workspaceId: 'w1',
@@ -242,12 +242,12 @@ describe('profile switching', () => {
     });
     const transport = new LocalBridgeWsClient(new LocalBridgeServer(new FakeAgentPort()));
     transport.connect();
-    act(() => {
+    await act(() => {
       store.set(localRuntimeAtom, fake.runtime);
       store.set(localTransportAtom, transport);
     });
-    fireEvent.press(screen.getByTestId('new-chat-profile-switcher'));
-    fireEvent.press(screen.getByLabelText('On this iPhone'));
+    await fireEvent.press(screen.getByTestId('new-chat-profile-switcher'));
+    await fireEvent.press(screen.getByLabelText('On this iPhone'));
     await waitFor(() => {
       expect(screen.getByText('New chat in on-device')).toBeTruthy();
     });
@@ -256,11 +256,11 @@ describe('profile switching', () => {
     expect(screen.getByLabelText('1. Download a model, Required')).toBeTruthy();
     expect(switcher()).toContain('Needs a model');
 
-    act(() => fake.update({ downloadPhases: { [MODEL]: 'downloading' } }));
+    await act(() => fake.update({ downloadPhases: { [MODEL]: 'downloading' } }));
     expect(screen.getByLabelText('1. Download a model, Downloading')).toBeTruthy();
     expect(switcher()).toContain('Downloading model');
 
-    act(() => fake.update({ downloadPhases: { [MODEL]: 'ready' } }));
+    await act(() => fake.update({ downloadPhases: { [MODEL]: 'ready' } }));
     expect(screen.getByLabelText('1. Download a model, Done')).toBeTruthy();
     expect(screen.getByLabelText('4. Start your first chat, Ready')).toBeTruthy();
     expect(switcher()).toBe('Where agents run, On this iPhone, Ready · Private offline models');
@@ -269,7 +269,7 @@ describe('profile switching', () => {
 
   it('hides the setup guide for good once dismissed, without blocking a chat', async () => {
     const store = storeWith(true);
-    render(store);
+    await render(store);
     const fake = createFakeSetupRuntime({
       modelId: MODEL,
       workspaceId: null,
@@ -278,31 +278,31 @@ describe('profile switching', () => {
     });
     const transport = new LocalBridgeWsClient(new LocalBridgeServer(new FakeAgentPort()));
     transport.connect();
-    act(() => {
+    await act(() => {
       store.set(localRuntimeAtom, fake.runtime);
       store.set(localTransportAtom, transport);
     });
-    fireEvent.press(screen.getByTestId('new-chat-profile-switcher'));
-    fireEvent.press(screen.getByLabelText('On this iPhone'));
+    await fireEvent.press(screen.getByTestId('new-chat-profile-switcher'));
+    await fireEvent.press(screen.getByLabelText('On this iPhone'));
     await waitFor(() => {
       expect(screen.getByTestId('local-setup-guide')).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByLabelText('Hide setup guide'));
+    await fireEvent.press(screen.getByLabelText('Hide setup guide'));
     expect(screen.queryByTestId('local-setup-guide')).toBeNull();
     expect(store.get(localSetupDismissedAtom)).toBe(true);
     // Hiding the guide changes nothing about readiness, and later progress does not bring it back.
     expect(
       String(screen.getByTestId('new-chat-profile-switcher').props['accessibilityLabel']),
     ).toContain('Needs a model');
-    act(() => fake.update({ downloadPhase: 'ready' }));
+    await act(() => fake.update({ downloadPhase: 'ready' }));
     expect(screen.queryByTestId('local-setup-guide')).toBeNull();
     transport.dispose();
   });
 
-  it('offers no choice with a single bridge where the local agent is unavailable', () => {
+  it('offers no choice with a single bridge where the local agent is unavailable', async () => {
     const store = storeWith(false);
-    render(store);
+    await render(store);
     expect(screen.getByText('New chat in profile-1')).toBeTruthy();
     expect(screen.queryByTestId('new-chat-profile-switcher')).toBeNull();
     expect(screen.queryByTestId('drawer-profile-switcher')).toBeNull();

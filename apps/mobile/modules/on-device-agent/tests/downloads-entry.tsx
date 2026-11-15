@@ -114,8 +114,8 @@ async function beforeTermination(models: LocalModelDefinition[]) {
       downloads.snapshot(second.id).bytesWritten < second.bytes,
     'transfersStillRunningAtTermination',
   );
-  marker.write(JSON.stringify({ phase: 'terminate' }));
-  phaseOutcome.write(JSON.stringify({ status: 'terminate', checks }));
+  marker.writeSync(JSON.stringify({ phase: 'terminate' }));
+  phaseOutcome.writeSync(JSON.stringify({ status: 'terminate', checks }));
 }
 
 /** A pause whose checkpoint cannot be written must not leave a phantom running transfer. */
@@ -132,7 +132,7 @@ async function pauseFailureReleasesTransfer(
   const partial = (await native.getModelFilePaths(model.id)).partialUri;
   const blocker = new Directory(partial.replace(/partial\.gguf$/, 'resume.data'));
   blocker.create();
-  new File(blocker, 'occupied').write('x');
+  new File(blocker, 'occupied').writeSync('x');
   const failed = await downloads.pause(model.id);
   check(
     failed.phase === 'error' &&
@@ -217,7 +217,7 @@ async function run() {
   const models = await fixture();
   if (marker.exists) {
     await afterRelaunch(models);
-    outcome.write(JSON.stringify({ status: 'pass', checks }));
+    outcome.writeSync(JSON.stringify({ status: 'pass', checks }));
     return 'pass';
   }
   await beforeTermination(models);
@@ -239,7 +239,7 @@ function DownloadGate() {
         checks,
         error: error instanceof Error ? error.message : String(error),
       };
-      (marker.exists ? outcome : phaseOutcome).write(JSON.stringify(failure));
+      (marker.exists ? outcome : phaseOutcome).writeSync(JSON.stringify(failure));
       setStatus('fail');
     });
   }, []);

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Gesture } from 'react-native-gesture-handler';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePanGesture } from 'react-native-gesture-handler';
 import { useReducedMotion, useSharedValue } from 'react-native-reanimated';
 
 import { playLightImpact, playSelectionTick } from '@shared/haptics';
@@ -36,7 +36,7 @@ export interface UseChatScrollRailOptions {
 
 export interface UseChatScrollRailResult {
   state: ChatScrollRailState;
-  gesture: ReturnType<typeof Gesture.Pan>;
+  gesture: ReturnType<typeof usePanGesture>;
   engaged: ReturnType<typeof useSharedValue<number>>;
   fingerY: ReturnType<typeof useSharedValue<number>>;
   scrollEnabled: boolean;
@@ -258,26 +258,17 @@ export function useChatScrollRail({
     [clearEdgeTimer, onInteractionEnd],
   );
 
-  const gesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .enabled(enabled)
-        .hitSlop({ width: CHAT_SCROLL_RAIL_TOUCH_WIDTH, right: 0 })
-        .activateAfterLongPress(CHAT_SCROLL_RAIL_ACTIVATION_DELAY_MS)
-        .maxPointers(1)
-        .runOnJS(true)
-        .withTestId('chat-scroll-rail-pan')
-        .onStart((event) => {
-          begin(toRailY(event.y));
-        })
-        .onUpdate((event) => {
-          move(toRailY(event.y));
-        })
-        .onFinalize(() => {
-          finish();
-        }),
-    [begin, enabled, finish, move, toRailY],
-  );
+  const gesture = usePanGesture({
+    enabled,
+    hitSlop: { width: CHAT_SCROLL_RAIL_TOUCH_WIDTH, right: 0 },
+    activateAfterLongPress: CHAT_SCROLL_RAIL_ACTIVATION_DELAY_MS,
+    maxPointers: 1,
+    runOnJS: true,
+    testID: 'chat-scroll-rail-pan',
+    onActivate: (event) => begin(toRailY(event.y)),
+    onUpdate: (event) => move(toRailY(event.y)),
+    onFinalize: finish,
+  });
 
   return {
     state,

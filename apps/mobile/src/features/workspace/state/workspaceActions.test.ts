@@ -152,9 +152,19 @@ function editActiveProfile(
 
 describe('workspace actions', () => {
   beforeEach(() => {
+    jest.useFakeTimers();
     jest.clearAllMocks();
     jest.mocked(FileSystem.read).mockRejectedValue(new Error('missing'));
     jest.mocked(FileSystem.write).mockResolvedValue(undefined);
+  });
+
+  afterEach(async () => {
+    try {
+      await jest.runOnlyPendingTimersAsync();
+    } finally {
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    }
   });
 
   it('keeps cached roots visible while stale data revalidates and survives failure', async () => {
@@ -553,6 +563,14 @@ describe('workspace actions', () => {
     store.set(closeWorkspacePickerAtom);
     expect(router.back).toHaveBeenCalledTimes(1);
     expect(router.dismissTo).not.toHaveBeenCalled();
+    expect(api.listWorkspaceRoots).not.toHaveBeenCalled();
+    expect(FileSystem.read).not.toHaveBeenCalled();
+
+    await jest.runOnlyPendingTimersAsync();
+    expect(api.listWorkspaceRoots).toHaveBeenCalledTimes(1);
+    expect(FileSystem.read).toHaveBeenCalledTimes(1);
+    expect(store.get(workspaceRootsResourceAtom).refreshing).toBe(false);
+    expect(store.get(workspaceFavoritesResourceAtom).refreshing).toBe(false);
   });
 
   it('returns to git checkout after choosing a destination', async () => {

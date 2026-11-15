@@ -141,7 +141,7 @@ export function useBrowserScreenModel(theme: AppTheme) {
 
   const insets = useSafeAreaInsets();
   const inlineToolbar = useInlineToolbar();
-  const webViewRef = useRef<WebView>(null);
+  const webViewRef = useRef<WebView<unknown>>(null);
   const desktopScrollViewRef = useRef<ScrollView>(null);
   const bottomBarTranslateY = useRef(new RNAnimated.Value(0)).current;
   const lastDesktopFitKeyRef = useRef<string | null>(null);

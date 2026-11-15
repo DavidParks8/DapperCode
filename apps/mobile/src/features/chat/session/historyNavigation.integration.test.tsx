@@ -112,7 +112,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function setup(initial = chat()) {
+async function setup(initial = chat()) {
   const pages: ReturnType<typeof deferred<SnapshotPageResponse>>[] = [];
   const readSnapshotPage = jest.fn(() => {
     const pending = deferred<SnapshotPageResponse>();
@@ -163,19 +163,19 @@ function setup(initial = chat()) {
       return continuation.current;
     },
   };
-  const hook = renderHook(() => useMainScreenChatNavigation(context as never));
-  const load = () => {
+  const hook = await renderHook(() => useMainScreenChatNavigation(context as never));
+  const load = async () => {
     let request!: Promise<void>;
-    act(() => {
+    await act(() => {
       request = hook.result.current.handleLoadEarlier();
     });
-    return request;
+    return { request };
   };
-  const select = (next: Chat) => {
-    act(() => {
+  const select = async (next: Chat) => {
+    await act(() => {
       hook.result.current.openChatThread(next.id, next);
     });
-    hook.rerender({});
+    await hook.rerender({});
   };
   return { ...hook, context, continuation, pages, readSnapshotPage, load, select };
 }
@@ -194,22 +194,24 @@ function expectSettled(current: Chat | null) {
 
 describe('older history request lifecycle', () => {
   it('retries the current snapshot rather than paginating when history recovery failed', async () => {
-    const harness = setup({ ...chat(), historyRecoveryError: 'History unavailable' });
+    const harness = await setup({ ...chat(), historyRecoveryError: 'History unavailable' });
     await act(async () => {
-      await harness.load();
+      await (
+        await harness.load()
+      ).request;
     });
     expect(harness.context.loadChat).toHaveBeenCalledWith('thread', {
       preserveRuntimeState: true,
       revalidate: true,
     });
     expect(harness.readSnapshotPage).not.toHaveBeenCalled();
-    harness.unmount();
+    await harness.unmount();
   });
 
   it('keeps the completed response and settled controls when a running-turn page arrives late', async () => {
-    const harness = setup();
+    const harness = await setup();
     expect(isChatLikelyRunning(harness.context.selectedChatRef.current!)).toBe(true);
-    const pending = harness.load();
+    const { request: pending } = await harness.load();
     expect(harness.continuation.current.loading).toBe(true);
     harness.context.selectedChatRef.current = finalChat(harness.context.selectedChatRef.current!);
     expectSettled(harness.context.selectedChatRef.current);
@@ -236,8 +238,8 @@ describe('older history request lifecycle', () => {
   });
 
   it('retains streaming additions and optimistic turns while adding legitimate history', async () => {
-    const harness = setup();
-    const pending = harness.load();
+    const harness = await setup();
+    const { request: pending } = await harness.load();
     const initial = harness.context.selectedChatRef.current!;
     harness.context.selectedChatRef.current = {
       ...initial,
@@ -265,8 +267,8 @@ describe('older history request lifecycle', () => {
   });
 
   it('shows a retryable failure without reinstalling the captured running chat', async () => {
-    const harness = setup();
-    const pending = harness.load();
+    const harness = await setup();
+    const { request: pending } = await harness.load();
     const final = finalChat(harness.context.selectedChatRef.current!);
     harness.context.selectedChatRef.current = final;
     await act(async () => {
@@ -278,7 +280,7 @@ describe('older history request lifecycle', () => {
     expect(harness.context.api.rememberChat).not.toHaveBeenCalled();
     expect(harness.continuation.current).toMatchObject({ loading: false, error: 'offline' });
 
-    const retry = harness.load();
+    const { request: retry } = await harness.load();
     expect(harness.continuation.current).toMatchObject({ loading: true, error: null });
     await act(async () => {
       harness.pages[1]!.resolve(page());
@@ -291,12 +293,12 @@ describe('older history request lifecycle', () => {
   it.each(['page', 'error', 'stale'] as const)(
     'ignores an old %s after A → B → A, including while the replacement request is pending',
     async (outcome) => {
-      const harness = setup();
-      const oldRequest = harness.load();
-      harness.select(chat('other'));
+      const harness = await setup();
+      const { request: oldRequest } = await harness.load();
+      await harness.select(chat('other'));
       expect(harness.continuation.current).toMatchObject({ loading: false, error: null });
-      harness.select(finalChat(chat()));
-      const newRequest = harness.load();
+      await harness.select(finalChat(chat()));
+      const { request: newRequest } = await harness.load();
       expect(harness.readSnapshotPage).toHaveBeenCalledTimes(2);
       await act(async () => {
         if (outcome === 'error') {
@@ -321,8 +323,8 @@ describe('older history request lifecycle', () => {
   );
 
   it('ignores a superseded snapshot revision and allows pagination from its new cursor', async () => {
-    const harness = setup();
-    const pending = harness.load();
+    const harness = await setup();
+    const { request: pending } = await harness.load();
     const final = finalChat(chat('thread', 4));
     harness.context.selectedChatRef.current = final;
     harness.continuation.current = getTranscriptContinuationState(final);
@@ -333,7 +335,7 @@ describe('older history request lifecycle', () => {
     expect(harness.context.selectedChatRef.current).toBe(final);
     expect(harness.continuation.current.error).toBeNull();
     expect(harness.context.api.rememberChat).not.toHaveBeenCalled();
-    const retry = harness.load();
+    const { request: retry } = await harness.load();
     await act(async () => {
       harness.pages[1]!.resolve(page(4));
       await retry;
@@ -343,13 +345,15 @@ describe('older history request lifecycle', () => {
   });
 
   it('deduplicates taps before rerender and ignores a response after unmount', async () => {
-    const harness = setup();
-    const pending = harness.load();
-    await harness.load();
+    const harness = await setup();
+    const { request: pending } = await harness.load();
+    await (
+      await harness.load()
+    ).request;
     expect(harness.readSnapshotPage).toHaveBeenCalledTimes(1);
     expect(harness.context.setSelectedChat).not.toHaveBeenCalled();
     expect(harness.context.api.rememberChat).not.toHaveBeenCalled();
-    harness.unmount();
+    await harness.unmount();
     harness.context.setSelectedChat.mockClear();
     harness.context.setTranscriptContinuationState.mockClear();
     await act(async () => {
@@ -362,11 +366,11 @@ describe('older history request lifecycle', () => {
   });
 
   it('keeps a newer successful page when an old selection request fails afterward', async () => {
-    const harness = setup();
-    const oldRequest = harness.load();
-    harness.select(chat('other'));
-    harness.select(finalChat(chat()));
-    const newRequest = harness.load();
+    const harness = await setup();
+    const { request: oldRequest } = await harness.load();
+    await harness.select(chat('other'));
+    await harness.select(finalChat(chat()));
+    const { request: newRequest } = await harness.load();
     await act(async () => {
       harness.pages[1]!.resolve(page());
       await newRequest;
@@ -387,8 +391,8 @@ describe('older history request lifecycle', () => {
   });
 
   it('refetches a genuinely stale cursor without publishing an old snapshot', async () => {
-    const harness = setup();
-    const pending = harness.load();
+    const harness = await setup();
+    const { request: pending } = await harness.load();
     harness.context.selectedChatRef.current = finalChat(harness.context.selectedChatRef.current!);
     await act(async () => {
       harness.pages[0]!.resolve(page(4));
@@ -405,9 +409,9 @@ describe('older history request lifecycle', () => {
   });
 
   it('fences an A → B → A navigation even when both opens happen before the next render', async () => {
-    const harness = setup();
-    const pending = harness.load();
-    act(() => {
+    const harness = await setup();
+    const pending = await harness.load();
+    await act(() => {
       harness.result.current.openChatThread('other', chat('other'));
       harness.result.current.openChatThread('thread', finalChat(chat()));
     });
@@ -454,8 +458,8 @@ describe('older history request lifecycle', () => {
         'kickoff',
         'msg-optimistic',
       ]);
-      const harness = setup(current);
-      const pending = harness.load();
+      const harness = await setup(current);
+      const pending = await harness.load();
       const settled = {
         ...current,
         status: 'complete' as const,

@@ -928,7 +928,7 @@ pub struct VoicePipelineClient {
 
 impl VoicePipelineClient {
     pub fn new(config: VoicePipelineConfig) -> Result<Self, VoiceError> {
-        let http = reqwest::Client::builder()
+        let http = crate::tls::http_client_builder()
             .redirect(Policy::none())
             .no_proxy()
             .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
@@ -2468,7 +2468,7 @@ mod tests {
                 tts_base_url: non_ollama_url,
                 ..VoicePipelineConfig::default()
             },
-            reqwest::Client::new(),
+            crate::tls::http_client(),
         )
         .expect("create mixed voice client");
         mixed_client

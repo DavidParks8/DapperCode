@@ -46,13 +46,17 @@ test('prebuild opts the production app into the native Expo scene lifecycle', ()
       maxBuffer: 10 * 1024 * 1024,
     }),
   );
-  assert.deepEqual(config._internal.modResults.ios.infoPlist.UIApplicationSceneManifest, {
+  const manifest = config._internal.modResults.ios.infoPlist.UIApplicationSceneManifest;
+  const delegate =
+    manifest.UISceneConfigurations.UIWindowSceneSessionRoleApplication[0].UISceneDelegateClassName;
+  assert.ok(['EXExpoAppSceneDelegate', '$(PRODUCT_MODULE_NAME).SceneDelegate'].includes(delegate));
+  assert.deepEqual(manifest, {
     UIApplicationSupportsMultipleScenes: false,
     UISceneConfigurations: {
       UIWindowSceneSessionRoleApplication: [
         {
           UISceneConfigurationName: 'Default Configuration',
-          UISceneDelegateClassName: 'EXExpoAppSceneDelegate',
+          UISceneDelegateClassName: delegate,
         },
       ],
     },
@@ -112,4 +116,30 @@ test('prebuild refuses to silently replace a custom scene configuration', async 
     compileModsAsync(config, { projectRoot: mobileRoot, platforms: ['ios'], introspect: true }),
     /custom UIApplicationSceneManifest/,
   );
+});
+
+test('prebuild preserves the Expo 58 template scene delegate', async () => {
+  const { compileModsAsync } = require('expo/config-plugins');
+  const manifest = {
+    UIApplicationSupportsMultipleScenes: false,
+    UISceneConfigurations: {
+      UIWindowSceneSessionRoleApplication: [
+        {
+          UISceneConfigurationName: 'Default Configuration',
+          UISceneDelegateClassName: '$(PRODUCT_MODULE_NAME).SceneDelegate',
+        },
+      ],
+    },
+  };
+  const config = plugin({
+    name: 'Scene test',
+    slug: 'scene-test',
+    ios: { infoPlist: { UIApplicationSceneManifest: manifest } },
+  });
+  const result = await compileModsAsync(config, {
+    projectRoot: mobileRoot,
+    platforms: ['ios'],
+    introspect: true,
+  });
+  assert.deepEqual(result._internal.modResults.ios.infoPlist.UIApplicationSceneManifest, manifest);
 });

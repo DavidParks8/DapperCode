@@ -101,7 +101,11 @@ export function collectCargoPackages(rootDir, manifestPath, cargoTarget, execute
     const id = pending.pop();
     if (!id || visited.has(id)) continue;
     visited.add(id);
-    for (const dependency of nodeById.get(id)?.deps ?? []) pending.push(dependency.pkg);
+    for (const dependency of nodeById.get(id)?.deps ?? []) {
+      if (dependency.dep_kinds.some(({ kind }) => kind !== 'dev')) {
+        pending.push(dependency.pkg);
+      }
+    }
   }
   return [...visited]
     .map((id) => packageById.get(id))

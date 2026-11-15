@@ -226,6 +226,16 @@ under `secrets/`; it never silently downgrades existing system credentials after
 failure. The app reports which backend is in use. Set `DAPPERCODE_SECRETS_BACKEND=file` to explicitly
 select the fallback.
 
+The desktop's keyring 4 native stores preserve the login-Keychain service/account and UTF-8 vault
+payload on macOS, and `account.service` Generic Credential targets with UTF-16LE passwords and
+Enterprise persistence on Windows. Headless Unix always uses the private-file backend; it does not
+initialize Secret Service or an ephemeral keyring mock. Process-inspection initialization failures
+abort lifecycle actions without removing ownership records or declaring live processes dead.
+Terminated, unreaped Unix children count as stopped; a process exiting during metadata inspection
+is rechecked before an inspection error is reported.
+The broker's HTTP clients contact loopback workers with proxies and redirects disabled; their
+preconfigured Rustls backend explicitly retains ring and WebPKI roots, not OS/platform trust.
+
 Because the macOS app is ad-hoc code-signed, every rebuild produces a new code signature and macOS
 asks for keychain access again. The shared vault limits that to one item instead of one prompt per
 workspace. This remains expected until the app is signed with a stable identity.
@@ -519,6 +529,11 @@ preferred.
 Browser preview uses its separately configured listener rather than another route on the main bridge
 listener. The versioned mobile RPC inventory is `contracts/bridge-rpc/v2/manifest.json`; the Rust
 allowlist remains authoritative at runtime.
+
+HTTPS preview targets must present an unexpired certificate valid for the target hostname and
+trusted by the bridge machine's operating system. For local development, use a certificate issued
+by a local CA you explicitly trust on that machine, or use HTTP over loopback. Untrusted self-signed
+certificates are rejected; there is no certificate-validation bypass.
 
 ## Development
 

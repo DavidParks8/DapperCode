@@ -215,7 +215,7 @@ mod tests {
                 case["agentCapabilities"]["sessionDelete"]
             );
         }
-        use agent_client_protocol::schema::v1::ToolCallStatus;
+        use agent_client_protocol::v1::schema::ToolCallStatus;
         // Tool-meta statuses are exactly ACP's: installed clients map anything else to `pending`.
         let mut tool_statuses = [
             ToolCallStatus::Pending,

@@ -4,7 +4,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::v1::schema::{
     CancelNotification, ClientCapabilities, CloseSessionRequest, CloseSessionResponse,
     ContentBlock, CreateElicitationRequest, DeleteSessionRequest, DeleteSessionResponse,
     ElicitationCapabilities, ElicitationContentValue, ElicitationFormCapabilities,
@@ -13,12 +14,12 @@ use agent_client_protocol::schema::v1::{
     RequestPermissionRequest, ResumeSessionRequest, ResumeSessionResponse, SessionId,
     SessionNotification, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
 };
-use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{Client, ConnectTo, JsonRpcRequest, JsonRpcResponse};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use super::config::{ResolvedAgentManifest, RuntimeManifestError};
+use super::drain_transport::DrainTransport;
 use super::events::CanonicalEvent;
 use super::interactions::{
     ApprovalPolicy, InteractionError, InteractionRegistry, PendingElicitationSummary,
@@ -27,6 +28,7 @@ use super::interactions::{
 use super::session::{AcpSession, ReconstructionError, SessionRegistry, SessionRouteError};
 
 const COMMAND_BUFFER: usize = 64;
+const TRANSPORT_DRAIN_TIMEOUT: Duration = Duration::from_secs(3);
 pub const STEER_METHOD: &str = "_dappercode.dev/session/steer";
 pub const FORK_METHOD: &str = "_dappercode.dev/session/fork";
 const DAPPERCODE_EXTENSION_VERSION: u64 = 1;
@@ -257,6 +259,7 @@ pub struct AcpConnection {
     commands: mpsc::Sender<Command>,
     negotiated: Arc<NegotiatedInitialize>,
     shutdown: watch::Sender<bool>,
+    finished: watch::Receiver<Option<Result<(), String>>>,
     failure: watch::Receiver<Option<String>>,
     sessions: SessionRegistry,
     interactions: InteractionRegistry,
@@ -343,6 +346,7 @@ impl AcpConnection {
         let (ready_tx, mut ready_rx) = mpsc::channel(1);
         let (commands, mut command_rx) = mpsc::channel::<Command>(COMMAND_BUFFER);
         let (shutdown, mut shutdown_rx) = watch::channel(false);
+        let (finished_tx, finished) = watch::channel(None);
         let (failure_tx, failure) = watch::channel(None);
         let sessions = SessionRegistry::default();
         let interactions = InteractionRegistry::new(sessions.clone());
@@ -359,14 +363,14 @@ impl AcpConnection {
             let permission_interactions = actor_interactions.clone();
             let elicitation_interactions = actor_interactions.clone();
             let result = Client
-                .builder()
+                .v1()
                 .on_receive_notification(
                     async move |notification: SessionNotification, _| {
                         notification_sessions
                             .route(&notification_agent_id, notification)
                             .await
                             .map_err(|error| {
-                                agent_client_protocol::util::internal_error(error.to_string())
+                                agent_client_protocol::Error::internal_error().data(error.to_string())
                             })?;
                         Ok(())
                     },
@@ -388,7 +392,7 @@ impl AcpConnection {
                     },
                     agent_client_protocol::on_receive_request!(),
                 )
-                .connect_with(transport, async move |connection| {
+                .connect_with(DrainTransport { transport, timeout: TRANSPORT_DRAIN_TIMEOUT }, async move |connection| {
                 let capabilities = ClientCapabilities::new().elicitation(
                     ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()),
                 );
@@ -397,13 +401,13 @@ impl AcpConnection {
                     connection.send_request(InitializeRequest::new(ProtocolVersion::V1).client_capabilities(capabilities)).block_task(),
                 )
                 .await
-                .map_err(|_| agent_client_protocol::util::internal_error("ACP initialization timed out"))??;
+                .map_err(|_| agent_client_protocol::Error::internal_error().data("ACP initialization timed out"))??;
                 let negotiated = NegotiatedInitialize { response };
                 let _ = ready_for_initialize.send(Ok(negotiated.clone())).await;
                 loop {
                     tokio::select! {
                         changed = shutdown_rx.changed() => {
-                            changed.map_err(|_| agent_client_protocol::util::internal_error("ACP shutdown channel closed"))?;
+                            changed.map_err(|_| agent_client_protocol::Error::internal_error().data("ACP shutdown channel closed"))?;
                             break;
                         }
                         command = command_rx.recv() => match command {
@@ -414,15 +418,17 @@ impl AcpConnection {
                 }
                 Ok(())
             }).await;
+            let result = result.map_err(|error| error.to_string());
             actor_interactions.drain().await;
             finish_connection_actor(
-                result.map_err(|error| error.to_string()),
+                result.clone(),
                 &ready_tx,
                 &actor_requested_shutdown,
                 &failure_tx,
                 &actor_sessions,
             )
             .await;
+            let _ = finished_tx.send(Some(result));
         });
         match tokio::time::timeout(initialize_timeout, ready_rx.recv()).await {
             Ok(Some(Ok(negotiated))) => Ok((
@@ -432,6 +438,7 @@ impl AcpConnection {
                     commands,
                     negotiated: Arc::new(negotiated.clone()),
                     shutdown,
+                    finished,
                     failure,
                     sessions,
                     interactions,
@@ -656,7 +663,7 @@ impl AcpConnection {
 
     pub async fn cancel(
         &self,
-        session_id: agent_client_protocol::schema::v1::SessionId,
+        session_id: agent_client_protocol::v1::schema::SessionId,
     ) -> Result<(), AcpRuntimeError> {
         if self.sessions.get(&session_id).await.is_none() {
             return Err(AcpRuntimeError::UnknownSession(session_id.to_string()));
@@ -678,7 +685,7 @@ impl AcpConnection {
 
     pub async fn cancel_turn(
         &self,
-        session_id: agent_client_protocol::schema::v1::SessionId,
+        session_id: agent_client_protocol::v1::schema::SessionId,
         expected_source_turn_id: &str,
     ) -> Result<(), AcpRuntimeError> {
         let session = self
@@ -788,7 +795,7 @@ impl AcpConnection {
 
     pub async fn prepare_steer(
         &self,
-        session_id: &agent_client_protocol::schema::v1::SessionId,
+        session_id: &agent_client_protocol::v1::schema::SessionId,
     ) -> Result<u64, AcpRuntimeError> {
         if self.sessions.get(session_id).await.is_none() {
             return Err(AcpRuntimeError::UnknownSession(session_id.to_string()));
@@ -798,7 +805,7 @@ impl AcpConnection {
 
     pub async fn current_steer_epoch(
         &self,
-        session_id: &agent_client_protocol::schema::v1::SessionId,
+        session_id: &agent_client_protocol::v1::schema::SessionId,
     ) -> Result<u64, AcpRuntimeError> {
         if self.sessions.get(session_id).await.is_none() {
             return Err(AcpRuntimeError::UnknownSession(session_id.to_string()));
@@ -808,7 +815,7 @@ impl AcpConnection {
 
     pub async fn verify_steer_epoch(
         &self,
-        session_id: &agent_client_protocol::schema::v1::SessionId,
+        session_id: &agent_client_protocol::v1::schema::SessionId,
         epoch: u64,
     ) -> Result<bool, AcpRuntimeError> {
         if self.sessions.get(session_id).await.is_none() {
@@ -872,14 +879,14 @@ impl AcpConnection {
 
     pub async fn session(
         &self,
-        session_id: &agent_client_protocol::schema::v1::SessionId,
+        session_id: &agent_client_protocol::v1::schema::SessionId,
     ) -> Option<AcpSession> {
         self.sessions.get(session_id).await
     }
 
     pub(crate) async fn evict_session(
         &self,
-        session_id: &agent_client_protocol::schema::v1::SessionId,
+        session_id: &agent_client_protocol::v1::schema::SessionId,
     ) {
         self.sessions.remove(session_id).await;
     }
@@ -887,7 +894,7 @@ impl AcpConnection {
     #[cfg(test)]
     pub async fn ensure_session(
         &self,
-        session_id: agent_client_protocol::schema::v1::SessionId,
+        session_id: agent_client_protocol::v1::schema::SessionId,
     ) -> Result<AcpSession, AcpRuntimeError> {
         self.sessions
             .register(&self.agent_id, session_id)
@@ -946,9 +953,18 @@ impl AcpConnection {
                 .fail_active("ACP connection shut down".to_string())
                 .await;
         }
-        self.shutdown
-            .send(true)
-            .map_err(|_| AcpRuntimeError::ConnectionTaskEnded)
+        let mut finished = self.finished.clone();
+        let _ = self.shutdown.send(true);
+        loop {
+            let result = finished.borrow_and_update().clone();
+            if let Some(result) = result {
+                return result.map_err(AcpRuntimeError::Connection);
+            }
+            finished
+                .changed()
+                .await
+                .map_err(|_| AcpRuntimeError::ConnectionTaskEnded)?;
+        }
     }
 }
 
@@ -996,7 +1012,7 @@ enum Command {
         response: oneshot::Sender<Result<SetSessionConfigOptionResponse, AcpRuntimeError>>,
     },
     Cancel {
-        session_id: agent_client_protocol::schema::v1::SessionId,
+        session_id: agent_client_protocol::v1::schema::SessionId,
         response: oneshot::Sender<Result<(), AcpRuntimeError>>,
     },
     Steer {
@@ -1013,7 +1029,7 @@ enum Command {
 impl Command {
     async fn dispatch(
         self,
-        connection: &agent_client_protocol::ConnectionTo<agent_client_protocol::Agent>,
+        connection: &agent_client_protocol::v1::ConnectionTo<agent_client_protocol::Agent>,
         request_timeout: Duration,
         agent_id: &str,
         sessions: &SessionRegistry,
@@ -1421,7 +1437,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use std::sync::Mutex as StdMutex;
 
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         AgentCapabilities, BooleanPropertySchema, CreateElicitationResponse, ElicitationAction,
         ElicitationFormMode, ElicitationRequestScope, ElicitationSchema, ElicitationSessionScope,
         IntegerPropertySchema, ListSessionsResponse, LoadSessionResponse,
@@ -1453,7 +1469,7 @@ mod tests {
         ));
         assert_eq!(*failure.borrow(), None);
     }
-    use agent_client_protocol::{Agent, Client, ConnectTo, Responder};
+    use agent_client_protocol::{v1::Responder, Agent, Client, ConnectTo};
 
     #[derive(Clone)]
     enum TestInteraction {
@@ -1469,7 +1485,7 @@ mod tests {
     struct PendingInteractionFixture {
         connection: AcpConnection,
         events: crate::acp::events::CanonicalEventReceiver,
-        session_id: agent_client_protocol::schema::v1::SessionId,
+        session_id: agent_client_protocol::v1::schema::SessionId,
         observed: mpsc::UnboundedReceiver<ObservedInteraction>,
         prompt_responder: Arc<StdMutex<Option<Responder<PromptResponse>>>>,
     }
@@ -1480,7 +1496,7 @@ mod tests {
         prompt_responder: Arc<StdMutex<Option<Responder<PromptResponse>>>>,
     ) -> impl ConnectTo<Client> {
         Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(AgentCapabilities::new()))
@@ -1666,7 +1682,7 @@ mod tests {
         let delete_calls = Arc::new(AtomicUsize::new(0));
 
         let plain_agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(AgentCapabilities::new()))
@@ -1701,7 +1717,7 @@ mod tests {
         plain.shutdown().await.expect("shutdown");
 
         let capable_agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(AgentCapabilities::new().session_capabilities(
@@ -1749,7 +1765,7 @@ mod tests {
     async fn close_session_uses_the_advertised_method_and_evicts_the_loaded_session() {
         let close_calls = Arc::new(AtomicUsize::new(0));
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(AgentCapabilities::new().session_capabilities(
@@ -1796,7 +1812,7 @@ mod tests {
     #[tokio::test]
     async fn prompt_response_usage_emits_before_finish_and_updates_snapshot() {
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(AgentCapabilities::new()))
@@ -1891,7 +1907,7 @@ mod tests {
         connection.shutdown().await.expect("shutdown");
     }
 
-    fn steer_meta() -> agent_client_protocol::schema::v1::Meta {
+    fn steer_meta() -> agent_client_protocol::v1::schema::Meta {
         serde_json::from_value(serde_json::json!({
             "dappercode.dev": {
                 "version": 1,
@@ -1906,7 +1922,7 @@ mod tests {
         .expect("valid extension metadata")
     }
 
-    fn fork_meta() -> agent_client_protocol::schema::v1::Meta {
+    fn fork_meta() -> agent_client_protocol::v1::schema::Meta {
         serde_json::from_value(serde_json::json!({
             "dappercode.dev": {
                 "version": 1,
@@ -1985,7 +2001,7 @@ mod tests {
 
     #[test]
     fn mcp_transport_prefers_http_then_sse_without_stdio_fallback() {
-        use agent_client_protocol::schema::v1::McpCapabilities;
+        use agent_client_protocol::v1::schema::McpCapabilities;
 
         for (capabilities, expected) in [
             (
@@ -2050,7 +2066,7 @@ mod tests {
 
     #[tokio::test]
     async fn typed_fork_is_capability_and_session_gated_before_dispatch() {
-        let plain_agent = Agent.builder().on_receive_request(
+        let plain_agent = Agent.v1().on_receive_request(
             async |_request: InitializeRequest, responder, _| {
                 responder.respond(initialized(AgentCapabilities::new()))
             },
@@ -2090,7 +2106,7 @@ mod tests {
 
         let (observed_tx, mut observed_rx) = mpsc::unbounded_channel::<ForkRequest>();
         let fork_agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     let mut response = initialized(AgentCapabilities::new());
@@ -2147,7 +2163,7 @@ mod tests {
         let prompt_responder = Arc::new(StdMutex::new(None::<Responder<PromptResponse>>));
         let timed_out_steer_responder = Arc::new(StdMutex::new(None::<Responder<SteerResponse>>));
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     let mut response = initialized(AgentCapabilities::new());
@@ -2217,11 +2233,11 @@ mod tests {
             .expect("prompt admitted");
         let prompt = vec![
             ContentBlock::from("preserve this guidance"),
-            ContentBlock::Image(agent_client_protocol::schema::v1::ImageContent::new(
+            ContentBlock::Image(agent_client_protocol::v1::schema::ImageContent::new(
                 "aGVsbG8=",
                 "image/png",
             )),
-            ContentBlock::ResourceLink(agent_client_protocol::schema::v1::ResourceLink::new(
+            ContentBlock::ResourceLink(agent_client_protocol::v1::schema::ResourceLink::new(
                 "source.rs",
                 "/repo/source.rs",
             )),
@@ -2427,7 +2443,7 @@ mod tests {
         assert_eq!(
             result.expect("typed permission response").outcome,
             RequestPermissionOutcome::Selected(
-                agent_client_protocol::schema::v1::SelectedPermissionOutcome::new("allow-once")
+                agent_client_protocol::v1::schema::SelectedPermissionOutcome::new("allow-once")
             )
         );
         assert!(matches!(
@@ -2487,7 +2503,7 @@ mod tests {
         assert_eq!(
             result.expect("typed permission response").outcome,
             RequestPermissionOutcome::Selected(
-                agent_client_protocol::schema::v1::SelectedPermissionOutcome::new("allow-once")
+                agent_client_protocol::v1::schema::SelectedPermissionOutcome::new("allow-once")
             )
         );
         assert!(fixture.connection.pending_permissions().await.is_empty());
@@ -2518,7 +2534,7 @@ mod tests {
         assert_eq!(
             result.expect("typed permission response").outcome,
             RequestPermissionOutcome::Selected(
-                agent_client_protocol::schema::v1::SelectedPermissionOutcome::new("allow-once")
+                agent_client_protocol::v1::schema::SelectedPermissionOutcome::new("allow-once")
             )
         );
         assert!(read.connection.pending_permissions().await.is_empty());
@@ -2588,7 +2604,7 @@ mod tests {
         assert_eq!(
             result.expect("typed permission response").outcome,
             RequestPermissionOutcome::Selected(
-                agent_client_protocol::schema::v1::SelectedPermissionOutcome::new("allow-once")
+                agent_client_protocol::v1::schema::SelectedPermissionOutcome::new("allow-once")
             )
         );
         assert!(fixture.connection.pending_permissions().await.is_empty());
@@ -2756,7 +2772,7 @@ mod tests {
         let prompt_responders = Arc::new(StdMutex::new(Vec::new()));
         let (observed_tx, mut observed_rx) = mpsc::unbounded_channel();
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(AgentCapabilities::new()))
@@ -3023,7 +3039,7 @@ mod tests {
         assert_eq!(
             response.expect("typed permission response").outcome,
             RequestPermissionOutcome::Selected(
-                agent_client_protocol::schema::v1::SelectedPermissionOutcome::new("allow-once")
+                agent_client_protocol::v1::schema::SelectedPermissionOutcome::new("allow-once")
             )
         );
         tokio::time::timeout(Duration::from_millis(100), &mut resolution)
@@ -3450,7 +3466,7 @@ mod tests {
         let (order_tx, mut order_rx) = mpsc::unbounded_channel::<&'static str>();
         let prompt_responder = Arc::new(StdMutex::new(None::<Responder<PromptResponse>>));
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(AgentCapabilities::new()))
@@ -3631,7 +3647,7 @@ mod tests {
         let reconstruction_calls = Arc::new(AtomicUsize::new(0));
         let prompt_responder = Arc::new(StdMutex::new(None::<Responder<PromptResponse>>));
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(
@@ -3743,7 +3759,7 @@ mod tests {
             let (release_tx, release_rx) = oneshot::channel();
             let release_rx = Arc::new(StdMutex::new(Some(release_rx)));
             let agent = Agent
-                .builder()
+                .v1()
                 .on_receive_request(
                     async |_request: InitializeRequest, responder, _| {
                         responder.respond(initialized(AgentCapabilities::new().load_session(true)))
@@ -3827,7 +3843,7 @@ mod tests {
         let (outcomes_tx, mut outcomes_rx) = mpsc::unbounded_channel();
         let prompt_responder = Arc::new(StdMutex::new(None::<Responder<PromptResponse>>));
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(AgentCapabilities::new()))
@@ -3959,7 +3975,7 @@ mod tests {
         let (outcomes_tx, mut outcomes_rx) = mpsc::unbounded_channel();
         let prompt_responder = Arc::new(StdMutex::new(None::<Responder<PromptResponse>>));
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(AgentCapabilities::new()))
@@ -4065,7 +4081,7 @@ mod tests {
         let (cancel_tx, cancel_rx) = oneshot::channel();
         let cancel_tx = Arc::new(StdMutex::new(Some(cancel_tx)));
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(AgentCapabilities::new()))
@@ -4241,7 +4257,7 @@ mod tests {
         let (outcomes_tx, mut outcomes_rx) = mpsc::unbounded_channel();
         let prompt_responders = Arc::new(StdMutex::new(Vec::<Responder<PromptResponse>>::new()));
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(AgentCapabilities::new()))
@@ -4361,6 +4377,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shutdown_reports_a_transport_that_does_not_finish() {
+        struct NeverDrains<T>(T);
+
+        impl<T: ConnectTo<Client>> ConnectTo<Client> for NeverDrains<T> {
+            async fn connect_to(
+                self,
+                client: impl ConnectTo<Agent>,
+            ) -> Result<(), agent_client_protocol::Error> {
+                self.0.connect_to(client).await?;
+                std::future::pending().await
+            }
+        }
+
+        let agent = Agent.v1().on_receive_request(
+            async |_request: InitializeRequest, responder, _| {
+                responder.respond(initialized(AgentCapabilities::new()))
+            },
+            agent_client_protocol::on_receive_request!(),
+        );
+        let (connection, _) = AcpConnection::start_transport(
+            "test-agent".to_string(),
+            NeverDrains(agent),
+            Duration::from_secs(1),
+        )
+        .await
+        .expect("agent starts");
+        let error = tokio::time::timeout(
+            TRANSPORT_DRAIN_TIMEOUT + Duration::from_secs(1),
+            connection.shutdown(),
+        )
+        .await
+        .expect("shutdown is bounded")
+        .expect_err("stuck transport must fail");
+        assert!(error.to_string().contains("ACP transport drain timed out"));
+    }
+
+    #[tokio::test]
     async fn steer_preparation_prefers_reject_once_and_fails_without_reject() {
         let mut fixture = start_pending_interaction(TestInteraction::Permission(
             permission_request(permission_options()),
@@ -4379,7 +4432,7 @@ mod tests {
         assert_eq!(
             result.expect("typed response").outcome,
             RequestPermissionOutcome::Selected(
-                agent_client_protocol::schema::v1::SelectedPermissionOutcome::new("reject-once")
+                agent_client_protocol::v1::schema::SelectedPermissionOutcome::new("reject-once")
             )
         );
         finish_fixture(&fixture).await;
@@ -4578,7 +4631,7 @@ mod tests {
         let (outcomes_tx, mut outcomes_rx) = mpsc::unbounded_channel();
         let prompt_responder = Arc::new(StdMutex::new(None::<Responder<PromptResponse>>));
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(AgentCapabilities::new()))
@@ -4671,7 +4724,7 @@ mod tests {
         let (outcome_tx, outcome_rx) = oneshot::channel();
         let outcome_tx = Arc::new(StdMutex::new(Some(outcome_tx)));
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(AgentCapabilities::new().load_session(true)))
@@ -4703,7 +4756,7 @@ mod tests {
             AcpConnection::start_transport("test-agent".to_string(), agent, Duration::from_secs(1))
                 .await
                 .expect("agent starts");
-        let session_id = agent_client_protocol::schema::v1::SessionId::new("reconstructed");
+        let session_id = agent_client_protocol::v1::schema::SessionId::new("reconstructed");
         let session = connection
             .sessions
             .register("test-agent", session_id.clone())
@@ -4733,7 +4786,7 @@ mod tests {
     async fn typed_load_replaces_previous_projection_and_rolls_back_failure() {
         let load_count = Arc::new(AtomicUsize::new(0));
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(AgentCapabilities::new().load_session(true)))
@@ -4806,7 +4859,7 @@ mod tests {
         let (release_tx, release_rx) = oneshot::channel();
         let release_rx = Arc::new(StdMutex::new(Some(release_rx)));
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     let capabilities = AgentCapabilities::new()
@@ -4839,9 +4892,10 @@ mod tests {
                         if let Some(receiver) = receiver {
                             connection.spawn(async move {
                                 let _ = receiver.await;
-                                Err::<(), _>(agent_client_protocol::util::internal_error(
-                                    "forced failure",
-                                ))
+                                Err::<(), _>(
+                                    agent_client_protocol::Error::internal_error()
+                                        .data("forced failure"),
+                                )
                             })?;
                         }
                         Ok(())
@@ -4913,7 +4967,7 @@ mod tests {
     async fn initialize_advertises_minimal_capabilities_and_gates_list() {
         let (initialize_tx, initialize_rx) = oneshot::channel();
         let initialize_tx = Arc::new(StdMutex::new(Some(initialize_tx)));
-        let agent = Agent.builder().on_receive_request(
+        let agent = Agent.v1().on_receive_request(
             {
                 let initialize_tx = initialize_tx.clone();
                 async move |request: InitializeRequest, responder, _| {
@@ -4996,7 +5050,7 @@ mod tests {
     #[tokio::test]
     async fn ordinary_command_failures_preserve_typed_state() {
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |request: InitializeRequest, responder, _| {
                     let capabilities = AgentCapabilities::new()
@@ -5082,7 +5136,7 @@ mod tests {
         let prompt_seen_tx = Arc::new(StdMutex::new(Some(prompt_seen_tx)));
         let (cancel_seen_tx, cancel_seen_rx) = oneshot::channel();
         let cancel_seen_tx = Arc::new(StdMutex::new(Some(cancel_seen_tx)));
-        let agent = Agent.builder()
+        let agent = Agent.v1()
             .on_receive_request(async |request: InitializeRequest, responder, _| {
                 let capabilities = AgentCapabilities::new().load_session(true).session_capabilities(
                     SessionCapabilities::new().list(SessionListCapabilities::new()).resume(SessionResumeCapabilities::new()),
@@ -5205,7 +5259,7 @@ mod tests {
         let (cancelled_tx, cancelled_rx) = oneshot::channel();
         let cancelled_tx = Arc::new(StdMutex::new(Some(cancelled_tx)));
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(AgentCapabilities::new()))
@@ -5281,7 +5335,7 @@ mod tests {
     #[tokio::test]
     async fn load_reconstructs_all_update_families_and_resume_registers_sessions() {
         let next_session = Arc::new(AtomicUsize::new(0));
-        let agent = Agent.builder()
+        let agent = Agent.v1()
             .on_receive_request(async |_request: InitializeRequest, responder, _| {
                 responder.respond(initialized(AgentCapabilities::new().load_session(true).session_capabilities(
                     SessionCapabilities::new().list(SessionListCapabilities::new()).resume(SessionResumeCapabilities::new()),
@@ -5359,7 +5413,7 @@ mod tests {
             })]));
         assert_eq!(
             snapshot.tools["tool-1"].status,
-            agent_client_protocol::schema::v1::ToolCallStatus::Completed
+            agent_client_protocol::v1::schema::ToolCallStatus::Completed
         );
         assert_eq!(snapshot.plan[0].content, "Ship");
         assert_eq!(snapshot.commands[0].name, "review");
@@ -5403,7 +5457,7 @@ mod tests {
             .resume_session(ResumeSessionRequest::new("late-session", "/tmp"))
             .await
             .expect("late session resumes");
-        let late_id = agent_client_protocol::schema::v1::SessionId::new("late-session");
+        let late_id = agent_client_protocol::v1::schema::SessionId::new("late-session");
         assert!(connection
             .session(&late_id)
             .await
@@ -5421,7 +5475,7 @@ mod tests {
         let (release_tx, release_rx) = oneshot::channel();
         let release_rx = Arc::new(StdMutex::new(Some(release_rx)));
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |_request: InitializeRequest, responder, _| {
                     responder.respond(initialized(AgentCapabilities::new()))
@@ -5442,9 +5496,10 @@ mod tests {
                         if let Some(receiver) = receiver {
                             let _ = receiver.await;
                         }
-                        Err::<(), _>(agent_client_protocol::util::internal_error(
-                            "agent connection lost",
-                        ))
+                        Err::<(), _>(
+                            agent_client_protocol::Error::internal_error()
+                                .data("agent connection lost"),
+                        )
                     }
                 },
                 agent_client_protocol::on_receive_request!(),

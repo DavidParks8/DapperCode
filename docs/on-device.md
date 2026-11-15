@@ -580,10 +580,10 @@ precision levels. Unsupported packings cannot be downloaded or passed to inferen
 controller APIs. The app does not download draft heads or multimodal projectors; these models run
 text-only here.
 
-The maintained `llama.rn` engine is pinned to `0.13.0-rc.10` (llama.cpp b12211) for LFM3 architecture
+The maintained `llama.rn` engine is pinned to `0.13.0-rc.11` (llama.cpp b12292) for LFM3 architecture
 and tool-template support, retaining the Hadamard activation support needed by Bonsai 2 Q2_0.
 This is a pre-release binding and requires a rebuilt native app
-(on-device ABI 11 or later). Old binaries fail with a rebuild message rather than attempting unsupported
+(on-device ABI 13). Old binaries fail with a rebuild message rather than attempting unsupported
 inference through a JavaScript-only update.
 
 Compatibility uses physical RAM plus a fresh native app-memory-headroom measurement. A model's

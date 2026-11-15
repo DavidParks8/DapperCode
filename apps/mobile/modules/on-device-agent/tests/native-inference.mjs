@@ -15,6 +15,9 @@ export default async function scenario(e2e) {
   const mobile = path.join(e2e.worktree, 'apps/mobile');
   const sources = path.join(mobile, 'modules/on-device-agent/tests');
   const bundleId = 'dev.dappercode.native-inference';
+  const runtime = process.env.IOS_RUNTIME ?? 'com.apple.CoreSimulator.SimRuntime.iOS-27-0';
+  const deviceType =
+    process.env.IOS_DEVICE_TYPE ?? 'com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro';
   let app;
   let simulator;
   let booted = false;
@@ -38,13 +41,7 @@ export default async function scenario(e2e) {
       );
       const digest = await e2e.run('shasum', ['-a', '256', model], { timeoutMs: 30_000 });
       await e2e.expectEqual('test model integrity', digest.stdout.split(' ')[0], testModel.sha256);
-      const created = await e2e.run('xcrun', [
-        'simctl',
-        'create',
-        e2e.runId,
-        'com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro',
-        'com.apple.CoreSimulator.SimRuntime.iOS-27-0',
-      ]);
+      const created = await e2e.run('xcrun', ['simctl', 'create', e2e.runId, deviceType, runtime]);
       simulator = created.stdout.trim();
       await e2e.run('xcrun', ['simctl', 'boot', simulator]);
       booted = true;

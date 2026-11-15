@@ -8,6 +8,7 @@ use dappercode_bridge_platform::{file_has_multiple_links, tree_mode};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio_util::task::AbortOnDropHandle;
 
 const MAX_ARGS: usize = 64;
 const MAX_ARG_BYTES: usize = 16 * 1024;
@@ -287,10 +288,10 @@ impl ConnectTo<Client> for IsolatedAcpAgent {
             .spawn_process()
             .map_err(agent_client_protocol::Error::into_internal_error)?;
         let stdin = child.stdin.take().ok_or_else(|| {
-            agent_client_protocol::util::internal_error("failed to open ACP stdin")
+            agent_client_protocol::Error::internal_error().data("failed to open ACP stdin")
         })?;
         let stdout = child.stdout.take().ok_or_else(|| {
-            agent_client_protocol::util::internal_error("failed to open ACP stdout")
+            agent_client_protocol::Error::internal_error().data("failed to open ACP stdout")
         })?;
         #[cfg(test)]
         let stdout = DiagnosticReader {
@@ -315,9 +316,9 @@ impl ConnectTo<Client> for IsolatedAcpAgent {
         );
         futures_util::pin_mut!(protocol);
         let (status_tx, status_rx) = tokio::sync::oneshot::channel();
-        let status_task = tokio::spawn(async move {
+        let status_task = AbortOnDropHandle::new(tokio::spawn(async move {
             let _ = status_tx.send(child.wait().await);
-        });
+        }));
         match futures_util::future::select(protocol, status_rx).await {
             futures_util::future::Either::Left((result, _)) => {
                 status_task.abort();
@@ -326,21 +327,18 @@ impl ConnectTo<Client> for IsolatedAcpAgent {
             }
             futures_util::future::Either::Right((status, _)) => {
                 if let Err(error) = status_task.await {
-                    return Err(agent_client_protocol::util::internal_error(format!(
-                        "ACP process wait task failed: {error}"
-                    )));
+                    return Err(agent_client_protocol::Error::internal_error()
+                        .data(format!("ACP process wait task failed: {error}")));
                 }
                 match status {
                     Ok(Ok(status)) if status.success() => Ok(()),
-                    Ok(Ok(status)) => Err(agent_client_protocol::util::internal_error(format!(
-                        "ACP process exited with {status}"
-                    ))),
-                    Ok(Err(error)) => Err(agent_client_protocol::util::internal_error(format!(
-                        "failed to wait for ACP process: {error}"
-                    ))),
-                    Err(error) => Err(agent_client_protocol::util::internal_error(format!(
-                        "ACP process wait task ended without status: {error}"
-                    ))),
+                    Ok(Ok(status)) => Err(agent_client_protocol::Error::internal_error()
+                        .data(format!("ACP process exited with {status}"))),
+                    Ok(Err(error)) => Err(agent_client_protocol::Error::internal_error()
+                        .data(format!("failed to wait for ACP process: {error}"))),
+                    Err(error) => Err(agent_client_protocol::Error::internal_error().data(
+                        format!("ACP process wait task ended without status: {error}"),
+                    )),
                 }
             }
         }
@@ -394,7 +392,7 @@ fn executable_sha256(path: &Path) -> Result<String, RuntimeManifestError> {
         }
         digest.update(&buffer[..bytes]);
     }
-    Ok(format!("sha256:{:x}", digest.finalize()))
+    Ok(format!("sha256:{}", hex::encode(digest.finalize())))
 }
 
 #[cfg(test)]
@@ -610,7 +608,7 @@ fn installation_tree_sha256(root: &Path) -> Result<String, RuntimeManifestError>
             return Err(RuntimeManifestError::InvalidIntegrityRoot);
         }
     }
-    Ok(format!("sha256:{:x}", Sha256::digest(receipt)))
+    Ok(format!("sha256:{}", hex::encode(Sha256::digest(receipt))))
 }
 
 fn validate_agent_id(agent_id: &str) -> Result<(), RuntimeManifestError> {
@@ -712,6 +710,177 @@ while IFS= read -r _; do :; done
             idle_polls, 0,
             "unrelated child exits polled idle ACP stdout"
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shutdown_delivers_pending_permission_response_to_the_agent_process() {
+        use crate::acp::runtime::AcpConnection;
+        use agent_client_protocol::v1::schema::{
+            NewSessionRequest, PermissionOption, PermissionOptionKind, PromptRequest,
+            RequestPermissionRequest, ToolCallUpdate, ToolCallUpdateFields,
+        };
+        use std::time::Duration;
+
+        const AGENT: &str = r#"
+IFS= read -r request || exit 1
+id=$(printf '%s\n' "$request" | /usr/bin/sed -E 's/.*"id":"([^"]+)".*/\1/')
+printf '{"jsonrpc":"2.0","id":"%s","result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+IFS= read -r request || exit 2
+id=$(printf '%s\n' "$request" | /usr/bin/sed -E 's/.*"id":"([^"]+)".*/\1/')
+printf '{"jsonrpc":"2.0","id":"%s","result":{"sessionId":"fixture-session"}}\n' "$id"
+IFS= read -r request || exit 3
+printf '%s\n' "$PERMISSION_REQUEST"
+IFS= read -r response || exit 4
+printf '%s' "$response" > "$MARKER_PATH"
+while [ ! -f "$RELEASE_PATH" ]; do :; done
+printf 'processed' > "$COMPLETED_PATH"
+while IFS= read -r _; do :; done
+"#;
+
+        let directory = tempfile::tempdir().expect("create isolated agent directory");
+        let marker = directory.path().join("permission-response.json");
+        let release = directory.path().join("release");
+        let completed = directory.path().join("processed");
+        let request = RequestPermissionRequest::new(
+            "fixture-session",
+            ToolCallUpdate::new("fixture-tool", ToolCallUpdateFields::new().title("Approve")),
+            vec![PermissionOption::new(
+                "allow-once",
+                "Allow",
+                PermissionOptionKind::AllowOnce,
+            )],
+        );
+        let agent = IsolatedAcpAgent {
+            executable: PathBuf::from("/bin/sh"),
+            argv: vec!["-c".to_string(), AGENT.to_string()],
+            environment: BTreeMap::from([
+                (
+                    "PERMISSION_REQUEST".to_string(),
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": "fixture-permission",
+                        "method": "session/request_permission",
+                        "params": request,
+                    })
+                    .to_string(),
+                ),
+                (
+                    "MARKER_PATH".to_string(),
+                    marker.to_str().expect("UTF-8 marker path").to_string(),
+                ),
+                (
+                    "RELEASE_PATH".to_string(),
+                    release.to_str().expect("UTF-8 release path").to_string(),
+                ),
+                (
+                    "COMPLETED_PATH".to_string(),
+                    completed
+                        .to_str()
+                        .expect("UTF-8 completion path")
+                        .to_string(),
+                ),
+            ]),
+            stdout_poll_count: None,
+        };
+        let (connection, _) =
+            AcpConnection::start_transport("fixture".to_string(), agent, Duration::from_secs(2))
+                .await
+                .expect("agent starts");
+        let session = connection
+            .new_session(NewSessionRequest::new("/tmp"))
+            .await
+            .expect("session starts");
+        connection
+            .prompt(
+                PromptRequest::new(session.session_id, vec!["test".into()]),
+                "run".to_string(),
+                "turn".to_string(),
+            )
+            .await
+            .expect("prompt is admitted");
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while connection.pending_permissions().await.is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("permission request arrives");
+        let stopping = tokio::spawn(async move { connection.shutdown().await });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !marker.exists() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("agent received response before shutdown");
+        assert!(!stopping.is_finished(), "shutdown must wait for the agent");
+        std::fs::write(release, b"release").expect("release agent");
+        stopping.await.expect("shutdown task").expect("agent stops");
+        assert!(completed.exists(), "agent processed the response");
+        let response: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(marker).expect("agent received response"))
+                .expect("valid response");
+        assert_eq!(response["id"], "fixture-permission");
+        assert_eq!(response["result"]["outcome"]["outcome"], "cancelled");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn shutdown_timeout_does_not_leave_the_agent_process_running() {
+        use crate::acp::runtime::AcpConnection;
+        use std::time::Duration;
+
+        const AGENT: &str = r#"
+printf '%s' "$$" > "$PID_PATH"
+IFS= read -r request || exit 1
+id=$(printf '%s\n' "$request" | /usr/bin/sed -E 's/.*"id":"([^"]+)".*/\1/')
+printf '{"jsonrpc":"2.0","id":"%s","result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+while IFS= read -r _; do :; done
+exec /bin/sleep 5
+"#;
+
+        let directory = tempfile::tempdir().expect("create isolated agent directory");
+        let pid_path = directory.path().join("pid");
+        let agent = IsolatedAcpAgent {
+            executable: PathBuf::from("/bin/sh"),
+            argv: vec!["-c".to_string(), AGENT.to_string()],
+            environment: BTreeMap::from([(
+                "PID_PATH".to_string(),
+                pid_path.to_str().expect("UTF-8 PID path").to_string(),
+            )]),
+            stdout_poll_count: None,
+        };
+        let (connection, _) =
+            AcpConnection::start_transport("fixture".to_string(), agent, Duration::from_secs(2))
+                .await
+                .expect("agent starts");
+        let pid: u32 = std::fs::read_to_string(pid_path)
+            .expect("agent records PID")
+            .parse()
+            .expect("valid PID");
+        let error = connection
+            .shutdown()
+            .await
+            .expect_err("shutdown must time out");
+        assert!(error.to_string().contains("ACP transport drain timed out"));
+        let stopped = tokio::time::timeout(Duration::from_millis(500), async {
+            while dappercode_bridge_platform::process_is_alive(pid) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .is_ok();
+        if !stopped {
+            tokio::time::timeout(Duration::from_secs(3), async {
+                while dappercode_bridge_platform::process_is_alive(pid) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("fixture exits naturally");
+        }
+        assert!(stopped, "shutdown left the agent process running");
     }
 
     #[test]
@@ -1240,7 +1409,7 @@ while IFS= read -r _; do :; done
             entry.write_canonical(&mut receipt).expect("encode entry");
         }
         assert_eq!(receipt, fixture.receipt.as_bytes());
-        assert_eq!(format!("{:x}", Sha256::digest(receipt)), fixture.sha256);
+        assert_eq!(hex::encode(Sha256::digest(receipt)), fixture.sha256);
     }
 
     #[test]

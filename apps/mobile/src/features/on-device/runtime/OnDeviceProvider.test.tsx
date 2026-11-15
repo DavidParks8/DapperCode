@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import type { PropsWithChildren } from 'react';
 import { AppState, Pressable, Text, type AppStateStatus } from 'react-native';
 import { OnDeviceProvider as Provider, type OnDeviceStartup } from './OnDeviceProvider';
@@ -24,10 +24,12 @@ function OnDeviceProvider({ children }: PropsWithChildren) {
 
 function deferred() {
   let resolve!: () => void;
-  const promise = new Promise<void>((accept) => {
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((accept, decline) => {
     resolve = accept;
+    reject = decline;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function runtimeDouble(initialize: () => Promise<void> = async () => undefined) {
@@ -62,7 +64,7 @@ afterEach(() => {
 test('only a real background transition suspends local work; returning to active resumes it', async () => {
   const runtime = runtimeDouble();
   jest.mocked(OnDeviceRuntime).mockImplementation(() => runtime as unknown as OnDeviceRuntime);
-  render(
+  await render(
     <OnDeviceProvider>
       <Text>ready</Text>
     </OnDeviceProvider>,
@@ -70,49 +72,54 @@ test('only a real background transition suspends local work; returning to active
   await screen.findByText('ready');
   // Starting while active counts as becoming active, which resumes interrupted downloads.
   expect(runtime.foreground).toHaveBeenCalledTimes(1);
-  const change = (state: AppStateStatus) => act(() => handlers.get('change')?.(state));
-  change('inactive');
-  change('active');
+  const change = async (state: AppStateStatus) => await act(() => handlers.get('change')?.(state));
+  await change('inactive');
+  await change('active');
   expect(runtime.background).not.toHaveBeenCalled();
   expect(runtime.foreground).toHaveBeenCalledTimes(1);
-  change('inactive');
-  change('background');
+  await change('inactive');
+  await change('background');
   expect(runtime.background).toHaveBeenCalledTimes(1);
-  change('inactive');
-  change('active');
+  await change('inactive');
+  await change('active');
   expect(runtime.foreground).toHaveBeenCalledTimes(2);
-  act(() => handlers.get('memoryWarning')?.());
+  await act(() => handlers.get('memoryWarning')?.());
   expect(runtime.relieveMemory).toHaveBeenCalledTimes(1);
   expect(runtime.background).toHaveBeenCalledTimes(1);
 });
 
 test('retry waits for the failed runtime to finish disposing before constructing another', async () => {
+  const startup = deferred();
   const disposal = deferred();
-  const failed = runtimeDouble(() => Promise.reject(new Error('Broken storage')));
+  const failed = runtimeDouble(() => startup.promise);
   failed.dispose.mockImplementation(() => disposal.promise);
   const next = runtimeDouble();
   jest
     .mocked(OnDeviceRuntime)
     .mockImplementationOnce(() => failed as unknown as OnDeviceRuntime)
     .mockImplementationOnce(() => next as unknown as OnDeviceRuntime);
-  render(
-    <OnDeviceProvider>
-      <Text>ready</Text>
-    </OnDeviceProvider>,
-  );
-  expect(screen.getByText('starting')).toBeTruthy();
-  fireEvent.press(await screen.findByText('Broken storage'));
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
-  expect(failed.dispose).toHaveBeenCalledTimes(1);
-  expect(OnDeviceRuntime).toHaveBeenCalledTimes(1);
-  await act(async () => {
-    disposal.resolve();
-    await disposal.promise;
-  });
-  await screen.findByText('ready');
-  expect(OnDeviceRuntime).toHaveBeenCalledTimes(2);
+  try {
+    await render(
+      <OnDeviceProvider>
+        <Text>ready</Text>
+      </OnDeviceProvider>,
+    );
+    expect(screen.getByText('starting')).toBeTruthy();
+    await act(() => startup.reject(new Error('Broken storage')));
+    await fireEvent.press(await screen.findByText('Broken storage'));
+    await waitFor(() => expect(failed.dispose).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('starting')).toBeTruthy();
+    expect(screen.queryByText('Broken storage')).toBeNull();
+    expect(OnDeviceRuntime).toHaveBeenCalledTimes(1);
+    await act(() => disposal.resolve());
+    await screen.findByText('ready');
+    expect(OnDeviceRuntime).toHaveBeenCalledTimes(2);
+  } finally {
+    await act(() => {
+      startup.resolve();
+      disposal.resolve();
+    });
+  }
 });
 
 test('a remounted provider starts its runtime only after the previous one finishes starting and disposing', async () => {
@@ -124,39 +131,35 @@ test('a remounted provider starts its runtime only after the previous one finish
     .mocked(OnDeviceRuntime)
     .mockImplementationOnce(() => first as unknown as OnDeviceRuntime)
     .mockImplementationOnce(() => second as unknown as OnDeviceRuntime);
-  const view = render(
-    <OnDeviceProvider>
-      <Text>ready</Text>
-    </OnDeviceProvider>,
-  );
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
-  view.unmount();
-  render(
-    <OnDeviceProvider>
-      <Text>ready</Text>
-    </OnDeviceProvider>,
-  );
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
-  expect(first.dispose).toHaveBeenCalledTimes(1);
-  expect(OnDeviceRuntime).toHaveBeenCalledTimes(1);
-  await act(async () => {
-    startup.resolve();
-    await startup.promise;
-  });
-  await screen.findByText('ready');
-  expect(OnDeviceRuntime).toHaveBeenCalledTimes(2);
-  expect(second.initialize).toHaveBeenCalledTimes(1);
+  try {
+    const view = await render(
+      <OnDeviceProvider>
+        <Text>ready</Text>
+      </OnDeviceProvider>,
+    );
+    await waitFor(() => expect(first.initialize).toHaveBeenCalledTimes(1));
+    await view.unmount();
+    await render(
+      <OnDeviceProvider>
+        <Text>ready</Text>
+      </OnDeviceProvider>,
+    );
+    await waitFor(() => expect(first.dispose).toHaveBeenCalledTimes(1));
+    expect(OnDeviceRuntime).toHaveBeenCalledTimes(1);
+    await act(() => startup.resolve());
+    await screen.findByText('ready');
+    expect(OnDeviceRuntime).toHaveBeenCalledTimes(2);
+    expect(second.initialize).toHaveBeenCalledTimes(1);
+  } finally {
+    await act(() => startup.resolve());
+  }
 });
 
 test('starting in the background suspends instead of resuming downloads', async () => {
   Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'background' });
   const runtime = runtimeDouble();
   jest.mocked(OnDeviceRuntime).mockImplementation(() => runtime as unknown as OnDeviceRuntime);
-  render(
+  await render(
     <OnDeviceProvider>
       <Text>ready</Text>
     </OnDeviceProvider>,
@@ -164,6 +167,6 @@ test('starting in the background suspends instead of resuming downloads', async 
   await screen.findByText('ready');
   expect(runtime.background).toHaveBeenCalledTimes(1);
   expect(runtime.foreground).not.toHaveBeenCalled();
-  act(() => handlers.get('change')?.('active'));
+  await act(() => handlers.get('change')?.('active'));
   expect(runtime.foreground).toHaveBeenCalledTimes(1);
 });

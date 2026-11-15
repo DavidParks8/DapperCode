@@ -34,6 +34,48 @@ The active app is linked as `@davidparks8s-team/dappercode` with EAS project ID
 pnpm dlx eas-cli project:info
 ```
 
+## Dependency Compatibility
+
+The mobile app uses Expo SDK 58 and React Native 0.88.1. Keep native dependencies aligned with
+`pnpm --filter @dappercode/mobile exec expo install --check`, rather than independently selecting
+the latest version of each native package:
+
+- React, React DOM, and React Test Renderer stay at **19.3.0** instead of 19.3.1 so their renderer
+  versions match the SDK's supported React version.
+- Gesture Handler stays on **~3.3.0** rather than 3.5.0; SVG stays at **15.16.0** rather than
+  15.16.1; Worklets stays at **0.13.0** rather than 0.13.1. These are SDK 58's recommended versions.
+  Application gestures use Gesture Handler 3's hook API, including its renamed activation and
+  deactivation callbacks.
+- TypeScript stays on **~6.0.3**, not 7.0.2. On-device code intelligence packages the JavaScript
+  compiler API (`typescript/lib/typescript.js`) into a browser/Hermes runtime; TypeScript 7
+  removes that implementation. The installed typescript-eslint 8 parser also supports TypeScript
+  **<6.1**, so upgrading the compiler independently breaks both runtime preparation and linting.
+- Babel runtime stays on **7.x** because Expo's Babel preset requires `^7.20.0`; it is a direct
+  dependency so generated helpers resolve under pnpm's isolated linker.
+- Workspace script Node types stay on **22.x** to match the minimum supported Node runtime.
+- React Native 0.88 defaults to generated strict API declarations, but the current masked-view
+  declarations still require the legacy `NativeMethods` interface. `apps/mobile/tsconfig.json`
+  selects React Native's official `react-native-legacy-deep-imports` compatibility condition.
+  Remove that condition only after native-library declarations and component/ref consumers can
+  migrate together; do not add local ambient type shims.
+- React Native Testing Library **14.1.0** is required by Expo Router 58. Its render, hook, event,
+  and lifecycle APIs must be awaited. It uses **test-renderer 1.3.1** for React 19.3 and exposes
+  host elements rather than the removed composite `UNSAFE_*` queries. React Test Renderer remains
+  for the existing lower-level component suites, with its version matched to React.
+
+Expo Router 58 requires each drawer destination to be declared with `Drawer.Screen`; filesystem
+routes alone no longer make drawer screens visible. The history-based drawer has no chat anchor:
+an anchor would instantiate an unrelated chat beneath a cold Settings link. Chat and Settings keep
+their own Stack anchors for deep links and connection modals. Navigation tests trigger modal
+launches through user actions after mounting, not through effects before the imperative router is
+ready.
+
+Expo File System 58 makes `File.write()` asynchronous. Native validation journals use
+`writeSync()` so a recorded checkpoint is durable before process termination or a gate reports
+success. A dependency upgrade is not validated by JavaScript typechecking alone: rebuild the native
+iOS app, run the on-device capability/inference/download/code-intelligence gates, and run the real
+layout suite before release. Do not reuse an older SDK's simulator binary as evidence for SDK 58.
+
 ## Build Profiles
 
 Current profiles in `apps/mobile/eas.json`:
@@ -112,7 +154,7 @@ local EAS build so it is not blocked by the account's cloud iOS build quota, sub
 IPA, and removes the temporary archive afterward. Tracked working-tree changes must be committed
 beforehand; untracked local files are left untouched.
 
-When updating `esbuild` or `llama.rn`, update the matching version-scoped `allowBuilds` approval in
+When updating `esbuild`, `llama.rn`, or `@parcel/watcher`, update the matching version-scoped `allowBuilds` approval in
 `pnpm-workspace.yaml` too. A clean EAS install refuses unapproved dependency build scripts.
 
 Use `pnpm run release:latest --dry-run` to print the workflow without changing the checkout or
@@ -155,8 +197,8 @@ For iOS local device/signed builds, Apple signing/tooling is still required.
 Use Xcode 27.1 or newer and install its iOS 27 simulator runtime. Builds from older SDKs run
 letterboxed on iPhone Duo instead of extending to the edges of both displays. They also cannot
 report the fold. `pnpm run release:latest` refuses older Xcode versions, and every `eas.json` build
-profile pins the `macos-tahoe-26.6-xcode-27.1` cloud image, because SDK 57's default image ships
-Xcode 26.6:
+profile pins the `macos-tahoe-26.6-xcode-27.1` cloud image instead of relying on the SDK's default
+Xcode version:
 
 ```bash
 xcodebuild -version
@@ -189,11 +231,12 @@ To check iPhone Duo layouts, create a simulator with
   display. Pose changes need the Mac unlocked. Android foldables
 report folds through the same module. Use a `pixel_9_pro_fold` emulator and its fold controls.
 
-The SDK 57 scene-lifecycle backport requires Expo 57.0.23 or newer; this project pins the
-57.0.24 patch line. `withIosSceneLifecycle` connects the standard generated AppDelegate to
-Expo's native scene delegate. It rejects unexpected startup code or a custom scene manifest
-rather than silently overwriting them. Review/remove this compatibility plugin when upgrading
-to SDK 58, which provides its own scene lifecycle.
+SDK 58's generated AppDelegate already uses Expo's native scene lifecycle.
+The retained `withIosSceneLifecycle` plugin validates that startup, installs or checks the
+`UIApplicationSceneManifest`, and ensures Expo's scene delegate owns the window and starts React
+Native exactly once. It preserves SDK 58's generated `SceneDelegate` configuration and the
+previous Expo delegate configuration, but rejects unexpected startup code or custom manifests
+rather than silently overwriting them. Review the plugin again on the next SDK upgrade.
 
 Build a standalone simulator release without reading local bridge credentials or starting Metro:
 
@@ -224,7 +267,9 @@ background/foreground recovery, and cold/warm deep links. It never uses
 a paired device or the user's app container or bridge. Appium's fixed ports are serialized with
 harness leases, and the scenario deletes only its own simulator when finished. Use
 `IOS_RUNTIME=com.apple.CoreSimulator.SimRuntime.iOS-26-5` for an older-runtime compatibility run
-before uninstalling that runtime.
+before uninstalling that runtime. If the selected runtime does not support iPhone 17 Pro, set
+`IOS_DEVICE_TYPE` to one of its supported device identifiers (for example,
+`com.apple.CoreSimulator.SimDeviceType.iPhone-Duo` for the iOS 27.1 Duo runtime).
 
 After verifying the replacement runtime, remove obsolete runtimes by their exact identifiers
 from `xcrun simctl runtime list`, using `xcrun simctl runtime delete <identifier>`. This removes

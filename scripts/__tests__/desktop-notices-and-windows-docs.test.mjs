@@ -75,7 +75,10 @@ function cargoMetadataFor(target) {
     resolve: {
       nodes: [
         {
-          deps: [{ pkg: shared.id }, { pkg: architecturePackage.id }],
+          deps: [
+            { pkg: shared.id, dep_kinds: [{ kind: null, target: null }] },
+            { pkg: architecturePackage.id, dep_kinds: [{ kind: null, target: null }] },
+          ],
           id: rootPackage.id,
         },
         { deps: [], id: shared.id },
@@ -193,6 +196,65 @@ test('Cargo notice closures are filtered independently for x64 and ARM64', () =>
   assert.deepEqual(arm64.map((pkg) => pkg.name).sort(), [
     'shared-runtime',
     'windows-arm64-runtime',
+  ]);
+});
+
+test('Cargo notices omit development-only closures but retain build and shared dependencies', () => {
+  const target = 'x86_64-pc-windows-msvc';
+  const metadata = cargoMetadataFor(target);
+  const [rootPackage, shared, architecturePackage] = metadata.packages;
+  const testPackage = {
+    ...shared,
+    id: 'registry+https://example.invalid/index#test-certificates@1.0.0',
+    name: 'test-certificates',
+  };
+  const testTransitive = {
+    ...shared,
+    id: 'registry+https://example.invalid/index#test-parser@1.0.0',
+    name: 'test-parser',
+  };
+  const buildPackage = {
+    ...shared,
+    id: 'registry+https://example.invalid/index#build-helper@1.0.0',
+    name: 'build-helper',
+  };
+  metadata.packages.push(testPackage, testTransitive, buildPackage);
+  metadata.resolve.nodes = [
+    {
+      id: rootPackage.id,
+      deps: [
+        {
+          pkg: shared.id,
+          dep_kinds: [
+            { kind: 'dev', target: null },
+            { kind: null, target: null },
+          ],
+        },
+        { pkg: architecturePackage.id, dep_kinds: [{ kind: null, target: null }] },
+        { pkg: testPackage.id, dep_kinds: [{ kind: 'dev', target: null }] },
+        { pkg: buildPackage.id, dep_kinds: [{ kind: 'build', target: null }] },
+      ],
+    },
+    {
+      id: shared.id,
+      deps: [{ pkg: testTransitive.id, dep_kinds: [{ kind: 'dev', target: null }] }],
+    },
+    {
+      id: testPackage.id,
+      deps: [{ pkg: testTransitive.id, dep_kinds: [{ kind: null, target: null }] }],
+    },
+    { id: testTransitive.id, deps: [] },
+    { id: architecturePackage.id, deps: [] },
+    { id: buildPackage.id, deps: [] },
+  ];
+
+  const packages = collectCargoPackages(root, 'apps/desktop/Cargo.toml', target, () =>
+    JSON.stringify(metadata),
+  );
+  assert.deepEqual(packages.map((pkg) => pkg.name).sort(), [
+    'build-helper',
+    'shared-runtime',
+    'windows-x64-runtime',
   ]);
 });
 

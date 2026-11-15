@@ -1,4 +1,5 @@
 pub(crate) mod config;
+mod drain_transport;
 pub(crate) mod events;
 pub(crate) mod handlers;
 pub(crate) mod harness;

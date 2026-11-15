@@ -120,7 +120,7 @@ before signaling the process. The broker owns and reaps isolated workspace worke
 
 ## Mobile Development
 
-Requirements: Node.js 22.13+, pnpm 11.1.2, Rust 1.97.1, and Git.
+Requirements: Node.js 22.22.2–22.x, 24.15.0–24.x, or 26+, pnpm 11.1.2, Rust 1.97.1, and Git.
 
 ```bash
 pnpm install --frozen-lockfile

@@ -31,7 +31,7 @@ export function SelectableOutput({
   const initialTextRef = useRef(normalizedText);
   const latestTextRef = useRef(normalizedText);
   latestTextRef.current = normalizedText;
-  const webViewRef = useRef<WebView>(null);
+  const webViewRef = useRef<WebView<unknown>>(null);
   const readyRef = useRef(false);
   const [failed, setFailed] = useState(false);
   const [height, setHeight] = useState(() =>
@@ -82,7 +82,7 @@ export function SelectableOutput({
           {normalizedText}
         </Text>
       ) : (
-        <WebView
+        <WebView<unknown>
           ref={webViewRef}
           testID={testID}
           source={source}

@@ -247,7 +247,10 @@ impl Drop for DefinitiveSettlementGuard<'_> {
 }
 
 fn submission_source_turn_id(submission_id: &str) -> String {
-    format!("queue-{:x}", Sha256::digest(submission_id.as_bytes()))
+    format!(
+        "queue-{}",
+        hex::encode(Sha256::digest(submission_id.as_bytes()))
+    )
 }
 
 fn normalize_queue_pending(
@@ -3017,12 +3020,12 @@ impl BridgeQueueService {
                         return;
                     }
                     match status {
-                        agent_client_protocol::schema::v1::ToolCallStatus::Pending
-                        | agent_client_protocol::schema::v1::ToolCallStatus::InProgress => {
+                        agent_client_protocol::v1::schema::ToolCallStatus::Pending
+                        | agent_client_protocol::v1::schema::ToolCallStatus::InProgress => {
                             runtime.active_tool_call_ids.insert(tool_call_id);
                         }
-                        agent_client_protocol::schema::v1::ToolCallStatus::Completed
-                        | agent_client_protocol::schema::v1::ToolCallStatus::Failed => {
+                        agent_client_protocol::v1::schema::ToolCallStatus::Completed
+                        | agent_client_protocol::v1::schema::ToolCallStatus::Failed => {
                             runtime.active_tool_call_ids.remove(&tool_call_id);
                         }
                         _ => {
@@ -3363,7 +3366,7 @@ impl BridgeQueueService {
 mod tests {
     use std::sync::Mutex as StdMutex;
 
-    use agent_client_protocol::schema::v1::{ContentBlock, StopReason, ToolCallStatus, ToolKind};
+    use agent_client_protocol::v1::schema::{ContentBlock, StopReason, ToolCallStatus, ToolKind};
     use futures_util::future::BoxFuture;
 
     use crate::acp::events::CanonicalEvent;
@@ -4427,7 +4430,7 @@ mod tests {
 
     #[test]
     fn bridge_prompt_preserves_official_content_blocks_and_rejects_unknown_blocks() {
-        let image = ContentBlock::Image(agent_client_protocol::schema::v1::ImageContent::new(
+        let image = ContentBlock::Image(agent_client_protocol::v1::schema::ImageContent::new(
             "aGVsbG8=",
             "image/png",
         ));

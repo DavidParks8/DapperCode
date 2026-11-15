@@ -30,7 +30,7 @@ export const MermaidFrame = forwardRef<MermaidFrameHandle, MermaidFrameProps>(fu
   { testID, style, onMessage, onError, onProcessTerminated },
   ref,
 ) {
-  const webViewRef = useRef<WebView>(null);
+  const webViewRef = useRef<WebView<unknown>>(null);
   const source = useMemo(
     () => ({ uri: resolveMermaidRuntimeUri(Image.resolveAssetSource(MERMAID_RUNTIME_ASSET).uri) }),
     [],
@@ -51,7 +51,7 @@ export const MermaidFrame = forwardRef<MermaidFrameHandle, MermaidFrameProps>(fu
   );
 
   return (
-    <WebView
+    <WebView<unknown>
       ref={webViewRef}
       testID={testID}
       source={source}

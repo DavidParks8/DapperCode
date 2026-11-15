@@ -49,10 +49,10 @@ function element(
   );
 }
 
-it('expands JSON tool output into ordered, read-only todos and collapses it again', () => {
-  const screen = render(element());
+it('expands JSON tool output into ordered, read-only todos and collapses it again', async () => {
+  const screen = await render(element());
   expect(screen.queryByTestId('tool-todo-list')).toBeNull();
-  fireEvent.press(screen.getByTestId('tool-title-toggle'));
+  await fireEvent.press(screen.getByTestId('tool-title-toggle'));
   expect(
     screen.getAllByTestId('tool-todo-item').map((row) => row.props['accessibilityLabel']),
   ).toEqual([
@@ -67,29 +67,29 @@ it('expands JSON tool output into ordered, read-only todos and collapses it agai
     expanded: true,
   });
 
-  fireEvent.press(screen.getByTestId('tool-title-toggle'));
+  await fireEvent.press(screen.getByTestId('tool-title-toggle'));
   expect(screen.queryByTestId('tool-todo-list')).toBeNull();
   expect(screen.getByTestId('tool-row').props['accessibilityState']).toMatchObject({
     expanded: false,
   });
 });
 
-it('renders an empty list explicitly and updates it while expanded', () => {
-  const screen = render(element());
-  fireEvent.press(screen.getByTestId('tool-title-toggle'));
-  screen.rerender(element('[]'));
+it('renders an empty list explicitly and updates it while expanded', async () => {
+  const screen = await render(element());
+  await fireEvent.press(screen.getByTestId('tool-title-toggle'));
+  await screen.rerender(element('[]'));
   expect(screen.getByText('No todos.')).toBeTruthy();
   expect(screen.queryByTestId('tool-todo-item')).toBeNull();
   expect(screen.queryByTestId('selectable-output-text')).toBeNull();
 });
 
-it('renders one list when reconciled history repeats the title and JSON response', () => {
-  const screen = render(
+it('renders one list when reconciled history repeats the title and JSON response', async () => {
+  const screen = await render(
     element(`${output}\ntodowrite\n${output}`, 'completed', [
       { type: 'content', content: { type: 'text', text: output } },
     ]),
   );
-  fireEvent.press(screen.getByTestId('tool-title-toggle'));
+  await fireEvent.press(screen.getByTestId('tool-title-toggle'));
   expect(screen.getAllByTestId('tool-todo-item')).toHaveLength(3);
   expect(screen.getByLabelText('Render the todo list. In progress')).toBeTruthy();
   expect(screen.queryByTestId('selectable-output-text')).toBeNull();
@@ -98,9 +98,9 @@ it('renders one list when reconciled history repeats the title and JSON response
 it.each([
   ['Unable to update todos', 'completed'],
   [output, 'failed'],
-] as const)('preserves raw output for errors or unrecognized content', (content, status) => {
-  const screen = render(element(content, status));
-  fireEvent.press(screen.getByTestId('tool-title-toggle'));
+] as const)('preserves raw output for errors or unrecognized content', async (content, status) => {
+  const screen = await render(element(content, status));
+  await fireEvent.press(screen.getByTestId('tool-title-toggle'));
   expect(screen.queryByTestId('tool-todo-list')).toBeNull();
   expect(screen.getByLabelText(`Tool output: ${content}`)).toBeTruthy();
 });

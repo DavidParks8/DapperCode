@@ -40,7 +40,7 @@ function check(condition: unknown, name: string, detail = ''): asserts condition
     throw new Error(`${name}${detail ? `: ${detail}` : ''}`);
   }
   checks[name] = true;
-  outcome.write(JSON.stringify({ status: 'running', checks }));
+  outcome.writeSync(JSON.stringify({ status: 'running', checks }));
 }
 
 async function withModel(
@@ -425,14 +425,14 @@ function NativeInferenceGate() {
       return;
     }
     started = true;
-    outcome.write(JSON.stringify({ status: 'running' }));
+    outcome.writeSync(JSON.stringify({ status: 'running' }));
     void exerciseInference().then(
       (memory) => {
-        outcome.write(JSON.stringify({ status: 'pass', checks, metrics, memory }));
+        outcome.writeSync(JSON.stringify({ status: 'pass', checks, metrics, memory }));
         setStatus('pass');
       },
       (error: unknown) => {
-        outcome.write(
+        outcome.writeSync(
           JSON.stringify({
             status: 'fail',
             checks,
