@@ -12,6 +12,8 @@ use crate::{
     secrets::{BridgeSecret, SecretBackend, SecretStore},
     store::AppPaths,
 };
+mod credentials;
+pub(crate) use credentials::Keychain;
 
 #[cfg(target_os = "macos")]
 mod macos;

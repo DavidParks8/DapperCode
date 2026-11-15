@@ -5,9 +5,8 @@ use std::path::Path;
 
 use crate::{
     secrets::{
-        generate_token, legacy_entry_account, parse_vault, validate_sip_password, vault_file_get,
-        vault_file_set, BridgeSecret, SecretBackend, SecretStore, SecretVault, VAULT_ENTRY_ACCOUNT,
-        VAULT_VERSION,
+        generate_token, validate_sip_password, vault_file_get, vault_file_set, BridgeSecret,
+        SecretBackend, SecretStore, SecretVault, VAULT_VERSION,
     },
     store::{atomic_private_write, remove_file_if_exists, AppPaths, FileLease},
 };
@@ -66,35 +65,6 @@ fn rollback_entries(store: &SecretStore, accounts: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn migrate_keychain_vault(
-    store: &SecretStore,
-    paths: &AppPaths,
-    vault: &SecretVault,
-) -> Result<()> {
-    for (profile_id, token) in &vault.bridge_auth_tokens {
-        match profile_get(store, profile_id)? {
-            Some(existing) if existing != *token => {
-                bail!("conflicting Windows bridge credentials for profile {profile_id}")
-            }
-            Some(_) => {}
-            None => {
-                profile_set(store, profile_id, token).with_context(|| {
-                    format!("failed to migrate Windows bridge credential for {profile_id}")
-                })?;
-            }
-        }
-    }
-
-    migrate_sip_password(store, paths, vault)?;
-    (store.keychain.delete)(VAULT_ENTRY_ACCOUNT)
-        .context("failed to remove the migrated Windows bridge credential vault")?;
-    remove_file_if_exists(&paths.secret_vault_file_path())
-        .context("failed to remove the stale bridge credential fallback")?;
-    activate_layout(store)?;
-    store.clear_vault_cache();
-    Ok(())
-}
-
 fn migrate_file_vault(
     store: &SecretStore,
     paths: &AppPaths,
@@ -138,14 +108,6 @@ fn migrate_file_vault(
 fn prepare_keychain(store: &SecretStore, paths: &AppPaths) -> Result<WindowsPreparation> {
     let active = layout_is_active(store)?;
 
-    if !active {
-        if let Some(contents) = (store.keychain.get)(VAULT_ENTRY_ACCOUNT)? {
-            let vault = parse_vault(&contents, "Windows Credential Manager")?;
-            migrate_keychain_vault(store, paths, &vault)?;
-            return Ok(WindowsPreparation::Keychain);
-        }
-    }
-
     if let Some(vault) = vault_file_get(&paths.secret_vault_file_path())? {
         return migrate_file_vault(store, paths, vault);
     }
@@ -175,28 +137,6 @@ pub(crate) fn get(
     if active && file_vault.is_none() {
         return Ok(direct_token.map(|token| BridgeSecret {
             token,
-            backend: SecretBackend::Keychain,
-        }));
-    }
-
-    let shared_contents = if active {
-        None
-    } else {
-        (store.keychain.get)(VAULT_ENTRY_ACCOUNT)?
-    };
-    if let Some(contents) = shared_contents {
-        let vault = parse_vault(&contents, "Windows Credential Manager")?;
-        let Some(token) = vault.bridge_auth_tokens.get(profile_id) else {
-            return Ok(direct_token.map(|token| BridgeSecret {
-                token,
-                backend: SecretBackend::Keychain,
-            }));
-        };
-        if direct_token.as_ref().is_some_and(|direct| direct != token) {
-            bail!("conflicting Windows bridge credentials for profile {profile_id}");
-        }
-        return Ok(Some(BridgeSecret {
-            token: token.clone(),
             backend: SecretBackend::Keychain,
         }));
     }
@@ -388,12 +328,8 @@ pub(crate) fn ensure_profiles(
 
 pub(crate) fn refresh(store: &SecretStore, paths: &AppPaths) -> Result<()> {
     store.clear_vault_cache();
-    if !layout_is_active(store)? {
-        if let Some(contents) = (store.keychain.get)(VAULT_ENTRY_ACCOUNT)? {
-            parse_vault(&contents, "Windows Credential Manager")?;
-        }
-        vault_file_get(&paths.secret_vault_file_path())?;
-    }
+    layout_is_active(store)?;
+    vault_file_get(&paths.secret_vault_file_path())?;
     Ok(())
 }
 
@@ -452,24 +388,6 @@ pub(crate) fn set(
                 }
             }
         }
-    }
-}
-
-fn delete_from_legacy_vault(store: &SecretStore, profile_id: &str) -> Result<()> {
-    let Some(contents) = (store.keychain.get)(VAULT_ENTRY_ACCOUNT)? else {
-        return Ok(());
-    };
-    let mut vault = parse_vault(&contents, "Windows Credential Manager")?;
-    if vault.bridge_auth_tokens.remove(profile_id).is_none() {
-        return Ok(());
-    }
-    if vault.bridge_auth_tokens.is_empty() && vault.sip_password.is_none() {
-        (store.keychain.delete)(VAULT_ENTRY_ACCOUNT)
-            .context("failed to remove the empty legacy Windows credential vault")
-    } else {
-        let contents = serde_json::to_string(&vault)?;
-        (store.keychain.set)(VAULT_ENTRY_ACCOUNT, &contents)
-            .context("failed to remove a profile from the legacy Windows credential vault")
     }
 }
 
@@ -618,7 +536,6 @@ pub(crate) fn delete(store: &SecretStore, paths: &AppPaths, profile_id: &str) ->
             let _ = (store.keychain.delete)(&windows_profile_entry_account(profile_id));
         }
         WindowsPreparation::Keychain => {
-            delete_from_legacy_vault(store, profile_id)?;
             delete_from_file_vault(store, paths, profile_id)?;
             if profile_get(store, profile_id)?.is_some() {
                 (store.keychain.delete)(&windows_profile_entry_account(profile_id))
@@ -632,8 +549,7 @@ pub(crate) fn delete(store: &SecretStore, paths: &AppPaths, profile_id: &str) ->
             }
         }
     }
-    let _ = (store.keychain.delete)(&legacy_entry_account(profile_id));
-    remove_file_if_exists(&paths.secret_file_path(profile_id))
+    Ok(())
 }
 
 pub(crate) fn windows_profile_entry_account(profile_id: &str) -> String {

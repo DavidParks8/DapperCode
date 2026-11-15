@@ -425,6 +425,11 @@ Security and storage boundaries:
   (1,200 UTF-16 code units) stay in the dedicated private-file fallback, up to the normal 4,096-byte
   SIP password limit. Recovering bridge tokens from the shared file vault still succeeds, and
   replacing an existing native SIP credential with that fallback preserves its value on failure.
+- **Current credential layouts only**: obsolete per-profile token JSON files and the old Windows
+  shared-keychain vault are neither imported nor deleted. Hosts relying only on those obsolete
+  credentials must configure and pair again. The shared private-file vault remains a supported
+  backend for headless hosts and credential-service outages; recovering from it still preserves
+  both bridge tokens and the SIP password.
 - **Loopback-only inference**: `--stt-base-url`, `--llm-base-url`, and `--tts-base-url` must resolve
   to loopback hosts (`localhost`, `127.0.0.1`, or `::1`); remote model URLs are rejected.
 - **Mandatory mobile approval**: `start_phone_call` blocks on a non-dismissible mobile approval
