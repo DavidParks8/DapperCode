@@ -95,6 +95,12 @@ export function PhoneCallDock({
     }
   }, [hangupAction]);
 
+  useEffect(() => {
+    if (settled) {
+      setExpanded(false);
+    }
+  }, [settled]);
+
   return (
     <View style={styles.card} testID="phone-call-dock">
       <View style={styles.row}>

@@ -369,6 +369,9 @@ pub(super) async fn handle_bridge_method(
             .map_err(|error| BridgeError::server(&error.to_string())),
         "bridge/capabilities/read" => serde_json::to_value(state.bridge_capabilities())
             .map_err(|error| BridgeError::server(&error.to_string())),
+        "bridge/phoneCall/surfaces/read" => Ok(json!({
+            "surfaces": state.phone_calls.snapshot_surfaces(),
+        })),
         "bridge/push/observed" => {
             let params = params.unwrap_or_else(|| json!({}));
             let candidate_id = read_string(params.get("candidateId"))

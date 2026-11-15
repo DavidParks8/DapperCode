@@ -16,6 +16,7 @@ import { threadRuntimeSnapshotsAtom } from '../state/runtime';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useCallback } from 'react';
 import type { AgUiLiveAssistantMessages } from '@bridge/agui/agUi';
+import type { BridgeUiSurface } from '@bridge/types/types';
 import {
   RUN_WATCHDOG_MS,
   type ThreadRuntimeSnapshot,
@@ -43,6 +44,16 @@ interface ReplayRecoveryInstallGuard {
   runtimeSnapshotsByThread: Record<string, ThreadRuntimeSnapshot>;
   scheduledPromptsByThread: Record<string, ThreadRuntimeSnapshot['scheduledPrompts']>;
   selectedThreadId: string | null;
+}
+
+function recoverySurfaces(
+  current: ThreadRuntimeSnapshot | undefined,
+  original: ThreadRuntimeSnapshot | undefined,
+  recovered: BridgeUiSurface[],
+): BridgeUiSurface[] {
+  return current?.bridgeUiSurfaces === original?.bridgeUiSurfaces
+    ? recovered
+    : (current?.bridgeUiSurfaces ?? []);
 }
 
 export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecoveryEngineContext) {
@@ -85,6 +96,16 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
   const setBridgeCapabilities = useSetAtom(bridgeCapabilitiesAtom);
   const setActivity = useSetAtom(activityAtom);
   const relatedAgentThreads = useAtomValue(relatedAgentThreadsAtom);
+  const applySelectedRecoveryRuntime = useCallback(
+    (threadId: string, runtimeAdvanced: boolean) => {
+      if (!runtimeAdvanced) {
+        applyThreadRuntimeSnapshot(threadId);
+      } else {
+        setActiveBridgeUiSurfaces(bridgeUiSurfaceSnapshotsRef.current[threadId] ?? []);
+      }
+    },
+    [applyThreadRuntimeSnapshot, bridgeUiSurfaceSnapshotsRef, setActiveBridgeUiSurfaces],
+  );
   const installReplayRecoverySnapshot = useCallback(
     (snapshot: ReplayRecoverySnapshot, guard: ReplayRecoveryInstallGuard) => {
       for (const threadId of snapshot.missingThreadIds) {
@@ -122,7 +143,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
         return next;
       });
 
-      for (const { chat, queue, schedules } of snapshot.threads) {
+      for (const { chat, queue, schedules, bridgeUiSurfaces } of snapshot.threads) {
         if (deletedThreadIdsRef.current.has(chat.id)) {
           continue;
         }
@@ -135,18 +156,30 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
           : null;
         const runtimeAdvanced =
           threadRuntimeSnapshotsRef.current[chat.id] !== guard.runtimeSnapshotsByThread[chat.id];
+        const installedSurfaces = recoverySurfaces(
+          store.get(threadRuntimeSnapshotsAtom)[chat.id],
+          guard.runtimeSnapshotsByThread[chat.id],
+          bridgeUiSurfaces,
+        );
+        bridgeUiSurfaceSnapshotsRef.current[chat.id] = installedSurfaces;
         if (runtimeAdvanced) {
           runtimeAdvancedThreadIds.add(chat.id);
           store.set(threadRuntimeSnapshotsAtom, (current) => {
             const currentThread = current[chat.id];
-            if (currentThread?.scheduledPrompts !== guard.scheduledPromptsByThread[chat.id]) {
+            const schedulesUnchanged =
+              currentThread?.scheduledPrompts === guard.scheduledPromptsByThread[chat.id];
+            const surfacesUnchanged =
+              currentThread?.bridgeUiSurfaces ===
+              guard.runtimeSnapshotsByThread[chat.id]?.bridgeUiSurfaces;
+            if (!schedulesUnchanged && !surfacesUnchanged) {
               return current;
             }
             return {
               ...current,
               [chat.id]: {
                 ...(currentThread ?? { updatedAtMs: Date.now() }),
-                scheduledPrompts: schedules.schedules,
+                ...(schedulesUnchanged ? { scheduledPrompts: schedules.schedules } : {}),
+                ...(surfacesUnchanged ? { bridgeUiSurfaces } : {}),
                 updatedAtMs: Date.now(),
               },
             };
@@ -172,7 +205,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
             streamingText: null,
             pendingApproval: pendingThreadApproval,
             pendingUserInputRequest: pendingThreadUserInput,
-            bridgeUiSurfaces: [],
+            bridgeUiSurfaces: installedSurfaces,
             queuedMessages: [...queue.pendingSteers, ...queue.items],
             pendingSteerMessageIds: queue.pendingSteers.map((item) => item.id),
             editingQueuedMessageId: queue.editingItemId ?? null,
@@ -193,7 +226,6 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
         } else {
           delete chatPlanSnapshotsRef.current[chat.id];
         }
-        bridgeUiSurfaceSnapshotsRef.current[chat.id] = [];
       }
 
       const selectedId = chatIdRef.current;
@@ -207,9 +239,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
         setTranscriptContinuationState(getTranscriptContinuationState(selected));
         setStoppingTurn(false);
         setError(null);
-        if (!runtimeAdvancedThreadIds.has(selected.id)) {
-          applyThreadRuntimeSnapshot(selected.id);
-        }
+        applySelectedRecoveryRuntime(selected.id, runtimeAdvancedThreadIds.has(selected.id));
       } else if (!selectedId && !selectionChanged) {
         setStreamingText(null);
         setPendingApproval(null);
@@ -224,7 +254,7 @@ export function useMainScreenReplayRecoveryEngine(context: MainScreenReplayRecov
     },
     [
       api,
-      applyThreadRuntimeSnapshot,
+      applySelectedRecoveryRuntime,
       bridgeUiSurfaceSnapshotsRef,
       bumpAgentRuntimeRevision,
       chatIdRef,

@@ -193,6 +193,64 @@ describe('PhoneCallDock', () => {
     expect(texts(tree)).toContain('On hold · 0:15');
   });
 
+  it.each([
+    ['ended', endedCall, 'Ended · Refill ready Friday.'],
+    [
+      'failed',
+      {
+        ...endedCall,
+        tone: 'error',
+        blocks: [
+          {
+            type: 'keyValue',
+            items: [
+              { label: 'Status', value: 'Failed' },
+              { label: 'To', value: '+15551234567' },
+              { label: 'Duration', value: '1:05' },
+              { label: 'Reason', value: 'The voice assistant hit an error' },
+            ],
+          },
+        ],
+      } satisfies BridgeUiSurface,
+      'Failed · The voice assistant hit an error',
+    ],
+  ] as const)(
+    'collapses expanded live details when the same call becomes %s',
+    (_, surface, status) => {
+      jest.useFakeTimers();
+      const { tree, onAction, onDismiss } = render(liveCall());
+      press(tree, 'phone-call-dock-toggle');
+      expect(shows(tree, 'phone-call-dock-details')).toBe(true);
+      expect(shows(tree, 'phone-call-dock-hangup')).toBe(true);
+      act(() => {
+        tree.update(
+          <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+            <AppThemeProvider theme={theme}>
+              <PhoneCallDock
+                surface={surface}
+                detailsMaxHeight={240}
+                onAction={onAction}
+                onDismiss={onDismiss}
+              />
+            </AppThemeProvider>
+          </SafeAreaProvider>,
+        );
+      });
+      expect(shows(tree, 'phone-call-dock-details')).toBe(false);
+      expect(shows(tree, 'phone-call-dock-hangup')).toBe(false);
+      expect(shows(tree, 'phone-call-dock-dismiss')).toBe(true);
+      expect(texts(tree)).toContain(status);
+      expect(onAction).not.toHaveBeenCalled();
+      press(tree, 'phone-call-dock-toggle');
+      expect(shows(tree, 'phone-call-dock-details')).toBe(true);
+      const settledText = texts(tree);
+      act(() => jest.advanceTimersByTime(10_000));
+      expect(texts(tree)).toEqual(settledText);
+      press(tree, 'phone-call-dock-dismiss');
+      expect(onDismiss).toHaveBeenCalledWith(surface);
+    },
+  );
+
   it.each([-60_000, 60_000])(
     'ticks from local receipt, not bridge time, with %d ms of phone clock skew',
     (skew) => {

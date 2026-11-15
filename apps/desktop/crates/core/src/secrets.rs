@@ -1955,6 +1955,135 @@ mod tests {
     }
 
     #[test]
+    fn windows_recovers_oversized_sip_passwords_without_blocking_workspace_credentials() {
+        let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        for sip_read_first in [false, true] {
+            reset_windows_memory_keychain();
+            WINDOWS_MEMORY_KEYCHAIN
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .max_password_bytes = Some(MAX_WINDOWS_CREDENTIAL_UTF16_UNITS * 2);
+            let directory = tempdir().unwrap();
+            let paths = AppPaths::for_tests(directory.path().to_path_buf());
+            let file = SecretStore::file_backend_for_tests();
+            let token = file.get_or_create(&paths, "alpha").unwrap().token;
+            let mut password = generate_token().repeat(32);
+            password.truncate(MAX_WINDOWS_CREDENTIAL_UTF16_UNITS + 1);
+            file.store_sip_password(&paths, &password).unwrap();
+
+            let native = SecretStore::with_windows_keychain(windows_memory_keychain());
+            if sip_read_first {
+                assert_eq!(
+                    native.load_sip_password(&paths).unwrap(),
+                    Some((password.clone(), SecretBackend::File))
+                );
+            }
+            let (credential, created) = native.get_or_create_with_status(&paths, "alpha").unwrap();
+            assert!(!created);
+            assert_eq!(credential.token, token);
+            assert_eq!(credential.backend, SecretBackend::Keychain);
+            assert!(!paths.secret_vault_file_path().exists());
+            assert!(paths.sip_secret_file_path().exists());
+            assert!(!WINDOWS_MEMORY_KEYCHAIN
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .entries
+                .contains_key(WINDOWS_SIP_PASSWORD_ACCOUNT));
+            let restarted = SecretStore::with_windows_keychain(windows_memory_keychain());
+            assert_eq!(
+                restarted.load_sip_password(&paths).unwrap(),
+                Some((password, SecretBackend::File))
+            );
+            assert_eq!(
+                restarted.get(&paths, "alpha").unwrap().unwrap().token,
+                token
+            );
+        }
+    }
+
+    #[test]
+    fn windows_moves_sip_passwords_between_native_capacity_and_private_fallback() {
+        let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        reset_windows_memory_keychain();
+        let directory = tempdir().unwrap();
+        let paths = AppPaths::for_tests(directory.path().to_path_buf());
+        let store = SecretStore::with_windows_keychain(windows_memory_keychain());
+        let small = generate_token();
+        store.store_sip_password(&paths, &small).unwrap();
+        let large = format!(
+            "{small}{}",
+            "\u{10000}".repeat(MAX_WINDOWS_CREDENTIAL_UTF16_UNITS / 2)
+        );
+        assert_eq!(
+            store.store_sip_password(&paths, &large).unwrap(),
+            SecretBackend::File
+        );
+        assert_eq!(
+            store.load_sip_password(&paths).unwrap(),
+            Some((large, SecretBackend::File))
+        );
+        assert!(!WINDOWS_MEMORY_KEYCHAIN
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .entries
+            .contains_key(WINDOWS_SIP_PASSWORD_ACCOUNT));
+        assert_eq!(
+            store.store_sip_password(&paths, &small).unwrap(),
+            SecretBackend::Keychain
+        );
+        assert!(!paths.sip_secret_file_path().exists());
+        assert_eq!(
+            store.load_sip_password(&paths).unwrap(),
+            Some((small, SecretBackend::Keychain))
+        );
+    }
+
+    #[test]
+    fn windows_failed_native_retirement_restores_the_previous_sip_fallback() {
+        let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        for previous_fallback in [false, true] {
+            reset_windows_memory_keychain();
+            let directory = tempdir().unwrap();
+            let paths = AppPaths::for_tests(directory.path().to_path_buf());
+            let store = SecretStore::with_windows_keychain(windows_memory_keychain());
+            let previous = generate_token();
+            store.store_sip_password(&paths, &previous).unwrap();
+            if previous_fallback {
+                atomic_private_write(
+                    &paths.sip_secret_file_path(),
+                    &serde_json::to_vec(&serde_json::json!({ "sipPassword": previous })).unwrap(),
+                )
+                .unwrap();
+            }
+            WINDOWS_MEMORY_KEYCHAIN
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .fail_deletes
+                .insert(WINDOWS_SIP_PASSWORD_ACCOUNT.to_string());
+            let oversized = generate_token().repeat(32);
+            assert!(store.store_sip_password(&paths, &oversized).is_err());
+            assert_eq!(
+                store.load_sip_password(&paths).unwrap(),
+                Some((previous.clone(), SecretBackend::Keychain))
+            );
+            if previous_fallback {
+                let saved: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(paths.sip_secret_file_path()).unwrap())
+                        .unwrap();
+                assert_eq!(saved["sipPassword"], previous);
+            } else {
+                assert!(!paths.sip_secret_file_path().exists());
+            }
+        }
+    }
+
+    #[test]
     fn rejects_invalid_sip_passwords() {
         let temp = tempdir().unwrap();
         let paths = AppPaths::for_tests(temp.path().to_path_buf());

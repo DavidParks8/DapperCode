@@ -255,13 +255,20 @@ struct SharedCallState {
     pre_connect_steers: Vec<String>,
 }
 
+impl SharedCallState {
+    fn elapsed_seconds(&self) -> Option<u64> {
+        self.duration_seconds.or_else(|| {
+            self.connected_instant
+                .map(|started| Instant::now().saturating_duration_since(started).as_secs())
+        })
+    }
+}
+
 #[derive(Debug)]
 struct ActiveCallSlot {
     call_id: String,
     owner_thread_id: String,
-    phone_number: String,
-    callee_name: Option<String>,
-    objective: String,
+    validated: ValidatedStartRequest,
     approval_tx: StdMutex<Option<oneshot::Sender<ApprovalDecision>>>,
     steer_tx: mpsc::UnboundedSender<String>,
     cancel: CancellationToken,
@@ -283,22 +290,17 @@ impl ActiveCallSlot {
 
     fn snapshot(&self) -> PhoneCallSnapshot {
         let guard = lock_unpoisoned(&self.shared);
-        let live_duration = guard.duration_seconds.or_else(|| {
-            guard
-                .connected_instant
-                .map(|started| Instant::now().saturating_duration_since(started).as_secs())
-        });
         PhoneCallSnapshot {
             call_id: self.call_id.clone(),
             status: guard.status,
             on_hold: guard.on_hold,
-            phone_number: Some(self.phone_number.clone()),
-            callee_name: self.callee_name.clone(),
-            objective: Some(self.objective.clone()),
+            phone_number: Some(self.validated.phone_number.clone()),
+            callee_name: self.validated.callee_name.clone(),
+            objective: Some(self.validated.objective.clone()),
             started_at: Some(guard.started_at_iso.clone()),
             connected_at: guard.connected_at_iso.clone(),
             ended_at: guard.ended_at_iso.clone(),
-            duration_seconds: live_duration,
+            duration_seconds: guard.elapsed_seconds(),
             end_reason: guard.end_reason.clone(),
             outcome_summary: guard.outcome_summary.clone(),
             transcript: guard.transcript.clone(),
@@ -389,6 +391,59 @@ impl PhoneCallService {
         self.config.is_some()
     }
 
+    pub(crate) fn snapshot_surfaces(&self) -> Vec<BridgeUiSurface> {
+        let Some(config) = self.config.as_ref() else {
+            return Vec::new();
+        };
+        let active = lock_unpoisoned(&self.registry).active.clone();
+        let Some(slot) = active else {
+            return Vec::new();
+        };
+        if slot.skip_post_call_report.load(Ordering::Acquire) {
+            return Vec::new();
+        }
+        let shared = lock_unpoisoned(&slot.shared);
+        let (status, subtitle, tone) = match shared.status {
+            PhoneCallStatus::AwaitingApproval => {
+                if slot.cancel.is_cancelled() || lock_unpoisoned(&slot.approval_tx).is_none() {
+                    return Vec::new();
+                }
+                return vec![build_approval_modal_surface(
+                    &approval_surface_id(&slot.call_id),
+                    &slot.owner_thread_id,
+                    config,
+                    &slot.validated,
+                )];
+            }
+            PhoneCallStatus::Dialing => ("Dialing", "Dialing…", BridgeUiTone::Info),
+            PhoneCallStatus::Ringing => ("Ringing", "Ringing…", BridgeUiTone::Info),
+            PhoneCallStatus::InProgress => {
+                let status = if shared.on_hold { "On hold" } else { "In call" };
+                (status, status, BridgeUiTone::Success)
+            }
+            _ => return Vec::new(),
+        };
+        vec![build_live_workflow_card(
+            &live_surface_id(&slot.call_id),
+            &slot.owner_thread_id,
+            config,
+            &slot.validated,
+            &shared.started_at_iso,
+            LiveCardParams {
+                title_override: None,
+                subtitle,
+                status_value: status,
+                tone,
+                in_call_actions: true,
+                dismissible: false,
+                duration_seconds: shared.elapsed_seconds(),
+                detail_label_value: None,
+                technical_detail: None,
+                transcript: &shared.transcript,
+            },
+        )]
+    }
+
     pub(crate) fn start_phone_call<'a>(
         self: &'a Arc<Self>,
         caller_thread_id: &'a str,
@@ -450,9 +505,7 @@ impl PhoneCallService {
         let slot = Arc::new(ActiveCallSlot {
             call_id: call_id.clone(),
             owner_thread_id: owner_thread_id.to_string(),
-            phone_number: validated.phone_number.clone(),
-            callee_name: validated.callee_name.clone(),
-            objective: validated.objective.clone(),
+            validated: validated.clone(),
             approval_tx: StdMutex::new(Some(approval_tx)),
             steer_tx,
             cancel: call_cancel.clone(),
@@ -6256,6 +6309,116 @@ mod tests {
         assert!(!newest_giant.contains("We open at nine."));
         assert!(report("remote_bye", &[giant, short])
             .ends_with("Transcript:\n[earlier transcript omitted]\nRecipient: We open at nine."));
+    }
+
+    #[tokio::test]
+    async fn snapshot_surfaces_restores_pending_approval_without_republishing_it() {
+        let hub = Arc::new(ClientHub::new());
+        let (outbox, mut notifications) = client_outbox(128);
+        hub.add_client_with_metadata(outbox, ClientConnectionMetadata::default())
+            .await;
+        let sip = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let service = PhoneCallService::with_options(
+            Some(sample_runtime_config(
+                sip.local_addr().unwrap().port(),
+                "http://127.0.0.1:9/v1",
+            )),
+            hub,
+            Weak::new(),
+            approval_timeouts(Duration::from_secs(5)),
+            None,
+        );
+        let starting = Arc::clone(&service);
+        let start = tokio::spawn(async move {
+            starting
+                .start_phone_call(
+                    "snapshot-owner",
+                    StartPhoneCallRequest {
+                        context: Some("Ask about weekend hours too.".to_string()),
+                        first_message: Some("Hello, I am calling about your hours.".to_string()),
+                        ..parking_request()
+                    },
+                )
+                .await
+        });
+        let call_id = await_approval_call_id(&mut notifications).await;
+        let surfaces = service.snapshot_surfaces();
+        assert_eq!(surfaces.len(), 1);
+        validate_bridge_ui_surface(&surfaces[0]).unwrap();
+        assert_eq!(surfaces[0].id, approval_surface_id(&call_id));
+        assert_eq!(surfaces[0].thread_id, "snapshot-owner");
+        assert!(surfaces[0]
+            .actions
+            .iter()
+            .any(|action| action.id == "approve"));
+        assert!(surfaces[0].blocks.iter().any(|block| matches!(
+            block, BridgeUiBlock::Markdown { markdown } if markdown.contains("Ask about weekend hours too.")
+        )));
+        assert!(
+            notifications.try_recv().is_err(),
+            "snapshot reads must not publish new events"
+        );
+        service
+            .resolve_ui_action(&ui_action(&surfaces[0].id, "snapshot-owner", "cancel"))
+            .await;
+        timeout(TEST_TIMEOUT, start)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(service.snapshot_surfaces().is_empty());
+        assert_eq!(service.live_work_count(), 0);
+        let mut packet = [0; 1024];
+        assert!(
+            timeout(Duration::from_millis(50), sip.recv_from(&mut packet))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshot_surfaces_restores_quiet_held_call_controls_with_fresh_duration() {
+        let voice = MockVoiceState::new(Vec::new(), Vec::new(), 0);
+        let mut call = TrunkCall::connect(
+            &voice,
+            TrunkCallOptions::new(Duration::from_secs(30), Duration::from_secs(120)),
+        )
+        .await;
+        call.dialog
+            .renegotiate(&call.sip, 1, "UPDATE", "inactive", call.rtp_port)
+            .await;
+        call.card_shows("On hold").await;
+        let slot = lock_unpoisoned(&call.service.registry)
+            .active
+            .clone()
+            .unwrap();
+        lock_unpoisoned(&slot.shared).connected_instant =
+            Instant::now().checked_sub(Duration::from_secs(65));
+        let recovered = call.service.snapshot_surfaces();
+        assert_eq!(recovered.len(), 1);
+        validate_bridge_ui_surface(&recovered[0]).unwrap();
+        assert_eq!(recovered[0].id, live_surface_id(&call.call_id));
+        assert!(recovered[0]
+            .actions
+            .iter()
+            .any(|action| action.id == "hangup"));
+        assert_eq!(recovered[0].dismissible, Some(false));
+        let BridgeUiBlock::KeyValue { items } = &recovered[0].blocks[0] else {
+            panic!("live call details");
+        };
+        assert!(items
+            .iter()
+            .any(|item| item.label == "Status" && item.value == "On hold"));
+        let duration = items.iter().find(|item| item.label == "Duration").unwrap();
+        let (minutes, seconds) = duration.value.split_once(':').unwrap();
+        let elapsed = minutes.parse::<u64>().unwrap() * 60 + seconds.parse::<u64>().unwrap();
+        assert!(
+            (65..70).contains(&elapsed),
+            "recovery must read current duration, not the last card"
+        );
+        call.agent_hangup().await;
+        call.settled().await;
+        assert!(call.service.snapshot_surfaces().is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

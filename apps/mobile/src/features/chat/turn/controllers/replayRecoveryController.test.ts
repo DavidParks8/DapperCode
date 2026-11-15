@@ -1,5 +1,7 @@
 import type { HostBridgeApiClient } from '@bridge/client/client';
 import type { BridgeCapabilities, Chat } from '@bridge/types/types';
+import manifest from '../../../../../../../contracts/bridge-rpc/v2/manifest.json';
+import { toBridgeUiSurface } from '../../helpers/bridgeUi';
 import { RpcRequestError } from '@bridge/ws/errors';
 import {
   collectReplayRecoveryThreadIds,
@@ -21,6 +23,7 @@ function createApi() {
     listApprovals: jest.fn().mockResolvedValue([{ id: 'approval', threadId: 'background-a' }]),
     listPendingUserInputs: jest.fn().mockResolvedValue([{ id: 'input', threadId: 'background-b' }]),
     readBridgeCapabilities: jest.fn().mockResolvedValue(capabilities),
+    readPhoneCallSurfaces: jest.fn().mockResolvedValue([]),
     getChat: jest.fn((threadId: string) => Promise.resolve(chat(threadId))),
     readThreadQueue: jest.fn((threadId: string) => Promise.resolve({ threadId })),
     readThreadSchedules: jest.fn((threadId: string) =>
@@ -30,6 +33,50 @@ function createApi() {
 }
 
 describe('replay recovery controller', () => {
+  it.each(['approval', 'held'] as const)(
+    'recovers %s phone controls even when the owning thread was not already tracked',
+    async (phase) => {
+      const api = createApi();
+      api.listLoadedChatIds.mockResolvedValue([]);
+      api.listApprovals.mockResolvedValue([]);
+      api.listPendingUserInputs.mockResolvedValue([]);
+      api.readBridgeCapabilities.mockResolvedValue({
+        ...capabilities,
+        supports: { ...capabilities.supports, phoneCalls: true },
+      });
+      const surfaces = manifest.fixtures.phoneCallSurfaceSnapshots[phase].surfaces.map((raw) => {
+        const surface = toBridgeUiSurface(raw);
+        if (!surface) {
+          throw new Error('Invalid phone-call contract fixture');
+        }
+        return surface;
+      });
+      api.readPhoneCallSurfaces.mockResolvedValue(surfaces);
+      const recovered = await fetchReplayRecoverySnapshot(api, []);
+      expect(recovered.threads.map(({ chat: value }) => value.id)).toEqual(['phone-owner']);
+      expect(recovered.threads[0]?.bridgeUiSurfaces).toEqual(surfaces);
+      expect(api.getChat).toHaveBeenCalledWith('phone-owner', { forceRefresh: true });
+    },
+  );
+
+  it('does not acknowledge an incomplete or malformed phone surface read as a successful snapshot', async () => {
+    const api = createApi();
+    api.readBridgeCapabilities.mockResolvedValue({
+      ...capabilities,
+      supports: { ...capabilities.supports, phoneCalls: true },
+    });
+    api.readPhoneCallSurfaces.mockRejectedValueOnce(new Error('phone snapshot unavailable'));
+    await expect(fetchReplayRecoverySnapshot(api, [])).rejects.toThrow(
+      'phone snapshot unavailable',
+    );
+    api.readPhoneCallSurfaces.mockResolvedValueOnce([
+      { id: 'invalid', threadId: '', title: '', presentation: 'modal', blocks: [], actions: [] },
+    ]);
+    await expect(fetchReplayRecoverySnapshot(api, [])).rejects.toThrow(
+      'invalid phone-call recovery surface',
+    );
+  });
+
   it('deduplicates tracked IDs and ignores empty IDs', () => {
     expect(
       collectReplayRecoveryThreadIds([
