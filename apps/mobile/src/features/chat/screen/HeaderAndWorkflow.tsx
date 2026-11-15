@@ -495,10 +495,10 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
             hasChat: selectedChat !== null && selectedChat !== undefined,
             openTitleEditor,
             handleOpenGit,
+            startNewChat: () => startNewChat(),
           })}
           title={headerTitle}
           agent={activeAgent}
-          onNewChat={selectedChat ? () => startNewChat() : undefined}
           embeddedInGlass
         />
         {showSessionMetaRow ? (

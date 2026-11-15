@@ -168,8 +168,9 @@ To check iPhone Duo layouts, create a simulator with
 `xcrun simctl create "Duo QA" com.apple.CoreSimulator.SimDeviceType.iPhone-Duo` and switch poses
 (closed, open, book, laptop) in Xcode's Device Hub. `simctl` cannot change poses. Check each pose:
 - **Closed and open landscape:** the status bar and camera sit in a vertical column on the trailing
-  edge. Header buttons appear as a vertical bar in that column, below the clock, except **New chat**,
-  which stays in the header so it remains one tap away even when the keyboard limits the bar.
+  edge. All header buttons, including **New chat**, move to a vertical bar in that column, below
+  the clock. **New chat** stays visible ahead of the other actions when space is limited and joins
+  More when the keyboard leaves room for only navigation and overflow.
   Content and other controls stay inside the safe area. When closed, the chat's Send (or Stop)
   button sits on that bar, centered in the column and bottom-aligned with the composer's input box;
   the bar's other buttons fold into More rather than overlapping it, including while the keyboard
@@ -177,7 +178,7 @@ To check iPhone Duo layouts, create a simulator with
 - **Book:** the chat keeps the full width, the session list stays behind the menu, and the
   composer and sheets sit on the right page, off the hinge.
 - **Laptop:** the window is portrait. The chat's title and chips stay at the top of the upper half,
-  and its other header buttons stand on a vertical rail along the trailing edge, ending above the
+  and its header buttons stand on a vertical rail along the trailing edge, ending above the
   hinge. The composer focuses automatically and keeps the keyboard on the lower half, with the
   composer directly above the fold; scrolling the transcript does not dismiss it. Opening the menu
   hides the keyboard, and closing it brings the keyboard back. In Xcode 27 the simulator renders the inner

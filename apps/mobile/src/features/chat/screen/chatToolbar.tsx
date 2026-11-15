@@ -1,10 +1,11 @@
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import type { ComponentProps } from 'react';
 import { Platform } from 'react-native';
 
 import { SceneVerticalToolbar, type SceneToolbarItem } from '@shell/layout/SceneToolbar';
 import { useTrailingActionRail } from '@shell/layout/useShellLayout';
 import { useNavigationToggleLabel } from '@shell/state/drawer/atoms';
+import { startNewChatAtom } from '@shell/navigation/actions';
 import { resolveComposerActionReach } from '../composer/inputLayout';
 import { keyboardVisibleAtom } from '../state/composer';
 import type { ChatHeader } from './ChatHeader';
@@ -27,6 +28,7 @@ export function ChatSceneToolbar({ context }: { context: Context }) {
     composerSafeAreaBottomInset,
   } = context;
   const navigationLabel = useNavigationToggleLabel();
+  const startNewChat = useSetAtom(startNewChatAtom);
   const keyboardVisible = useAtomValue(keyboardVisibleAtom);
   // The composer's Send button sits at the bottom of a trailing bar, following the composer.
   const sendInRail = useTrailingActionRail() !== null && shouldShowComposer;
@@ -61,6 +63,14 @@ export function ChatSceneToolbar({ context }: { context: Context }) {
         group: 'action',
         priority: 1,
       },
+      {
+        key: 'new-chat',
+        icon: 'add',
+        label: 'New chat',
+        onPress: () => startNewChat(),
+        group: 'action',
+        priority: 2,
+      },
     );
   }
   return <SceneVerticalToolbar items={items} reservedBottom={reservedBottom} />;
@@ -74,10 +84,11 @@ export function resolveInlineHeaderButtons(
     hasChat: boolean;
     openTitleEditor: () => void;
     handleOpenGit: () => void;
+    startNewChat: () => void;
   },
 ): Pick<
   ComponentProps<typeof ChatHeader>,
-  'onOpenDrawer' | 'onRenameTitle' | 'rightIconName' | 'onRightActionPress'
+  'onOpenDrawer' | 'onRenameTitle' | 'rightIconName' | 'onRightActionPress' | 'onNewChat'
 > {
   if (!inline) {
     return {};
@@ -89,6 +100,7 @@ export function resolveInlineHeaderButtons(
           onRenameTitle: actions.openTitleEditor,
           rightIconName: 'git-branch-outline',
           onRightActionPress: actions.handleOpenGit,
+          onNewChat: actions.startNewChat,
         }
       : {}),
   };

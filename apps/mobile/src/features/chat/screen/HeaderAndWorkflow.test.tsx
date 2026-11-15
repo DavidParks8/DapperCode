@@ -211,8 +211,8 @@ describe('MainScreenHeaderAndWorkflow in laptop pose', () => {
         .map((button) => button.props['accessibilityLabel']) ?? [];
     const headerButtons = ['Open navigation drawer', 'Edit session title', 'Open Git', 'New chat'];
 
-    expect(buttonsIn('chat-header-row')).toEqual(['New chat']);
-    expect(buttonsIn('scene-vertical-toolbar')).toEqual(headerButtons.slice(0, -1));
+    expect(buttonsIn('chat-header-row')).toEqual([]);
+    expect(buttonsIn('scene-vertical-toolbar')).toEqual(headerButtons);
     const rail = StyleSheet.flatten(container('scene-vertical-toolbar')?.props['style']) as {
       top: number;
       height: number;
@@ -233,7 +233,7 @@ describe('MainScreenHeaderAndWorkflow in laptop pose', () => {
     act(() => tree.unmount());
   });
 
-  it('keeps new chat directly available when the closed Duo keyboard crowds the rail', () => {
+  it('moves new chat into rail overflow when the closed Duo keyboard crowds the rail', () => {
     act(() => {
       Dimensions.set({
         window: { width: 466, height: 678, scale: 3, fontScale: 1 },
@@ -280,7 +280,7 @@ describe('MainScreenHeaderAndWorkflow in laptop pose', () => {
         ?.findAll((node) => node.type === CircularToolbarButton)
         .map((button) => button.props['accessibilityLabel']);
 
-    expect(buttonsIn('chat-header-row')).toEqual(['New chat']);
+    expect(buttonsIn('chat-header-row')).toEqual([]);
     expect(buttonsIn('scene-vertical-toolbar')).toEqual(['Open navigation drawer', 'More']);
     act(() => tree.unmount());
   });

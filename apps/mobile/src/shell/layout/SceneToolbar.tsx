@@ -95,7 +95,8 @@ export function SceneVerticalToolbar({
   const placement = useToolbarPlacement();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const theme = useAppTheme();
-  const [overflowVisible, setOverflowVisible] = useState(false);
+  // Opening the sheet can hide the keyboard and change which actions fit on the rail.
+  const [overflowItems, setOverflowItems] = useState<SceneToolbarItem[] | null>(null);
   if (!frame || items.length === 0) {
     return null;
   }
@@ -162,7 +163,7 @@ export function SceneVerticalToolbar({
               label: OVERFLOW_LABEL,
               icon: 'ellipsis-horizontal',
               group: 'action',
-              onPress: () => setOverflowVisible(true),
+              onPress: () => setOverflowItems(overflow),
             })
           : null}
       </View>
@@ -170,16 +171,16 @@ export function SceneVerticalToolbar({
         {visible.filter((item) => item.group === 'bottom').map(renderButton)}
       </View>
       <SelectionSheet
-        visible={overflowVisible}
+        visible={overflowItems !== null}
         title={OVERFLOW_LABEL}
-        onClose={() => setOverflowVisible(false)}
-        options={overflow.map((item) => ({
+        onClose={() => setOverflowItems(null)}
+        options={(overflowItems ?? []).map((item) => ({
           key: item.key,
           title: item.label,
           icon: item.icon,
           disabled: item.disabled,
           onPress: () => {
-            setOverflowVisible(false);
+            setOverflowItems(null);
             item.onPress();
           },
         }))}

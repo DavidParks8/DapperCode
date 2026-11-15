@@ -144,6 +144,7 @@ export const nativeOnDeviceSelectors = {
   gitFile: (name: string) => `git-file-${name}`,
   gitDiscarding: { predicate: 'label BEGINSWITH "Discarding"' },
   editSessionTitle: 'Edit session title',
+  chatNewChatRail: 'scene-toolbar-button-glass-new-chat',
   sessionTitle: 'Session title',
   cancelRename: 'Cancel rename',
   saveSessionTitle: 'Save session title',
