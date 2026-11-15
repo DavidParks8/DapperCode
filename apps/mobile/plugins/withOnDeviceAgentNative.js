@@ -20,7 +20,7 @@ const DELEGATE_ANCHOR = '  var reactNativeFactory: RCTReactNativeFactory?\n';
 const IMPORT_ANCHOR = 'import React\n';
 const BACKGROUND_EVENTS = `
   // On-device model downloads take iOS's background-session completion handler directly: Expo's
-  // aggregated subscriber callback never completes it for third-party sessions (SDK 57).
+  // aggregated subscriber callback never completes it for third-party sessions (SDK 58).
   public override func application(
     _ application: UIApplication,
     handleEventsForBackgroundURLSession identifier: String,
@@ -39,7 +39,7 @@ const BACKGROUND_EVENTS = `
 /** Routes the model download session's relaunch events past Expo's subscriber aggregation. */
 function updateAppDelegate({ language, contents }) {
   if (language !== 'swift') {
-    throw new Error('On-device model downloads require the Expo SDK 57 Swift AppDelegate.');
+    throw new Error('On-device model downloads require the Expo SDK 58 Swift AppDelegate.');
   }
   if (contents.includes('ModelDownloadEvents.handle(')) {
     return contents;

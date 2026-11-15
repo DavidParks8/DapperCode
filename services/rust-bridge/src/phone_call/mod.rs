@@ -2892,7 +2892,7 @@ mod tests {
         net::{IpAddr, Ipv4Addr, SocketAddr},
     };
 
-    use agent_client_protocol::schema::v1::ContentBlock;
+    use agent_client_protocol::v1::schema::ContentBlock;
     use axum::{
         body::Body,
         extract::{ws::Message, Multipart, State},
@@ -3380,7 +3380,7 @@ mod tests {
             let authorization = match config
                 .descriptor(crate::acp::runtime::McpTransportPreference::Http, &pending)
             {
-                Some(agent_client_protocol::schema::v1::McpServer::Http(desc)) => {
+                Some(agent_client_protocol::v1::schema::McpServer::Http(desc)) => {
                     desc.headers[0].value.clone()
                 }
                 _ => String::new(),
@@ -3390,7 +3390,7 @@ mod tests {
                 .activate_credential(pending, thread_id)
                 .expect("activate MCP credential");
 
-            let client = reqwest::Client::builder()
+            let client = crate::tls::http_client_builder()
                 .no_proxy()
                 .build()
                 .expect("reqwest MCP client");

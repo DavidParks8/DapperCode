@@ -15,7 +15,7 @@ export interface CreateAppStoreOptions {
 export function createAppStore(options: CreateAppStoreOptions = {}): AppStore {
   const store = createStore();
   store.set(appStoreRefAtom, store);
-  store.set(systemColorSchemeAtom, Appearance.getColorScheme() ?? 'unspecified');
+  store.set(systemColorSchemeAtom, Appearance.getColorScheme());
   store.set(appStatePersistenceAdapterAtom, options.persistence ?? createAppStatePersistence());
   return store;
 }

@@ -1,4 +1,4 @@
-use agent_client_protocol::schema::v1::{StopReason, ToolCallStatus, ToolKind};
+use agent_client_protocol::v1::schema::{StopReason, ToolCallStatus, ToolKind};
 use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
 

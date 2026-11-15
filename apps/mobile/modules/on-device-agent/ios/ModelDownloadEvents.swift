@@ -5,7 +5,7 @@ import os
 ///
 /// The `withOnDeviceAgentNative` config plugin calls this from `AppDelegate` before Expo's
 /// aggregated subscriber callback. Expo only calls the system completion handler after every
-/// responding subscriber completes, and in Expo SDK 57 neither expo-file-system's
+/// responding subscriber completes, and in Expo SDK 58 neither expo-file-system's
 /// `FileSystemBackgroundSessionHandler` (it keeps handlers for identifiers it does not own) nor
 /// `EXLegacyAppDelegateWrapper` (it never completes with zero legacy delegates) ever does for this
 /// session. Taking the system handler directly guarantees iOS learns that event handling finished.

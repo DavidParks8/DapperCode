@@ -6,10 +6,11 @@ export async function bundleNativeReactApp(
 ) {
   const mobile = path.join(e2e.worktree, 'apps/mobile');
   const app = e2e.copyIntoRun(
-    path.join(
-      mobile,
-      'local-builds/on-device-gate/Build/Products/Release-iphonesimulator/DapperCode.app',
-    ),
+    process.env.DAPPERCODE_NATIVE_TEST_APP ??
+      path.join(
+        mobile,
+        'local-builds/on-device-gate/Build/Products/Release-iphonesimulator/DapperCode.app',
+      ),
     `runtime/${name}.app`,
   );
   await e2e.run(

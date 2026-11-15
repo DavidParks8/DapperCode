@@ -50,7 +50,7 @@ beforeEach(() => {
 afterEach(() => openURL.mockRestore());
 
 async function startSignIn(runtime: FakeSettingsRuntime) {
-  fireEvent.press(screen.getByTestId('settings-local-github-sign-in'));
+  await fireEvent.press(screen.getByTestId('settings-local-github-sign-in'));
   await act(async () => {
     await runtime.pendingSignIn?.present(authorization);
   });
@@ -59,7 +59,7 @@ async function startSignIn(runtime: FakeSettingsRuntime) {
 describe('Git & GitHub settings', () => {
   it('shows and copies the device code, and opens GitHub only when asked', async () => {
     const runtime = new FakeSettingsRuntime();
-    render(wrap(runtime, createStore(), <LocalGitAccountScreen />));
+    await render(wrap(runtime, createStore(), <LocalGitAccountScreen />));
     expect(screen.getAllByText('Git & GitHub').length).toBeGreaterThan(0);
     await startSignIn(runtime);
 
@@ -68,7 +68,7 @@ describe('Git & GitHub settings', () => {
     expect(screen.getByText('Copied to the clipboard.')).toBeTruthy();
     expect(openURL).not.toHaveBeenCalled();
 
-    fireEvent.press(screen.getByTestId('settings-local-github-open'));
+    await fireEvent.press(screen.getByTestId('settings-local-github-open'));
     expect(openURL).toHaveBeenCalledWith('https://github.com/login/device');
 
     await act(async () => {
@@ -87,17 +87,17 @@ describe('Git & GitHub settings', () => {
   it('keeps an in-progress sign-in when the page is left and shows the same code on return', async () => {
     const runtime = new FakeSettingsRuntime();
     const store = createStore();
-    const first = render(wrap(runtime, store, <LocalGitAccountScreen />));
+    const first = await render(wrap(runtime, store, <LocalGitAccountScreen />));
     await startSignIn(runtime);
-    first.unmount();
+    await first.unmount();
     expect(runtime.authentication.cancelSignIn).not.toHaveBeenCalled();
 
-    render(wrap(runtime, store, <LocalGitAccountScreen />));
+    await render(wrap(runtime, store, <LocalGitAccountScreen />));
     expect(screen.getByText('WDJB-MJHT')).toBeTruthy();
     expect(runtime.signIn).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      fireEvent.press(screen.getByTestId('settings-local-github-cancel'));
+      await fireEvent.press(screen.getByTestId('settings-local-github-cancel'));
     });
     expect(runtime.authentication.cancelSignIn).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('WDJB-MJHT')).toBeNull();
@@ -112,7 +112,7 @@ describe('Git & GitHub settings', () => {
     announce.mockClear();
     const runtime = new FakeSettingsRuntime();
     const store = createStore();
-    const first = render(wrap(runtime, store, <LocalGitAccountScreen />));
+    const first = await render(wrap(runtime, store, <LocalGitAccountScreen />));
     await startSignIn(runtime);
     await act(async () => {
       await runtime.completeSignIn({
@@ -125,31 +125,31 @@ describe('Git & GitHub settings', () => {
     });
     const signedIn = (call: unknown[]) => String(call[0]).startsWith('Signed in to GitHub');
     expect(announce.mock.calls.filter(signedIn)).toEqual([['Signed in to GitHub as octocat.']]);
-    first.unmount();
+    await first.unmount();
 
     announce.mockClear();
-    const revisit = render(wrap(runtime, store, <LocalGitAccountScreen />));
+    const revisit = await render(wrap(runtime, store, <LocalGitAccountScreen />));
     expect(announce.mock.calls.filter(signedIn)).toHaveLength(0);
     await act(async () => {
-      fireEvent.press(screen.getByTestId('settings-local-github-sign-out'));
+      await fireEvent.press(screen.getByTestId('settings-local-github-sign-out'));
     });
-    revisit.unmount();
+    await revisit.unmount();
 
-    render(wrap(runtime, store, <LocalGitAccountScreen />));
+    await render(wrap(runtime, store, <LocalGitAccountScreen />));
     expect(screen.getByTestId('settings-local-github-sign-in')).toBeTruthy();
     expect(announce.mock.calls.filter(signedIn)).toHaveLength(0);
     announce.mockRestore();
   });
 
-  it('hides build configuration details when sign-in is unavailable', () => {
+  it('hides build configuration details when sign-in is unavailable', async () => {
     const runtime = new FakeSettingsRuntime();
     runtime.configured = false;
-    render(wrap(runtime, createStore(), <LocalGitAccountScreen />));
+    await render(wrap(runtime, createStore(), <LocalGitAccountScreen />));
     expect(screen.getByLabelText('GitHub sign-in, Unavailable')).toBeTruthy();
     expect(screen.queryByText(/EXPO_PUBLIC|client id|OAuth|rebuild/i)).toBeNull();
     expect(screen.queryByTestId('settings-local-github-sign-in')).toBeNull();
 
-    act(() =>
+    await act(() =>
       runtime.setPreferences({
         account: {
           providerId: 'github',
@@ -175,9 +175,9 @@ describe('Git & GitHub settings', () => {
         credentialRef: 'r',
       },
     });
-    render(wrap(runtime, createStore(), <LocalGitAccountScreen />));
+    await render(wrap(runtime, createStore(), <LocalGitAccountScreen />));
     await act(async () => {
-      fireEvent.press(screen.getByTestId('settings-local-github-sign-out'));
+      await fireEvent.press(screen.getByTestId('settings-local-github-sign-out'));
     });
     expect(runtime.signOut).toHaveBeenCalledTimes(1);
     expect(alert).not.toHaveBeenCalled();
@@ -188,7 +188,7 @@ describe('Git & GitHub settings', () => {
   it('validates the commit author, saves only changes, and confirms the save', async () => {
     const runtime = new FakeSettingsRuntime();
     runtime.setPreferences({ author: { name: 'Ada', email: 'ada@example.com' } });
-    render(wrap(runtime, createStore(), <LocalGitAccountScreen />));
+    await render(wrap(runtime, createStore(), <LocalGitAccountScreen />));
     const name = screen.getByTestId('settings-local-author-name');
     const email = screen.getByTestId('settings-local-author-email');
     expect(name.props['textContentType']).toBe('name');
@@ -199,14 +199,14 @@ describe('Git & GitHub settings', () => {
     const save = () => screen.getByTestId('settings-local-author-save');
     expect(save().props['accessibilityState']).toMatchObject({ disabled: true });
 
-    fireEvent.changeText(email, 'ada-at-example');
+    await fireEvent.changeText(email, 'ada-at-example');
     expect(screen.getByText('Enter an email address like name@example.com.')).toBeTruthy();
     expect(save().props['accessibilityState']).toMatchObject({ disabled: true });
 
-    fireEvent.changeText(email, ' ada@lovelace.dev ');
+    await fireEvent.changeText(email, ' ada@lovelace.dev ');
     expect(save().props['accessibilityState']).toMatchObject({ disabled: false });
     await act(async () => {
-      fireEvent.press(save());
+      await fireEvent.press(save());
     });
     expect(runtime.saveAuthor).toHaveBeenCalledWith({ name: 'Ada', email: ' ada@lovelace.dev ' });
     expect(screen.getByText('Commit author saved.')).toBeTruthy();
@@ -214,18 +214,18 @@ describe('Git & GitHub settings', () => {
     expect(save().props['accessibilityState']).toMatchObject({ disabled: true });
   });
 
-  it('fills an untouched author from GitHub sign-in but never overwrites edits', () => {
+  it('fills an untouched author from GitHub sign-in but never overwrites edits', async () => {
     const runtime = new FakeSettingsRuntime();
-    render(wrap(runtime, createStore(), <LocalGitAccountScreen />));
-    act(() =>
+    await render(wrap(runtime, createStore(), <LocalGitAccountScreen />));
+    await act(() =>
       runtime.setPreferences({
         author: { name: 'octocat', email: '1+octocat@users.noreply.github.com' },
       }),
     );
     expect(screen.getByTestId('settings-local-author-name').props['value']).toBe('octocat');
 
-    fireEvent.changeText(screen.getByTestId('settings-local-author-name'), 'Mona');
-    act(() => runtime.setPreferences({ author: { name: 'other', email: 'o@example.com' } }));
+    await fireEvent.changeText(screen.getByTestId('settings-local-author-name'), 'Mona');
+    await act(() => runtime.setPreferences({ author: { name: 'other', email: 'o@example.com' } }));
     expect(screen.getByTestId('settings-local-author-name').props['value']).toBe('Mona');
   });
 });

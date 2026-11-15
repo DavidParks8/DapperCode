@@ -310,12 +310,12 @@ describe('GitCheckoutScreen on this iPhone', () => {
       throw new Error('Expected the active clone to prevent removal.');
     }
     const action = { type: 'GO_BACK' };
-    previousGuard({ data: { action } });
+    previousGuard({ data: { action }, repeat: jest.fn() });
     expect(mockCheckoutDispatch).not.toHaveBeenCalled();
     const cloningAtNavigation: boolean[] = [];
     jest.mocked(router.dismissTo).mockImplementationOnce(() => {
       cloningAtNavigation.push(store.get(gitCheckoutCloningAtom));
-      previousGuard({ data: { action } });
+      previousGuard({ data: { action }, repeat: jest.fn() });
     });
     await act(async () => {
       finish();

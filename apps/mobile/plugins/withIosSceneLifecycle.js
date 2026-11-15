@@ -14,7 +14,7 @@ const legacyStartup = `#if os(iOS) || os(tvOS)
 
 function updateAppDelegate({ language, contents }) {
   if (language !== 'swift') {
-    throw new Error('iOS scene lifecycle requires the Expo SDK 57 Swift AppDelegate.');
+    throw new Error('iOS scene lifecycle requires the Expo SDK 58 Swift AppDelegate.');
   }
   if (contents.includes(sceneDelegate) && !contents.includes('factory.startReactNative(')) {
     return contents;
@@ -32,9 +32,9 @@ function updateAppDelegate({ language, contents }) {
 
 function withIosSceneLifecycle(config) {
   const [major, minor, patch] = require('expo/package.json').version.split('.').map(Number);
-  if (major !== 57 || minor !== 0 || !Number.isInteger(patch) || patch < 23) {
+  if (major !== 58 || minor !== 0 || !Number.isInteger(patch)) {
     throw new Error(
-      'iOS scene lifecycle requires Expo 57.0.23+; review this plugin on SDK upgrades.',
+      'iOS scene lifecycle requires Expo SDK 58; review this plugin on SDK upgrades.',
     );
   }
   config = withAppDelegate(config, (modConfig) => {
@@ -54,11 +54,23 @@ function withIosSceneLifecycle(config) {
       },
     };
     const existing = modConfig.modResults.UIApplicationSceneManifest;
+    const expoManifest = {
+      ...manifest,
+      UISceneConfigurations: {
+        UIWindowSceneSessionRoleApplication: [
+          {
+            UISceneConfigurationName: 'Default Configuration',
+            UISceneDelegateClassName: '$(PRODUCT_MODULE_NAME).SceneDelegate',
+          },
+        ],
+      },
+    };
     // Parsed plist dictionaries have null prototypes; compare their data, not their prototypes.
-    if (
-      existing !== undefined &&
-      !isDeepStrictEqual(JSON.parse(JSON.stringify(existing)), manifest)
-    ) {
+    const existingData = existing === undefined ? undefined : JSON.parse(JSON.stringify(existing));
+    if (existingData !== undefined && !isDeepStrictEqual(existingData, manifest)) {
+      if (isDeepStrictEqual(existingData, expoManifest)) {
+        return modConfig;
+      }
       throw new Error('Refusing to replace a custom UIApplicationSceneManifest.');
     }
     modConfig.modResults.UIApplicationSceneManifest = manifest;

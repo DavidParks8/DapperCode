@@ -15,10 +15,6 @@ import { useAppTheme } from '@shared/theme';
 import { routes } from '@shell/navigation/routes';
 import { useKeyboardFocusBlocker } from '@shell/state/keyboard';
 
-export const unstable_settings = {
-  anchor: 'chats/[chatId]',
-};
-
 export default function DrawerLayout() {
   const layout = useShellLayout();
   return <ResponsiveDrawerLayout layout={layout} />;
@@ -44,7 +40,11 @@ export function ResponsiveDrawerLayout({ layout }: { layout: ShellLayout }) {
         overlayColor: theme.colors.transparent,
         sceneStyle: { backgroundColor: theme.colors.bgMain },
       }}
-    />
+    >
+      <Drawer.Screen name="chats/[chatId]" />
+      <Drawer.Screen name="settings" />
+      <Drawer.Screen name="browser" />
+    </Drawer>
   );
 }
 

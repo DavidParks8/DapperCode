@@ -87,6 +87,7 @@ mod services;
 #[cfg(test)]
 mod source_policy;
 mod storage;
+mod tls;
 
 use attachments::{
     infer_image_content_type_from_path, save_multipart_attachment, ATTACHMENT_MULTIPART_MAX_BYTES,

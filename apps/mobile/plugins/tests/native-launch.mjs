@@ -8,6 +8,8 @@ export const contract = {
 export default async function scenario(e2e) {
   const bundleId = 'com.dappermagna.tethercode';
   const runtime = process.env.IOS_RUNTIME ?? 'com.apple.CoreSimulator.SimRuntime.iOS-27-0';
+  const deviceType =
+    process.env.IOS_DEVICE_TYPE ?? 'com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro';
   const builtApp =
     process.env.IOS_LAUNCH_APP ??
     path.join(
@@ -81,18 +83,19 @@ export default async function scenario(e2e) {
       await e2e.check('requested iOS runtime is available', () =>
         runtimes.runtimes.some((entry) => entry.identifier === runtime && entry.isAvailable),
       );
+      await e2e.check('requested device is supported by the runtime', () =>
+        runtimes.runtimes.some(
+          (entry) =>
+            entry.identifier === runtime &&
+            entry.supportedDeviceTypes.some((type) => type.identifier === deviceType),
+        ),
+      );
       const app = e2e.copyIntoRun(builtApp, 'runtime/DapperCode.app');
       const bundle = await e2e.run('test', ['-s', path.join(app, 'main.jsbundle')]);
       await e2e.expectEqual('standalone release JavaScript is embedded', bundle.code, 0);
       await e2e.run('codesign', ['--verify', '--deep', '--strict', app]);
       simulator = (
-        await e2e.run('xcrun', [
-          'simctl',
-          'create',
-          e2e.runId,
-          'com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro',
-          runtime,
-        ])
+        await e2e.run('xcrun', ['simctl', 'create', e2e.runId, deviceType, runtime])
       ).stdout.trim();
       await e2e.expectMatch('run owns a fresh simulator', simulator, /^[A-F0-9-]{36}$/i);
       await e2e.run('xcrun', ['simctl', 'boot', simulator]);
@@ -139,12 +142,12 @@ export default async function scenario(e2e) {
     });
     await e2e.phase('cold-launch', async () => {
       await e2e.run('xcrun', ['simctl', 'launch', simulator, bundleId]);
-      await assertScreen('Private connection');
+      await assertScreen('Your machine');
     });
     await e2e.phase('interaction', async () => {
       const element = await request(`/session/${sessionId}/element`, 'POST', {
         using: '-ios predicate string',
-        value: 'label CONTAINS "Private connection" AND visible == true',
+        value: 'name == "onboarding-choice-bridge" AND visible == true',
       });
       const elementId = element['element-6066-11e4-a52e-4f735466cecf'];
       await request(`/session/${sessionId}/element/${elementId}/click`, 'POST', {});
@@ -158,14 +161,14 @@ export default async function scenario(e2e) {
         1,
       );
       await e2e.run('xcrun', ['simctl', 'launch', simulator, bundleId]);
-      await assertScreen('Private connection');
+      await assertScreen('Your machine');
     });
     await e2e.phase('resume', async () => {
       const processId = lastSource.match(/processId="(\d+)"/)?.[1];
       await e2e.check('foreground process is identified', () => Boolean(processId));
-      await execute('mobile: pressButton', { name: 'home' });
+      await execute('mobile: activateApp', { bundleId: 'com.apple.Preferences' });
       await e2e.waitFor(
-        'home moves the live app into background',
+        'opening Settings moves the live app into background',
         async () => [2, 3].includes(await execute('mobile: queryAppState', { bundleId })),
         { timeoutMs: 15000, intervalMs: 250 },
       );
@@ -173,7 +176,7 @@ export default async function scenario(e2e) {
         [2, 3].includes(await execute('mobile: queryAppState', { bundleId })),
       );
       await execute('mobile: activateApp', { bundleId });
-      await assertScreen('Private connection');
+      await assertScreen('Your machine');
       await e2e.expectEqual(
         'foreground resumes the same process rather than relaunching a crashed app',
         lastSource.match(/processId="(\d+)"/)?.[1],
@@ -184,6 +187,7 @@ export default async function scenario(e2e) {
         'io',
         simulator,
         'screenshot',
+        '--display=primary',
         path.join(e2e.logDir, 'onboarding.png'),
       ]);
     });
@@ -191,12 +195,12 @@ export default async function scenario(e2e) {
       await execute('mobile: deepLink', { url: 'dappercode://launch-test-missing', bundleId });
       await assertScreen('Page not found');
       await execute('mobile: deepLink', { url: 'dappercode://onboarding', bundleId });
-      await assertScreen('Private connection');
+      await assertScreen('Your machine');
       await execute('mobile: terminateApp', { bundleId });
       await execute('mobile: deepLink', { url: 'dappercode://launch-test-missing', bundleId });
       await assertScreen('Page not found');
       await execute('mobile: deepLink', { url: 'dappercode://onboarding', bundleId });
-      await assertScreen('Private connection');
+      await assertScreen('Your machine');
     });
   } catch (error) {
     if (lastSource) process.stderr.write(`\nLAST_NATIVE_UI\n${lastSource}\n`);

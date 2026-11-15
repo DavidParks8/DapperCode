@@ -69,7 +69,7 @@ export function BrowserPreviewSurface({
   iframeStyle: CSSProperties;
   handleNativePreviewViewportLayout: (event: LayoutChangeEvent) => void;
   nativeShellMode: string | null;
-  webViewRef: React.RefObject<WebView | null>;
+  webViewRef: React.RefObject<WebView<unknown> | null>;
   webViewBottomInset: number;
   nativeContentMode: 'mobile' | 'desktop' | undefined;
   nativeUserAgent: string | undefined;
@@ -133,7 +133,7 @@ export function BrowserPreviewSurface({
         <View style={styles.previewViewport} onLayout={handleNativePreviewViewportLayout}>
           {nativeShellMode ? (
             <View style={styles.previewViewport}>
-              <WebView
+              <WebView<unknown>
                 key={`${previewUrl}-${nativeReloadKey}-${viewportPreset}`}
                 ref={webViewRef}
                 source={{ uri: previewUrl }}
@@ -199,7 +199,7 @@ export function BrowserPreviewSurface({
                   },
                 ]}
               >
-                <WebView
+                <WebView<unknown>
                   key={`${previewUrl}-${nativeReloadKey}-${viewportPreset}`}
                   ref={webViewRef}
                   source={{ uri: previewUrl }}
@@ -250,7 +250,7 @@ export function BrowserPreviewSurface({
         </View>
       ) : (
         <View style={styles.previewViewport}>
-          <WebView
+          <WebView<unknown>
             key={`${previewUrl}-${nativeReloadKey}-${viewportPreset}`}
             ref={webViewRef}
             source={{ uri: previewUrl }}

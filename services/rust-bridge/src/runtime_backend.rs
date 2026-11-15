@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     ContentBlock, ElicitationContentValue, NewSessionRequest, ResourceLink,
     SessionConfigOptionValue,
 };
@@ -794,8 +794,8 @@ async fn discover_subagent_session(
         };
         if matches!(
             tool.status,
-            agent_client_protocol::schema::v1::ToolCallStatus::Completed
-                | agent_client_protocol::schema::v1::ToolCallStatus::Failed
+            agent_client_protocol::v1::schema::ToolCallStatus::Completed
+                | agent_client_protocol::v1::schema::ToolCallStatus::Failed
         ) {
             // The tool named its child on the way out; the header path owns it from here.
             break;
@@ -988,8 +988,8 @@ async fn process_event_side_effects(
     {
         let settled = matches!(
             status,
-            agent_client_protocol::schema::v1::ToolCallStatus::Completed
-                | agent_client_protocol::schema::v1::ToolCallStatus::Failed
+            agent_client_protocol::v1::schema::ToolCallStatus::Completed
+                | agent_client_protocol::v1::schema::ToolCallStatus::Failed
         );
         if !settled
             && crate::acp::snapshot::is_subagent_task_tool(*kind, title)
@@ -1022,7 +1022,7 @@ async fn process_event_side_effects(
     let related_terminal = match event {
         crate::acp::events::CanonicalEvent::RunFinished {
             thread_id,
-            stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
+            stop_reason: agent_client_protocol::v1::schema::StopReason::Cancelled,
             generation,
             ..
         } => Some((thread_id.as_str(), *generation, "cancelled")),
@@ -2737,7 +2737,7 @@ pub(super) fn bridge_prompt(params: &Value) -> Result<Vec<ContentBlock>, String>
 mod client_request_tests {
     use super::*;
     use crate::acp::events::{canonical_event_channel, CanonicalEvent, MessageRole};
-    use agent_client_protocol::schema::v1::{ToolCallStatus, ToolKind};
+    use agent_client_protocol::v1::schema::{ToolCallStatus, ToolKind};
     use std::path::PathBuf;
     use tokio::{
         sync::{oneshot, Notify, Semaphore},

@@ -69,22 +69,18 @@ for (const dependencyPath of yamlPaths) {
   });
 }
 
-test("expo-router's query parser decodes through the patched URI decoder", () => {
-  const queryString = loadDependency('expo-router', 'query-string');
-  const decode = loadDependency('expo-router', 'query-string', 'decode-uri-component');
-
-  // query-string@7 calls require('decode-uri-component') directly, so the patched release must
-  // stay a callable CommonJS export rather than an ES module namespace.
-  assert.equal(typeof decode, 'function');
+test("expo-router's query parser handles malformed URI components in linear time", () => {
+  const routerRequire = createRequire(mobileRequire.resolve('expo-router'));
+  const { parseQueryParams } = routerRequire('./fork/getStateFromPath-forks');
+  const parse = (query) => parseQueryParams(`/?${query}`, { name: 'test' });
   assert.deepEqual(
-    { ...queryString.parse('mark=%E2%9C%93&bare=%&mixed=%C3%A5%ZZ') },
+    { ...parse('mark=%E2%9C%93&bare=%&mixed=%C3%A5%ZZ') },
     { mark: '✓', bare: '%', mixed: 'å%ZZ' },
   );
 
-  // GHSA-qr28-fpjm-wq7f: malformed percent runs must decode in linear time. Vulnerable releases
-  // take many seconds on this input; the patched decoder finishes it in milliseconds.
+  // GHSA-qr28-fpjm-wq7f: malformed percent runs must decode in linear time.
   const malformed = `${'%C3'.repeat(20_000)}%`;
   const started = performance.now();
-  assert.equal(decode(malformed), malformed);
+  assert.equal(parse(`value=${malformed}`).value, `${'\uFFFD'.repeat(20_000)}%`);
   assert.ok(performance.now() - started < 1_000, 'malformed percent runs decode in linear time');
 });

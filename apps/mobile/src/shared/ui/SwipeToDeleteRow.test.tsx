@@ -159,6 +159,37 @@ describe('SwipeToDeleteRow', () => {
     expect(translateX()).toBe(-ROW_WIDTH);
   });
 
+  it('does not delete when the native gesture is cancelled after a full-width drag', () => {
+    const onDelete = jest.fn();
+    const { translateX } = renderRow(onDelete);
+    act(() => {
+      simulatePan(latestMockGesture('Pan'), [{ translationX: -220 }], { canceled: true });
+    });
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(translateX()).toBe(0);
+    expect(latestMockGesture('Pan').config['activeOffsetX']).toBe(-6);
+  });
+
+  it('restores an open row when a rightward gesture is cancelled', () => {
+    const onDelete = jest.fn();
+    const { translateX } = renderRow(onDelete);
+    act(() => {
+      simulatePan(latestMockGesture('Pan'), [{ translationX: -70 }], { velocityX: 0 });
+    });
+    expect(translateX()).toBe(-SWIPE_ACTION_WIDTH);
+
+    const gesture = latestMockGesture('Pan');
+    act(() => {
+      gesture.onStart?.({});
+      gesture.onUpdate?.({ translationX: 80 });
+    });
+    expect(translateX()).toBe(-SWIPE_ACTION_WIDTH + 80);
+    act(() => gesture.onEnd?.({ canceled: true }));
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(translateX()).toBe(-SWIPE_ACTION_WIDTH);
+    expect(latestMockGesture('Pan').config['activeOffsetX']).toEqual([-6, 6]);
+  });
+
   it('never drags past the row or back beyond its resting position', () => {
     const { translateX } = renderRow(jest.fn());
 

@@ -557,7 +557,7 @@ fn default_worker_start_timeout_ms() -> u64 {
 /// profiles and can run their bridges side by side.
 pub fn profile_id_for(workspace: &Path) -> String {
     let digest = Sha256::digest(workspace.to_string_lossy().as_bytes());
-    let fingerprint: String = format!("{digest:x}").chars().take(12).collect();
+    let fingerprint: String = hex::encode(digest).chars().take(12).collect();
     let slug = workspace
         .file_name()
         .and_then(|name| name.to_str())
@@ -781,6 +781,7 @@ mod tests {
         let second = profile_id_for(Path::new("/Users/dev/worktrees/project"));
         assert_ne!(first, second);
         assert_eq!(first, profile_id_for(Path::new("/Users/dev/code/project")));
+        assert_eq!(first, "project-41d136b16318");
         assert!(first.starts_with("project-"));
         assert!(profile_id_for(Path::new("/Users/dev/My Repo!")).starts_with("my-repo-"));
     }

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use agent_client_protocol::schema::v1::{ContentBlock, SessionId};
+use agent_client_protocol::v1::schema::{ContentBlock, SessionId};
 use futures_util::future::BoxFuture;
 use reqwest::{Client, StatusCode};
 

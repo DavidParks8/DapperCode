@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react-native';
 import { fetch } from 'expo/fetch';
-import { AccessibilityInfo, Alert, ScrollView } from 'react-native';
+import { AccessibilityInfo, Alert } from 'react-native';
 
 import { router } from 'expo-router';
 import { resetRouterMock } from '@shared/testing/expoRouterMock';
@@ -104,7 +104,7 @@ describe('OpenCode skill management over the real on-device runtime', () => {
     expect(row('review').getByText('/review · Shown to the model')).toBeTruthy();
 
     await act(async () => {
-      fireEvent(screen.getByLabelText('Use skills'), 'valueChange', false);
+      await fireEvent(screen.getByLabelText('Use skills'), 'valueChange', false);
     });
     await settle();
     expect(runtime.skills.skillsEnabled()).toBe(false);
@@ -116,7 +116,7 @@ describe('OpenCode skill management over the real on-device runtime', () => {
     expect(row('review').getByText('/review · Hidden from the model')).toBeTruthy();
 
     await act(async () => {
-      fireEvent(screen.getByLabelText('Use skills'), 'valueChange', true);
+      await fireEvent(screen.getByLabelText('Use skills'), 'valueChange', true);
     });
     await settle();
     expect(runtime.skills.skillsEnabled()).toBe(true);
@@ -132,12 +132,12 @@ describe('OpenCode skill management over the real on-device runtime', () => {
     expect(
       row('internal-docs').getByText('Deny · opencode.json permission.skill: internal-*'),
     ).toBeTruthy();
-    fireEvent.press(screen.getByTestId('settings-local-skill-permission-internal-docs'));
+    await fireEvent.press(screen.getByTestId('settings-local-skill-permission-internal-docs'));
     expect(screen.getByLabelText('Ask').props['accessibilityHint']).toBe(
       'The model asks before loading it. Running /internal-docs or @internal-docs yourself counts as consent.',
     );
     await act(async () => {
-      fireEvent.press(screen.getByLabelText('Allow'));
+      await fireEvent.press(screen.getByLabelText('Allow'));
     });
     await settle();
     expect(row('internal-docs').getByText('Allow · your choice')).toBeTruthy();
@@ -159,9 +159,9 @@ describe('OpenCode skill management over the real on-device runtime', () => {
     expect(screen.getByText('Warnings')).toBeTruthy();
     expect(screen.queryByText('Skipped')).toBeNull();
 
-    fireEvent.press(screen.getByLabelText('Permission rules, 1'));
+    await fireEvent.press(screen.getByLabelText('Permission rules, 1'));
     expect(router.push).toHaveBeenLastCalledWith(routes.settingsSkillRules('on-device'));
-    fireEvent.press(screen.getByLabelText('Catalogs'));
+    await fireEvent.press(screen.getByLabelText('Catalogs'));
     expect(router.push).toHaveBeenLastCalledWith(
       routes.settingsSkillCatalogs('on-device', 'ws-one'),
     );
@@ -175,14 +175,20 @@ describe('OpenCode skill management over the real on-device runtime', () => {
     expect(screen.getByText(/^No rules\./u)).toBeTruthy();
     expect(screen.getByLabelText('Deny, Active')).toBeTruthy();
 
-    fireEvent.changeText(screen.getByTestId('settings-local-skill-rule-pattern'), 'internal-*');
+    await fireEvent.changeText(
+      screen.getByTestId('settings-local-skill-rule-pattern'),
+      'internal-*',
+    );
     await act(async () => {
-      fireEvent.press(screen.getByTestId('settings-local-skill-rule-add'));
+      await fireEvent.press(screen.getByTestId('settings-local-skill-rule-add'));
     });
-    fireEvent.press(screen.getByLabelText('Ask'));
-    fireEvent.changeText(screen.getByTestId('settings-local-skill-rule-pattern'), 'internal-docs');
+    await fireEvent.press(screen.getByLabelText('Ask'));
+    await fireEvent.changeText(
+      screen.getByTestId('settings-local-skill-rule-pattern'),
+      'internal-docs',
+    );
     await act(async () => {
-      fireEvent.press(screen.getByTestId('settings-local-skill-rule-add'));
+      await fireEvent.press(screen.getByTestId('settings-local-skill-rule-add'));
     });
     expect(runtime.skills.rules()).toEqual([
       { pattern: 'internal-*', effect: 'deny' },
@@ -205,21 +211,24 @@ describe('OpenCode skill management over the real on-device runtime', () => {
       rule: { pattern: 'internal-docs', origin: 'user' },
     });
 
-    fireEvent.changeText(screen.getByTestId('settings-local-skill-rule-pattern'), 'x'.repeat(129));
+    await fireEvent.changeText(
+      screen.getByTestId('settings-local-skill-rule-pattern'),
+      'x'.repeat(129),
+    );
     await act(async () => {
-      fireEvent.press(screen.getByTestId('settings-local-skill-rule-add'));
+      await fireEvent.press(screen.getByTestId('settings-local-skill-rule-add'));
     });
     expect(screen.getByText(/rules of 1-128 characters each/u)).toBeTruthy();
     expect(runtime.skills.rules()).toHaveLength(2);
 
     await act(async () => {
-      fireEvent.press(screen.getByLabelText('Delete rule 1, internal-*'));
+      await fireEvent.press(screen.getByLabelText('Delete rule 1, internal-*'));
     });
     expect(runtime.skills.rules()).toEqual([{ pattern: 'internal-docs', effect: 'ask' }]);
 
     expect(screen.getByText('Denied skills')).toBeTruthy();
     await act(async () => {
-      fireEvent.press(screen.getByLabelText('Remove denial for review'));
+      await fireEvent.press(screen.getByLabelText('Remove denial for review'));
     });
     await settle();
     expect(runtime.preferences().disabledSkills).toEqual([]);
@@ -253,24 +262,25 @@ describe('OpenCode skill management over the real on-device runtime', () => {
     expect(screen.queryByLabelText(`Remove ${TEAM}`)).toBeNull();
 
     // The URL field sits at the bottom; the page scrolls a focused field above the keyboard.
-    expect(screen.UNSAFE_getByType(ScrollView).props['automaticallyAdjustKeyboardInsets']).toBe(
-      true,
-    );
+    expect(
+      screen.container.queryAll((node) => node.props['automaticallyAdjustKeyboardInsets'])[0]
+        ?.props['automaticallyAdjustKeyboardInsets'],
+    ).toBe(true);
     // Invalid URLs are refused inline; adding a valid one does not download it.
-    fireEvent.changeText(
+    await fireEvent.changeText(
       screen.getByTestId('settings-local-skill-catalog-url'),
       'http://insecure.example/skills',
     );
     await act(async () => {
-      fireEvent.press(screen.getByTestId('settings-local-skill-catalog-add'));
+      await fireEvent.press(screen.getByTestId('settings-local-skill-catalog-add'));
     });
     expect(screen.getByText(/must be https:\/\/ URLs/u)).toBeTruthy();
-    fireEvent.changeText(
+    await fireEvent.changeText(
       screen.getByTestId('settings-local-skill-catalog-url'),
       'https://cat.example/skills',
     );
     await act(async () => {
-      fireEvent.press(screen.getByTestId('settings-local-skill-catalog-add'));
+      await fireEvent.press(screen.getByTestId('settings-local-skill-catalog-add'));
     });
     await settle();
     expect(await screen.findByText(PERSONAL)).toBeTruthy();
@@ -279,7 +289,7 @@ describe('OpenCode skill management over the real on-device runtime', () => {
     expect(requested()).toEqual([]);
 
     // Download is explicit, busy while it runs, and blocks a second download.
-    fireEvent.press(screen.getByLabelText(`Download ${PERSONAL}`));
+    await fireEvent.press(screen.getByLabelText(`Download ${PERSONAL}`));
     await waitFor(() =>
       expect(
         screen.getByLabelText(`Download ${PERSONAL}`).props['accessibilityState'],
@@ -306,7 +316,7 @@ describe('OpenCode skill management over the real on-device runtime', () => {
 
     // A failed project catalog download is reported beside that catalog.
     await act(async () => {
-      fireEvent.press(screen.getByLabelText(`Download ${TEAM}`));
+      await fireEvent.press(screen.getByLabelText(`Download ${TEAM}`));
     });
     await settle();
     expect(
@@ -314,13 +324,13 @@ describe('OpenCode skill management over the real on-device runtime', () => {
     ).toBeTruthy();
 
     // Removing a personal catalog asks first and deletes its downloaded skills.
-    fireEvent.press(screen.getByLabelText(`Remove ${PERSONAL}`));
+    await fireEvent.press(screen.getByLabelText(`Remove ${PERSONAL}`));
     expect(jest.mocked(Alert.alert).mock.calls.at(-1)?.[0]).toBe('Remove catalog?');
     await act(async () => {
       lastAlertButton('Cancel').onPress?.();
     });
     expect(screen.getByText(PERSONAL)).toBeTruthy();
-    fireEvent.press(screen.getByLabelText(`Remove ${PERSONAL}`));
+    await fireEvent.press(screen.getByLabelText(`Remove ${PERSONAL}`));
     await act(async () => {
       lastAlertButton('Remove').onPress?.();
     });

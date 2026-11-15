@@ -56,7 +56,7 @@ export function getOnDeviceNativeServices(): OnDeviceNativeServices {
           const file = await target.getDownloadedModelFile(id);
           if (file && observedFiles[id]?.uri !== file.uri) {
             observedFiles[id] = { uri: file.uri };
-            new File(Paths.document, 'product-model-files.json').write(
+            new File(Paths.document, 'product-model-files.json').writeSync(
               JSON.stringify(observedFiles),
             );
           }

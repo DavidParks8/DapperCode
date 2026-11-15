@@ -114,15 +114,15 @@ async function settle(ms = 0): Promise<void> {
   });
 }
 
-function mount(client: WorkspaceHostClient | null, cwd: string | null = CWD, focused = true) {
-  return renderHook(
+async function mount(client: WorkspaceHostClient | null, cwd: string | null = CWD, focused = true) {
+  return await renderHook(
     (props: { client: WorkspaceHostClient | null; cwd: string | null; focused: boolean }) =>
       useWorkspaceFiles({ host: props.client, cwd: props.cwd, focused: props.focused }),
     { initialProps: { client, cwd, focused } },
   );
 }
 
-async function openNotes(hook: ReturnType<typeof mount>, path = 'notes.md') {
+async function openNotes(hook: Awaited<ReturnType<typeof mount>>, path = 'notes.md') {
   await act(async () => {
     await hook.result.current.openFile(entry(path));
   });
@@ -169,7 +169,7 @@ describe('file path and size helpers', () => {
 
 describe('files controller without a workspace', () => {
   it('does nothing and refuses every write until a host and workspace exist', async () => {
-    const hook = mount(null, null);
+    const hook = await mount(null, null);
     await settle(FILES_CHANGE_POLL_MS * 2);
 
     expect(hook.result.current.listing).toBeNull();
@@ -195,7 +195,7 @@ describe('files controller folder listing', () => {
   it('shows friendly copy for a typed listing failure and stops loading', async () => {
     const { host, client } = createHost();
     host.listFiles.mockRejectedValueOnce(nativeError('WORKSPACE_NOT_FOUND'));
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
 
     expect(hook.result.current.loading).toBe(false);
@@ -208,10 +208,10 @@ describe('files controller folder listing', () => {
     const slowRoot = deferred<WorkspaceFileListResponse>();
     const slowRootFailure = deferred<WorkspaceFileListResponse>();
     host.listFiles.mockReturnValueOnce(slowRoot.promise);
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
 
-    act(() => hook.result.current.openDirectory('src'));
+    await act(() => hook.result.current.openDirectory('src'));
     await settle();
     expect(hook.result.current.directory).toBe('src');
     expect(hook.result.current.listing?.path).toBe('src');
@@ -223,8 +223,8 @@ describe('files controller folder listing', () => {
 
     // A late failure for a folder already left is not shown either.
     host.listFiles.mockReturnValueOnce(slowRootFailure.promise);
-    act(() => hook.result.current.openDirectory(''));
-    act(() => hook.result.current.openDirectory('src'));
+    await act(() => hook.result.current.openDirectory(''));
+    await act(() => hook.result.current.openDirectory('src'));
     slowRootFailure.reject(nativeError('PATH_NOT_FOUND'));
     await settle();
     expect(hook.result.current.directory).toBe('src');
@@ -233,11 +233,11 @@ describe('files controller folder listing', () => {
 
   it('refuses to change folders while a file is open', async () => {
     const { client } = createHost();
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
     await openNotes(hook);
 
-    act(() => hook.result.current.openDirectory('src'));
+    await act(() => hook.result.current.openDirectory('src'));
     expect(hook.result.current.directory).toBe('');
     expect(hook.result.current.file?.path).toBe('notes.md');
   });
@@ -246,7 +246,7 @@ describe('files controller folder listing', () => {
 describe('files controller opening and editing', () => {
   it('reports a failed open with the host message, or a fallback naming the file', async () => {
     const { host, client } = createHost();
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
 
     host.readFile.mockRejectedValueOnce(nativeError('FILE_NOT_TEXT'));
@@ -269,16 +269,16 @@ describe('files controller opening and editing', () => {
       truncated: true,
       totalBytes: 10_000_000,
     });
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
     await openNotes(hook, 'big.log');
 
-    act(() => hook.result.current.setDraft('changed'));
+    await act(() => hook.result.current.setDraft('changed'));
     expect(hook.result.current.file?.draft).toBe('head');
     expect(hook.result.current.dirty).toBe(false);
 
     let closed = false;
-    act(() => {
+    await act(() => {
       closed = hook.result.current.closeFile();
     });
     expect(closed).toBe(true);
@@ -287,20 +287,20 @@ describe('files controller opening and editing', () => {
 
   it('refuses to close a dirty file, explains why, and clears the warning on the next edit', async () => {
     const { client } = createHost();
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
     await openNotes(hook);
 
-    act(() => hook.result.current.setDraft('hello world'));
+    await act(() => hook.result.current.setDraft('hello world'));
     let closed = true;
-    act(() => {
+    await act(() => {
       closed = hook.result.current.closeFile();
     });
     expect(closed).toBe(false);
     expect(hook.result.current.unsavedBlocked).toBe(true);
     expect(hook.result.current.file?.draft).toBe('hello world');
 
-    act(() => hook.result.current.setDraft('hello world!'));
+    await act(() => hook.result.current.setDraft('hello world!'));
     expect(hook.result.current.unsavedBlocked).toBe(false);
   });
 });
@@ -308,10 +308,10 @@ describe('files controller opening and editing', () => {
 describe('files controller saving', () => {
   it('saves the draft, adopts the new revision, and refreshes the listing', async () => {
     const { host, client } = createHost();
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
     await openNotes(hook);
-    act(() => hook.result.current.setDraft('hello world'));
+    await act(() => hook.result.current.setDraft('hello world'));
     host.listFiles.mockClear();
 
     let saved = false;
@@ -335,10 +335,10 @@ describe('files controller saving', () => {
 
   it('flags a revision conflict, then overwrites with the latest revision on request', async () => {
     const harness = createHost();
-    const hook = mount(harness.client);
+    const hook = await mount(harness.client);
     await settle();
     await openNotes(hook);
-    act(() => hook.result.current.setDraft('mine'));
+    await act(() => hook.result.current.setDraft('mine'));
     harness.changeOnDisk('notes.md', 'theirs');
 
     let saved = true;
@@ -369,10 +369,10 @@ describe('files controller saving', () => {
 
   it('keeps a non-conflict save failure out of the conflict flow', async () => {
     const { host, client } = createHost();
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
     await openNotes(hook);
-    act(() => hook.result.current.setDraft('x'.repeat(10)));
+    await act(() => hook.result.current.setDraft('x'.repeat(10)));
     host.writeFile.mockRejectedValueOnce(nativeError('FILE_TOO_LARGE'));
 
     await act(async () => {
@@ -385,10 +385,10 @@ describe('files controller saving', () => {
 
   it('reports an overwrite whose fresh read fails, keeping the draft', async () => {
     const { host, client } = createHost();
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
     await openNotes(hook);
-    act(() => hook.result.current.setDraft('mine'));
+    await act(() => hook.result.current.setDraft('mine'));
     host.readFile.mockRejectedValueOnce(nativeError('PATH_NOT_FOUND'));
 
     let saved = true;
@@ -407,7 +407,7 @@ describe('files controller saving', () => {
 describe('files controller outside changes', () => {
   it('reloads a clean open file when the change token moves', async () => {
     const harness = createHost();
-    const hook = mount(harness.client);
+    const hook = await mount(harness.client);
     await settle();
     await openNotes(hook);
     // The first poll only records the starting token.
@@ -426,11 +426,11 @@ describe('files controller outside changes', () => {
 
   it('flags, but never reloads, a dirty file changed on disk; Discard then shows the disk copy', async () => {
     const harness = createHost();
-    const hook = mount(harness.client);
+    const hook = await mount(harness.client);
     await settle();
     await openNotes(hook);
     await settle(FILES_CHANGE_POLL_MS);
-    act(() => hook.result.current.setDraft('my edit'));
+    await act(() => hook.result.current.setDraft('my edit'));
     harness.host.readFile.mockClear();
 
     harness.changeOnDisk('notes.md', 'agent edit');
@@ -452,11 +452,11 @@ describe('files controller outside changes', () => {
 
   it('discards edits locally without a read when nothing changed on disk', async () => {
     const { host, client } = createHost();
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
     await openNotes(hook);
-    act(() => hook.result.current.setDraft('my edit'));
-    act(() => {
+    await act(() => hook.result.current.setDraft('my edit'));
+    await act(() => {
       hook.result.current.closeFile();
     });
     host.readFile.mockClear();
@@ -471,7 +471,7 @@ describe('files controller outside changes', () => {
 
   it('does not poll while the app is in the background or inactive', async () => {
     const harness = createHost();
-    const hook = mount(harness.client);
+    const hook = await mount(harness.client);
     await settle();
     await openNotes(hook);
     await settle(FILES_CHANGE_POLL_MS);
@@ -492,7 +492,7 @@ describe('files controller outside changes', () => {
 
   it('stops polling when unfocused and treats an unreadable token as no change', async () => {
     const harness = createHost();
-    const hook = mount(harness.client);
+    const hook = await mount(harness.client);
     await settle();
     await openNotes(hook);
     await settle(FILES_CHANGE_POLL_MS);
@@ -504,24 +504,24 @@ describe('files controller outside changes', () => {
     expect(hook.result.current.error).toBeNull();
 
     harness.host.changeToken.mockClear();
-    hook.rerender({ client: harness.client, cwd: CWD, focused: false });
+    await hook.rerender({ client: harness.client, cwd: CWD, focused: false });
     await settle(FILES_CHANGE_POLL_MS * 2);
     expect(harness.host.changeToken).not.toHaveBeenCalled();
   });
 
   it('drops a background reload when a save lands while it is in flight', async () => {
     const harness = createHost();
-    const hook = mount(harness.client);
+    const hook = await mount(harness.client);
     await settle();
     await openNotes(hook);
     const slowRead = deferred<WorkspaceFileReadResponse>();
     harness.host.readFile.mockReturnValueOnce(slowRead.promise);
 
     let reload!: Promise<void>;
-    act(() => {
+    await act(() => {
       reload = hook.result.current.reloadFromDisk();
     });
-    act(() => hook.result.current.setDraft('saved meanwhile'));
+    await act(() => hook.result.current.setDraft('saved meanwhile'));
     await act(async () => {
       await hook.result.current.save();
     });
@@ -547,7 +547,7 @@ describe('files controller outside changes', () => {
 
   it('reports a background reload failure without touching the open file', async () => {
     const { host, client } = createHost();
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
     await openNotes(hook);
     host.readFile.mockRejectedValueOnce(new Error(''));
@@ -561,7 +561,7 @@ describe('files controller outside changes', () => {
 
   it('refresh re-reads the token and listing and reloads only a clean file', async () => {
     const harness = createHost();
-    const hook = mount(harness.client);
+    const hook = await mount(harness.client);
     await settle();
     await openNotes(hook);
 
@@ -571,7 +571,7 @@ describe('files controller outside changes', () => {
     });
     expect(hook.result.current.file?.original).toBe('v2');
 
-    act(() => hook.result.current.setDraft('dirty'));
+    await act(() => hook.result.current.setDraft('dirty'));
     harness.changeOnDisk('notes.md', 'v3');
     harness.host.readFile.mockClear();
     await act(async () => {
@@ -588,7 +588,7 @@ describe('files controller outside changes', () => {
 describe('files controller background reload races', () => {
   it('does nothing when asked to reload with no file open', async () => {
     const { host, client } = createHost();
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
 
     await act(async () => {
@@ -599,17 +599,17 @@ describe('files controller background reload races', () => {
 
   it('keeps edits typed while a reload is in flight and flags the disk change instead', async () => {
     const { host, client } = createHost();
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
     await openNotes(hook);
     const slowRead = deferred<WorkspaceFileReadResponse>();
     host.readFile.mockReturnValueOnce(slowRead.promise);
 
     let reload!: Promise<void>;
-    act(() => {
+    await act(() => {
       reload = hook.result.current.reloadFromDisk();
     });
-    act(() => hook.result.current.setDraft('typed during reload'));
+    await act(() => hook.result.current.setDraft('typed during reload'));
     slowRead.resolve({
       path: 'notes.md',
       content: 'agent edit',
@@ -631,17 +631,17 @@ describe('files controller background reload races', () => {
 
   it('does not reopen a file closed while its reload was in flight', async () => {
     const { host, client } = createHost();
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
     await openNotes(hook);
     const slowRead = deferred<WorkspaceFileReadResponse>();
     host.readFile.mockReturnValueOnce(slowRead.promise);
 
     let reload!: Promise<void>;
-    act(() => {
+    await act(() => {
       reload = hook.result.current.reloadFromDisk();
     });
-    act(() => {
+    await act(() => {
       hook.result.current.closeFile();
     });
     slowRead.resolve({
@@ -660,7 +660,7 @@ describe('files controller background reload races', () => {
   it('treats the first readable token as the baseline when the initial read failed', async () => {
     const harness = createHost();
     harness.host.changeToken.mockRejectedValueOnce(new Error('not ready'));
-    const hook = mount(harness.client);
+    const hook = await mount(harness.client);
     await settle();
     await openNotes(hook);
     harness.host.listFiles.mockClear();
@@ -679,7 +679,7 @@ describe('files controller background reload races', () => {
 
   it('only refreshes the listing for a change while no file is open', async () => {
     const harness = createHost();
-    const hook = mount(harness.client);
+    const hook = await mount(harness.client);
     await settle();
     await settle(FILES_CHANGE_POLL_MS);
     harness.host.listFiles.mockClear();
@@ -698,12 +698,12 @@ describe('files controller background reload races', () => {
 
   it('refuses to save an open file after the host disconnects', async () => {
     const { host, client } = createHost();
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
     await openNotes(hook);
-    act(() => hook.result.current.setDraft('unsent'));
+    await act(() => hook.result.current.setDraft('unsent'));
 
-    hook.rerender({ client: null, cwd: CWD, focused: true });
+    await hook.rerender({ client: null, cwd: CWD, focused: true });
     let saved = true;
     await act(async () => {
       saved = await hook.result.current.save();
@@ -716,7 +716,7 @@ describe('files controller background reload races', () => {
 
   it('drops late results after the screen unmounts', async () => {
     const { host, client } = createHost();
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
     await openNotes(hook);
     const slowRead = deferred<WorkspaceFileReadResponse>();
@@ -724,10 +724,10 @@ describe('files controller background reload races', () => {
     const errors = jest.spyOn(console, 'error');
 
     let reload!: Promise<void>;
-    act(() => {
+    await act(() => {
       reload = hook.result.current.reloadFromDisk();
     });
-    hook.unmount();
+    await hook.unmount();
     slowRead.reject(new Error('gone'));
     await reload;
     expect(errors).not.toHaveBeenCalled();
@@ -737,9 +737,9 @@ describe('files controller background reload races', () => {
 describe('files controller create, rename, and delete', () => {
   it('creates a file in the open folder, announces it, and opens it', async () => {
     const { host, client } = createHost({ 'src/a.md': 'a' });
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
-    act(() => hook.result.current.openDirectory('src'));
+    await act(() => hook.result.current.openDirectory('src'));
     await settle();
 
     let created = false;
@@ -754,7 +754,7 @@ describe('files controller create, rename, and delete', () => {
 
   it('renames within the same folder and deletes by path', async () => {
     const { host, client } = createHost({ 'src/a.md': 'a' });
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
 
     await act(async () => {
@@ -772,7 +772,7 @@ describe('files controller create, rename, and delete', () => {
 
   it('reports failed mutations with typed copy or the action fallback', async () => {
     const { host, client } = createHost();
-    const hook = mount(client);
+    const hook = await mount(client);
     await settle();
 
     host.createFile.mockRejectedValueOnce(nativeError('PATH_EXISTS'));

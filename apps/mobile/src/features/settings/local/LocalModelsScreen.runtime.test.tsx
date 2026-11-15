@@ -71,7 +71,7 @@ async function openQwen3(options: FakeNativeOptions = {}) {
       </Provider>
     </SafeAreaProvider>
   );
-  render(wrap(<LocalModelFamilyScreen />));
+  await render(wrap(<LocalModelFamilyScreen />));
   await flush();
   return { fake, runtime };
 }
@@ -81,7 +81,7 @@ function row(modelId: string) {
 }
 
 async function pressIn(modelId: string, label: string): Promise<void> {
-  fireEvent.press(row(modelId).getByLabelText(label));
+  await fireEvent.press(row(modelId).getByLabelText(label));
   await flush();
 }
 

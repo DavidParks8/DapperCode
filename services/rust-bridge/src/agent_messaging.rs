@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use agent_client_protocol::schema::v1::{HttpHeader, McpServer, McpServerHttp, McpServerSse};
+use agent_client_protocol::v1::schema::{HttpHeader, McpServer, McpServerHttp, McpServerSse};
 use axum::extract::{DefaultBodyLimit, Query, Request, State};
 use axum::http::{header::AUTHORIZATION, HeaderMap, HeaderName, Method, StatusCode};
 use axum::middleware::{self, Next};
@@ -18,7 +18,7 @@ use futures_util::{Stream, StreamExt};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolResult, ClientJsonRpcMessage, ContentBlock, ServerCapabilities, ServerInfo,
+    CallToolResult, ClientJsonRpcMessage, ContentBlock, ServerCapabilities, ServerConfig,
     ServerJsonRpcMessage,
 };
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
@@ -1105,8 +1105,8 @@ impl AgentMessagingMcpHandler {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for AgentMessagingMcpHandler {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "Use messaging tools only for explicit one-way communication with direct parent and sub-agent sessions. Scheduled-prompt tools operate only on this authenticated ACP session and accept one-time absolute RFC 3339 timestamps. Phone-call tools place user-approved outbound calls for this ACP session and deliver a structured transcript report when the call ends.",
         )
     }
@@ -1482,12 +1482,12 @@ impl AgentMessageEnvelope {
 }
 
 pub(crate) fn prompt_contains_agent_message_envelope(
-    prompt: &[agent_client_protocol::schema::v1::ContentBlock],
+    prompt: &[agent_client_protocol::v1::schema::ContentBlock],
 ) -> bool {
     let mut combined = String::new();
     let mut contains_envelope = false;
     for block in prompt {
-        if let agent_client_protocol::schema::v1::ContentBlock::Text(text) = block {
+        if let agent_client_protocol::v1::schema::ContentBlock::Text(text) = block {
             contains_envelope |= contains_reserved_agent_message_marker(&text.text);
             combined.push_str(&text.text);
         }
@@ -1732,7 +1732,7 @@ mod tests {
             }))
             .expect("ACP text block")
         })
-        .collect::<Vec<agent_client_protocol::schema::v1::ContentBlock>>();
+        .collect::<Vec<agent_client_protocol::v1::schema::ContentBlock>>();
 
         assert!(prompt_contains_agent_message_envelope(&prompt));
     }
@@ -2192,7 +2192,10 @@ mod tests {
         assert_eq!(http_url.host_str(), Some("127.0.0.1"));
         assert_eq!(http_url.port(), sse_url.port());
 
-        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let client = crate::tls::http_client_builder()
+            .no_proxy()
+            .build()
+            .unwrap();
         assert_eq!(
             client
                 .post(config.http_url.clone())
@@ -2252,7 +2255,10 @@ mod tests {
             McpServer::Http(descriptor) => descriptor.headers[0].value.clone(),
             _ => panic!("unexpected MCP descriptor"),
         };
-        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let client = crate::tls::http_client_builder()
+            .no_proxy()
+            .build()
+            .unwrap();
         let mut session_ids = Vec::new();
 
         for request_id in 0..MAX_MCP_SESSIONS_PER_CREDENTIAL as u64 {
@@ -2399,7 +2405,10 @@ mod tests {
             McpServer::Sse(descriptor) => descriptor.headers[0].value.clone(),
             _ => panic!("unexpected MCP descriptor"),
         };
-        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let client = crate::tls::http_client_builder()
+            .no_proxy()
+            .build()
+            .unwrap();
         let response = client
             .get(config.sse_url.clone())
             .header(AUTHORIZATION, authorization)

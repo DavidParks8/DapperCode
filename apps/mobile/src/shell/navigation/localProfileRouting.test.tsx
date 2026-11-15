@@ -92,11 +92,11 @@ function storeWith(activeProfileId: string, available: boolean) {
   return store;
 }
 
-function render(store: ReturnType<typeof storeWith>, initialUrl: string) {
+async function render(store: ReturnType<typeof storeWith>, initialUrl: string) {
   const Wrapper = ({ children }: PropsWithChildren) => (
     <AppStateProvider store={store}>{children}</AppStateProvider>
   );
-  return renderRouter(
+  return await renderRouter(
     {
       appDir: './src/app',
       overrides: {
@@ -121,10 +121,10 @@ function render(store: ReturnType<typeof storeWith>, initialUrl: string) {
 describe('local profile routing', () => {
   it('opens On this iPhone in the regular profile routes once its transport is ready', async () => {
     const store = storeWith('profile-1', true);
-    const result = render(store, '/profiles/profile-1/chats/new');
+    const result = await render(store, '/profiles/profile-1/chats/new');
     expect(screen.getByText('Main profile-1 new')).toBeTruthy();
 
-    act(() => replaceRoot(routes.newChat(LOCAL_PROFILE_ID)));
+    await act(() => replaceRoot(routes.newChat(LOCAL_PROFILE_ID)));
     await waitFor(() => {
       expect(store.get(activeProfileAtom)).toEqual(LOCAL_PROFILE);
     });
@@ -135,12 +135,12 @@ describe('local profile routing', () => {
 
     const transport = new LocalBridgeWsClient(new LocalBridgeServer(new FakeAgentPort()));
     transport.connect();
-    act(() => store.set(localTransportAtom, transport));
+    await act(() => store.set(localTransportAtom, transport));
     expect(screen.getByText('Main on-device new')).toBeTruthy();
     expect(store.get(wsClientAtom)).toBe(transport);
     expect(store.get(apiClientAtom)?.profileId).toBe(LOCAL_PROFILE_ID);
 
-    act(() => replaceRoot(routes.newChat('profile-1')));
+    await act(() => replaceRoot(routes.newChat('profile-1')));
     await waitFor(() => {
       expect(store.get(activeProfileIdAtom)).toBe('profile-1');
     });
@@ -151,7 +151,7 @@ describe('local profile routing', () => {
   it('never resolves a saved local selection where the local agent is unsupported', async () => {
     const store = storeWith(LOCAL_PROFILE_ID, false);
     expect(store.get(activeProfileAtom)).toBeNull();
-    const result = render(store, '/');
+    const result = await render(store, '/');
     await waitFor(() => {
       expect(result.getPathname()).toBe('/profiles/profile-1/chats/new');
     });
@@ -160,9 +160,9 @@ describe('local profile routing', () => {
     });
   });
 
-  it('explains instead of opening a local profile link on an unsupported device', () => {
+  it('explains instead of opening a local profile link on an unsupported device', async () => {
     const store = storeWith('profile-1', false);
-    render(store, '/profiles/on-device/chats/new');
+    await render(store, '/profiles/on-device/chats/new');
     expect(screen.getByText('On this iPhone is unavailable')).toBeTruthy();
   });
 
@@ -177,12 +177,12 @@ describe('local profile routing', () => {
       ['/on-device/account', '/profiles/on-device/settings/github'],
       ['/on-device/workspaces', '/profiles/on-device/chats/new'],
     ] as const) {
-      const result = render(store, legacy);
+      const result = await render(store, legacy);
       await waitFor(() => {
         expect(result.getPathname()).toBe(unified);
       });
       expect(store.get(activeProfileIdAtom)).toBe(LOCAL_PROFILE_ID);
-      result.unmount();
+      await result.unmount();
     }
   });
 
@@ -192,32 +192,32 @@ describe('local profile routing', () => {
     const transport = new LocalBridgeWsClient(new LocalBridgeServer(new FakeAgentPort()));
     transport.connect();
     store.set(localTransportAtom, transport);
-    const result = render(store, '/profiles/on-device/chats/new');
-    act(() => router.push(routes.settingsSkills(LOCAL_PROFILE_ID)));
+    const result = await render(store, '/profiles/on-device/chats/new');
+    await act(() => router.push(routes.settingsSkills(LOCAL_PROFILE_ID)));
     await waitFor(() => {
       expect(screen.getByText('Skills')).toBeTruthy();
     });
     expect(result.getPathname()).toBe('/profiles/on-device/settings/skills');
 
-    act(() => router.push(routes.settingsSkillImport(LOCAL_PROFILE_ID, 'ws-one')));
+    await act(() => router.push(routes.settingsSkillImport(LOCAL_PROFILE_ID, 'ws-one')));
     await waitFor(() => {
       expect(screen.getByText('Add skill')).toBeTruthy();
     });
     expect(result.getPathname()).toBe('/profiles/on-device/settings/skills/add');
 
-    act(() => router.push(routes.settingsSkill(LOCAL_PROFILE_ID, 'add', 'ws-one')));
+    await act(() => router.push(routes.settingsSkill(LOCAL_PROFILE_ID, 'add', 'ws-one')));
     await waitFor(() => {
       expect(screen.getByText('Skill add in ws-one')).toBeTruthy();
     });
     expect(result.getPathname()).toBe('/profiles/on-device/settings/skills/info/add');
 
-    act(() => router.push(routes.settingsSkillRules(LOCAL_PROFILE_ID)));
+    await act(() => router.push(routes.settingsSkillRules(LOCAL_PROFILE_ID)));
     await waitFor(() => {
       expect(screen.getByText('Skill rules')).toBeTruthy();
     });
     expect(result.getPathname()).toBe('/profiles/on-device/settings/skills/rules');
 
-    act(() => router.push(routes.settingsSkillCatalogs(LOCAL_PROFILE_ID, null)));
+    await act(() => router.push(routes.settingsSkillCatalogs(LOCAL_PROFILE_ID, null)));
     await waitFor(() => {
       expect(screen.getByText('Skill catalogs')).toBeTruthy();
     });
@@ -231,15 +231,15 @@ describe('local profile routing', () => {
     const transport = new LocalBridgeWsClient(new LocalBridgeServer(new FakeAgentPort()));
     transport.connect();
     store.set(localTransportAtom, transport);
-    const result = render(store, '/profiles/profile-1/chats/new');
+    const result = await render(store, '/profiles/profile-1/chats/new');
 
-    act(() => replaceRoot(routes.newChat(LOCAL_PROFILE_ID)));
+    await act(() => replaceRoot(routes.newChat(LOCAL_PROFILE_ID)));
     await waitFor(() => {
       expect(screen.getByText('Main on-device new')).toBeTruthy();
     });
-    act(() => router.push(routes.onboarding));
+    await act(() => router.push(routes.onboarding));
     expect(screen.getByText('Outside the profile')).toBeTruthy();
-    act(() => router.back());
+    await act(() => router.back());
 
     await waitFor(() => {
       expect(screen.getByText('Main on-device new')).toBeTruthy();

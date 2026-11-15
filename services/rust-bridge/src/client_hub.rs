@@ -749,7 +749,7 @@ mod canonical_mailbox_tests {
             run_id: "run".into(),
             source_turn_id: "turn".into(),
             generation: 1,
-            stop_reason: agent_client_protocol::schema::v1::StopReason::EndTurn,
+            stop_reason: agent_client_protocol::v1::schema::StopReason::EndTurn,
         })
         .await;
         let event = canonical_events.recv().await.unwrap();
@@ -797,7 +797,7 @@ mod canonical_mailbox_tests {
             run_id: "run".into(),
             source_turn_id: "turn".into(),
             generation: 1,
-            stop_reason: agent_client_protocol::schema::v1::StopReason::EndTurn,
+            stop_reason: agent_client_protocol::v1::schema::StopReason::EndTurn,
         })
         .await;
         let event = canonical_events.recv().await.unwrap();
@@ -888,7 +888,7 @@ mod canonical_mailbox_tests {
                     run_id: "run".into(),
                     source_turn_id: "turn".into(),
                     generation: 1,
-                    stop_reason: agent_client_protocol::schema::v1::StopReason::EndTurn,
+                    stop_reason: agent_client_protocol::v1::schema::StopReason::EndTurn,
                 })
                 .await;
             })
@@ -951,7 +951,7 @@ mod canonical_mailbox_tests {
                     run_id: "run".into(),
                     source_turn_id: "turn".into(),
                     generation: 1,
-                    stop_reason: agent_client_protocol::schema::v1::StopReason::EndTurn,
+                    stop_reason: agent_client_protocol::v1::schema::StopReason::EndTurn,
                 })
                 .await;
             })

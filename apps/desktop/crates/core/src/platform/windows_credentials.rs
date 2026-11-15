@@ -554,7 +554,7 @@ pub(crate) fn delete(store: &SecretStore, paths: &AppPaths, profile_id: &str) ->
 
 pub(crate) fn windows_profile_entry_account(profile_id: &str) -> String {
     let digest = Sha256::digest(profile_id.as_bytes());
-    format!("{WINDOWS_TOKEN_ENTRY_PREFIX}:{digest:x}")
+    format!("{WINDOWS_TOKEN_ENTRY_PREFIX}:{}", hex::encode(digest))
 }
 
 fn validate_profile_id(profile_id: &str) -> Result<()> {

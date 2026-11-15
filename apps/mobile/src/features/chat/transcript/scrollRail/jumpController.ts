@@ -41,7 +41,7 @@ export interface ChatScrollRailJumpController {
 export function createChatScrollRailJumpController(
   dependencies: ChatScrollRailJumpDependencies,
 ): ChatScrollRailJumpController {
-  const schedule = dependencies.schedule ?? setTimeout;
+  const schedule = dependencies.schedule ?? ((callback, delayMs) => setTimeout(callback, delayMs));
   const cancelScheduled = dependencies.cancelScheduled ?? clearTimeout;
   let generation = 0;
   let pending: PendingJump | null = null;

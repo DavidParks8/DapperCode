@@ -2,14 +2,14 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     CreateElicitationRequest, CreateElicitationResponse, ElicitationAcceptAction,
     ElicitationAction, ElicitationContentValue, ElicitationMode, ElicitationPropertySchema,
     ElicitationSchema, ElicitationScope, MultiSelectItems, PermissionOptionKind,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionId, ToolCallStatus, ToolKind,
 };
-use agent_client_protocol::Responder;
+use agent_client_protocol::v1::Responder;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use uuid::Uuid;
@@ -1904,14 +1904,14 @@ fn validate_value(
                         .unwrap_or(true)
                 })
                 || schema.format.is_some_and(|format| match format {
-                    agent_client_protocol::schema::v1::StringFormat::Email => !valid_email(value),
-                    agent_client_protocol::schema::v1::StringFormat::Uri => {
+                    agent_client_protocol::v1::schema::StringFormat::Email => !valid_email(value),
+                    agent_client_protocol::v1::schema::StringFormat::Uri => {
                         reqwest::Url::parse(value).is_err()
                     }
-                    agent_client_protocol::schema::v1::StringFormat::Date => {
+                    agent_client_protocol::v1::schema::StringFormat::Date => {
                         chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_err()
                     }
-                    agent_client_protocol::schema::v1::StringFormat::DateTime => {
+                    agent_client_protocol::v1::schema::StringFormat::DateTime => {
                         chrono::DateTime::parse_from_rfc3339(value).is_err()
                     }
                     _ => true,

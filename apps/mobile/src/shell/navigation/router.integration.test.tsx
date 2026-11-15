@@ -158,10 +158,11 @@ function SettingsConnectionLauncher() {
   const { profileId = 'profile-1' } = useLocalSearchParams<{
     profileId?: string;
   }>();
-  useEffect(() => {
-    router.push(routes.settingsConnection(profileId, 'edit'));
-  }, [profileId]);
-  return <Text>Settings launcher</Text>;
+  return (
+    <Text onPress={() => router.push(routes.settingsConnection(profileId, 'edit'))}>
+      Settings launcher
+    </Text>
+  );
 }
 
 function ChatFooterConnectionLauncher() {
@@ -176,13 +177,16 @@ function ChatFooterConnectionLauncher() {
       mainLifecycle.push('unmount');
     };
   }, []);
-  useEffect(() => {
-    // Mirrors openBridgeConnectionAtom in actions.ts: the drawer's connection footer opens the
-    // Settings-owned connection editor with an anchored push, from whatever screen (a chat, in
-    // this case) the drawer happened to be opened over.
-    router.push(routes.settingsConnection(profileId, 'edit'), { withAnchor: true });
-  }, [profileId]);
-  return <Text>Chat {chatId}</Text>;
+  // Mirrors the drawer footer's user-triggered anchored push after navigation is mounted.
+  return (
+    <Text
+      onPress={() =>
+        router.push(routes.settingsConnection(profileId, 'edit'), { withAnchor: true })
+      }
+    >
+      Chat {chatId}
+    </Text>
+  );
 }
 
 const baseOverrides = {
@@ -258,8 +262,8 @@ describe('Expo Router route topology', () => {
     );
   });
 
-  it('reconstructs the real anchored chat Stack beneath a cold Git deep link', () => {
-    const result = renderRouter(
+  it('reconstructs the real anchored chat Stack beneath a cold Git deep link', async () => {
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {
@@ -280,8 +284,8 @@ describe('Expo Router route topology', () => {
     expect(router.canGoBack()).toBe(true);
   });
 
-  it('promotes a new chat id in place without remounting MainScreen', () => {
-    const result = renderRouter(
+  it('promotes a new chat id in place without remounting MainScreen', async () => {
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {
@@ -295,7 +299,7 @@ describe('Expo Router route topology', () => {
       },
     );
 
-    act(() => promoteChat?.('chat-created'));
+    await act(() => promoteChat?.('chat-created'));
 
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-created');
     expect(mainLifecycle).toEqual(['mount']);
@@ -303,13 +307,13 @@ describe('Expo Router route topology', () => {
 
   it.each(['open', 'closed'])(
     'honors the %s session-list intent while clearing a deleted current chat',
-    (status) => {
+    async (status) => {
       navigationStore.set(windowTraitsAtom, {
         horizontalSizeClass: 'compact',
         verticalSizeClass: 'regular',
         divisions: [],
       });
-      const result = renderRouter(
+      const result = await renderRouter(
         {
           appDir: './src/app',
           overrides: {
@@ -319,9 +323,9 @@ describe('Expo Router route topology', () => {
         },
         { initialUrl: '/profiles/profile-1/chats/deleted-chat', wrapper: defaultWrapper },
       );
-      act(() => drawerNavigation?.openDrawer());
+      await act(() => drawerNavigation?.openDrawer());
       expect(screen.getByText('Drawer status: open')).toBeTruthy();
-      act(() => {
+      await act(() => {
         navigationStore.set(startNewChatAtom, { keepDrawerOpen: true });
         if (status === 'closed') {
           navigationStore.set(closeDrawerAtom);
@@ -330,14 +334,14 @@ describe('Expo Router route topology', () => {
       expect(result.getPathname()).toBe('/profiles/profile-1/chats/new');
       expect(screen.getByText(`Drawer status: ${status}`)).toBeTruthy();
       if (status === 'open') {
-        act(() => navigationStore.set(startNewChatAtom, { keepDrawerOpen: true }));
+        await act(() => navigationStore.set(startNewChatAtom, { keepDrawerOpen: true }));
         expect(screen.getByText('Drawer status: open')).toBeTruthy();
       }
     },
   );
 
-  it('keeps the drawer closed when a subsequent new chat is promoted after returning from Files', () => {
-    const result = renderRouter(
+  it('keeps the drawer closed when a subsequent new chat is promoted after returning from Files', async () => {
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {
@@ -349,23 +353,23 @@ describe('Expo Router route topology', () => {
       },
       { initialUrl: '/profiles/profile-1/chats/new', wrapper: defaultWrapper },
     );
-    act(() => promoteChat?.('first-created'));
-    act(() => router.push(routes.git('profile-1', 'first-created')));
-    act(() => router.push(routes.files('profile-1', 'first-created', '/workspace')));
-    act(() => router.back());
-    act(() => router.back());
-    act(() => drawerNavigation?.openDrawer());
+    await act(() => promoteChat?.('first-created'));
+    await act(() => router.push(routes.git('profile-1', 'first-created')));
+    await act(() => router.push(routes.files('profile-1', 'first-created', '/workspace')));
+    await act(() => router.back());
+    await act(() => router.back());
+    await act(() => drawerNavigation?.openDrawer());
     expect(screen.getByText('Drawer status: open')).toBeTruthy();
-    act(() => navigationStore.set(startNewChatAtom));
+    await act(() => navigationStore.set(startNewChatAtom));
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/new');
     expect(screen.getByText('Drawer status: closed')).toBeTruthy();
-    act(() => promoteChat?.('second-created'));
+    await act(() => promoteChat?.('second-created'));
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/second-created');
     expect(screen.getByText('Drawer status: closed')).toBeTruthy();
   });
 
-  it('collapses pushed agents before switching chats and keeps one MainScreen', () => {
-    const result = renderRouter(
+  it('collapses pushed agents before switching chats and keeps one MainScreen', async () => {
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {
@@ -380,10 +384,10 @@ describe('Expo Router route topology', () => {
       },
     );
 
-    act(() => router.push('/profiles/profile-1/chats/chat-1/agents/child'));
+    await act(() => router.push('/profiles/profile-1/chats/chat-1/agents/child'));
     expect(screen.getByText('Agent child')).toBeTruthy();
 
-    act(() => navigateRoot(routes.chat('profile-1', 'chat-2')));
+    await act(() => navigateRoot(routes.chat('profile-1', 'chat-2')));
 
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-2');
     expect(mainLifecycle).toEqual(['mount']);
@@ -402,8 +406,8 @@ describe('Expo Router route topology', () => {
     ['/profiles/profile-1/chats/chat-1/workspace-picker', routeLabels.workspace],
     ['/profiles/profile-1/chats/chat-1/git-checkout', routeLabels.checkout],
     ['/profiles/profile-1/chats/chat-1/connection?mode=edit', routeLabels.connection],
-  ])('cold-loads %s', (initialUrl, label) => {
-    const result = renderRouter(
+  ])('cold-loads %s', async (initialUrl, label) => {
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {
@@ -419,8 +423,8 @@ describe('Expo Router route topology', () => {
     expect(screen.getByText(label)).toBeTruthy();
   });
 
-  it('navigates every destination and returns through the intended history', () => {
-    const result = renderRouter(
+  it('navigates every destination and returns through the intended history', async () => {
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {
@@ -435,20 +439,20 @@ describe('Expo Router route topology', () => {
       },
     );
 
-    act(() => navigateRoot(routes.browser('profile-1')));
+    await act(() => navigateRoot(routes.browser('profile-1')));
     expect(screen.getByText(routeLabels.browser)).toBeTruthy();
-    act(() => router.back());
+    await act(() => router.back());
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1');
 
-    act(() => navigateRoot(routes.settings('profile-1')));
-    act(() => router.push(routes.privacy('profile-1')));
+    await act(() => navigateRoot(routes.settings('profile-1')));
+    await act(() => router.push(routes.privacy('profile-1')));
     expect(screen.getByText(routeLabels.privacy)).toBeTruthy();
-    act(() => router.back());
+    await act(() => router.back());
     expect(screen.getByText(routeLabels.settings)).toBeTruthy();
-    act(() => router.push(routes.terms('profile-1')));
+    await act(() => router.push(routes.terms('profile-1')));
     expect(screen.getByText(routeLabels.terms)).toBeTruthy();
-    act(() => router.back());
-    act(() => router.back());
+    await act(() => router.back());
+    await act(() => router.back());
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1');
 
     for (const [href, label] of [
@@ -457,9 +461,9 @@ describe('Expo Router route topology', () => {
       [routes.git('profile-1', 'chat-1'), routeLabels.git],
       [routes.agent('profile-1', 'chat-1', 'child'), routeLabels.agent],
     ] as const) {
-      act(() => router.push(href));
+      await act(() => router.push(href));
       expect(screen.getByText(label)).toBeTruthy();
-      act(() => router.back());
+      await act(() => router.back());
       expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1');
     }
 
@@ -469,9 +473,9 @@ describe('Expo Router route topology', () => {
 
   it.each([undefined, 'grandchild'])(
     'returns from a chat preview in one tap without remounting or losing nested history (%s)',
-    (threadId) => {
+    async (threadId) => {
       navigationStore.set(selectedChatIdAtom, 'chat-1');
-      const result = renderRouter(
+      const result = await renderRouter(
         {
           appDir: './src/app',
           overrides: {
@@ -484,30 +488,30 @@ describe('Expo Router route topology', () => {
         { initialUrl: '/profiles/profile-1/chats/chat-1', wrapper: defaultWrapper },
       );
       if (threadId) {
-        act(() => router.push(routes.agent('profile-1', 'chat-1', 'child')));
-        act(() => router.push(routes.agent('profile-1', 'chat-1', threadId)));
+        await act(() => router.push(routes.agent('profile-1', 'chat-1', 'child')));
+        await act(() => router.push(routes.agent('profile-1', 'chat-1', threadId)));
       }
       const sourcePath = result.getPathname();
       for (let visit = 0; visit < 2; visit += 1) {
-        act(() => navigationStore.set(openBrowserAtom, 'http://localhost:3000', threadId));
+        await act(() => navigationStore.set(openBrowserAtom, 'http://localhost:3000', threadId));
         expect(result.getPathname()).toBe('/profiles/profile-1/browser');
-        fireEvent.press(screen.getByRole('button', { name: 'Back to chat' }));
+        await fireEvent.press(screen.getByRole('button', { name: 'Back to chat' }));
         expect(result.getPathname()).toBe(sourcePath);
         expect(mainLifecycle).toEqual(['mount']);
       }
       if (threadId) {
-        act(() => router.back());
+        await act(() => router.back());
         expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1/agents/child');
       }
 
-      act(() => navigationStore.set(navigateAtom, 'Browser'));
+      await act(() => navigationStore.set(navigateAtom, 'Browser'));
       expect(result.getPathname()).toBe('/profiles/profile-1/browser');
       expect(screen.queryByRole('button', { name: 'Back to chat' })).toBeNull();
     },
   );
 
-  it('can return to the source chat from a cold browser URL without navigation history', () => {
-    const result = renderRouter(
+  it('can return to the source chat from a cold browser URL without navigation history', async () => {
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {
@@ -521,12 +525,12 @@ describe('Expo Router route topology', () => {
         wrapper: defaultWrapper,
       },
     );
-    fireEvent.press(screen.getByRole('button', { name: 'Back to chat' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Back to chat' }));
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1');
   });
 
-  it('pushes nested agents and returns one level at a time without remounting MainScreen', () => {
-    const result = renderRouter(
+  it('pushes nested agents and returns one level at a time without remounting MainScreen', async () => {
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {
@@ -541,7 +545,7 @@ describe('Expo Router route topology', () => {
       },
     );
 
-    act(() => {
+    await act(() => {
       router.push('/profiles/profile-1/chats/chat-1/agents/child');
       router.push('/profiles/profile-1/chats/chat-1/agents/grandchild');
     });
@@ -549,7 +553,7 @@ describe('Expo Router route topology', () => {
     expect(screen.getByText('Agent grandchild')).toBeTruthy();
     expect(mainLifecycle).toEqual(['mount']);
 
-    act(() => router.back());
+    await act(() => router.back());
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1/agents/child');
     expect(screen.getByText('Agent child')).toBeTruthy();
     expect(mainLifecycle).toEqual(['mount']);
@@ -582,7 +586,7 @@ describe('Expo Router route topology', () => {
     const Wrapper = ({ children }: PropsWithChildren) => (
       <AppStateProvider store={store}>{children}</AppStateProvider>
     );
-    const result = renderRouter(
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {
@@ -596,7 +600,7 @@ describe('Expo Router route topology', () => {
       },
     );
 
-    act(() => replaceRoot(routes.newChat('profile-2')));
+    await act(() => replaceRoot(routes.newChat('profile-2')));
 
     await waitFor(() => {
       expect(store.get(activeBridgeProfileAtom)?.id).toBe('profile-2');
@@ -606,7 +610,7 @@ describe('Expo Router route topology', () => {
     expect(countNamedRoutes(result.getRouterState(), 'agents/[threadId]')).toBe(0);
   });
 
-  it('uses the real profile anchor behind a cold connection modal', () => {
+  it('uses the real profile anchor behind a cold connection modal', async () => {
     const data = createDefaultAppStateData();
     data.bridgeProfiles = {
       activeProfileId: 'profile-1',
@@ -625,7 +629,7 @@ describe('Expo Router route topology', () => {
     const Wrapper = ({ children }: PropsWithChildren) => (
       <AppStateProvider store={store}>{children}</AppStateProvider>
     );
-    const result = renderRouter(
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {
@@ -643,12 +647,12 @@ describe('Expo Router route topology', () => {
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1/connection');
     expect(screen.getByText('Connection')).toBeTruthy();
     expect(router.canGoBack()).toBe(true);
-    act(() => router.back());
+    await act(() => router.back());
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1');
   });
 
-  it('anchors the connection modal beneath Settings, not the currently selected chat', () => {
-    const result = renderRouter(
+  it('anchors the connection modal beneath Settings, not the currently selected chat', async () => {
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {
@@ -664,17 +668,18 @@ describe('Expo Router route topology', () => {
       },
     );
 
+    await fireEvent.press(screen.getByText('Settings launcher'));
     expect(result.getPathname()).toBe('/profiles/profile-1/settings/connection');
     expect(screen.getByText('Connection')).toBeTruthy();
     // Settings never mounted a chat behind the modal, so there is nothing to leak into.
     expect(mainLifecycle).toEqual([]);
-    act(() => router.back());
+    await act(() => router.back());
     // Cancelling/back must land on Settings, never on chats/new or any chat.
     expect(result.getPathname()).toBe('/profiles/profile-1/settings');
   });
 
-  it('anchors the connection modal beneath Settings from a chat screen, keeping the chat intact', () => {
-    const result = renderRouter(
+  it('anchors the connection modal beneath Settings from a chat screen, keeping the chat intact', async () => {
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {
@@ -690,6 +695,7 @@ describe('Expo Router route topology', () => {
       },
     );
 
+    await fireEvent.press(screen.getByText('Chat chat-1'));
     // openBridgeConnectionAtom's anchored push from the drawer footer must land on the modal
     // even when opened from a chat screen, not just from Settings itself.
     expect(result.getPathname()).toBe('/profiles/profile-1/settings/connection');
@@ -704,18 +710,18 @@ describe('Expo Router route topology', () => {
       expect.arrayContaining(['index', 'connection']),
     );
 
-    act(() => router.back());
+    await act(() => router.back());
     // Cancelling must land on Settings, never back on the originating chat or chats/new.
     expect(result.getPathname()).toBe('/profiles/profile-1/settings');
     expect(screen.getByText(routeLabels.settings)).toBeTruthy();
 
     // The chat the drawer was opened from must still be intact and reachable, not remounted.
-    act(() => router.push('/profiles/profile-1/chats/chat-1'));
+    await act(() => router.push('/profiles/profile-1/chats/chat-1'));
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1');
     expect(mainLifecycle).toEqual(['mount']);
   });
 
-  it('uses real Drawer history so chat root exits and Settings returns to the live chat', () => {
+  it('uses real Drawer history so chat root exits and Settings returns to the live chat', async () => {
     const data = createDefaultAppStateData();
     data.bridgeProfiles = {
       activeProfileId: 'profile-1',
@@ -734,7 +740,7 @@ describe('Expo Router route topology', () => {
     const Wrapper = ({ children }: PropsWithChildren) => (
       <AppStateProvider store={store}>{children}</AppStateProvider>
     );
-    const result = renderRouter(
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {
@@ -753,20 +759,20 @@ describe('Expo Router route topology', () => {
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-2');
     expect(router.canGoBack()).toBe(false);
 
-    act(() => navigateRoot(routes.settings('profile-1')));
+    await act(() => navigateRoot(routes.settings('profile-1')));
     expect(result.getPathname()).toBe('/profiles/profile-1/settings');
     expect(screen.getByText('Settings')).toBeTruthy();
 
-    act(() => router.back());
+    await act(() => router.back());
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-2');
 
-    act(() => navigateRoot(routes.chat('profile-1', 'chat-3')));
+    await act(() => navigateRoot(routes.chat('profile-1', 'chat-3')));
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-3');
     expect(mainLifecycle).toEqual(['mount']);
   });
 
-  it('preserves an unrelated Settings push (e.g. Privacy) when root navigation lands on a completely different destination', () => {
-    const result = renderRouter(
+  it('preserves an unrelated Settings push (e.g. Privacy) when root navigation lands on a completely different destination', async () => {
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {
@@ -781,26 +787,26 @@ describe('Expo Router route topology', () => {
       },
     );
 
-    act(() => navigateRoot(routes.settings('profile-1')));
-    act(() => router.push(routes.privacy('profile-1')));
+    await act(() => navigateRoot(routes.settings('profile-1')));
+    await act(() => router.push(routes.privacy('profile-1')));
     expect(screen.getByText(routeLabels.privacy)).toBeTruthy();
     expect(countNamedRoutes(result.getRouterState(), 'privacy')).toBe(1);
 
     // Root navigation to a destination that has nothing to do with Settings (e.g. a push
     // notification opening a chat) must not reach into Settings' own Stack and collapse the
     // Privacy screen the user left pushed there.
-    act(() => navigateRoot(routes.chat('profile-1', 'chat-1')));
+    await act(() => navigateRoot(routes.chat('profile-1', 'chat-1')));
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1');
     expect(countNamedRoutes(result.getRouterState(), 'privacy')).toBe(1);
 
     // Genuine back navigation into Settings' own history (not another root "land here"
     // request) still reveals the preserved Privacy screen.
-    act(() => router.back());
+    await act(() => router.back());
     expect(screen.getByText(routeLabels.privacy)).toBeTruthy();
   });
 
-  it('preserves an unsaved connection form in the background when an unrelated root navigation happens elsewhere', () => {
-    const result = renderRouter(
+  it('preserves an unsaved connection form in the background when an unrelated root navigation happens elsewhere', async () => {
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {
@@ -823,7 +829,7 @@ describe('Expo Router route topology', () => {
     // Simulate an unrelated root navigation elsewhere (e.g. a push notification opening a
     // chat) while the user has an in-progress, unsaved "Add bridge" form open. The destination
     // has nothing to do with Settings, so it must never reach into Settings' own Stack.
-    act(() => navigateRoot(routes.chat('profile-1', 'chat-1')));
+    await act(() => navigateRoot(routes.chat('profile-1', 'chat-1')));
     expect(result.getPathname()).toBe('/profiles/profile-1/chats/chat-1');
 
     // The unsaved form is still there in the background — its screen was never dismissed or
@@ -832,8 +838,8 @@ describe('Expo Router route topology', () => {
     expect(formLifecycle).toEqual(['mount']);
   });
 
-  it('unwinds the Settings connection modal on Save before switching to the new chat root, so re-entering Settings never resurrects it', () => {
-    const result = renderRouter(
+  it('unwinds the Settings connection modal on Save before switching to the new chat root, so re-entering Settings never resurrects it', async () => {
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {
@@ -853,13 +859,14 @@ describe('Expo Router route topology', () => {
       },
     );
 
+    await fireEvent.press(screen.getByText('Chat chat-1'));
     // The drawer footer's anchored push lands on the modal, same as the sibling test above.
     expect(result.getPathname()).toBe('/profiles/profile-1/settings/connection');
     expect(mockConnectionScreenProps?.['onSaved']).toEqual(expect.any(Function));
 
     // Simulate a successful Save completing for the profile already active in this Settings
     // instance (edit mode keeps the same profile id).
-    act(() =>
+    await act(() =>
       (mockConnectionScreenProps?.['onSaved'] as (nextProfileId: string) => void)('profile-1'),
     );
 
@@ -871,20 +878,20 @@ describe('Expo Router route topology', () => {
 
     // Re-entering Settings (e.g. tapping the drawer's Settings item again) must land cleanly
     // on Settings' own index.
-    act(() => navigateRoot(routes.settings('profile-1')));
+    await act(() => navigateRoot(routes.settings('profile-1')));
     expect(result.getPathname()).toBe('/profiles/profile-1/settings');
     expect(screen.getByText(routeLabels.settings)).toBeTruthy();
 
     // Prove Settings' own nested Stack was actually unwound to a single `index` entry — not
     // `[index, connection, index]`, the vendored StackRouter's duplicate-push symptom — by
     // pushing a real, distinct Settings screen and inspecting the full stack beneath it.
-    act(() => router.push(routes.privacy('profile-1')));
+    await act(() => router.push(routes.privacy('profile-1')));
     const settingsStack = findStackContaining(result.getRouterState(), 'privacy');
     expect(settingsStack?.routes.map((route) => route.name)).toEqual(['index', 'privacy']);
 
     // Back must return to Settings' own index, never resurrect the saved connection editor —
     // the exact symptom this fix addresses.
-    act(() => router.back());
+    await act(() => router.back());
     expect(result.getPathname()).toBe('/profiles/profile-1/settings');
     expect(screen.getByText(routeLabels.settings)).toBeTruthy();
   });

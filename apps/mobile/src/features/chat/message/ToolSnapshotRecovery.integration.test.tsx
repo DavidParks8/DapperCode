@@ -70,24 +70,24 @@ function SelectedToolRow() {
   );
 }
 
-function renderSnapshot(initial: RawAcpSnapshot) {
+async function renderSnapshot(initial: RawAcpSnapshot) {
   const store = createStore();
   store.set(selectedChatAtom, applySnapshotToChat(baseChat, initial));
-  const screen = render(
+  const screen = await render(
     <Provider store={store}>
       <AppThemeProvider theme={theme}>
         <SelectedToolRow />
       </AppThemeProvider>
     </Provider>,
   );
-  const recover = (next: RawAcpSnapshot) => {
+  const recover = async (next: RawAcpSnapshot) => {
     const previous = requireTestValue(store.get(selectedChatAtom) ?? undefined, 'previous chat');
     const incoming = applySnapshotToChat(baseChat, next);
     expect(incoming.updatedAt).toBe(previous.updatedAt);
     expect(incoming.messages.map((message) => message.content)).toEqual(
       previous.messages.map((message) => message.content),
     );
-    act(() => store.set(selectedChatAtom, resolveEquivalentChat(previous, incoming)));
+    await act(() => store.set(selectedChatAtom, resolveEquivalentChat(previous, incoming)));
     return requireTestValue(store.get(selectedChatAtom) ?? undefined, 'recovered chat');
   };
   return { screen, recover };
@@ -95,8 +95,8 @@ function renderSnapshot(initial: RawAcpSnapshot) {
 
 it.each(['completed', 'failed'] as const)(
   'settles a tool after %s snapshot recovery with unchanged text and session timestamps',
-  (status) => {
-    const { screen, recover } = renderSnapshot(snapshot());
+  async (status) => {
+    const { screen, recover } = await renderSnapshot(snapshot());
     expect(screen.getByTestId('tool-row').props['accessibilityLabel']).toBe(
       'Editing file.ts +1 -1',
     );
@@ -105,7 +105,7 @@ it.each(['completed', 'failed'] as const)(
     });
     expect(screen.getByTestId('tool-header-shimmer', { includeHiddenElements: true })).toBeTruthy();
 
-    const recovered = recover(snapshot({ status }));
+    const recovered = await recover(snapshot({ status }));
     expect(screen.getByTestId('tool-row').props['accessibilityLabel']).toBe(
       status === 'completed' ? 'Edited file.ts +1 -1' : 'Failed to edit file.ts +1 -1',
     );
@@ -114,16 +114,16 @@ it.each(['completed', 'failed'] as const)(
     expect(screen.getByLabelText('file.ts, 1 line added, 1 line removed')).toBeTruthy();
     expect(buildToolInvocations(recovered.messages)[0]?.isError).toBe(status === 'failed');
 
-    expect(recover(snapshot({ status }))).toBe(recovered);
+    expect(await recover(snapshot({ status }))).toBe(recovered);
     expect(screen.queryByTestId('tool-header-shimmer', { includeHiddenElements: true })).toBeNull();
   },
 );
 
-it('refreshes structured patch counts when the flattened snapshot output is identical', () => {
-  const { screen, recover } = renderSnapshot(snapshot({ status: 'completed' }));
+it('refreshes structured patch counts when the flattened snapshot output is identical', async () => {
+  const { screen, recover } = await renderSnapshot(snapshot({ status: 'completed' }));
   expect(screen.getByLabelText('file.ts, 1 line added, 1 line removed')).toBeTruthy();
 
-  const recovered = recover(
+  const recovered = await recover(
     snapshot({
       status: 'completed',
       structuredContent: [

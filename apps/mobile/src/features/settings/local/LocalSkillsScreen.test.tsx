@@ -75,9 +75,9 @@ function row(name: string) {
 
 /** Opens a skill's Allow / Ask / Deny sheet and picks one option. */
 async function choosePermission(id: string, option: string) {
-  fireEvent.press(screen.getByTestId(`settings-local-skill-permission-${id}`));
+  await fireEvent.press(screen.getByTestId(`settings-local-skill-permission-${id}`));
   await act(async () => {
-    fireEvent.press(screen.getByLabelText(option));
+    await fireEvent.press(screen.getByLabelText(option));
   });
   await settle();
 }
@@ -165,9 +165,9 @@ describe('Skills settings over the real on-device runtime', () => {
     });
 
     // Follow rules appears only for an overridden skill and removes the choice.
-    fireEvent.press(screen.getByTestId('settings-local-skill-permission-plan'));
+    await fireEvent.press(screen.getByTestId('settings-local-skill-permission-plan'));
     expect(screen.queryByLabelText('Follow rules')).toBeNull();
-    fireEvent.press(screen.getByTestId('selection-sheet-close'));
+    await fireEvent.press(screen.getByTestId('selection-sheet-close'));
     await choosePermission('review', 'Follow rules');
     expect(row('review').getByText('Allow · no rule matches')).toBeTruthy();
     expect(runtime.skills.rules()).toEqual([]);
@@ -181,7 +181,7 @@ describe('Skills settings over the real on-device runtime', () => {
         .mockRejectedValueOnce(new Error('The workspace could not be read.'));
     });
     expect(await screen.findByText('The workspace could not be read.')).toBeTruthy();
-    fireEvent.press(screen.getByLabelText('Try again'));
+    await fireEvent.press(screen.getByLabelText('Try again'));
     await settle();
     expect(screen.getByTestId('settings-local-skill-row-review')).toBeTruthy();
 
@@ -199,8 +199,8 @@ describe('Skills settings over the real on-device runtime', () => {
     const { runtime } = await open(<LocalSkillsScreen />);
     expect(await screen.findByTestId('settings-local-skill-row-review')).toBeTruthy();
 
-    fireEvent.press(screen.getByLabelText('Workspace, App'));
-    fireEvent.press(screen.getByLabelText('Skills Repo'));
+    await fireEvent.press(screen.getByLabelText('Workspace, App'));
+    await fireEvent.press(screen.getByLabelText('Skills Repo'));
     expect(await screen.findByTestId('settings-local-skill-row-lint')).toBeTruthy();
     expect(screen.getByLabelText('Workspace, Skills Repo')).toBeTruthy();
     expect(screen.queryByTestId('settings-local-skill-row-review')).toBeNull();
@@ -224,9 +224,9 @@ describe('Skills settings over the real on-device runtime', () => {
       screen.getByText(/In place of gh skill install, clone a skills repository as a workspace/u),
     ).toBeTruthy();
     expect(screen.queryByTestId('settings-local-skill-diagnostic')).toBeNull();
-    fireEvent.press(screen.getByTestId('settings-local-skill-add'));
+    await fireEvent.press(screen.getByTestId('settings-local-skill-add'));
     expect(router.push).toHaveBeenLastCalledWith(routes.settingsSkillImport('on-device', 'ws-one'));
-    screen.unmount();
+    await screen.unmount();
 
     await open(<LocalSkillsScreen />, { files: {}, workspaces: [] });
     expect(screen.getByText('No workspaces yet')).toBeTruthy();
@@ -238,7 +238,7 @@ describe('Skills settings over the real on-device runtime', () => {
       await current.skills.importPersonal('ws-two', 'skills/notes');
     });
     const remove = jest.spyOn(runtime.skills, 'removePersonal');
-    fireEvent.press(await screen.findByLabelText('Remove notes'));
+    await fireEvent.press(await screen.findByLabelText('Remove notes'));
     expect(jest.mocked(Alert.alert).mock.calls.at(-1)?.[0]).toBe('Remove notes?');
     await act(async () => {
       lastAlertButton('Cancel').onPress?.();
@@ -246,7 +246,7 @@ describe('Skills settings over the real on-device runtime', () => {
     expect(remove).not.toHaveBeenCalled();
     expect(screen.getByTestId('settings-local-skill-row-notes')).toBeTruthy();
 
-    fireEvent.press(screen.getByLabelText('Remove notes'));
+    await fireEvent.press(screen.getByLabelText('Remove notes'));
     await act(async () => {
       lastAlertButton('Remove').onPress?.();
     });
@@ -257,11 +257,11 @@ describe('Skills settings over the real on-device runtime', () => {
 
   it('opens skill details with location, hint, compatibility, and the pre-approved tools warning', async () => {
     await open(<LocalSkillsScreen />);
-    fireEvent.press(await screen.findByLabelText('review details'));
+    await fireEvent.press(await screen.findByLabelText('review details'));
     expect(router.push).toHaveBeenLastCalledWith(
       routes.settingsSkill('on-device', 'review', 'ws-one'),
     );
-    screen.unmount();
+    await screen.unmount();
 
     await open(<LocalSkillInfoScreen />);
     expect(await screen.findByText('.github/skills/review/SKILL.md')).toBeTruthy();
@@ -287,26 +287,25 @@ describe('Skills settings over the real on-device runtime', () => {
     expect(screen.getByText('Folder with SKILL.md')).toBeTruthy();
     expect(screen.getByText('Shown to the model')).toBeTruthy();
     // The info page changes the permission with the same sheet as the list.
-    fireEvent.press(screen.getByLabelText('Permission, Allow'));
+    await fireEvent.press(screen.getByLabelText('Permission, Allow'));
     await act(async () => {
-      fireEvent.press(screen.getByLabelText('Ask'));
+      await fireEvent.press(screen.getByLabelText('Ask'));
     });
     await settle();
     expect(await screen.findByLabelText('Permission, Ask')).toBeTruthy();
     expect(screen.getByText(/^Ask · your choice\. Ask means the model asks/u)).toBeTruthy();
     // The skill can be reviewed before it is enabled: what the agent reads, and what it bundles.
-    expect(
-      await within(screen.getByTestId('settings-local-skill-source')).findByText(
-        FILES['ws-one:.github/skills/review/SKILL.md'].trimEnd(),
-      ),
-    ).toBeTruthy();
+    expect(screen.getByTestId('settings-local-skill-source')).toHaveTextContent(
+      FILES['ws-one:.github/skills/review/SKILL.md'].trimEnd(),
+      { exact: true, normalizer: (text) => text },
+    );
     expect(screen.getByText('What the agent reads when it loads this skill.')).toBeTruthy();
     expect(
       within(screen.getByTestId('settings-local-skill-files')).getByText('No bundled files'),
     ).toBeTruthy();
     // Project skills are changed in their workspace, not removed here.
     expect(screen.queryByTestId('settings-local-skill-remove')).toBeNull();
-    fireEvent.press(screen.getByLabelText('Back to Skills'));
+    await fireEvent.press(screen.getByLabelText('Back to Skills'));
     expect(router.back).toHaveBeenCalled();
   });
 
@@ -318,16 +317,15 @@ describe('Skills settings over the real on-device runtime', () => {
     expect(await screen.findByText('Stored on this iPhone')).toBeTruthy();
     expect(screen.getByText('Off (user-invocable: false)')).toBeTruthy();
     // A personal copy shows what was imported, including the files left behind.
-    expect(
-      await within(screen.getByTestId('settings-local-skill-source')).findByText(
-        FILES['ws-two:skills/notes/SKILL.md'].trimEnd(),
-      ),
-    ).toBeTruthy();
+    expect(screen.getByTestId('settings-local-skill-source')).toHaveTextContent(
+      FILES['ws-two:skills/notes/SKILL.md'].trimEnd(),
+      { exact: true, normalizer: (text) => text },
+    );
     expect(
       within(screen.getByTestId('settings-local-skill-files')).getByText('template.md'),
     ).toBeTruthy();
     expect(screen.getByText('a/b/c/d/e/f: Deeper than 6 directories.')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('settings-local-skill-remove'));
+    await fireEvent.press(screen.getByTestId('settings-local-skill-remove'));
     await act(async () => {
       lastAlertButton('Remove').onPress?.();
     });
@@ -341,7 +339,7 @@ describe('Skills settings over the real on-device runtime', () => {
     expect(screen.getByLabelText('Back to Skills')).toBeTruthy();
     expect(screen.getByLabelText('Workspace, Skills Repo')).toBeTruthy();
 
-    fireEvent.press(await screen.findByLabelText('Add lint'));
+    await fireEvent.press(await screen.findByLabelText('Add lint'));
     expect(await screen.findByText('Added lint')).toBeTruthy();
     const copied = within(screen.getByTestId('settings-local-skill-added'));
     expect(copied.getByText('2 files copied: SKILL.md, rules.md')).toBeTruthy();
@@ -355,10 +353,10 @@ describe('Skills settings over the real on-device runtime', () => {
     ).toEqual(['lint', 'Added lint', 'zeta']);
 
     // Browse a cloned repository whose skills are outside the project roots.
-    fireEvent.press(screen.getByLabelText('skills'));
-    fireEvent.press(await screen.findByLabelText('notes'));
+    await fireEvent.press(screen.getByLabelText('skills'));
+    await fireEvent.press(await screen.findByLabelText('notes'));
     expect(await screen.findByText('/skills/notes')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('settings-local-skill-browse-add'));
+    await fireEvent.press(screen.getByTestId('settings-local-skill-browse-add'));
     expect(await screen.findByText('Added notes')).toBeTruthy();
     expect(
       within(screen.getByTestId('settings-local-skill-add-skipped')).getByText(
@@ -373,18 +371,18 @@ describe('Skills settings over the real on-device runtime', () => {
     expect(screen.queryByText('Added lint')).toBeNull();
 
     // An invalid SKILL.md is reported, and a folder without one cannot be added.
-    fireEvent.press(screen.getByLabelText('Parent folder'));
+    await fireEvent.press(screen.getByLabelText('Parent folder'));
     expect(screen.queryByText('Added notes')).toBeNull();
-    fireEvent.press(await screen.findByLabelText('bad'));
-    fireEvent.press(await screen.findByLabelText('Add bad'));
+    await fireEvent.press(await screen.findByLabelText('bad'));
+    await fireEvent.press(await screen.findByLabelText('Add bad'));
     expect(
       await within(await screen.findByTestId('settings-local-skill-add-error')).findByText(
         /frontmatter/u,
       ),
     ).toBeTruthy();
     expect(screen.getByText('Not added')).toBeTruthy();
-    fireEvent.press(screen.getByLabelText('Parent folder'));
-    fireEvent.press(await screen.findByLabelText('empty'));
+    await fireEvent.press(screen.getByLabelText('Parent folder'));
+    await fireEvent.press(await screen.findByLabelText('empty'));
     expect(await screen.findByText('No folders here.')).toBeTruthy();
     expect(screen.queryByTestId('settings-local-skill-browse-add')).toBeNull();
 
@@ -404,7 +402,7 @@ describe('Skills settings over the real on-device runtime', () => {
           finish = reject;
         }),
     );
-    fireEvent.press(await screen.findByLabelText('Add zeta'));
+    await fireEvent.press(await screen.findByLabelText('Add zeta'));
     // While one add runs, the others wait instead of racing it.
     expect(screen.getByLabelText('Add zeta').props['accessibilityState']).toMatchObject({
       busy: true,

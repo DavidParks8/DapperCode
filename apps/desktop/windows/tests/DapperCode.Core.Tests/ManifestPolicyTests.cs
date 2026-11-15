@@ -151,7 +151,7 @@ public sealed class ManifestPolicyTests
         AssertPackageVersion(
             packageVersions,
             "Microsoft.Extensions.DependencyInjection",
-            "10.0.11");
+            "11.0.0");
 
         AssertPackageReference(
             XDocument.Load(Path.Combine(CoreProject, "DapperCode.Core.csproj")),

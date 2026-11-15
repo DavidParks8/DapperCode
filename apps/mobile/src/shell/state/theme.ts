@@ -3,7 +3,7 @@ import type { ColorSchemeName } from 'react-native';
 
 import { createAppTheme, resolveThemeMode } from '@shared/theme';
 
-export const systemColorSchemeAtom = atom<ColorSchemeName>('unspecified');
+export const systemColorSchemeAtom = atom<ColorSchemeName | null>(null);
 
 export const themeModeAtom = atom((get) => resolveThemeMode(get(systemColorSchemeAtom)));
 

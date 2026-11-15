@@ -3,10 +3,13 @@ let mockDrawerStatus = 'closed';
 
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 jest.mock('expo-router/drawer', () => ({
-  Drawer: (props: Record<string, unknown>) => {
-    mockDrawerProps = props;
-    return null;
-  },
+  Drawer: Object.assign(
+    (props: Record<string, unknown>) => {
+      mockDrawerProps = props;
+      return null;
+    },
+    { Screen: () => null },
+  ),
   useDrawerStatus: () => mockDrawerStatus,
 }));
 jest.mock('@shell/navigation/DrawerContent', () => ({ DrawerContent: () => null }));

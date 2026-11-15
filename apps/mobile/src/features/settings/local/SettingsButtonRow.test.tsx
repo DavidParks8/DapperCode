@@ -38,8 +38,8 @@ function contrast(text: string, background: string): number {
   return (light! + 0.05) / (dark! + 0.05);
 }
 
-function renderRow(theme: ReturnType<typeof createAppTheme>, disabled: boolean) {
-  const view = render(
+async function renderRow(theme: ReturnType<typeof createAppTheme>, disabled: boolean) {
+  const view = await render(
     <AppThemeProvider theme={theme}>
       <SettingsButtonRow label="Commit staged changes" disabled={disabled} onPress={jest.fn()} />
     </AppThemeProvider>,
@@ -53,17 +53,17 @@ function renderRow(theme: ReturnType<typeof createAppTheme>, disabled: boolean) 
     opacity: StyleSheet.flatten(row.props['style'] as StyleProp<ViewStyle>)?.opacity ?? 1,
     state: row.props['accessibilityState'],
   };
-  view.unmount();
+  await view.unmount();
   return result;
 }
 
 describe('SettingsButtonRow contrast', () => {
   it.each(['light', 'dark'] as const)(
     'keeps enabled and disabled actions legible in %s mode without fading the row',
-    (mode) => {
+    async (mode) => {
       const theme = createAppTheme(mode);
       for (const disabled of [false, true]) {
-        const row = renderRow(theme, disabled);
+        const row = await renderRow(theme, disabled);
         expect(contrast(row.color, theme.colors.bgItem)).toBeGreaterThanOrEqual(4.5);
         expect(row.opacity).toBe(1);
         expect(row.state).toMatchObject({ disabled });

@@ -108,7 +108,7 @@ impl BrowserPreviewService {
             preview_base_url,
             secure_cookie,
             available: AtomicBool::new(false),
-            http: HttpClient::builder()
+            http: crate::tls::preview_client_builder()
                 .danger_accept_invalid_certs(true)
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
@@ -623,7 +623,7 @@ mod tests {
             b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         )
         .await;
-        let http = HttpClient::new();
+        let http = crate::tls::http_client();
         assert!(is_loopback_http_port_reachable(&http, port).await);
         task.await.unwrap();
 

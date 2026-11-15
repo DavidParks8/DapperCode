@@ -30,7 +30,7 @@ An iOS 27 crash containing `UIScene life cycle is required for apps built with t
 means UIKit rejected the native startup configuration before JavaScript could run. Updating
 Metro or restarting the bridge cannot fix it.
 
-DapperCode uses Expo 57.0.24's native scene lifecycle through
+DapperCode uses Expo 58's native scene lifecycle through
 `apps/mobile/plugins/withIosSceneLifecycle.js`. The prebuild plugin registers
 `EXExpoAppSceneDelegate` and leaves React Native startup to that scene delegate, while preserving
 Expo's deep-link and application-state forwarding. Regenerate and rebuild the native app after

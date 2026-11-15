@@ -1,13 +1,13 @@
+use agent_client_protocol::schema::MaybeUndefined;
 #[cfg(test)]
-use agent_client_protocol::schema::v1::SessionNotification;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::SessionNotification;
+use agent_client_protocol::v1::schema::{
     AvailableCommandInput, ContentBlock, ContentChunk, SessionConfigKind, SessionUpdate,
     ToolCallContent, ToolCallStatus, ToolKind,
 };
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOptions,
 };
-use agent_client_protocol::schema::MaybeUndefined;
 
 use super::events::{
     CanonicalEvent, CommandEntry, ConfigEntry, ConfigOptionValue, FieldUpdate, MessageRole,
@@ -935,7 +935,7 @@ mod tests {
                 run_id: "run".to_string(),
                 source_turn_id: "turn".to_string(),
                 generation,
-                stop_reason: agent_client_protocol::schema::v1::StopReason::EndTurn,
+                stop_reason: agent_client_protocol::v1::schema::StopReason::EndTurn,
             })
             .await;
         let snapshot = session.snapshot().await;

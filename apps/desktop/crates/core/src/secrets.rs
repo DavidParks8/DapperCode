@@ -701,6 +701,36 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    fn dependency_upgrade_headless_unix_persists_credentials_across_store_recreation() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempdir().unwrap();
+        let paths = AppPaths::for_tests(directory.path().to_path_buf());
+        let first = SecretStore::discover()
+            .get_or_create(&paths, "unix-profile")
+            .unwrap();
+        assert_eq!(first.backend, SecretBackend::File);
+        let restarted = SecretStore::discover();
+        let restored = restarted.get(&paths, "unix-profile").unwrap().unwrap();
+        assert_eq!(restored.token, first.token);
+        assert_eq!(restored.backend, SecretBackend::File);
+        assert_eq!(
+            std::fs::metadata(paths.secret_vault_file_path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        restarted.delete(&paths, "unix-profile").unwrap();
+        assert!(SecretStore::discover()
+            .get(&paths, "unix-profile")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
     fn creates_then_reuses_a_token_for_a_profile() {
         let temp = tempdir().unwrap();
         let paths = AppPaths::for_tests(temp.path().to_path_buf());
@@ -793,6 +823,14 @@ mod tests {
         assert_eq!(beta.backend, SecretBackend::Keychain);
         assert_eq!(GETS.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(SETS.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn windows_profile_account_preserves_existing_digest_format() {
+        assert_eq!(
+            windows_profile_entry_account("profile-56"),
+            "bridge-auth-token:v2:0038851cbd37beeb49b6cbf6893d248ac90536f123ace1fa818a90c255b91dc1"
+        );
     }
 
     #[test]

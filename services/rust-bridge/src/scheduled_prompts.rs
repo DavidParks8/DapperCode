@@ -1240,7 +1240,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex as StdMutex;
 
-    use agent_client_protocol::schema::v1::ContentBlock;
+    use agent_client_protocol::v1::schema::ContentBlock;
     use futures_util::future::BoxFuture;
     use tokio::sync::{mpsc, oneshot};
 
