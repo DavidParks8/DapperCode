@@ -421,6 +421,11 @@ Security and storage boundaries:
   and credentials under the same central config lease. Platform-specific credential handling stays
   inside the desktop platform adapter. Returning from the Windows file backend preserves the SIP
   secret before retiring its shared fallback vault.
+- **Current credential layouts only**: obsolete per-profile token JSON files and the old Windows
+  shared-keychain vault are neither imported nor deleted. Hosts relying only on those obsolete
+  credentials must configure and pair again. The shared private-file vault remains a supported
+  backend for headless hosts and credential-service outages; recovering from it still preserves
+  both bridge tokens and the SIP password.
 - **Loopback-only inference**: `--stt-base-url`, `--llm-base-url`, and `--tts-base-url` must resolve
   to loopback hosts (`localhost`, `127.0.0.1`, or `::1`); remote model URLs are rejected.
 - **Mandatory mobile approval**: `start_phone_call` blocks on a non-dismissible mobile approval

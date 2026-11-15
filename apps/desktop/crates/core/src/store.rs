@@ -78,10 +78,6 @@ impl AppPaths {
         self.base.join("runtime").join("config.lock")
     }
 
-    pub fn secret_file_path(&self, profile_id: &str) -> PathBuf {
-        self.base.join("secrets").join(format!("{profile_id}.json"))
-    }
-
     pub fn secret_vault_file_path(&self) -> PathBuf {
         self.base.join("secrets").join("bridge-auth-vault.json")
     }

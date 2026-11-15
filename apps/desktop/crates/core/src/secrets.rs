@@ -14,12 +14,10 @@ use crate::test_env::var as secrets_env;
 use std::env::var as secrets_env;
 
 use crate::{
-    platform::{self, CredentialLayout},
+    platform::{self, CredentialLayout, Keychain},
     store::{atomic_private_write, remove_file_if_exists, AppPaths, FileLease},
 };
 
-const KEYCHAIN_SERVICE: &str = "dev.dappercode.desktop";
-const LEGACY_TOKEN_ENTRY_PREFIX: &str = "bridge-auth-token";
 pub(crate) const VAULT_ENTRY_ACCOUNT: &str = "bridge-auth-vault:v1";
 pub(crate) const VAULT_VERSION: u32 = 1;
 const MAX_VAULT_BYTES: usize = 1024 * 1024;
@@ -64,13 +62,6 @@ impl std::fmt::Debug for BridgeSecret {
             .field("backend", &self.backend)
             .finish()
     }
-}
-
-#[cfg(test)]
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SecretFile {
-    bridge_auth_token: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -133,25 +124,6 @@ pub(crate) fn validate_sip_password(password: &str) -> Result<()> {
 struct VaultState {
     vault: SecretVault,
     backend: SecretBackend,
-}
-
-/// Indirection over the OS keychain so the fallback logic can be exercised without touching a real
-/// login keychain during tests.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Keychain {
-    pub(crate) get: fn(&str) -> Result<Option<String>>,
-    pub(crate) set: fn(&str, &str) -> Result<()>,
-    pub(crate) delete: fn(&str) -> Result<()>,
-}
-
-impl Keychain {
-    fn system() -> Self {
-        Self {
-            get: keychain_get,
-            set: keychain_set,
-            delete: keychain_delete,
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -506,10 +478,7 @@ impl SecretStore {
                 self.persist_vault(paths, vault, Some(state.backend))?;
             }
         }
-        if !self.prefer_file {
-            let _ = (self.keychain.delete)(&legacy_entry_account(profile_id));
-        }
-        remove_file_if_exists(&paths.secret_file_path(profile_id))
+        Ok(())
     }
 
     pub fn store_sip_password(&self, paths: &AppPaths, password: &str) -> Result<SecretBackend> {
@@ -566,60 +535,6 @@ impl SecretStore {
         }
         Ok(())
     }
-}
-
-pub(crate) fn legacy_entry_account(profile_id: &str) -> String {
-    format!("{LEGACY_TOKEN_ENTRY_PREFIX}:{profile_id}")
-}
-
-fn keychain_get(account: &str) -> Result<Option<String>> {
-    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, account)
-        .context("keychain is unavailable on this system")?;
-    match entry.get_password() {
-        Ok(token) if !token.trim().is_empty() => Ok(Some(token)),
-        Ok(_) => bail!("stored bridge credential vault is empty"),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(error) => Err(error).context("failed to read the bridge credential vault"),
-    }
-}
-
-fn keychain_set(account: &str, token: &str) -> Result<()> {
-    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, account)
-        .context("keychain is unavailable on this system")?;
-    entry
-        .set_password(token)
-        .context("failed to store the bridge token in the keychain")
-}
-
-fn keychain_delete(account: &str) -> Result<()> {
-    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, account)
-        .context("keychain is unavailable on this system")?;
-    match entry.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(error) => Err(error).context("failed to remove the bridge token from the keychain"),
-    }
-}
-
-#[cfg(test)]
-fn file_get(path: &Path) -> Result<Option<String>> {
-    let contents = match std::fs::read(path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(error).with_context(|| format!("failed to read {}", path.display()))
-        }
-    };
-    let file: SecretFile = serde_json::from_slice(&contents)
-        .with_context(|| format!("invalid stored bridge secret at {}", path.display()))?;
-    Ok(Some(file.bridge_auth_token).filter(|token| !token.trim().is_empty()))
-}
-
-#[cfg(test)]
-fn file_set(path: &Path, token: &str) -> Result<()> {
-    let contents = serde_json::to_vec_pretty(&SecretFile {
-        bridge_auth_token: token.to_string(),
-    })?;
-    atomic_private_write(path, &contents)
 }
 
 pub(crate) fn parse_vault(contents: &str, source: &str) -> Result<SecretVault> {
@@ -982,7 +897,7 @@ mod tests {
     }
 
     #[test]
-    fn windows_reuses_existing_entries_and_detects_legacy_conflicts() {
+    fn windows_reuses_current_entries_without_importing_obsolete_credentials() {
         let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -1025,11 +940,10 @@ mod tests {
                 serde_json::to_string(&legacy).unwrap(),
             );
         }
-        assert!(store
-            .get(&paths, "alpha")
-            .unwrap_err()
-            .to_string()
-            .contains("conflicting Windows bridge credentials"));
+        assert_eq!(
+            store.get(&paths, "alpha").unwrap().unwrap().token,
+            "alpha-token"
+        );
         assert!(store.get(&paths, "missing").unwrap().is_none());
     }
 
@@ -1072,7 +986,7 @@ mod tests {
     }
 
     #[test]
-    fn windows_rejects_conflicting_legacy_and_file_migrations() {
+    fn windows_rejects_conflicts_between_current_file_and_native_credentials() {
         let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -1097,11 +1011,12 @@ mod tests {
                 serde_json::to_string(&legacy).unwrap(),
             );
         }
-        assert!(store
-            .ensure_profiles(&paths, &["alpha".to_string()])
-            .unwrap_err()
-            .to_string()
-            .contains("conflicting Windows bridge credentials"));
+        assert_eq!(
+            store
+                .ensure_profiles(&paths, &["alpha".to_string()])
+                .unwrap(),
+            Some(SecretBackend::Keychain)
+        );
 
         WINDOWS_MEMORY_KEYCHAIN
             .lock()
@@ -1229,7 +1144,7 @@ mod tests {
     }
 
     #[test]
-    fn windows_delete_cleans_legacy_file_and_direct_entries() {
+    fn windows_deletes_current_credentials_without_touching_obsolete_entries() {
         let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -1281,6 +1196,7 @@ mod tests {
         )
         .unwrap();
         assert!(remaining.bridge_auth_tokens.contains_key("beta"));
+        assert!(remaining.bridge_auth_tokens.contains_key("alpha"));
         drop(keychain);
 
         remove_file_if_exists(&paths.secret_vault_file_path()).unwrap();
@@ -1298,7 +1214,7 @@ mod tests {
     }
 
     #[test]
-    fn windows_migrates_a_shared_vault_without_losing_partial_progress() {
+    fn windows_ignores_obsolete_shared_vaults_and_leaves_their_contents_untouched() {
         let _serial = WINDOWS_MEMORY_KEYCHAIN_TEST
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -1306,90 +1222,48 @@ mod tests {
         let temp = tempdir().unwrap();
         let paths = AppPaths::for_tests(temp.path().to_path_buf());
         let store = SecretStore::with_windows_keychain(windows_memory_keychain());
-        let mut legacy_vault = SecretVault::default();
-        for (profile_id, token) in [
-            ("alpha", "alpha-token"),
-            ("beta", "beta-token"),
-            ("gamma", "gamma-token"),
-        ] {
-            legacy_vault
-                .bridge_auth_tokens
-                .insert(profile_id.to_string(), token.to_string());
-        }
+        let old_token = generate_token();
+        let mut obsolete_vault = SecretVault::default();
+        obsolete_vault
+            .bridge_auth_tokens
+            .insert("alpha".to_string(), old_token.clone());
+        obsolete_vault.sip_password = Some(generate_token());
+        let original = serde_json::to_string(&obsolete_vault).unwrap();
         {
             let mut keychain = WINDOWS_MEMORY_KEYCHAIN
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            keychain.entries.insert(
-                VAULT_ENTRY_ACCOUNT.to_string(),
-                serde_json::to_string(&legacy_vault).unwrap(),
-            );
             keychain
-                .fail_sets
-                .insert(windows_profile_entry_account("beta"));
+                .entries
+                .insert(VAULT_ENTRY_ACCOUNT.to_string(), original.clone());
+            keychain
+                .fail_deletes
+                .insert(VAULT_ENTRY_ACCOUNT.to_string());
         }
 
-        let error = store
-            .ensure_profiles(
-                &paths,
-                &["alpha".to_string(), "beta".to_string(), "gamma".to_string()],
-            )
-            .unwrap_err();
-        assert!(error.to_string().contains("failed to migrate"));
-        {
-            let keychain = WINDOWS_MEMORY_KEYCHAIN
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            assert!(keychain.entries.contains_key(VAULT_ENTRY_ACCOUNT));
-            assert!(!keychain.entries.contains_key(WINDOWS_LAYOUT_ENTRY_ACCOUNT));
-            assert_eq!(
-                keychain
-                    .entries
-                    .get(&windows_profile_entry_account("alpha"))
-                    .map(String::as_str),
-                Some("alpha-token")
-            );
-        }
-        assert_eq!(
-            store.get(&paths, "beta").unwrap().unwrap().token,
-            "beta-token"
-        );
-
-        WINDOWS_MEMORY_KEYCHAIN
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .fail_sets
-            .clear();
+        assert!(store.get(&paths, "alpha").unwrap().is_none());
+        assert!(store.load_sip_password(&paths).unwrap().is_none());
         assert_eq!(
             store
-                .ensure_profiles(
-                    &paths,
-                    &["alpha".to_string(), "beta".to_string(), "gamma".to_string()],
-                )
+                .ensure_profiles(&paths, &["alpha".to_string(), "beta".to_string()])
                 .unwrap(),
             Some(SecretBackend::Keychain)
         );
+        assert_ne!(
+            store.get(&paths, "alpha").unwrap().unwrap().token,
+            old_token
+        );
+        store.delete(&paths, "alpha").unwrap();
+        assert!(store.get(&paths, "alpha").unwrap().is_none());
+        assert!(store.get(&paths, "beta").unwrap().is_some());
         let keychain = WINDOWS_MEMORY_KEYCHAIN
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        assert!(!keychain.entries.contains_key(VAULT_ENTRY_ACCOUNT));
+        assert_eq!(keychain.entries.get(VAULT_ENTRY_ACCOUNT), Some(&original));
         assert_eq!(
             keychain.entries.get(WINDOWS_LAYOUT_ENTRY_ACCOUNT),
             Some(&WINDOWS_LAYOUT_MARKER.to_string())
         );
-        for (profile_id, token) in [
-            ("alpha", "alpha-token"),
-            ("beta", "beta-token"),
-            ("gamma", "gamma-token"),
-        ] {
-            assert_eq!(
-                keychain
-                    .entries
-                    .get(&windows_profile_entry_account(profile_id))
-                    .map(String::as_str),
-                Some(token)
-            );
-        }
     }
 
     #[test]
@@ -1495,25 +1369,28 @@ mod tests {
     }
 
     #[test]
-    fn rotates_legacy_tokens_without_reading_or_deleting_them() {
+    fn obsolete_token_files_are_not_read_or_deleted_during_current_credential_operations() {
         let temp = tempdir().unwrap();
         let paths = AppPaths::for_tests(temp.path().to_path_buf());
         let store = file_store();
         let profile_id = "alpha-000000000001";
-        file_set(&paths.secret_file_path(profile_id), "legacy-token").unwrap();
+        let obsolete_path = temp
+            .path()
+            .join("secrets")
+            .join(format!("{profile_id}.json"));
+        let obsolete_contents = br#"{"bridgeAuthToken":"obsolete-token"}"#;
+        atomic_private_write(&obsolete_path, obsolete_contents).unwrap();
+        let original_contents = std::fs::read(&obsolete_path).unwrap();
 
         store
             .ensure_profiles(&paths, &[profile_id.to_string()])
             .unwrap();
 
         let current = store.get(&paths, profile_id).unwrap().unwrap();
-        assert_ne!(current.token, "legacy-token");
-        assert_eq!(
-            file_get(&paths.secret_file_path(profile_id))
-                .unwrap()
-                .as_deref(),
-            Some("legacy-token")
-        );
+        assert_ne!(current.token, "obsolete-token");
+        store.delete(&paths, profile_id).unwrap();
+        assert!(store.get(&paths, profile_id).unwrap().is_none());
+        assert_eq!(std::fs::read(&obsolete_path).unwrap(), original_contents);
     }
 
     #[test]
@@ -1672,29 +1549,40 @@ mod tests {
     #[test]
     fn rejects_a_corrupt_secret_file() {
         let temp = tempdir().unwrap();
-        let path = temp.path().join("alpha.json");
-        std::fs::write(&path, b"not json").unwrap();
-        assert!(file_get(&path)
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        atomic_private_write(&paths.secret_vault_file_path(), b"not json").unwrap();
+        assert!(file_store()
+            .get(&paths, "alpha")
             .unwrap_err()
             .to_string()
-            .contains("invalid stored bridge secret"));
+            .contains("invalid stored bridge credential vault"));
     }
 
     #[test]
-    fn treats_an_empty_stored_token_as_absent() {
+    fn rejects_empty_current_vault_tokens_and_recovers_after_a_valid_write() {
         let temp = tempdir().unwrap();
-        let path = temp.path().join("alpha.json");
-        file_set(&path, "   ").unwrap();
-        assert_eq!(file_get(&path).unwrap(), None);
-
-        file_set(&path, "real-token").unwrap();
-        assert_eq!(file_get(&path).unwrap().as_deref(), Some("real-token"));
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        let store = file_store();
+        atomic_private_write(
+            &paths.secret_vault_file_path(),
+            br#"{"version":1,"bridgeAuthTokens":{"alpha":"   "}}"#,
+        )
+        .unwrap();
+        assert!(store.get(&paths, "alpha").is_err());
+        let token = generate_token();
+        let mut vault = SecretVault::default();
+        vault
+            .bridge_auth_tokens
+            .insert("alpha".to_string(), token.clone());
+        vault_file_set(&paths.secret_vault_file_path(), &vault).unwrap();
+        assert_eq!(store.get(&paths, "alpha").unwrap().unwrap().token, token);
     }
 
     #[test]
     fn reports_a_missing_secret_file_as_absent() {
         let temp = tempdir().unwrap();
-        assert_eq!(file_get(&temp.path().join("absent.json")).unwrap(), None);
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        assert!(file_store().get(&paths, "alpha").unwrap().is_none());
     }
 
     #[test]
@@ -1811,10 +1699,8 @@ mod tests {
     #[test]
     fn reading_an_unknown_keychain_entry_reports_no_secret() {
         // Reading a non-existent item never prompts, so this is safe to exercise directly.
-        let profile_id = format!("dappercode-test-absent-{}", std::process::id());
-        let account = legacy_entry_account(&profile_id);
-        assert_eq!(keychain_get(&account).unwrap(), None);
-        assert!(account.starts_with("bridge-auth-token:"));
+        let account = format!("dappercode-test-absent-{}", generate_token());
+        assert_eq!((Keychain::system().get)(&account).unwrap(), None);
     }
 
     #[test]
