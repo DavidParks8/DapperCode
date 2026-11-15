@@ -24,6 +24,7 @@ import {
 import type { WindowTraits } from './windowLayout';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+jest.mock('./ToolbarOverflowMenu', () => jest.requireActual('./ToolbarOverflowMenu.tsx'));
 
 type Queryable = QueryNode;
 
@@ -278,7 +279,7 @@ describe('SceneVerticalToolbar', () => {
 });
 
 describe('SceneVerticalToolbar without a host', () => {
-  function renderBar(reservedBottom: number): ReactTestRenderer {
+  function renderBar(reservedBottom: number, onRename = jest.fn()): ReactTestRenderer {
     act(() => {
       Dimensions.set({
         window: { width: 466, height: 678, scale: 3, fontScale: 1 },
@@ -301,7 +302,7 @@ describe('SceneVerticalToolbar without a host', () => {
               <SceneVerticalToolbar
                 items={[
                   item('menu', 'navigation'),
-                  item('rename', 'action'),
+                  item('rename', 'action', { onPress: onRename }),
                   item('git', 'action'),
                 ]}
                 reservedBottom={reservedBottom}
@@ -340,6 +341,31 @@ describe('SceneVerticalToolbar without a host', () => {
 
     expect(StyleSheet.flatten(bar?.props['style'])).toMatchObject({ top: 182, height });
     expect(buttons(tree).map((button) => button.props['accessibilityLabel'])).toEqual(expected);
+    act(() => tree.unmount());
+  });
+  it('preserves open overflow choices when the rail gains enough room to show every action', () => {
+    const onRename = jest.fn();
+    const tree = renderBar(376, onRename);
+    act(() => (buttons(tree)[1]?.props['onPress'] as () => void)());
+
+    act(() => {
+      Dimensions.set({
+        window: { width: 466, height: 874, scale: 3, fontScale: 1 },
+        screen: { width: 466, height: 874, scale: 3, fontScale: 1 },
+      });
+    });
+    expect(buttons(tree).map((button) => button.props['accessibilityLabel'])).toEqual([
+      'menu',
+      'rename',
+      'git',
+    ]);
+    const sheet = tree.root.findByType(SelectionSheet);
+    expect(sheet.props['visible']).toBe(true);
+    const options = sheet.props['options'] as { title: string; onPress: () => void }[];
+    expect(options.map(({ title }) => title)).toEqual(['rename', 'git']);
+    act(() => options[0]?.onPress());
+    expect(onRename).toHaveBeenCalledTimes(1);
+    expect(tree.root.findByType(SelectionSheet).props['visible']).toBe(false);
     act(() => tree.unmount());
   });
   it('renders nothing when there are no items', () => {

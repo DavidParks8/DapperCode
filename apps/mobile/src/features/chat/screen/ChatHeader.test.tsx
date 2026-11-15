@@ -331,10 +331,11 @@ describe('ChatHeader', () => {
     jest.useRealTimers();
   });
 
-  it('renders the title and wires the drawer, rename, and right actions', () => {
+  it('renders the title and wires the drawer, rename, Git, and new-chat actions', () => {
     const onOpenDrawer = jest.fn();
     const onRenameTitle = jest.fn();
     const onRightActionPress = jest.fn();
+    const onNewChat = jest.fn();
     const tree = render(
       <ChatHeader
         onOpenDrawer={onOpenDrawer}
@@ -342,6 +343,7 @@ describe('ChatHeader', () => {
         onRenameTitle={onRenameTitle}
         rightIconName="git-branch-outline"
         onRightActionPress={onRightActionPress}
+        onNewChat={onNewChat}
       />,
     );
     const root = queryRoot(tree);
@@ -350,10 +352,12 @@ describe('ChatHeader', () => {
     tapHost(findHost(root, 'Open navigation drawer'));
     tapHost(findHost(root, 'Edit session title'));
     tapHost(findHost(root, 'Open Git'));
+    tapHost(findHost(root, 'New chat'));
 
     expect(onOpenDrawer).toHaveBeenCalledTimes(1);
     expect(onRenameTitle).toHaveBeenCalledTimes(1);
     expect(onRightActionPress).toHaveBeenCalledTimes(1);
+    expect(onNewChat).toHaveBeenCalledTimes(1);
     expect(findToolbarButton(root, 'Edit session title')).toBeDefined();
     act(() => tree.unmount());
   });
@@ -370,6 +374,7 @@ describe('ChatHeader', () => {
         onRenameTitle={jest.fn()}
         rightIconName="git-branch-outline"
         onRightActionPress={jest.fn()}
+        onNewChat={jest.fn()}
       />,
     );
     const root = queryRoot(tree);
@@ -381,6 +386,7 @@ describe('ChatHeader', () => {
     expect(findHost(root, 'Open navigation drawer')).toBeTruthy();
     expect(findHost(root, 'Edit session title')).toBeTruthy();
     expect(findHost(root, 'Open Git')).toBeTruthy();
+    expect(findHost(root, 'New chat')).toBeTruthy();
 
     act(() => tree.unmount());
     Object.defineProperty(Platform, 'OS', { configurable: true, value: originalPlatformOs });
@@ -411,11 +417,12 @@ describe('ChatHeader', () => {
         onRenameTitle={jest.fn()}
         rightIconName="git-branch-outline"
         onRightActionPress={jest.fn()}
+        onNewChat={jest.fn()}
       />,
     );
     const root = queryRoot(tree);
 
-    for (const label of ['Open navigation drawer', 'Edit session title', 'Open Git']) {
+    for (const label of ['Open navigation drawer', 'Edit session title', 'Open Git', 'New chat']) {
       const icon = findToolbarButton(root, label).findAll(
         (node) => node.props['color'] !== undefined,
       )[0];

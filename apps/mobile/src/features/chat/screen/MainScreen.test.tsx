@@ -54,7 +54,6 @@ import {
   newChatRoutePendingAtom,
   pendingMainChatIdAtom,
 } from '@shell/state/chat/atoms';
-import { startNewChatAtom } from '@shell/navigation/actions';
 import { applyRestoredChatSnapshotAtom } from '@shell/state/chat/actions';
 import { interruptedChatCreationAtom } from '@shell/state/chat/atoms';
 import { pendingBrowserTargetUrlAtom } from '../../browser/state/browser';
@@ -975,7 +974,7 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
-    it('shows the new chat screen while navigation away from the previous route settles', async () => {
+    it('starts a new chat from the header while navigation away from the previous route settles', async () => {
       router.navigate(routes.chat('profile-1', chat.id));
       const api = createApi({ cachedChat: chat });
       const { tree, store } = await renderMain({
@@ -987,16 +986,19 @@ function MainRouteShell() {
       expect(hasText(root, 'Real thread')).toBe(true);
 
       (router.navigate as jest.Mock).mockImplementationOnce(() => undefined);
-      await act(async () => {
-        store.set(startNewChatAtom);
-        await Promise.resolve();
-        await Promise.resolve();
-      });
+      await pressLabel(root, 'New chat');
 
       expect(router.navigate).toHaveBeenLastCalledWith(routes.newChat('profile-1'));
       expect(store.get(newChatRoutePendingAtom)).toBe(true);
       expect(hasText(root, 'Real thread')).toBe(false);
       expect(messageInput(root).props['placeholder']).toBe('Message Codex...');
+      expect(
+        root.findAll(
+          (node) =>
+            node.props['accessibilityLabel'] === 'New chat' &&
+            typeof node.props['onPress'] === 'function',
+        ),
+      ).toHaveLength(0);
 
       await act(async () => {
         router.replace(routes.newChat('profile-1'));

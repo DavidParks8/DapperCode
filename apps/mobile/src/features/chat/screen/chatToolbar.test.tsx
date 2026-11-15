@@ -1,4 +1,5 @@
 import { Provider, createStore } from 'jotai';
+import { Button, Menu } from '@expo/ui/swift-ui';
 import { Dimensions, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
@@ -8,17 +9,23 @@ import { queryRoot } from '@shared/testing/foldableLayout';
 import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
 import type { WindowTraits } from '@shell/layout/windowLayout';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
+import { mainScreenCommandsAtom } from '@shell/state/commands';
 import { windowTraitsAtom } from '@shell/state/layout/atoms';
 import { keyboardVisibleAtom } from '../state/composer';
 import { ChatSceneToolbar, resolveInlineHeaderButtons } from './chatToolbar';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 
 const theme = createAppTheme('dark');
 
 function renderToolbar(
   context: Record<string, unknown>,
-  options: { keyboardVisible?: boolean; traits?: Partial<WindowTraits> } = {},
+  options: {
+    keyboardVisible?: boolean;
+    traits?: Partial<WindowTraits>;
+    onStartNewChat?: () => void;
+  } = {},
 ): ReactTestRenderer {
   act(() => {
     Dimensions.set({
@@ -38,6 +45,10 @@ function renderToolbar(
     ...options.traits,
   });
   store.set(keyboardVisibleAtom, options.keyboardVisible ?? false);
+  store.set(mainScreenCommandsAtom, {
+    openChat: jest.fn(),
+    startNewChat: options.onStartNewChat ?? jest.fn(),
+  });
   store.set(drawerCommandsAtom, {
     closeDrawer: jest.fn(),
     toggleNavigation: jest.fn(),
@@ -65,8 +76,8 @@ function renderToolbar(
 
 function labels(tree: ReactTestRenderer): string[] {
   return queryRoot(tree)
-    .findAll((node) => node.type === CircularToolbarButton)
-    .map((button) => button.props['accessibilityLabel'] as string);
+    .findAll((node) => node.type === CircularToolbarButton || node.type === Menu)
+    .map((button) => String(button.props['accessibilityLabel'] ?? button.props['label']));
 }
 
 function barFrame(tree: ReactTestRenderer): { top: number; bottom: number } {
@@ -105,19 +116,32 @@ describe('chat toolbar', () => {
   it('puts navigation first, then the chat actions, in the vertical bar', () => {
     const openTitleEditor = jest.fn();
     const handleOpenGit = jest.fn();
-    const tree = renderToolbar({
-      onOpenDrawer: jest.fn(),
-      selectedChat: { id: 'chat' },
-      openTitleEditor,
-      handleOpenGit,
-    });
+    const onStartNewChat = jest.fn();
+    const tree = renderToolbar(
+      {
+        onOpenDrawer: jest.fn(),
+        selectedChat: { id: 'chat' },
+        openTitleEditor,
+        handleOpenGit,
+      },
+      { onStartNewChat },
+    );
 
-    expect(labels(tree)).toEqual(['Open navigation drawer', 'Edit session title', 'Open Git']);
-    const [, rename, git] = queryRoot(tree).findAll((node) => node.type === CircularToolbarButton);
+    expect(labels(tree)).toEqual([
+      'Open navigation drawer',
+      'Edit session title',
+      'Open Git',
+      'New chat',
+    ]);
+    const [, rename, git, newChat] = queryRoot(tree).findAll(
+      (node) => node.type === CircularToolbarButton,
+    );
     act(() => (rename?.props['onPress'] as () => void)());
     act(() => (git?.props['onPress'] as () => void)());
+    act(() => (newChat?.props['onPress'] as () => void)());
     expect(openTitleEditor).toHaveBeenCalledTimes(1);
     expect(handleOpenGit).toHaveBeenCalledTimes(1);
+    expect(onStartNewChat).toHaveBeenCalledTimes(1);
     act(() => tree.unmount());
   });
 
@@ -134,20 +158,47 @@ describe('chat toolbar', () => {
   });
 
   it('ends the bar above the Send button and folds actions into More while typing', () => {
+    const onStartNewChat = jest.fn();
     const tree = renderToolbar(
       { ...chatWithComposer, composerOverlayInset: KEYBOARD_INSET },
-      { keyboardVisible: true },
+      { keyboardVisible: true, onStartNewChat },
     );
 
     expect(labels(tree)).toEqual(['Open navigation drawer', 'More']);
+    const menu = tree.root.findByType(Menu);
+    expect(menu.props['onPrimaryAction']).toBeUndefined();
+    const newChat = queryRoot(tree).findAll(
+      (node) => node.type === Button && node.props['label'] === 'New chat',
+    )[0];
+    const press = newChat?.props['onPress'];
+    if (typeof press !== 'function') {
+      throw new Error('Missing new-chat overflow action');
+    }
+    act(() => press());
+    expect(onStartNewChat).toHaveBeenCalledTimes(1);
     expect(barFrame(tree).bottom).toBeLessThanOrEqual(SEND_TOP_WITH_KEYBOARD - 12);
+    act(() => tree.unmount());
+  });
+
+  it('keeps new chat on the rail ahead of secondary actions when only three slots fit', () => {
+    const tree = renderToolbar(
+      { ...chatWithComposer, composerOverlayInset: 260 },
+      { keyboardVisible: true },
+    );
+
+    expect(labels(tree)).toEqual(['Open navigation drawer', 'New chat', 'More']);
     act(() => tree.unmount());
   });
 
   it('keeps every action while the keyboard is down and the Send button rests at the bottom', () => {
     const tree = renderToolbar({ ...chatWithComposer, composerOverlayInset: 0 });
 
-    expect(labels(tree)).toEqual(['Open navigation drawer', 'Edit session title', 'Open Git']);
+    expect(labels(tree)).toEqual([
+      'Open navigation drawer',
+      'Edit session title',
+      'Open Git',
+      'New chat',
+    ]);
     expect(barFrame(tree)).toEqual({ top: 182, bottom: SEND_TOP_AT_REST - 12 });
     act(() => tree.unmount());
   });
@@ -161,7 +212,12 @@ describe('chat toolbar', () => {
       { keyboardVisible: true, traits },
     );
 
-    expect(labels(tree)).toEqual(['Open navigation drawer', 'Edit session title', 'Open Git']);
+    expect(labels(tree)).toEqual([
+      'Open navigation drawer',
+      'Edit session title',
+      'Open Git',
+      'New chat',
+    ]);
     // The bar keeps the whole column below the status bar, down to the bottom safe area.
     expect(barFrame(tree)).toEqual({ top: 182, bottom: 658 });
     act(() => tree.unmount());
@@ -173,6 +229,7 @@ describe('chat toolbar', () => {
       hasChat: true,
       openTitleEditor: jest.fn(),
       handleOpenGit: jest.fn(),
+      startNewChat: jest.fn(),
     };
 
     expect(resolveInlineHeaderButtons(false, actions)).toEqual({});
@@ -181,6 +238,7 @@ describe('chat toolbar', () => {
       onRenameTitle: actions.openTitleEditor,
       rightIconName: 'git-branch-outline',
       onRightActionPress: actions.handleOpenGit,
+      onNewChat: actions.startNewChat,
     });
     expect(resolveInlineHeaderButtons(true, { ...actions, hasChat: false })).toEqual({
       onOpenDrawer: actions.onOpenDrawer,

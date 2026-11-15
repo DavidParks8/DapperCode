@@ -152,6 +152,7 @@ test.describe('shell layout', () => {
     await app.settle();
     await expectShellMode(app.page, 'overlay');
     await expectWithinViewport(selectors.composer(app.page));
+    await expectWithinViewport(selectors.chatHeaderNewChat(app.page));
 
     await app.page.setViewportSize(open);
     await app.settle();
@@ -159,11 +160,15 @@ test.describe('shell layout', () => {
     expect(opened.drawer.width).toBeLessThanOrEqual(TABLET_SIDEBAR_WIDTH);
     await expectNoOverlap(selectors.drawer(app.page), selectors.composer(app.page));
     await expectWithinViewport(selectors.composer(app.page));
+    await expectWithinViewport(selectors.chatHeaderNewChat(app.page));
 
     await app.page.setViewportSize(closed);
     await app.settle();
     const reclosed = await expectShellMode(app.page, 'overlay');
     expect(Math.round(reclosed.pane.width)).toBe(closed.width);
     await expectWithinViewport(selectors.composer(app.page));
+    await selectors.chatHeaderNewChat(app.page).click();
+    await expect(selectors.chatHeaderNewChat(app.page)).toHaveCount(0);
+    await expect(selectors.composerInput(app.page)).toBeVisible();
   });
 });
