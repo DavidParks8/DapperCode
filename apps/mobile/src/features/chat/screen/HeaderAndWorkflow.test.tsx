@@ -1,4 +1,5 @@
 import React from 'react';
+import { Menu } from '@expo/ui/swift-ui';
 import { Provider, createStore } from 'jotai';
 import { Dimensions, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -277,8 +278,8 @@ describe('MainScreenHeaderAndWorkflow in laptop pose', () => {
     const buttonsIn = (testID: string) =>
       root
         .findAll((node) => node.props['testID'] === testID && typeof node.type !== 'string')[0]
-        ?.findAll((node) => node.type === CircularToolbarButton)
-        .map((button) => button.props['accessibilityLabel']);
+        ?.findAll((node) => node.type === CircularToolbarButton || node.type === Menu)
+        .map((button) => button.props['accessibilityLabel'] ?? button.props['label']);
 
     expect(buttonsIn('chat-header-row')).toEqual([]);
     expect(buttonsIn('scene-vertical-toolbar')).toEqual(['Open navigation drawer', 'More']);

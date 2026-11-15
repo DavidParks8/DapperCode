@@ -170,7 +170,9 @@ To check iPhone Duo layouts, create a simulator with
 - **Closed and open landscape:** the status bar and camera sit in a vertical column on the trailing
   edge. All header buttons, including **New chat**, move to a vertical bar in that column, below
   the clock. **New chat** stays visible ahead of the other actions when space is limited and joins
-  More when the keyboard leaves room for only navigation and overflow.
+  the system's Liquid Glass More menu when the keyboard leaves room for only navigation and
+  overflow. iOS uses a native SwiftUI pull-down menu, not a custom action sheet; the system owns
+  its material, anchoring, dismissal, and accessibility.
   Content and other controls stay inside the safe area. When closed, the chat's Send (or Stop)
   button sits on that bar, centered in the column and bottom-aligned with the composer's input box;
   the bar's other buttons fold into More rather than overlapping it, including while the keyboard

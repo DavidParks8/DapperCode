@@ -24,6 +24,7 @@ import {
 import type { WindowTraits } from './windowLayout';
 
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+jest.mock('./ToolbarOverflowMenu', () => jest.requireActual('./ToolbarOverflowMenu.tsx'));
 
 type Queryable = QueryNode;
 

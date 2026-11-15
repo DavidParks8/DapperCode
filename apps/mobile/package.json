@@ -37,6 +37,7 @@
   "dependencies": {
     "@ag-ui/core": "1.0.3",
     "@expo/metro-runtime": "~57.0.16",
+    "@expo/ui": "~57.0.26",
     "@expo/vector-icons": "15.0.3",
     "@gorhom/bottom-sheet": "^5.2.14",
     "@react-native-masked-view/masked-view": "^0.3.2",

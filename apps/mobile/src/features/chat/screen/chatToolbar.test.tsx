@@ -1,4 +1,5 @@
 import { Provider, createStore } from 'jotai';
+import { Button, Menu } from '@expo/ui/swift-ui';
 import { Dimensions, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
@@ -6,7 +7,6 @@ import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { queryRoot } from '@shared/testing/foldableLayout';
 import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
-import { SelectionSheet } from '@shared/ui/SelectionSheet';
 import type { WindowTraits } from '@shell/layout/windowLayout';
 import { drawerCommandsAtom } from '@shell/state/drawer/atoms';
 import { mainScreenCommandsAtom } from '@shell/state/commands';
@@ -76,8 +76,8 @@ function renderToolbar(
 
 function labels(tree: ReactTestRenderer): string[] {
   return queryRoot(tree)
-    .findAll((node) => node.type === CircularToolbarButton)
-    .map((button) => button.props['accessibilityLabel'] as string);
+    .findAll((node) => node.type === CircularToolbarButton || node.type === Menu)
+    .map((button) => String(button.props['accessibilityLabel'] ?? button.props['label']));
 }
 
 function barFrame(tree: ReactTestRenderer): { top: number; bottom: number } {
@@ -165,19 +165,10 @@ describe('chat toolbar', () => {
     );
 
     expect(labels(tree)).toEqual(['Open navigation drawer', 'More']);
-    const more = queryRoot(tree).findAll(
-      (node) => node.type === CircularToolbarButton && node.props['accessibilityLabel'] === 'More',
-    )[0];
-    act(() => (more?.props['onPress'] as () => void)());
-    const sheet = tree.root.findByType(SelectionSheet);
-    expect(sheet.props['visible']).toBe(true);
-    expect(sheet.props['options']).toEqual(
-      expect.arrayContaining([expect.objectContaining({ key: 'new-chat', title: 'New chat' })]),
-    );
+    const menu = tree.root.findByType(Menu);
+    expect(menu.props['onPrimaryAction']).toBeUndefined();
     const newChat = queryRoot(tree).findAll(
-      (node) =>
-        node.props['accessibilityLabel'] === 'New chat' &&
-        typeof node.props['onPress'] === 'function',
+      (node) => node.type === Button && node.props['label'] === 'New chat',
     )[0];
     const press = newChat?.props['onPress'];
     if (typeof press !== 'function') {
@@ -185,7 +176,6 @@ describe('chat toolbar', () => {
     }
     act(() => press());
     expect(onStartNewChat).toHaveBeenCalledTimes(1);
-    expect(tree.root.findByType(SelectionSheet).props['visible']).toBe(false);
     expect(barFrame(tree).bottom).toBeLessThanOrEqual(SEND_TOP_WITH_KEYBOARD - 12);
     act(() => tree.unmount());
   });

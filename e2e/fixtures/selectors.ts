@@ -147,7 +147,7 @@ export const nativeOnDeviceSelectors = {
   chatNewChatRail: 'scene-toolbar-button-glass-new-chat',
   chatNewChatOverflow: {
     classChain:
-      '**/XCUIElementTypeOther[`name == "Bottom Sheet"`]/**/XCUIElementTypeButton[`label == "New chat" AND visible == true`]',
+      '**/XCUIElementTypeCollectionView/**/XCUIElementTypeCell/**/XCUIElementTypeButton[`label == "New chat" AND visible == true`]',
   },
   sessionTitle: 'Session title',
   cancelRename: 'Cancel rename',
