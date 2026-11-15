@@ -3259,17 +3259,21 @@ mod tests {
     );
 
     #[tokio::test]
-    async fn http_tls_preserves_webpki_and_loopback_preview_policies() {
-        let cert = CertificateDer::from(
-            BASE64_STANDARD
-                .decode(TEST_LOCALHOST_CERT_B64)
-                .expect("decode test cert"),
-        );
-        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
-            BASE64_STANDARD
-                .decode(TEST_LOCALHOST_PKCS8_B64)
-                .expect("decode test key"),
-        ));
+    async fn http_tls_verifies_preview_certificates_and_preserves_webpki() {
+        let mut params =
+            rcgen::CertificateParams::new(vec!["localhost".to_string(), "127.0.0.1".to_string()])
+                .expect("localhost certificate parameters");
+        params.not_before = std::time::SystemTime::now().into();
+        params.not_after = params.not_before + Duration::from_secs(86_400);
+        params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::ServerAuth];
+        let key_pair = rcgen::KeyPair::generate().expect("generate test key");
+        let cert = params
+            .self_signed(&key_pair)
+            .expect("sign localhost certificate");
+        let cert = cert.der().clone();
+        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_pair.serialize_der()));
+        let trusted_certificate =
+            reqwest::Certificate::from_der(&cert).expect("preview trust anchor");
         let config = rustls::ServerConfig::builder_with_provider(Arc::new(
             rustls::crypto::ring::default_provider(),
         ))
@@ -3284,19 +3288,25 @@ mod tests {
         let address = listener.local_addr().expect("TLS address");
         let server = tokio::spawn(async move {
             let acceptor = TlsAcceptor::from(Arc::new(config));
-            let (stream, _) = listener.accept().await.expect("accept normal client");
-            assert!(acceptor.accept(stream).await.is_err());
-            let (stream, _) = listener.accept().await.expect("accept preview client");
-            let mut stream = acceptor
-                .accept(stream)
-                .await
-                .expect("preview TLS handshake");
-            let mut request = [0_u8; 1024];
-            assert!(stream.read(&mut request).await.expect("read request") > 0);
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
-                .await
-                .expect("write response");
+            let mut handshakes = Vec::new();
+            for _ in 0..4 {
+                let (stream, _) = listener.accept().await.expect("accept TLS client");
+                match acceptor.accept(stream).await {
+                    Ok(mut stream) => {
+                        handshakes.push(true);
+                        let mut request = [0_u8; 1024];
+                        assert!(stream.read(&mut request).await.expect("read request") > 0);
+                        stream
+                            .write_all(
+                                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                            )
+                            .await
+                            .expect("write response");
+                    }
+                    Err(_) => handshakes.push(false),
+                }
+            }
+            handshakes
         });
         let url = format!("https://{address}/");
         let client = crate::tls::http_client_builder()
@@ -3307,20 +3317,44 @@ mod tests {
             .await
             .expect("TLS request finishes");
         assert!(result.is_err(), "untrusted certificate must be rejected");
-        let preview = crate::tls::preview_client_builder()
-            .danger_accept_invalid_certs(true)
+        let preview = crate::preview::BrowserPreviewService::new(0, 0, None, None).http;
+        let result = timeout(TEST_TIMEOUT, preview.get(&url).send())
+            .await
+            .expect("untrusted preview request finishes");
+        assert!(
+            result.is_err(),
+            "preview must reject untrusted certificates"
+        );
+
+        let trusted_preview = crate::tls::preview_client_builder()
+            .tls_certs_merge([trusted_certificate])
+            .resolve("wrong-host.test", address)
             .no_proxy()
             .build()
-            .expect("build preview client");
-        let response = timeout(TEST_TIMEOUT, preview.get(url).send())
+            .expect("build trusted preview client");
+        let result = timeout(
+            TEST_TIMEOUT,
+            trusted_preview
+                .get(format!("https://wrong-host.test:{}/", address.port()))
+                .send(),
+        )
+        .await
+        .expect("wrong-host preview request finishes");
+        assert!(
+            result.is_err(),
+            "preview must verify the certificate hostname"
+        );
+        let response = timeout(TEST_TIMEOUT, trusted_preview.get(&url).send())
             .await
-            .expect("preview request finishes")
-            .expect("preview accepts loopback certificate");
+            .expect("trusted preview request finishes")
+            .expect("preview accepts a valid explicitly trusted certificate");
         assert_eq!(response.status(), reqwest::StatusCode::OK);
-        timeout(TEST_TIMEOUT, server)
+        assert_eq!(response.text().await.expect("read preview response"), "ok");
+        let handshakes = timeout(TEST_TIMEOUT, server)
             .await
             .expect("TLS server finishes")
             .expect("TLS server task");
+        assert_eq!(handshakes, [false, false, false, true]);
     }
 
     #[test]

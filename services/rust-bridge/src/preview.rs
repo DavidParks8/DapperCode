@@ -109,7 +109,6 @@ impl BrowserPreviewService {
             secure_cookie,
             available: AtomicBool::new(false),
             http: crate::tls::preview_client_builder()
-                .danger_accept_invalid_certs(true)
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .expect("build browser preview client"),

@@ -207,4 +207,5 @@ webpki-roots.workspace = true
 [dev-dependencies]
 dappercode-bridge-path-policy = { workspace = true, features = ["test-support"] }
 dappercode-bridge-platform = { workspace = true, features = ["test-support"] }
+rcgen = { version = "0.14.10", default-features = false, features = ["ring"] }
 tempfile.workspace = true

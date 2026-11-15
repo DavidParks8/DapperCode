@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const mobileRequire = createRequire(new URL('../../apps/mobile/package.json', import.meta.url));
+const rootRequire = createRequire(new URL('../../package.json', import.meta.url));
 
 function loadDependency(...names) {
   let require = mobileRequire;
@@ -54,6 +56,22 @@ const yamlPaths = [
   ['expo', '@expo/cli', '@expo/xcpretty', 'js-yaml'],
   ['jest-expo', 'babel-jest', 'babel-plugin-istanbul', '@istanbuljs/load-nyc-config', 'js-yaml'],
 ];
+
+test('advertised and CI Node versions satisfy the Mermaid test runtime', () => {
+  const semver = loadDependency('react-native', 'semver');
+  const jsdomRange = mobileRequire('jsdom/package.json').engines.node;
+  const supportedRange = rootRequire('./package.json').engines.node;
+  assert.ok(semver.subset(supportedRange, jsdomRange), `${supportedRange} exceeds ${jsdomRange}`);
+
+  const yaml = loadDependency(...yamlPaths[0]);
+  for (const filename of ['build-and-test.yml', 'mobile-release.yml']) {
+    const workflow = yaml.load(
+      readFileSync(new URL(`../../.github/workflows/${filename}`, import.meta.url), 'utf8'),
+    );
+    const version = workflow.env.NODE_VERSION;
+    assert.ok(semver.satisfies(version, supportedRange), `${filename} uses unsupported ${version}`);
+  }
+});
 
 for (const dependencyPath of yamlPaths) {
   test(`${dependencyPath.at(-2)}'s YAML parser budgets empty merge sources`, () => {

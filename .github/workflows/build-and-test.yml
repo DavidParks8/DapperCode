@@ -26,7 +26,7 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: '22.13.1'
+  NODE_VERSION: '22.22.2'
   RUST_VERSION: '1.97.1'
   DOTNET_VERSION: '10.0.302'
   NUGET_VERSION: '6.14.0'
@@ -407,6 +407,9 @@ jobs:
 
       - name: Test Windows Rust
         shell: pwsh
+        env:
+          CARGO_BUILD_JOBS: '2'
+          CARGO_PROFILE_TEST_DEBUG: '0'
         run: ./scripts/test-rust-windows.ps1
 
   desktop-windows-package:

@@ -530,6 +530,11 @@ Browser preview uses its separately configured listener rather than another rout
 listener. The versioned mobile RPC inventory is `contracts/bridge-rpc/v2/manifest.json`; the Rust
 allowlist remains authoritative at runtime.
 
+HTTPS preview targets must present an unexpired certificate valid for the target hostname and
+trusted by the bridge machine's operating system. For local development, use a certificate issued
+by a local CA you explicitly trust on that machine, or use HTTP over loopback. Untrusted self-signed
+certificates are rejected; there is no certificate-validation bypass.
+
 ## Development
 
 For native offline iPhone usage, see [On this iPhone](on-device.md). A bridge is not needed for that

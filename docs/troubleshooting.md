@@ -229,6 +229,15 @@ initial Credential Manager persistence is unavailable, set `DAPPERCODE_SECRETS_B
 you accept the private-file fallback under `%APPDATA%\DapperCode\secrets`. A later failure to update
 existing Credential Manager entries fails closed rather than silently moving credentials to a file.
 
+## An HTTPS Browser Preview Fails to Load
+
+The bridge verifies HTTPS preview certificates against its machine's operating-system trust store.
+An untrusted self-signed, expired, or hostname-mismatched certificate fails with a preview gateway
+error. Configure the development server with a certificate from a CA you explicitly trust on the
+bridge machine, and use the hostname listed in that certificate (for example, `localhost` rather
+than `127.0.0.1`). Alternatively, serve the local development target over HTTP on loopback.
+There is no "accept any certificate" option.
+
 ## A Port Is Already Taken
 
 The first workspace allocates the public broker port; later workspaces share it and receive distinct

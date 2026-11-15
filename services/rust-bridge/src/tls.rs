@@ -24,7 +24,8 @@ pub(crate) fn http_client() -> reqwest::Client {
 }
 
 pub(crate) fn preview_client_builder() -> reqwest::ClientBuilder {
-    // Preview configures its own verifier, so reqwest needs a process-default provider.
+    // Use platform trust for local development CAs, with certificate and hostname checks enabled.
+    // Reqwest's platform verifier needs a process-default provider.
     if rustls::crypto::ring::default_provider()
         .install_default()
         .is_err()
