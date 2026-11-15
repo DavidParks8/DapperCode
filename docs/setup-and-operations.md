@@ -522,6 +522,15 @@ allowlist remains authoritative at runtime.
 
 ## Development
 
+Both Rust workspaces (`services/rust-bridge` and `apps/desktop`) set `incremental = false` and
+`debug = 1` in `[profile.dev]`; Cargo's test profile inherits these defaults. This produces smaller
+dev/test outputs with limited debug information for useful backtraces, at the cost of potentially
+slower rebuilds after code changes. Normal Cargo dependency caching and reuse remain enabled;
+release and bench profiles are unchanged. Standard Cargo environment and configuration overrides
+still apply. These defaults affect only builds from checkouts containing these manifest changes,
+not other branches, already-running builds, or existing artifacts; old outputs do not shrink
+automatically.
+
 For native offline iPhone usage, see [On this iPhone](on-device.md). A bridge is not needed for that
 mode. Its native build requires CMake, the pinned libgit2 build, and a rebuilt iOS application;
 Expo Go or a JavaScript-only update cannot add the native inference/Git libraries.
