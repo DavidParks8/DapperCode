@@ -145,6 +145,10 @@ export const nativeOnDeviceSelectors = {
   gitDiscarding: { predicate: 'label BEGINSWITH "Discarding"' },
   editSessionTitle: 'Edit session title',
   chatNewChatRail: 'scene-toolbar-button-glass-new-chat',
+  chatNewChatOverflow: {
+    classChain:
+      '**/XCUIElementTypeOther[`name == "Bottom Sheet"`]/**/XCUIElementTypeButton[`label == "New chat" AND visible == true`]',
+  },
   sessionTitle: 'Session title',
   cancelRename: 'Cancel rename',
   saveSessionTitle: 'Save session title',
