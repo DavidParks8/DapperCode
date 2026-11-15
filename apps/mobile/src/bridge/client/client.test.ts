@@ -61,6 +61,18 @@ function makeSnapshot(overrides: Partial<RawAcpSnapshot> = {}): RawAcpSnapshot {
 }
 
 describe('HostBridgeApiClient', () => {
+  it('reads authoritative phone controls through the native surface snapshot RPC', async () => {
+    const ws = createWsMock();
+    ws.request.mockResolvedValue({ surfaces: [] });
+    const client = new HostBridgeApiClient({ ws: ws as unknown as HostBridgeWsClient });
+    await expect(client.readPhoneCallSurfaces()).resolves.toEqual([]);
+    expect(ws.request).toHaveBeenCalledWith('bridge/phoneCall/surfaces/read');
+    ws.request.mockResolvedValue({ surfaces: null });
+    await expect(client.readPhoneCallSurfaces()).rejects.toThrow(
+      'invalid phone-call surface snapshot',
+    );
+  });
+
   it('listChats() maps app-server list response', async () => {
     const ws = createWsMock();
     ws.request.mockResolvedValue({

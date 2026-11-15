@@ -1,4 +1,5 @@
 import { requireTestValue } from '@shared/testing/requireTestValue';
+import phoneCallManifest from '../../../../../../contracts/bridge-rpc/v2/manifest.json';
 import * as DocumentPicker from 'expo-document-picker';
 import { fileSystemMock as FileSystem } from '@shared/testing/expoFileSystemMock';
 import { ComposerPasteView, type ComposerPasteViewProps } from '../composer/ComposerPasteView';
@@ -54,14 +55,19 @@ import {
   newChatRoutePendingAtom,
   pendingMainChatIdAtom,
 } from '@shell/state/chat/atoms';
-import { startNewChatAtom } from '@shell/navigation/actions';
 import { applyRestoredChatSnapshotAtom } from '@shell/state/chat/actions';
 import { interruptedChatCreationAtom } from '@shell/state/chat/atoms';
 import { pendingBrowserTargetUrlAtom } from '../../browser/state/browser';
 import { agentThreadMenuVisibleAtom } from '../state/modals';
 import { selectedChatAtom, selectedChatIdAtom } from '../state/session';
 import { threadRuntimeSnapshotsAtom } from '../state/runtime';
-import { activeTurnIdAtom, errorAtom, liveAssistantByThreadAtom, sendingAtom } from '../state/turn';
+import {
+  activeBridgeUiSurfacesAtom,
+  activeTurnIdAtom,
+  errorAtom,
+  liveAssistantByThreadAtom,
+  sendingAtom,
+} from '../state/turn';
 import { createAgUiThreadMessageState } from '@bridge/agui/agUiMessages';
 import { activityAtom } from '../state/composer';
 import { submissionScopeKey } from '../turn/controllers/submissionController';
@@ -975,7 +981,7 @@ function MainRouteShell() {
       act(() => tree.unmount());
     });
 
-    it('shows the new chat screen while navigation away from the previous route settles', async () => {
+    it('starts a new chat from the header while navigation away from the previous route settles', async () => {
       router.navigate(routes.chat('profile-1', chat.id));
       const api = createApi({ cachedChat: chat });
       const { tree, store } = await renderMain({
@@ -987,16 +993,19 @@ function MainRouteShell() {
       expect(hasText(root, 'Real thread')).toBe(true);
 
       (router.navigate as jest.Mock).mockImplementationOnce(() => undefined);
-      await act(async () => {
-        store.set(startNewChatAtom);
-        await Promise.resolve();
-        await Promise.resolve();
-      });
+      await pressLabel(root, 'New chat');
 
       expect(router.navigate).toHaveBeenLastCalledWith(routes.newChat('profile-1'));
       expect(store.get(newChatRoutePendingAtom)).toBe(true);
       expect(hasText(root, 'Real thread')).toBe(false);
       expect(messageInput(root).props['placeholder']).toBe('Message Codex...');
+      expect(
+        root.findAll(
+          (node) =>
+            node.props['accessibilityLabel'] === 'New chat' &&
+            typeof node.props['onPress'] === 'function',
+        ),
+      ).toHaveLength(0);
 
       await act(async () => {
         router.replace(routes.newChat('profile-1'));
@@ -6652,6 +6661,7 @@ function MainRouteShell() {
         const value = options.capabilities ?? capabilities;
         return value instanceof Error ? Promise.reject(value) : Promise.resolve(value);
       }),
+      readPhoneCallSurfaces: jest.fn().mockResolvedValue([]),
       peekChat: jest.fn().mockReturnValue(options.cachedChat ?? null),
       peekChatShell: jest.fn().mockReturnValue(options.shell ?? null),
       peekChatSummary: jest.fn().mockReturnValue(options.summary ?? null),
@@ -7442,6 +7452,138 @@ function MainRouteShell() {
         harness.unmount();
       },
     );
+
+    it.each(['approval', 'held'] as const)(
+      'restores %s phone controls after reconnect and a replay gap without a new call event',
+      async (phase) => {
+        const api = createApi({
+          capabilities: {
+            ...capabilities,
+            supports: { ...capabilities.supports, phoneCalls: true },
+          },
+        });
+        const surfaces = phoneCallManifest.fixtures.phoneCallSurfaceSnapshots[phase].surfaces.map(
+          (surface) => ({ ...surface, threadId: baseChat.id }),
+        );
+        requireTestValue(api['readPhoneCallSurfaces'], 'phone snapshot').mockResolvedValue(
+          surfaces,
+        );
+        const harness = await renderMain({ api, chat: baseChat });
+        await harness.emit({ method: 'bridge/ui.present', params: surfaces[0] });
+        await harness.setConnected(false);
+        await harness.setConnected(true);
+        await harness.emit({
+          method: 'bridge/events/snapshotRequired',
+          params: { reason: 'replayTruncated', resumeAfterEventId: 144 },
+        });
+        await settleRecovery();
+        expect(harness.store.get(activeBridgeUiSurfacesAtom).map((surface) => surface.id)).toEqual(
+          surfaces.map((surface) => surface.id),
+        );
+        const root = harness.tree.root as Queryable;
+        if (phase === 'approval') {
+          expect(text(root, 'Approve outbound phone call')).toBe(true);
+          const prompt = requireTestValue(
+            [...mockBridgeUiProps].reverse().find((props) => props.surface.id === surfaces[0]?.id),
+            'recovered approval renderer',
+          );
+          const approve = requireTestValue(
+            prompt.surface.actions.find((action) => action.id === 'approve'),
+            'recovered approval action',
+          );
+          expect(prompt.surface.actions.map((action) => action.id)).toEqual(['approve', 'cancel']);
+          await act(async () => {
+            prompt.onAction(prompt.surface, approve);
+            await Promise.resolve();
+          });
+        } else {
+          expect(text(root, 'On hold')).toBe(true);
+          expect(
+            root.findAll((node) => node.props['testID'] === 'phone-call-dock-hangup'),
+          ).not.toHaveLength(0);
+          await press(root, 'Hang Up');
+        }
+        expect(api['resolveBridgeUiSurface']).toHaveBeenCalled();
+        expect(harness.ws.acknowledgeSnapshotRecovery).toHaveBeenCalledWith(144);
+        harness.unmount();
+      },
+    );
+
+    it('restores phone controls despite unrelated runtime changes during recovery', async () => {
+      const api = createApi({
+        capabilities: { ...capabilities, supports: { ...capabilities.supports, phoneCalls: true } },
+      });
+      let finishSnapshot: (surfaces: unknown[]) => void = () => {
+        throw new Error('phone snapshot not started');
+      };
+      requireTestValue(api['readPhoneCallSurfaces'], 'phone snapshot').mockReturnValue(
+        new Promise<unknown[]>((resolve) => {
+          finishSnapshot = resolve;
+        }),
+      );
+      const held = phoneCallManifest.fixtures.phoneCallSurfaceSnapshots.held.surfaces.map(
+        (surface) => ({ ...surface, threadId: baseChat.id }),
+      );
+      const harness = await renderMain({ api, chat: baseChat });
+      await harness.emit({
+        method: 'bridge/events/snapshotRequired',
+        params: { reason: 'replayTruncated', resumeAfterEventId: 145 },
+      });
+      await harness.emit(
+        runtimeEvent('bridge/thread/queue/updated', {
+          ...emptyQueue,
+          items: [{ id: 'new-queue', content: 'New queued work', createdAt: now }],
+        }),
+      );
+      await act(async () => {
+        finishSnapshot(held);
+      });
+      await settleRecovery();
+      expect(harness.store.get(activeBridgeUiSurfacesAtom).map((surface) => surface.id)).toEqual(
+        held.map((surface) => surface.id),
+      );
+      expect(text(harness.tree.root as Queryable, 'On hold')).toBe(true);
+      expect(text(harness.tree.root as Queryable, 'New queued work')).toBe(true);
+      expect(harness.ws.acknowledgeSnapshotRecovery).toHaveBeenCalledWith(145);
+      harness.unmount();
+    });
+
+    it('does not replace a newer phone event with a delayed stale recovery surface', async () => {
+      const api = createApi({
+        capabilities: { ...capabilities, supports: { ...capabilities.supports, phoneCalls: true } },
+      });
+      let finishSnapshot: (surfaces: unknown[]) => void = () => {
+        throw new Error('phone snapshot not started');
+      };
+      requireTestValue(api['readPhoneCallSurfaces'], 'phone snapshot').mockReturnValue(
+        new Promise<unknown[]>((resolve) => {
+          finishSnapshot = resolve;
+        }),
+      );
+      const stale = phoneCallManifest.fixtures.phoneCallSurfaceSnapshots.approval.surfaces.map(
+        (surface) => ({ ...surface, threadId: baseChat.id }),
+      );
+      const latest = phoneCallManifest.fixtures.phoneCallSurfaceSnapshots.held.surfaces.map(
+        (surface) => ({ ...surface, threadId: baseChat.id }),
+      );
+      const harness = await renderMain({ api, chat: baseChat });
+      await harness.emit({
+        method: 'bridge/events/snapshotRequired',
+        params: { reason: 'replayTruncated', resumeAfterEventId: 146 },
+      });
+      await harness.emit({ method: 'bridge/ui.present', params: latest[0] });
+      await act(async () => {
+        finishSnapshot(stale);
+      });
+      await settleRecovery();
+      expect(harness.store.get(activeBridgeUiSurfacesAtom).map((surface) => surface.id)).toEqual(
+        latest.map((surface) => surface.id),
+      );
+      expect(text(harness.tree.root as Queryable, 'Approve outbound phone call')).toBe(false);
+      expect(text(harness.tree.root as Queryable, 'On hold')).toBe(true);
+      expect(harness.ws.acknowledgeSnapshotRecovery).toHaveBeenCalledWith(146);
+      harness.unmount();
+    });
 
     it('installs selected and background recovery truth before acknowledging once', async () => {
       const api = createApi();

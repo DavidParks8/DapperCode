@@ -18,6 +18,7 @@ import { readString, toRecord } from '@bridge/mapping/chatMapping';
 import type {
   AgentId,
   BridgeCapabilities,
+  BridgeUiSurface,
   Chat,
   ChatSummary,
   ModelOption,
@@ -35,6 +36,16 @@ function optionalText(value: unknown): string | undefined {
 export abstract class HostBridgeApiClientHealthAndCacheLayer extends HostBridgeApiClientCore {
   readBridgeCapabilities(): Promise<BridgeCapabilities> {
     return this.ws.request<BridgeCapabilities>('bridge/capabilities/read');
+  }
+
+  async readPhoneCallSurfaces(): Promise<BridgeUiSurface[]> {
+    const response = await this.ws.request<{ surfaces: BridgeUiSurface[] }>(
+      'bridge/phoneCall/surfaces/read',
+    );
+    if (!Array.isArray(response?.surfaces)) {
+      throw new Error('Bridge returned an invalid phone-call surface snapshot');
+    }
+    return response.surfaces;
   }
   /**
    * The bridge answers `model/list` by shelling out to the agent, which is slow enough that the

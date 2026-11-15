@@ -421,6 +421,10 @@ Security and storage boundaries:
   and credentials under the same central config lease. Platform-specific credential handling stays
   inside the desktop platform adapter. Returning from the Windows file backend preserves the SIP
   secret before retiring its shared fallback vault.
+- **Windows credential capacity**: valid SIP passwords exceeding the native credential limit
+  (1,200 UTF-16 code units) stay in the dedicated private-file fallback, up to the normal 4,096-byte
+  SIP password limit. Recovering bridge tokens from the shared file vault still succeeds, and
+  replacing an existing native SIP credential with that fallback preserves its value on failure.
 - **Current credential layouts only**: obsolete per-profile token JSON files and the old Windows
   shared-keychain vault are neither imported nor deleted. Hosts relying only on those obsolete
   credentials must configure and pair again. The shared private-file vault remains a supported

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Menu } from '@expo/ui/swift-ui';
 import { Provider, createStore } from 'jotai';
 import { Dimensions, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -18,6 +19,7 @@ import {
 import { formatCompactTokenCount, MainScreenHeaderAndWorkflow } from './HeaderAndWorkflow';
 import { ChatSceneToolbar } from './chatToolbar';
 import { SESSION_META_CHIP_HEIGHT } from '../styles/sessionMetaChip';
+import { keyboardVisibleAtom } from '../state/composer';
 import type {
   MainScreenPanelCollapseCoordinatorContext,
   MainScreenPanelCollapseCoordinatorResult,
@@ -208,7 +210,7 @@ describe('MainScreenHeaderAndWorkflow in laptop pose', () => {
       container(testID)
         ?.findAll((node) => node.type === CircularToolbarButton)
         .map((button) => button.props['accessibilityLabel']) ?? [];
-    const headerButtons = ['Open navigation drawer', 'Edit session title', 'Open Git'];
+    const headerButtons = ['Open navigation drawer', 'Edit session title', 'Open Git', 'New chat'];
 
     expect(buttonsIn('chat-header-row')).toEqual([]);
     expect(buttonsIn('scene-vertical-toolbar')).toEqual(headerButtons);
@@ -229,6 +231,58 @@ describe('MainScreenHeaderAndWorkflow in laptop pose', () => {
     expect(StyleSheet.flatten(container('session-meta-row')?.props['style'])).toMatchObject({
       paddingRight: 0,
     });
+    act(() => tree.unmount());
+  });
+
+  it('moves new chat into rail overflow when the closed Duo keyboard crowds the rail', () => {
+    act(() => {
+      Dimensions.set({
+        window: { width: 466, height: 678, scale: 3, fontScale: 1 },
+        screen: { width: 466, height: 678, scale: 3, fontScale: 1 },
+      });
+    });
+    const store = createStore();
+    store.set(windowTraitsAtom, {
+      horizontalSizeClass: 'compact',
+      verticalSizeClass: 'regular',
+      verticalBarEdge: 'trailing',
+      divisions: [],
+      occlusions: [{ x: 382, y: 0, width: 84, height: 174 }],
+      statusBar: null,
+    });
+    store.set(keyboardVisibleAtom, true);
+    const context = baseContext({
+      shouldShowComposer: true,
+      composerOverlayInset: 320,
+      composerSafeAreaBottomInset: 20,
+    });
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 466, height: 678 },
+            insets: { top: 0, left: 0, right: 84, bottom: 20 },
+          }}
+        >
+          <Provider store={store}>
+            <AppThemeProvider theme={theme}>
+              <MainScreenHeaderAndWorkflow context={context} />
+              <ChatSceneToolbar context={context} />
+            </AppThemeProvider>
+          </Provider>
+        </SafeAreaProvider>,
+      );
+    });
+    const root = queryRoot(tree);
+    const buttonsIn = (testID: string) =>
+      root
+        .findAll((node) => node.props['testID'] === testID && typeof node.type !== 'string')[0]
+        ?.findAll((node) => node.type === CircularToolbarButton || node.type === Menu)
+        .map((button) => button.props['accessibilityLabel'] ?? button.props['label']);
+
+    expect(buttonsIn('chat-header-row')).toEqual([]);
+    expect(buttonsIn('scene-vertical-toolbar')).toEqual(['Open navigation drawer', 'More']);
     act(() => tree.unmount());
   });
 });

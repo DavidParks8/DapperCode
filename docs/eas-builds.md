@@ -168,17 +168,22 @@ To check iPhone Duo layouts, create a simulator with
 `xcrun simctl create "Duo QA" com.apple.CoreSimulator.SimDeviceType.iPhone-Duo` and switch poses
 (closed, open, book, laptop) in Xcode's Device Hub. `simctl` cannot change poses. Check each pose:
 - **Closed and open landscape:** the status bar and camera sit in a vertical column on the trailing
-  edge. Header buttons appear as a vertical bar in that column, below the clock. Content and other
-  controls stay inside the safe area. When closed, the chat's Send (or Stop) button sits on that
-  bar, centered in the column and bottom-aligned with the composer's input box; the bar's other
-  buttons fold into More rather than overlapping it, including while the keyboard is up.
+  edge. All header buttons, including **New chat**, move to a vertical bar in that column, below
+  the clock. **New chat** stays visible ahead of the other actions when space is limited and joins
+  the system's Liquid Glass More menu when the keyboard leaves room for only navigation and
+  overflow. iOS uses a native SwiftUI pull-down menu, not a custom action sheet; the system owns
+  its material, anchoring, dismissal, and accessibility.
+  Content and other controls stay inside the safe area. When closed, the chat's Send (or Stop)
+  button sits on that bar, centered in the column and bottom-aligned with the composer's input box;
+  the bar's other buttons fold into More rather than overlapping it, including while the keyboard
+  is up.
 - **Book:** the chat keeps the full width, the session list stays behind the menu, and the
   composer and sheets sit on the right page, off the hinge.
 - **Laptop:** the window is portrait. The chat's title and chips stay at the top of the upper half,
-  and its header buttons stand on a vertical rail along the trailing edge, ending above the hinge.
-  The composer focuses automatically and keeps the keyboard on the lower half, with the composer
-  directly above the fold; scrolling the transcript does not dismiss it. Opening the menu hides the
-  keyboard, and closing it brings the keyboard back. In Xcode 27 the simulator renders the inner
+  and its header buttons stand on a vertical rail along the trailing edge, ending above the
+  hinge. The composer focuses automatically and keeps the keyboard on the lower half, with the
+  composer directly above the fold; scrolling the transcript does not dismiss it. Opening the menu
+  hides the keyboard, and closing it brings the keyboard back. In Xcode 27 the simulator renders the inner
   display separately: capture it with `xcrun simctl io <udid> screenshot --display=primary-1`, and
   drive it with element-targeted XCUITest gestures, because coordinate taps land on the outer
   display. Pose changes need the Mac unlocked. Android foldables

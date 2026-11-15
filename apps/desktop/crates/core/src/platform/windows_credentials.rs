@@ -428,10 +428,23 @@ fn store_sip_password_locked(
     password: &str,
 ) -> Result<SecretBackend> {
     validate_sip_password(password)?;
-    if password.encode_utf16().count() > MAX_WINDOWS_CREDENTIAL_UTF16_UNITS {
-        bail!("SIP password exceeds the Windows Credential Manager size limit");
-    }
     let existed = (store.keychain.get)(WINDOWS_SIP_PASSWORD_ACCOUNT)?.is_some();
+    if password.encode_utf16().count() > MAX_WINDOWS_CREDENTIAL_UTF16_UNITS {
+        let previous_fallback = sip_password_file_get(&paths.sip_secret_file_path())?;
+        sip_password_file_set(paths, password)?;
+        if existed {
+            if let Err(error) = (store.keychain.delete)(WINDOWS_SIP_PASSWORD_ACCOUNT) {
+                let rollback = match previous_fallback {
+                    Some(previous) => sip_password_file_set(paths, &previous),
+                    None => remove_file_if_exists(&paths.sip_secret_file_path()),
+                };
+                return Err(AppPaths::with_rollback_error(error, rollback)).context(
+                    "failed to move the Windows SIP password to its private-file fallback",
+                );
+            }
+        }
+        return Ok(SecretBackend::File);
+    }
     match (store.keychain.set)(WINDOWS_SIP_PASSWORD_ACCOUNT, password) {
         Ok(()) => {
             remove_file_if_exists(&paths.sip_secret_file_path())?;
@@ -441,13 +454,17 @@ fn store_sip_password_locked(
             Err(error).context("failed to update the Windows SIP password credential")
         }
         Err(_) => {
-            let contents = serde_json::to_vec_pretty(&SipPasswordFile {
-                sip_password: password.to_string(),
-            })?;
-            atomic_private_write(&paths.sip_secret_file_path(), &contents)?;
+            sip_password_file_set(paths, password)?;
             Ok(SecretBackend::File)
         }
     }
+}
+
+fn sip_password_file_set(paths: &AppPaths, password: &str) -> Result<()> {
+    let contents = serde_json::to_vec_pretty(&SipPasswordFile {
+        sip_password: password.to_string(),
+    })?;
+    atomic_private_write(&paths.sip_secret_file_path(), &contents)
 }
 
 pub(crate) fn load_sip_password(

@@ -23,6 +23,7 @@
     "bridge/git/unstage",
     "bridge/git/unstageAll",
     "bridge/health/read",
+    "bridge/phoneCall/surfaces/read",
     "bridge/push/observed",
     "bridge/push/presence",
     "bridge/push/register",
@@ -103,6 +104,60 @@
     { "code": -32005, "name": "overloaded" }
   ],
   "fixtures": {
+    "phoneCallSurfaceSnapshots": {
+      "approval": {
+        "surfaces": [
+          {
+            "id": "phone-call-approval:recovery-call",
+            "threadId": "phone-owner",
+            "kind": "phone-call",
+            "presentation": "modal",
+            "tone": "warning",
+            "title": "Approve outbound phone call",
+            "blocks": [
+              {
+                "type": "keyValue",
+                "items": [
+                  { "label": "To", "value": "+15551234567" },
+                  { "label": "Objective", "value": "Ask for opening hours" }
+                ]
+              }
+            ],
+            "actions": [
+              { "id": "approve", "label": "Approve & Call", "style": "primary" },
+              { "id": "cancel", "label": "Cancel", "style": "destructive" }
+            ],
+            "dismissible": false
+          }
+        ]
+      },
+      "held": {
+        "surfaces": [
+          {
+            "id": "phone-call-live:recovery-call",
+            "threadId": "phone-owner",
+            "kind": "phone-call",
+            "presentation": "workflowCard",
+            "tone": "success",
+            "title": "Phone call",
+            "blocks": [
+              {
+                "type": "keyValue",
+                "items": [
+                  { "label": "Status", "value": "On hold" },
+                  { "label": "To", "value": "+15551234567" },
+                  { "label": "Duration", "value": "1:05" },
+                  { "label": "Objective", "value": "Ask for opening hours" }
+                ]
+              }
+            ],
+            "actions": [{ "id": "hangup", "label": "Hang Up", "style": "destructive" }],
+            "dismissible": false
+          }
+        ]
+      },
+      "idle": { "surfaces": [] }
+    },
     "threadReadNotFound": {
       "code": -32004,
       "message": "Thread not found",

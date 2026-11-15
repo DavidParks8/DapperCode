@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useAtomValue } from 'jotai';
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { View, useWindowDimensions } from 'react-native';
 
 import { decorativeAccessibilityProps } from '@shared/accessibility';
@@ -9,10 +9,10 @@ import {
   CIRCULAR_TOOLBAR_BUTTON_SIZE,
   CircularToolbarButton,
 } from '@shared/ui/CircularToolbarButton';
-import { SelectionSheet } from '@shared/ui/SelectionSheet';
 import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { useShellLayout, useVerticalBarFrame } from '@shell/layout/useShellLayout';
 import { drawerCommandsAtom, useNavigationToggleLabel } from '@shell/state/drawer/atoms';
+import { ToolbarOverflowMenu } from './ToolbarOverflowMenu';
 
 export interface SceneToolbarItem {
   readonly key: string;
@@ -31,7 +31,6 @@ export interface SceneToolbarItem {
 }
 
 export const VERTICAL_TOOLBAR_GAP = 12;
-const OVERFLOW_LABEL = 'More';
 
 /**
  * Whether a header shows its own toolbar buttons. When the system lays bars out vertically, or the
@@ -95,7 +94,6 @@ export function SceneVerticalToolbar({
   const placement = useToolbarPlacement();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const theme = useAppTheme();
-  const [overflowVisible, setOverflowVisible] = useState(false);
   if (!frame || items.length === 0) {
     return null;
   }
@@ -156,34 +154,11 @@ export function SceneVerticalToolbar({
     >
       <View style={{ alignItems: 'center', gap: VERTICAL_TOOLBAR_GAP }}>
         {visible.filter((item) => item.group !== 'bottom').map(renderButton)}
-        {overflow.length > 0
-          ? renderButton({
-              key: 'overflow',
-              label: OVERFLOW_LABEL,
-              icon: 'ellipsis-horizontal',
-              group: 'action',
-              onPress: () => setOverflowVisible(true),
-            })
-          : null}
+        <ToolbarOverflowMenu items={overflow} />
       </View>
       <View style={{ alignItems: 'center', gap: VERTICAL_TOOLBAR_GAP }}>
         {visible.filter((item) => item.group === 'bottom').map(renderButton)}
       </View>
-      <SelectionSheet
-        visible={overflowVisible}
-        title={OVERFLOW_LABEL}
-        onClose={() => setOverflowVisible(false)}
-        options={overflow.map((item) => ({
-          key: item.key,
-          title: item.label,
-          icon: item.icon,
-          disabled: item.disabled,
-          onPress: () => {
-            setOverflowVisible(false);
-            item.onPress();
-          },
-        }))}
-      />
     </View>
   );
 }

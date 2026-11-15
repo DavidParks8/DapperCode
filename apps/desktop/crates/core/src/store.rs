@@ -240,7 +240,10 @@ impl AppPaths {
         FileLease::acquire(&self.config_lock_path())
     }
 
-    fn with_rollback_error(primary: anyhow::Error, rollback: Result<()>) -> anyhow::Error {
+    pub(crate) fn with_rollback_error(
+        primary: anyhow::Error,
+        rollback: Result<()>,
+    ) -> anyhow::Error {
         match rollback {
             Ok(()) => primary,
             Err(rollback) => anyhow!("{primary:#}; side-effect rollback also failed: {rollback:#}"),

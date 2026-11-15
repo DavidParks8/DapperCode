@@ -146,6 +146,15 @@ mod tests {
         ))
         .expect("v2 contract fixture parses");
         assert_eq!(manifest["protocolVersion"], crate::BRIDGE_PROTOCOL_VERSION);
+        for phase in ["approval", "held"] {
+            let surfaces =
+                manifest["fixtures"]["phoneCallSurfaceSnapshots"][phase]["surfaces"].clone();
+            let surfaces: Vec<crate::BridgeUiSurface> = serde_json::from_value(surfaces).unwrap();
+            for surface in surfaces {
+                crate::validate_bridge_ui_surface(&surface).unwrap();
+                assert_eq!(surface.kind.as_deref(), Some("phone-call"));
+            }
+        }
         let missing = &manifest["fixtures"]["threadReadNotFound"];
         let error = crate::thread_not_found_error(
             missing["data"]["threadId"]

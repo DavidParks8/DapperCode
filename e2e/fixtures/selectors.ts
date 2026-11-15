@@ -144,6 +144,11 @@ export const nativeOnDeviceSelectors = {
   gitFile: (name: string) => `git-file-${name}`,
   gitDiscarding: { predicate: 'label BEGINSWITH "Discarding"' },
   editSessionTitle: 'Edit session title',
+  chatNewChatRail: 'scene-toolbar-button-glass-new-chat',
+  chatNewChatOverflow: {
+    classChain:
+      '**/XCUIElementTypeCollectionView/**/XCUIElementTypeCell/**/XCUIElementTypeButton[`label == "New chat" AND visible == true`]',
+  },
   sessionTitle: 'Session title',
   cancelRename: 'Cancel rename',
   saveSessionTitle: 'Save session title',
@@ -232,6 +237,12 @@ export const selectors = {
   topChrome: (page: Page): Locator => page.getByTestId('main-screen-top-chrome'),
   chatHeaderRow: (page: Page): Locator => page.getByTestId('chat-header-row'),
   chatHeaderTitleRow: (page: Page): Locator => page.getByTestId('chat-header-title-row'),
+  chatHeaderNewChat: (page: Page): Locator =>
+    page.getByTestId('chat-header-row').getByRole('button', { name: 'New chat', exact: true }),
+  chatHeaderEditTitle: (page: Page): Locator =>
+    page.getByTestId('chat-header-row').getByLabel('Edit session title', { exact: true }),
+  chatHeaderGit: (page: Page): Locator =>
+    page.getByTestId('chat-header-row').getByLabel('Open Git', { exact: true }),
   sessionMetaRow: (page: Page): Locator => page.getByTestId('session-meta-row'),
 
   transcript: (page: Page): Locator => page.getByTestId('chat-transcript'),

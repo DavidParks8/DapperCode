@@ -332,6 +332,11 @@ card as a compact call bar above the composer (`PhoneCallDock.tsx`) instead of t
   newest line. A settled call collapses to a dismissible one-line summary.
   The timer anchors bridge-reported duration to local surface receipt time, so host/phone clock
   skew and remounting cannot add time or freeze it. Receipt metadata stays off the wire.
+- **Replay recovery**: `bridge/phoneCall/surfaces/read` returns the authoritative pending approval
+  or active call surface for this workspace, including silent and held calls. Live duration is
+  computed at read time rather than copied from the last notification. Mobile snapshot recovery
+  reinstalls these controls before acknowledging the replay gap, without overwriting newer UI
+  events or unrelated queue state. Terminal calls are not returned by this active-call snapshot.
 
 ## Rules For Future Integrations
 
