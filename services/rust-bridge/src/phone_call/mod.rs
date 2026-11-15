@@ -40,7 +40,7 @@ use crate::{
             build_rfc4733_digit_packets, encode_mulaw_frame_with_headroom, encode_wav_8k_mono,
             mulaw_frame_mean_abs, parse_dtmf_digit, synthesize_inband_dtmf_mulaw,
             Downsampler24kTo8k, TelephonyVad, VadEvent, RFC4733_DEFAULT_HOLD_PACKETS,
-            RTP_FRAME_SAMPLES,
+            RTP_FRAME_SAMPLES, VAD_MAX_UTTERANCE_SAMPLES,
         },
         sip::{SipCallEvent, SipCallHandle, SipCallSession, SipCallState, SipDialConfig, SipError},
         voice::{
@@ -640,12 +640,26 @@ impl PhoneCallService {
             .await;
         abort_guard.live_card_presented = true;
 
-        // Warm local STT/LLM/TTS models concurrently while SIP INVITE/ringing proceeds.
-        let preload_client = voice_client.clone();
-        let preload_cancel = call_cancel.child_token();
-        tokio::spawn(async move {
-            let _ = preload_client.preload_models(&preload_cancel).await;
-        });
+        let pre_connect_card_ctx = PreConnectCardContext {
+            live_surface_id: &live_surface_id,
+            owner_thread_id,
+            runtime_config: &runtime_config,
+            validated: &validated,
+            created_at: &created_at,
+        };
+        if let Err(error) = voice_client.preload_models(&call_cancel).await {
+            let failure = if error.is_cancelled() {
+                PreConnectFailure::Cancelled
+            } else {
+                PreConnectFailure::DialFailed {
+                    detail: error.to_string(),
+                    summary: "The local voice service could not get ready".to_string(),
+                }
+            };
+            return Err(self
+                .finish_pre_connect_failure(&mut abort_guard, &pre_connect_card_ctx, failure)
+                .await);
+        }
 
         let mut dial_config = SipDialConfig::new(
             runtime_config.server_host.clone(),
@@ -669,14 +683,6 @@ impl PhoneCallService {
             biased;
             () = call_cancel.cancelled() => Err(PreConnectFailure::Cancelled),
             res = SipCallSession::dial(dial_config) => res.map_err(|err| PreConnectFailure::dial_failed(&err)),
-        };
-
-        let pre_connect_card_ctx = PreConnectCardContext {
-            live_surface_id: &live_surface_id,
-            owner_thread_id,
-            runtime_config: &runtime_config,
-            validated: &validated,
-            created_at: &created_at,
         };
 
         let mut sip_session = match dial_res {
@@ -1495,7 +1501,11 @@ struct ConnectedCallContext {
 #[derive(Debug, Default)]
 struct SpokenTurnProgress {
     clauses_started: Vec<(usize, String)>,
+    clauses_finished: Vec<usize>,
     total_frames_enqueued: usize,
+    discarded_frames_at_start: usize,
+    finish_after_clause: Option<usize>,
+    synthesizing: Option<(usize, CancellationToken)>,
 }
 
 impl SpokenTurnProgress {
@@ -1506,8 +1516,16 @@ impl SpokenTurnProgress {
         let played_frames = self.total_frames_enqueued.saturating_sub(cleared_frames);
         let mut spoken: Vec<&str> = Vec::new();
         for (idx, (start_frame, clause)) in self.clauses_started.iter().enumerate() {
-            if *start_frame < played_frames || (idx == 0 && self.total_frames_enqueued > 0) {
+            if *start_frame < played_frames
+                && self
+                    .clauses_finished
+                    .get(idx)
+                    .is_some_and(|end| *end <= played_frames)
+            {
                 spoken.push(clause.as_str());
+            } else if *start_frame < played_frames {
+                spoken.push("[partially spoken sentence]");
+                break;
             }
         }
         spoken.join(" ")
@@ -1521,12 +1539,73 @@ struct ActiveAssistantTurn {
 }
 
 impl ActiveAssistantTurn {
-    fn abort_and_extract_spoken(&self, cleared_frames: usize) -> String {
+    fn abort_and_extract_spoken(&self, sip_handle: &SipCallHandle) -> String {
         self.cancel.cancel();
         self.handle.abort();
         let guard = lock_unpoisoned(&self.progress);
-        guard.spoken_text(cleared_frames)
+        let cleared = sip_handle.clear_outbound_audio();
+        guard.spoken_text(
+            cleared
+                .discarded_frames
+                .saturating_sub(guard.discarded_frames_at_start),
+        )
     }
+
+    fn finish_current_sentence(&self, sip_handle: &SipCallHandle) -> bool {
+        let mut progress = lock_unpoisoned(&self.progress);
+        let playback = sip_handle.outbound_playback_state();
+        let played = progress
+            .total_frames_enqueued
+            .saturating_sub(
+                playback
+                    .discarded_frames
+                    .saturating_sub(progress.discarded_frames_at_start),
+            )
+            .saturating_sub(playback.cleared_frames);
+        let Some(idx) =
+            progress
+                .clauses_started
+                .iter()
+                .enumerate()
+                .find_map(|(idx, (start, _))| {
+                    (*start < played
+                        && progress.clauses_finished.get(idx).is_none_or(|end| {
+                            *end > played || (*end == played && playback.outbound_playing)
+                        }))
+                    .then_some(idx)
+                })
+        else {
+            return false;
+        };
+        progress.finish_after_clause = Some(idx);
+        if let Some((synth_idx, cancel)) = &progress.synthesizing {
+            if *synth_idx > idx {
+                cancel.cancel();
+            }
+        }
+        if let Some(end) = progress.clauses_finished.get(idx).copied() {
+            sip_handle.trim_outbound_audio(
+                progress.total_frames_enqueued,
+                progress.discarded_frames_at_start,
+                end,
+            );
+            progress.clauses_started.truncate(idx + 1);
+            progress.clauses_finished.truncate(idx + 1);
+        }
+        true
+    }
+}
+
+fn requests_immediate_speech_stop(instruction: &str) -> bool {
+    let lowered = instruction.trim().to_ascii_lowercase();
+    let command = ["please ", "could you ", "can you ", "would you "]
+        .iter()
+        .find_map(|prefix| lowered.strip_prefix(prefix))
+        .unwrap_or(&lowered);
+    command
+        .strip_prefix("stop")
+        .is_some_and(|rest| rest.chars().next().is_none_or(|ch| !ch.is_alphanumeric()))
+        || command.starts_with("be quiet")
 }
 
 struct ActiveSttTask {
@@ -1613,6 +1692,8 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
     let mut opening_window_elapsed = false;
     let mut steer_pending_turn = !ctx.initial_steers.is_empty();
     let mut active_stt: Option<ActiveSttTask> = None;
+    let mut pending_utterances: VecDeque<Vec<i16>> = VecDeque::new();
+    let mut speech_quiet_deadline = None;
     let mut active_turn: Option<ActiveAssistantTurn> = None;
     let mut pending_end: Option<PendingCallEnd> = None;
     let mut transport_on_hold = false;
@@ -1630,6 +1711,7 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
     }
 
     let exit = loop {
+        let mut new_utterance = None;
         tokio::select! {
             biased;
             () = ctx.slot.cancel.cancelled() => {
@@ -1637,10 +1719,9 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                     stt.abort();
                 }
                 if let Some(turn) = active_turn.take() {
-                    let cleared = sip_handle.clear_outbound_audio();
-                    let spoken = turn.abort_and_extract_spoken(cleared.cleared_frames);
+                    let spoken = turn.abort_and_extract_spoken(&sip_handle);
                     if !spoken.is_empty() {
-                        conversation.mark_last_assistant_interrupted(&spoken);
+                        conversation.record_active_assistant_interrupted(&spoken);
                         sync_shared_transcript(&ctx.slot, conversation.transcript());
                     }
                 }
@@ -1661,10 +1742,9 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                     stt.abort();
                 }
                 if let Some(turn) = active_turn.take() {
-                    let cleared = sip_handle.clear_outbound_audio();
-                    let spoken = turn.abort_and_extract_spoken(cleared.cleared_frames);
+                    let spoken = turn.abort_and_extract_spoken(&sip_handle);
                     if !spoken.is_empty() {
-                        conversation.mark_last_assistant_interrupted(&spoken);
+                        conversation.record_active_assistant_interrupted(&spoken);
                         sync_shared_transcript(&ctx.slot, conversation.transcript());
                     }
                 }
@@ -1681,10 +1761,9 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                             stt.abort();
                         }
                         if let Some(turn) = active_turn.take() {
-                            let cleared = sip_handle.clear_outbound_audio();
-                            let spoken = turn.abort_and_extract_spoken(cleared.cleared_frames);
+                            let spoken = turn.abort_and_extract_spoken(&sip_handle);
                             if !spoken.is_empty() {
-                                conversation.mark_last_assistant_interrupted(&spoken);
+                                conversation.record_active_assistant_interrupted(&spoken);
                                 sync_shared_transcript(&ctx.slot, conversation.transcript());
                             }
                         }
@@ -1702,10 +1781,9 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                         transport_on_hold = on_hold;
                         pending_end = None;
                         if let Some(turn) = active_turn.take() {
-                            let cleared = sip_handle.clear_outbound_audio();
-                            let spoken = turn.abort_and_extract_spoken(cleared.cleared_frames);
+                            let spoken = turn.abort_and_extract_spoken(&sip_handle);
                             if !spoken.is_empty() {
-                                conversation.mark_last_assistant_interrupted(&spoken);
+                                conversation.record_active_assistant_interrupted(&spoken);
                             }
                         }
                         if let Some(stt) = active_stt.take() {
@@ -1714,6 +1792,8 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                         opening_greeting_pending = false;
                         opening_window_elapsed = true;
                         steer_pending_turn = false;
+                        pending_utterances.clear();
+                        speech_quiet_deadline = None;
                         set_call_hold(&ctx.slot, &mut conversation, on_hold);
                         vad = TelephonyVad::new();
                         vad.set_ivr_mode(on_hold);
@@ -1727,11 +1807,21 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
             }
             Some(instruction) = ctx.steer_rx.recv() => {
                 pending_end = None;
+                let finish_sentence = !requests_immediate_speech_stop(&instruction)
+                    && active_turn.as_ref().is_some_and(|turn| turn.finish_current_sentence(&sip_handle));
+                if !finish_sentence {
+                    if let Some(turn) = active_turn.take() {
+                        let spoken = turn.abort_and_extract_spoken(&sip_handle);
+                        if !spoken.is_empty() {
+                            conversation.record_active_assistant_interrupted(&spoken);
+                        }
+                    }
+                }
                 conversation.inject_steer(&instruction);
                 sync_shared_transcript(&ctx.slot, conversation.transcript());
                 publish_in_call_card_update(&ctx, conversation.transcript()).await;
 
-                if active_turn.is_none() && active_stt.is_none() && !vad.is_in_speech() {
+                if active_turn.is_none() && active_stt.is_none() && !vad.has_pending_speech() {
                     opening_greeting_pending = false;
                     opening_window_elapsed = true;
                     steer_pending_turn = false;
@@ -1751,37 +1841,49 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                     continue;
                 };
                 let outbound_mean = mulaw_frame_mean_abs(&frame.outbound_pcmu);
+                if mulaw_frame_mean_abs(&frame.inbound_pcmu)
+                    >= vad.speech_threshold(frame.outbound_playing, outbound_mean)
+                {
+                    let hangover = u32::try_from(vad.hangover_frames()).expect("VAD hangover is bounded");
+                    speech_quiet_deadline = Some(tokio::time::Instant::now() + Duration::from_millis(20) * hangover);
+                }
                 match vad.process_mulaw_frame(
                     &frame.inbound_pcmu,
                     frame.outbound_playing,
                     outbound_mean,
                 ) {
                     Some(VadEvent::BargeIn) => {
-                        let cleared = sip_handle.clear_outbound_audio();
                         if let Some(turn) = active_turn.take() {
-                            let spoken = turn.abort_and_extract_spoken(cleared.cleared_frames);
-                            conversation.mark_last_assistant_interrupted(&spoken);
+                            let spoken = turn.abort_and_extract_spoken(&sip_handle);
+                            conversation.record_active_assistant_interrupted(&spoken);
                             sync_shared_transcript(&ctx.slot, conversation.transcript());
                             publish_in_call_card_update(&ctx, conversation.transcript()).await;
                         }
                     }
                     Some(VadEvent::UtteranceComplete(samples)) => {
-                        if let Some(prev_stt) = active_stt.take() {
-                            prev_stt.abort();
-                        }
-                        let wav = encode_wav_8k_mono(&samples);
-                        active_stt = Some(spawn_stt_task(
-                            &ctx.voice_client,
-                            wav,
-                            &conversation,
-                            &ctx.slot.cancel,
-                        ));
+                        speech_quiet_deadline = None;
+                        new_utterance = Some(samples);
                     }
                     None => {}
                 }
             }
+            () = tokio::time::sleep_until(speech_quiet_deadline.unwrap_or(call_deadline)),
+                if speech_quiet_deadline.is_some() => {
+                speech_quiet_deadline = None;
+                if let Some(VadEvent::UtteranceComplete(samples)) = vad.finish_after_media_quiet() {
+                    new_utterance = Some(samples);
+                }
+            }
             stt_join = poll_active_stt(&mut active_stt), if active_stt.is_some() => {
                 active_stt = None;
+                if let Some(samples) = pending_utterances.pop_front() {
+                    active_stt = Some(spawn_stt_task(
+                        &ctx.voice_client,
+                        encode_wav_8k_mono(&samples),
+                        &conversation,
+                        &ctx.slot.cancel,
+                    ));
+                }
                 match stt_join {
                     Ok(Ok(Some(callee_text))) => {
                         if pending_end.is_some() && !is_substantive_reply(&callee_text) {
@@ -1796,28 +1898,31 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                         }
                         opening_greeting_pending = false;
                         opening_window_elapsed = true;
-                        steer_pending_turn = false;
+                        steer_pending_turn = true;
                         if let Some(turn) = active_turn.take() {
-                            let cleared = sip_handle.clear_outbound_audio();
-                            let spoken = turn.abort_and_extract_spoken(cleared.cleared_frames);
-                            conversation.mark_last_assistant_interrupted(&spoken);
+                            let spoken = turn.abort_and_extract_spoken(&sip_handle);
+                            conversation.record_active_assistant_interrupted(&spoken);
                         }
                         conversation.push_callee_utterance(&callee_text);
                         sync_shared_transcript(&ctx.slot, conversation.transcript());
                         publish_in_call_card_update(&ctx, conversation.transcript()).await;
-                        active_turn = Some(start_assistant_turn(
-                            &ctx,
-                            &conversation,
-                            &sip_handle,
-                            &mut pending_end,
-                        ));
+                        if active_stt.is_none() && !vad.has_pending_speech() {
+                            steer_pending_turn = false;
+                            active_turn = Some(start_assistant_turn(
+                                &ctx,
+                                &conversation,
+                                &sip_handle,
+                                &mut pending_end,
+                            ));
+                        }
                     }
                     Ok(Ok(None)) => {
                         let should_speak_now =
                             ((opening_greeting_pending && opening_window_elapsed)
                                 || steer_pending_turn)
                                 && active_turn.is_none()
-                                && !vad.is_in_speech();
+                                && active_stt.is_none()
+                                && !vad.has_pending_speech();
                         if should_speak_now {
                             opening_greeting_pending = false;
                             opening_window_elapsed = true;
@@ -1833,7 +1938,10 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                     Ok(Err(err)) if err.is_cancelled() => {}
                     Ok(Err(err)) => {
                         if let Some(turn) = active_turn.take() {
-                            let _ = turn.abort_and_extract_spoken(0);
+                            let spoken = turn.abort_and_extract_spoken(&sip_handle);
+                            if !spoken.is_empty() {
+                                conversation.record_active_assistant_interrupted(&spoken);
+                            }
                         }
                         let _ = sip_handle.hangup().await;
                         break CallLoopExit::Failed {
@@ -1851,7 +1959,7 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                 }
             }
             turn_join = poll_active_turn(&mut active_turn), if active_turn.is_some() => {
-                active_turn = None;
+                let completed_turn = active_turn.take();
                 match turn_join {
                     Ok(Ok(mut turn_output)) => {
                         let was_on_hold = conversation.is_on_hold();
@@ -1955,7 +2063,7 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
 
                         publish_in_call_card_update(&ctx, conversation.transcript()).await;
 
-                        if steer_pending_turn && active_stt.is_none() && !vad.is_in_speech() {
+                        if steer_pending_turn && active_stt.is_none() && !vad.has_pending_speech() {
                             steer_pending_turn = false;
                             active_turn = Some(start_assistant_turn(
                                 &ctx,
@@ -1967,6 +2075,12 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                     }
                     Ok(Err(err)) if err.is_cancelled() => {}
                     Ok(Err(err)) => {
+                        if let Some(turn) = completed_turn {
+                            let spoken = turn.abort_and_extract_spoken(&sip_handle);
+                            if !spoken.is_empty() {
+                                conversation.record_active_assistant_interrupted(&spoken);
+                            }
+                        }
                         let _ = sip_handle.hangup().await;
                         break CallLoopExit::Failed {
                             error: err.to_string(),
@@ -2002,7 +2116,7 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
             }
             () = tokio::time::sleep_until(opening_deadline), if opening_greeting_pending && !opening_window_elapsed && active_turn.is_none() => {
                 opening_window_elapsed = true;
-                if !vad.is_in_speech() && active_stt.is_none() {
+                if !vad.has_pending_speech() && active_stt.is_none() {
                     opening_greeting_pending = false;
                     steer_pending_turn = false;
                     active_turn = Some(start_assistant_turn(
@@ -2013,6 +2127,40 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                     ));
                 }
             }
+        }
+        if let Some(samples) = new_utterance {
+            if active_stt.is_some() {
+                let queued_samples: usize = pending_utterances.iter().map(Vec::len).sum();
+                if queued_samples.saturating_add(samples.len()) > VAD_MAX_UTTERANCE_SAMPLES {
+                    let _ = sip_handle.hangup().await;
+                    break CallLoopExit::Failed {
+                        error: "The transcription backlog exceeded the bounded audio limit."
+                            .to_string(),
+                    };
+                }
+                pending_utterances.push_back(samples);
+            } else {
+                active_stt = Some(spawn_stt_task(
+                    &ctx.voice_client,
+                    encode_wav_8k_mono(&samples),
+                    &conversation,
+                    &ctx.slot.cancel,
+                ));
+            }
+        }
+        if active_turn.is_none()
+            && active_stt.is_none()
+            && !vad.has_pending_speech()
+            && (steer_pending_turn || (opening_greeting_pending && opening_window_elapsed))
+        {
+            steer_pending_turn = false;
+            opening_greeting_pending = false;
+            active_turn = Some(start_assistant_turn(
+                &ctx,
+                &conversation,
+                &sip_handle,
+                &mut pending_end,
+            ));
         }
     };
 
@@ -2191,7 +2339,10 @@ fn spawn_assistant_turn(
 ) -> ActiveAssistantTurn {
     let turn_cancel = parent_cancel.child_token();
     let task_cancel = turn_cancel.clone();
-    let progress = Arc::new(StdMutex::new(SpokenTurnProgress::default()));
+    let progress = Arc::new(StdMutex::new(SpokenTurnProgress {
+        discarded_frames_at_start: sip_handle.outbound_playback_state().discarded_frames,
+        ..SpokenTurnProgress::default()
+    }));
     let task_progress = Arc::clone(&progress);
     let client = voice_client.clone();
     let conv_snapshot = conversation.clone();
@@ -2212,19 +2363,29 @@ fn spawn_assistant_turn(
         let tts_task: JoinHandle<Result<(), VoiceError>> = tokio::spawn(Box::pin(async move {
             let mut downsampler = Downsampler24kTo8k::new();
             let mut pcm_8k_buf: Vec<i16> = Vec::new();
+            let mut clause_idx = 0;
 
             while let Some(clause) = clause_rx.recv().await {
                 if tts_cancel.is_cancelled() {
                     return Err(VoiceError::Cancelled);
                 }
+                let synthesis_cancel = tts_cancel.child_token();
+                let mut audible = false;
                 {
                     let mut guard = lock_unpoisoned(&tts_progress);
+                    if guard
+                        .finish_after_clause
+                        .is_some_and(|last| clause_idx > last)
+                    {
+                        break;
+                    }
                     let start_idx = guard.total_frames_enqueued;
                     guard.clauses_started.push((start_idx, clause.clone()));
+                    guard.synthesizing = Some((clause_idx, synthesis_cancel.clone()));
                 }
 
-                tts_client
-                    .synthesize_speech_pcm24k(&clause, &tts_cancel, |samples_24k| {
+                let synthesis = tts_client
+                    .synthesize_speech_pcm24k(&clause, &synthesis_cancel, |samples_24k| {
                         downsampler.push_pcm24k_samples(samples_24k, &mut pcm_8k_buf);
                         let full_frames = pcm_8k_buf.len() / RTP_FRAME_SAMPLES;
                         if full_frames > 0 {
@@ -2237,29 +2398,60 @@ fn spawn_assistant_turn(
                                 mulaw_frames.push(encode_mulaw_frame_with_headroom(&frame_8k));
                             }
                             pcm_8k_buf.drain(..drain_samples);
+                            audible |= mulaw_frames.iter().any(|frame| {
+                                frame.iter().any(|byte| !matches!(*byte, 0xFF | 0x7F))
+                            });
+                            let mut guard = lock_unpoisoned(&tts_progress);
+                            if synthesis_cancel.is_cancelled()
+                                || guard
+                                    .finish_after_clause
+                                    .is_some_and(|last| clause_idx > last)
                             {
-                                let mut guard = lock_unpoisoned(&tts_progress);
-                                guard.total_frames_enqueued = guard
-                                    .total_frames_enqueued
-                                    .saturating_add(mulaw_frames.len());
+                                return;
                             }
+                            guard.total_frames_enqueued = guard
+                                .total_frames_enqueued
+                                .saturating_add(mulaw_frames.len());
                             tts_rtp.enqueue_pcmu_frames(mulaw_frames);
                         }
                     })
-                    .await?;
-            }
-
-            if !pcm_8k_buf.is_empty() && !tts_cancel.is_cancelled() {
-                let mut tail_frame = [0_i16; RTP_FRAME_SAMPLES];
-                let copy_len = pcm_8k_buf.len().min(RTP_FRAME_SAMPLES);
-                tail_frame[..copy_len].copy_from_slice(&pcm_8k_buf[..copy_len]);
-                pcm_8k_buf.clear();
-                let encoded = encode_mulaw_frame_with_headroom(&tail_frame);
+                    .await;
                 {
                     let mut guard = lock_unpoisoned(&tts_progress);
-                    guard.total_frames_enqueued = guard.total_frames_enqueued.saturating_add(1);
+                    guard.synthesizing = None;
+                    if guard
+                        .finish_after_clause
+                        .is_some_and(|last| clause_idx > last)
+                    {
+                        break;
+                    }
+                    synthesis?;
+                    if tts_cancel.is_cancelled() {
+                        return Err(VoiceError::Cancelled);
+                    }
+                    if !pcm_8k_buf.is_empty() {
+                        let mut tail_frame = [0_i16; RTP_FRAME_SAMPLES];
+                        let copy_len = pcm_8k_buf.len().min(RTP_FRAME_SAMPLES);
+                        tail_frame[..copy_len].copy_from_slice(&pcm_8k_buf[..copy_len]);
+                        pcm_8k_buf.clear();
+                        guard.total_frames_enqueued = guard.total_frames_enqueued.saturating_add(1);
+                        let frame = encode_mulaw_frame_with_headroom(&tail_frame);
+                        audible |= frame.iter().any(|byte| !matches!(*byte, 0xFF | 0x7F));
+                        tts_rtp.enqueue_pcmu_frames(vec![frame]);
+                    }
+                    if !audible {
+                        return Err(VoiceError::InvalidResponse {
+                            endpoint: "tts_worker".to_string(),
+                            reason: "speech became silent after telephone encoding".to_string(),
+                        });
+                    }
+                    let end = guard.total_frames_enqueued;
+                    guard.clauses_finished.push(end);
+                    if guard.finish_after_clause == Some(clause_idx) {
+                        break;
+                    }
                 }
-                tts_rtp.enqueue_pcmu_frames(vec![encoded]);
+                clause_idx += 1;
             }
 
             Ok(())
@@ -2299,6 +2491,22 @@ fn spawn_assistant_turn(
         // end_call).
         wait_for_outbound_media_drain(&rtp_handle, &task_cancel).await?;
 
+        let progress = lock_unpoisoned(&task_progress);
+        let mut turn_output = turn_output;
+        if progress.finish_after_clause.is_some() {
+            let discarded = rtp_handle
+                .outbound_playback_state()
+                .discarded_frames
+                .saturating_sub(progress.discarded_frames_at_start);
+            turn_output.full_text = progress.spoken_text(discarded);
+            turn_output.clauses = progress
+                .clauses_started
+                .iter()
+                .map(|(_, text)| text.clone())
+                .collect();
+            turn_output.tool_calls.clear();
+            turn_output.raw_tool_calls.clear();
+        }
         Ok(turn_output)
     }));
 
@@ -2897,7 +3105,7 @@ mod tests {
         body::Body,
         extract::{ws::Message, Multipart, State},
         http::{header::CONTENT_TYPE, StatusCode},
-        response::Response,
+        response::{IntoResponse, Response},
         routing::post,
         Json, Router,
     };
@@ -3003,6 +3211,9 @@ mod tests {
     const STT_FAILURE_REPLY: &str = "<mock-stt-failure>";
 
     struct MockVoiceState {
+        preload_delay_ms: AtomicUsize,
+        preload_requests: AtomicUsize,
+        preload_status: Mutex<StatusCode>,
         chat_turns: Mutex<VecDeque<Vec<Vec<u8>>>>,
         stt_replies: Mutex<VecDeque<String>>,
         stt_delay_ms: AtomicUsize,
@@ -3011,6 +3222,7 @@ mod tests {
         tts_chunk_delay_ms: AtomicUsize,
         chat_requests: Mutex<Vec<Value>>,
         tts_requests: Mutex<Vec<Value>>,
+        tts_fail_after: AtomicUsize,
     }
 
     impl MockVoiceState {
@@ -3024,6 +3236,9 @@ mod tests {
                 pcm.extend_from_slice(&8_000_i16.to_le_bytes());
             }
             Arc::new(Self {
+                preload_delay_ms: AtomicUsize::new(0),
+                preload_requests: AtomicUsize::new(0),
+                preload_status: Mutex::new(StatusCode::OK),
                 chat_turns: Mutex::new(chat_turns.into()),
                 stt_replies: Mutex::new(stt_replies.into_iter().map(ToOwned::to_owned).collect()),
                 stt_delay_ms: AtomicUsize::new(0),
@@ -3032,6 +3247,7 @@ mod tests {
                 tts_chunk_delay_ms: AtomicUsize::new(0),
                 chat_requests: Mutex::new(Vec::new()),
                 tts_requests: Mutex::new(Vec::new()),
+                tts_fail_after: AtomicUsize::new(usize::MAX),
             })
         }
     }
@@ -3040,7 +3256,25 @@ mod tests {
         let app = Router::new()
             .route(
                 "/api/chat",
-                post(|| async { (StatusCode::OK, Json(json!({ "done": true }))) }),
+                post(|State(st): State<Arc<MockVoiceState>>| async move {
+                    let delay = st.preload_delay_ms.load(Ordering::SeqCst);
+                    st.preload_requests.fetch_add(1, Ordering::SeqCst);
+                    let status = *st.preload_status.lock().await;
+                    let body = futures_util::stream::once(async move {
+                        if delay > 0 {
+                            tokio::time::sleep(Duration::from_millis(
+                                u64::try_from(delay).unwrap(),
+                            ))
+                            .await;
+                        }
+                        Ok::<_, std::convert::Infallible>(br#"{"done":true}"#.to_vec())
+                    });
+                    Response::builder()
+                        .status(status)
+                        .header(CONTENT_TYPE, "application/json")
+                        .body(Body::from_stream(body))
+                        .unwrap()
+                }),
             )
             .route(
                 "/v1/audio/transcriptions",
@@ -3099,6 +3333,13 @@ mod tests {
                 post(
                     |State(st): State<Arc<MockVoiceState>>, Json(body): Json<Value>| async move {
                         st.tts_requests.lock().await.push(body);
+                        if st.tts_requests.lock().await.len()
+                            > st.tts_fail_after.load(Ordering::SeqCst)
+                        {
+                            tokio::time::sleep(Duration::from_millis(200)).await;
+                            return (StatusCode::INTERNAL_SERVER_ERROR, "synthesis failed")
+                                .into_response();
+                        }
                         let pcm = st.tts_pcm_bytes.lock().await.clone();
                         let delay_ms = st.tts_chunk_delay_ms.load(Ordering::SeqCst);
                         let chunks: Vec<Vec<u8>> =
@@ -3539,6 +3780,14 @@ mod tests {
     }
 
     fn voice_reply(text: &str, tools: Value) -> Vec<Vec<u8>> {
+        let tools = if tools.as_array().is_some_and(Vec::is_empty) && !text.trim().is_empty() {
+            voice_tool(
+                "wait_silently",
+                json!({"reason": "Listening", "on_hold": false}),
+            )
+        } else {
+            tools
+        };
         vec![
             format!(
                 "data: {}\n\n",
@@ -4115,7 +4364,8 @@ mod tests {
         assert_eq!(snapshot.status, PhoneCallStatus::InProgress);
         let steered_request = voice.chat_requests.lock().await[1]["messages"].to_string();
         assert!(
-            steered_request.contains("Not ended: the user sent a new instruction"),
+            !steered_request.contains("\"name\":\"end_call\"")
+                && steered_request.contains("Also ask whether they take reservations."),
             "{steered_request}"
         );
 
@@ -4509,6 +4759,7 @@ mod tests {
         let turn1_sse = vec![
             b"data: {\"choices\":[{\"delta\":{\"content\":\"Hi, I am an AI assistant calling for Alex Example.\"}}]}\n\n".to_vec(),
             b"data: {\"choices\":[{\"delta\":{\"content\":\" I would like to reserve a table for four tonight.\"}}]}\n\n".to_vec(),
+            format!("data: {}\n\n", json!({"choices":[{"delta":{"tool_calls":voice_tool("wait_silently",json!({"on_hold":false}))}}]})).into_bytes(),
             b"data: [DONE]\n\n".to_vec(),
         ];
         let turn2_sse = vec![
@@ -4517,8 +4768,7 @@ mod tests {
             b"data: [DONE]\n\n".to_vec(),
         ];
         let turn3_sse = vec![
-            b"data: {\"choices\":[{\"delta\":{\"content\":\"Confirmed for seven forty-five p m on the patio, thank you!\"}}]}\n\n".to_vec(),
-            b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"tc_end\",\"type\":\"function\",\"function\":{\"name\":\"end_call\",\"arguments\":\"{\\\"reason\\\":\\\"reservation_confirmed\\\",\\\"outcome_summary\\\":\\\"Booked patio table for four at 7:45 PM\\\"}\"}}]}}]}\n\n".to_vec(),
+            b"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"tc_end\",\"type\":\"function\",\"function\":{\"name\":\"phone_turn\",\"arguments\":\"{\\\"decision\\\":\\\"end_call\\\",\\\"reason\\\":\\\"reservation_confirmed\\\",\\\"outcome_summary\\\":\\\"Booked patio table for four at 7:45 PM\\\",\\\"speech\\\":\\\"Confirmed for seven forty-five p m on the patio, thank you!\\\",\\\"digits\\\":\\\"\\\",\\\"on_hold\\\":false}\"}}]}}]}\n\n".to_vec(),
             b"data: [DONE]\n\n".to_vec(),
         ];
 
@@ -5091,6 +5341,7 @@ mod tests {
 
         let turn1_sse = vec![
             b"data: {\"choices\":[{\"delta\":{\"content\":\"Hi, I am an AI assistant calling for Alex Example to book dinner for four.\"}}]}\n\n".to_vec(),
+            format!("data: {}\n\n", json!({"choices":[{"delta":{"tool_calls":voice_tool("wait_silently",json!({"on_hold":false}))}}]})).into_bytes(),
             b"data: [DONE]\n\n".to_vec(),
         ];
         let turn2_sse = vec![
@@ -5776,6 +6027,9 @@ mod tests {
         pre_connect_steer: Option<&'static str>,
         sip_username: Option<&'static str>,
         custom_tls: Option<Arc<rustls::ClientConfig>>,
+        voice_config: Option<VoicePipelineConfig>,
+        objective: Option<&'static str>,
+        connect_timeout: Duration,
     }
 
     impl TrunkCallOptions {
@@ -5791,6 +6045,9 @@ mod tests {
                 pre_connect_steer: None,
                 sip_username: None,
                 custom_tls: None,
+                voice_config: None,
+                objective: None,
+                connect_timeout: TEST_TIMEOUT,
             }
         }
     }
@@ -5812,6 +6069,7 @@ mod tests {
 
     impl TrunkCall {
         async fn connect(voice: &Arc<MockVoiceState>, options: TrunkCallOptions) -> Self {
+            let connect_timeout = options.connect_timeout;
             let hub = Arc::new(ClientHub::new());
             let (outbox, mut notifications) = client_outbox(256);
             hub.add_client_with_metadata(outbox, ClientConnectionMetadata::default())
@@ -5831,6 +6089,9 @@ mod tests {
             let sip_port = sip.local_addr().unwrap().port();
             let rtp_port = rtp.local_addr().unwrap().port();
             let mut config = sample_runtime_config(sip_port, &voice_url);
+            if let Some(voice_config) = options.voice_config {
+                config.voice = voice_config;
+            }
             if let Some(username) = options.sip_username {
                 config.sip_username = username.to_string();
             }
@@ -5852,13 +6113,17 @@ mod tests {
                 MockSipDialog::accept_invite(&trunk_sip, rtp_port, false, include_dtmf).await
             });
             let start_service = Arc::clone(&service);
+            let objective = options
+                .objective
+                .unwrap_or("Ask for the opening hours")
+                .to_string();
             let start = tokio::spawn(async move {
                 start_service
                     .start_phone_call(
                         TRUNK_OWNER,
                         StartPhoneCallRequest {
                             phone_number: "+15559876543".to_string(),
-                            objective: "Ask for the opening hours".to_string(),
+                            objective,
                             callee_name: Some("Corner Bistro".to_string()),
                             first_message: None,
                             context: None,
@@ -5883,13 +6148,13 @@ mod tests {
                     "approve",
                 ))
                 .await;
-            let started = timeout(TEST_TIMEOUT, start)
+            let started = timeout(connect_timeout, start)
                 .await
                 .unwrap()
                 .unwrap()
                 .unwrap();
             assert_eq!(started.call_id, call_id);
-            let dialog = timeout(TEST_TIMEOUT, accept).await.unwrap().unwrap();
+            let dialog = timeout(connect_timeout, accept).await.unwrap().unwrap();
             Self {
                 service,
                 notifications,
@@ -6018,6 +6283,9 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "e2e-agent")]
+    include!("full_audio_tests.rs");
+
     #[test]
     fn spoken_text_reports_only_clauses_that_reached_the_wire() {
         let progress =
@@ -6026,14 +6294,29 @@ mod tests {
                     .iter()
                     .map(|(start, clause)| (*start, (*clause).to_string()))
                     .collect(),
+                clauses_finished: clauses
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, _)| {
+                        clauses
+                            .get(idx + 1)
+                            .map_or(total_frames_enqueued, |(start, _)| *start)
+                    })
+                    .collect(),
                 total_frames_enqueued,
+                ..SpokenTurnProgress::default()
             };
         let two_clauses = [(0, "Hello there."), (10, "How are you?")];
         for (turn, cleared_frames, expected) in [
             (progress(&[], 25), 0, ""),
             (progress(&two_clauses, 20), 0, "Hello there. How are you?"),
-            (progress(&two_clauses, 20), 15, "Hello there."),
-            (progress(&two_clauses, 20), 20, "Hello there."),
+            (progress(&two_clauses, 20), 10, "Hello there."),
+            (
+                progress(&two_clauses, 20),
+                15,
+                "[partially spoken sentence]",
+            ),
+            (progress(&two_clauses, 20), 20, ""),
             (progress(&two_clauses[..1], 0), 0, ""),
         ] {
             assert_eq!(
@@ -6916,7 +7199,7 @@ mod tests {
         assert_eq!(greeting.speaker, TranscriptSpeaker::Assistant);
         assert!(greeting.interrupted, "{greeting:?}");
         assert!(
-            greeting.text.starts_with("Hello") && greeting.text.ends_with(INTERRUPTED_MARKER),
+            greeting.text == "[partially spoken sentence] [interrupted]",
             "{greeting:?}"
         );
         let report = call.report().await;
@@ -6982,7 +7265,8 @@ mod tests {
             if speaking {
                 let spoken = spoken.expect("interrupted greeting");
                 assert!(
-                    spoken.interrupted && spoken.text.starts_with("Hello"),
+                    spoken.interrupted
+                        && spoken.text == "[partially spoken sentence] [interrupted]",
                     "{spoken:?}"
                 );
             } else {
@@ -7038,7 +7322,7 @@ mod tests {
         assert!(held.on_hold);
         let greeting = held.transcript.last().unwrap();
         assert!(
-            greeting.interrupted && greeting.text.starts_with("Hello"),
+            greeting.interrupted && greeting.text == "[partially spoken sentence] [interrupted]",
             "{greeting:?}"
         );
 
@@ -7117,11 +7401,20 @@ mod tests {
                     ]),
                 ),
                 voice_reply("", voice_tools(&[hold()])),
+                voice_reply("", voice_tools(&[("resume_call", json!({}))])),
+                voice_reply(
+                    "Is the patio heated?",
+                    voice_tools(&[(
+                        "wait_silently",
+                        json!({"reason": "Awaiting the answer", "on_hold": false}),
+                    )]),
+                ),
             ],
             vec![
                 "We are open until nine tonight.",
                 "Please hold while I check the patio.",
                 "Still checking, one moment please.",
+                "I'm back. How can I help?",
             ],
             2_450,
         );
@@ -7167,6 +7460,11 @@ mod tests {
             )
             .unwrap();
         chat_requests_reach(&voice, 5).await;
+        call.callee_speaks(ivr_silence).await;
+        call.card_shows("Is the patio heated?").await;
+        chat_requests_reach(&voice, 7).await;
+        assert_eq!(call.snapshot().status, PhoneCallStatus::InProgress);
+        assert!(!call.snapshot().on_hold);
         let requests: Vec<String> = voice
             .chat_requests
             .lock()
@@ -7183,17 +7481,20 @@ mod tests {
         assert!(requests[1].contains("Conversation resumed; respond to the recipient now."));
         assert!(requests[2].contains(rejected_end), "{}", requests[2]);
         assert_eq!(
-            requests[3].matches(rejected_end).count(),
+            requests[6].matches(rejected_end).count(),
             2,
             "{}",
-            requests[3]
+            requests[6]
         );
         assert!(
-            requests[4].contains("Not sent: the call is on hold."),
+            requests[6].contains("Not sent: the call is on hold."),
             "{}",
-            requests[4]
+            requests[6]
         );
-        assert!(!requests[4].contains("Sent DTMF digits: 2"));
+        assert!(!requests[6].contains("Sent DTMF digits: 2"));
+        assert!(requests[3].contains("Still checking, one moment please."));
+        assert!(requests[4].contains("Ask whether the patio is heated."));
+        assert!(!requests[4].contains(rejected_end));
 
         assert_eq!(
             call.agent_hangup().await.status,
@@ -7262,12 +7563,12 @@ mod tests {
         );
         assert_eq!(voice.chat_requests.lock().await.len(), 2);
 
-        // A newer utterance replaces a pending transcription, and hang-up aborts the newer one.
+        // A newer utterance stays queued, and hang-up cancels the transcription and its backlog.
         voice.stt_delay_ms.store(3_000, Ordering::SeqCst);
         call.callee_speaks(silence).await;
         stt_requests_reach(&voice, 4).await;
         call.callee_speaks(silence).await;
-        stt_requests_reach(&voice, 5).await;
+        assert_eq!(voice.stt_requests.load(Ordering::SeqCst), 4);
         assert_eq!(
             call.agent_hangup().await.status,
             HangupPhoneCallStatus::HungUp
@@ -7357,8 +7658,10 @@ mod tests {
             sip.send_to(busy.as_bytes(), client).await.expect("486");
             let _ = sip.recv_from(&mut buf).await;
         });
+        let voice = MockVoiceState::new(vec![], vec![], 0);
+        let voice_url = spawn_mock_voice_http(voice).await;
         let service = PhoneCallService::with_options(
-            Some(sample_runtime_config(sip_port, "http://127.0.0.1:9/v1")),
+            Some(sample_runtime_config(sip_port, &voice_url)),
             hub,
             Arc::downgrade(&queue),
             PhoneCallTimeouts {
@@ -7414,6 +7717,620 @@ mod tests {
             .unwrap()
             .expect_err("a busy line fails the call");
         assert!(error.to_string().contains("486 Busy Here"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn steering_during_synthesis_underrun_preserves_the_started_sentence() {
+        let voice = MockVoiceState::new(
+            vec![
+                voice_reply(
+                    "Hello, I am checking the hours.",
+                    voice_tools(&[("wait_silently", json!({"on_hold": false}))]),
+                ),
+                voice_reply(
+                    "Is there parking?",
+                    voice_tools(&[("wait_silently", json!({"on_hold": false}))]),
+                ),
+            ],
+            vec![],
+            2_400,
+        );
+        voice.tts_chunk_delay_ms.store(100, Ordering::SeqCst);
+        let mut call = TrunkCall::connect(
+            &voice,
+            TrunkCallOptions::new(Duration::from_millis(20), Duration::from_secs(60)),
+        )
+        .await;
+        call.assistant_audio_reaches_trunk().await;
+        timeout(TEST_TIMEOUT, async {
+            let mut buffer = [0; 2048];
+            loop {
+                let (len, _) = call.rtp.recv_from(&mut buffer).await.unwrap();
+                if parse_rtp_packet(&buffer[..len])
+                    .is_some_and(|packet| packet.payload.iter().all(|byte| *byte == 0xFF))
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        voice.tts_chunk_delay_ms.store(0, Ordering::SeqCst);
+        let steered_at = Instant::now();
+        call.service
+            .steer_phone_call(TRUNK_OWNER, &call.call_id, "Ask about parking.")
+            .unwrap();
+        call.card_shows("Is there parking?").await;
+        assert!(steered_at.elapsed() >= Duration::from_millis(300));
+        let messages = voice.chat_requests.lock().await[1]["messages"].to_string();
+        assert!(messages.contains("Hello, I am checking the hours."));
+        assert!(!messages.contains("[partially spoken sentence]"));
+        call.agent_hangup().await;
+    }
+
+    #[tokio::test]
+    async fn remote_hold_preserves_discarded_audio_accounting() {
+        let voice = MockVoiceState::new(
+            vec![voice_reply(
+                "The first sentence. The unplayed second sentence.",
+                json!([]),
+            )],
+            vec![],
+            48_000,
+        );
+        let mut call = TrunkCall::connect(
+            &voice,
+            TrunkCallOptions::new(Duration::from_millis(20), Duration::from_secs(60)),
+        )
+        .await;
+        call.assistant_audio_reaches_trunk().await;
+        call.dialog
+            .renegotiate(&call.sip, 2, "INVITE", "sendonly", call.rtp_port)
+            .await;
+        call.update_matching(|params| params["subtitle"] == "On hold")
+            .await;
+        let snapshot = call.snapshot();
+        assert!(snapshot.on_hold);
+        let assistant: Vec<_> = snapshot
+            .transcript
+            .iter()
+            .filter(|entry| entry.speaker == TranscriptSpeaker::Assistant)
+            .collect();
+        assert_eq!(assistant.len(), 1);
+        assert_eq!(
+            assistant[0].text,
+            "[partially spoken sentence] [interrupted]"
+        );
+        call.agent_hangup().await;
+    }
+
+    #[tokio::test]
+    async fn interrupting_a_steered_turn_preserves_the_previous_completed_answer() {
+        let voice = MockVoiceState::new(
+            vec![
+                voice_reply("The first answer.", json!([])),
+                voice_reply("The second answer is still being spoken.", json!([])),
+            ],
+            vec![],
+            2_400,
+        );
+        let mut call = TrunkCall::connect(
+            &voice,
+            TrunkCallOptions::new(Duration::from_millis(20), Duration::from_secs(60)),
+        )
+        .await;
+        call.card_shows("The first answer.").await;
+        call.outbound_audio_goes_quiet().await;
+        *voice.tts_pcm_bytes.lock().await = vec![1; 96_000];
+        call.service
+            .steer_phone_call(TRUNK_OWNER, &call.call_id, "Ask about the patio.")
+            .unwrap();
+        call.assistant_audio_reaches_trunk().await;
+        call.agent_hangup().await;
+        let snapshot = call.settled().await;
+        let assistant: Vec<_> = snapshot
+            .transcript
+            .iter()
+            .filter(|entry| entry.speaker == TranscriptSpeaker::Assistant)
+            .collect();
+        assert_eq!(assistant.len(), 2);
+        assert_eq!(assistant[0].text, "The first answer.");
+        assert!(!assistant[0].interrupted);
+        assert_eq!(
+            assistant[1].text,
+            "[partially spoken sentence] [interrupted]"
+        );
+        let report = call.report().await;
+        assert!(report.contains("The first answer."));
+    }
+
+    #[tokio::test]
+    async fn synthesis_failure_preserves_an_already_played_sentence() {
+        let voice = MockVoiceState::new(
+            vec![voice_reply(
+                "The first answer. The second answer.",
+                json!([]),
+            )],
+            vec![],
+            2_400,
+        );
+        voice.tts_fail_after.store(1, Ordering::SeqCst);
+        let mut call = TrunkCall::connect(
+            &voice,
+            TrunkCallOptions::new(Duration::from_millis(20), Duration::from_secs(60)),
+        )
+        .await;
+        call.assistant_audio_reaches_trunk().await;
+        call.dialog.expect_bye_and_reply_ok(&call.sip).await;
+        let snapshot = call.settled().await;
+        assert_eq!(snapshot.status, PhoneCallStatus::Failed);
+        assert!(snapshot
+            .transcript
+            .iter()
+            .any(|entry| entry.text.starts_with("The first answer.")));
+        assert!(!snapshot
+            .transcript
+            .iter()
+            .any(|entry| entry.text.contains("The second answer.")));
+        let report = call.report().await;
+        assert!(report.starts_with("[Outbound phone call failed]"));
+        assert!(report.contains("The first answer."));
+    }
+
+    #[tokio::test]
+    async fn steering_waits_for_pending_recipient_speech_onset() {
+        let voice = MockVoiceState::new(
+            vec![voice_reply("Is the patio open?", json!([]))],
+            vec!["What would you like to know?"],
+            2_400,
+        );
+        let mut call = TrunkCall::connect(
+            &voice,
+            TrunkCallOptions::new(Duration::from_secs(20), Duration::from_secs(60)),
+        )
+        .await;
+        send_rtp_utterance(
+            &call.rtp,
+            call.dialog.client_rtp_addr,
+            &mut call.seq,
+            &mut call.ts,
+            6,
+            0,
+        )
+        .await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        call.service
+            .steer_phone_call(TRUNK_OWNER, &call.call_id, "Ask about the patio.")
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(voice.chat_requests.lock().await.is_empty());
+        call.callee_speaks(VAD_DEFAULT_HANGOVER_FRAMES + 2).await;
+        call.card_shows("Is the patio open?").await;
+        assert_eq!(voice.chat_requests.lock().await.len(), 1);
+        call.agent_hangup().await;
+    }
+
+    #[tokio::test]
+    async fn overlapping_transcriptions_preserve_both_inputs_before_replying() {
+        let voice = MockVoiceState::new(
+            vec![voice_reply("Thursday, got it.", json!([]))],
+            vec![
+                "Book for two on Tuesday.",
+                "Actually, use Thursday instead.",
+            ],
+            2_400,
+        );
+        voice.stt_delay_ms.store(3_000, Ordering::SeqCst);
+        let mut call = TrunkCall::connect(
+            &voice,
+            TrunkCallOptions::new(Duration::from_secs(20), Duration::from_secs(60)),
+        )
+        .await;
+        call.callee_speaks(VAD_DEFAULT_HANGOVER_FRAMES + 2).await;
+        stt_requests_reach(&voice, 1).await;
+        call.callee_speaks(VAD_DEFAULT_HANGOVER_FRAMES + 2).await;
+        call.card_shows("Book for two on Tuesday.").await;
+        assert!(voice.chat_requests.lock().await.is_empty());
+        call.card_shows("Thursday, got it.").await;
+        let snapshot = call.snapshot();
+        let recipient: Vec<_> = snapshot
+            .transcript
+            .iter()
+            .filter(|entry| entry.speaker == TranscriptSpeaker::Callee)
+            .map(|entry| entry.text.as_str())
+            .collect();
+        assert_eq!(
+            recipient,
+            [
+                "Book for two on Tuesday.",
+                "Actually, use Thursday instead."
+            ]
+        );
+        let requests = voice.chat_requests.lock().await;
+        assert_eq!(requests.len(), 1);
+        let users: Vec<_> = requests[0]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|message| message["role"] == "user")
+            .map(|message| {
+                message["content"]
+                    .as_str()
+                    .unwrap()
+                    .strip_prefix("Recipient: ")
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(users, recipient);
+        drop(requests);
+        call.agent_hangup().await;
+        assert_eq!(
+            call.settled().await.end_reason.as_deref(),
+            Some("agent_hangup")
+        );
+    }
+
+    #[tokio::test]
+    async fn speech_with_missing_packets_or_sparse_comfort_noise_completes_once() {
+        for comfort_noise in [false, true] {
+            let voice = MockVoiceState::new(
+                vec![voice_reply("Thank you for the hours.", json!([]))],
+                vec!["We open at nine tomorrow."],
+                2_400,
+            );
+            let mut call = TrunkCall::connect(
+                &voice,
+                TrunkCallOptions::new(Duration::from_secs(20), Duration::from_secs(60)),
+            )
+            .await;
+            call.callee_speaks(0).await;
+            let quiet_started = Instant::now();
+            timeout(Duration::from_millis(1_200), async {
+                let emit_noise = async {
+                    if comfort_noise {
+                        for _ in 0..5 {
+                            tokio::time::sleep(Duration::from_millis(200)).await;
+                            let packet = build_rtp_packet(false, 13, call.seq, call.ts, 1, &[30]);
+                            call.rtp
+                                .send_to(&packet, call.dialog.client_rtp_addr)
+                                .await
+                                .unwrap();
+                            call.seq = call.seq.wrapping_add(1);
+                            call.ts = call.ts.wrapping_add(1_600);
+                        }
+                    }
+                };
+                tokio::join!(emit_noise, stt_requests_reach(&voice, 1));
+            })
+            .await
+            .expect("quiet media completes the utterance within twelve hundred milliseconds");
+            assert!(quiet_started.elapsed() <= Duration::from_millis(1_200));
+            call.card_shows("Thank you for the hours.").await;
+            assert_eq!(voice.stt_requests.load(Ordering::SeqCst), 1);
+            assert_eq!(voice.chat_requests.lock().await.len(), 1);
+            assert_eq!(call.snapshot().status, PhoneCallStatus::InProgress);
+            call.agent_hangup().await;
+            assert_eq!(call.settled().await.status, PhoneCallStatus::Completed);
+        }
+    }
+
+    #[tokio::test]
+    async fn steering_during_speech_finishes_only_the_current_sentence_and_fences_actions() {
+        for (instruction, should_finish) in [
+            ("Do not press one. Ask about parking instead.", true),
+            ("Please stop speaking. Ask about parking instead.", false),
+            ("Stop! Ask about parking instead.", false),
+            (
+                "Please stop reading that. Ask about parking instead.",
+                false,
+            ),
+        ] {
+            let voice = MockVoiceState::new(
+                vec![
+                    voice_reply(
+                        "Hello, I am calling about hours. I will press one now.",
+                        voice_tools(&[("send_dtmf", json!({"digits": "1"}))]),
+                    ),
+                    voice_reply(
+                        "Is there parking?",
+                        voice_tools(&[(
+                            "wait_silently",
+                            json!({"reason": "Awaiting parking", "on_hold": false}),
+                        )]),
+                    ),
+                ],
+                vec![],
+                24_000,
+            );
+            let mut call = TrunkCall::connect(
+                &voice,
+                TrunkCallOptions::new(Duration::from_millis(20), Duration::from_secs(60)),
+            )
+            .await;
+            call.assistant_audio_reaches_trunk().await;
+            let steered_at = Instant::now();
+            call.service
+                .steer_phone_call(TRUNK_OWNER, &call.call_id, instruction)
+                .unwrap();
+            call.card_shows("Is there parking?").await;
+            let snapshot = call.snapshot();
+            assert_eq!(snapshot.status, PhoneCallStatus::InProgress);
+            assert!(!snapshot.on_hold);
+            assert!(!snapshot
+                .transcript
+                .iter()
+                .any(|entry| entry.text.contains("I will press one")));
+            let first_turn = &voice.chat_requests.lock().await[1]["messages"].to_string();
+            assert!(!first_turn.contains("Sent DTMF digits: 1"));
+            assert!(!first_turn.contains("I will press one"));
+            if should_finish {
+                assert!(first_turn.contains("Hello, I am calling about hours."));
+                assert!(steered_at.elapsed() >= Duration::from_millis(700));
+            } else {
+                assert!(!first_turn.contains("Hello, I am calling about hours."));
+                assert!(steered_at.elapsed() < Duration::from_millis(1_500));
+            }
+            call.agent_hangup().await;
+            assert_eq!(call.settled().await.status, PhoneCallStatus::Completed);
+        }
+    }
+
+    #[tokio::test]
+    async fn voice_preparation_finishes_before_sip_and_preserves_cancel_and_failure_controls() {
+        for outcome in [
+            "ready",
+            "cancel",
+            "fail",
+            "unsupported-stt-ready",
+            "unsupported-stt-cancel",
+            "unsupported-tts-ready",
+            "unsupported-tts-cancel",
+            "unsupported-tts-fail",
+        ] {
+            let voice = MockVoiceState::new(vec![], vec![], 2_400);
+            voice.preload_delay_ms.store(1_000, Ordering::SeqCst);
+            if outcome == "fail" {
+                *voice.preload_status.lock().await = StatusCode::SERVICE_UNAVAILABLE;
+            } else if outcome.starts_with("unsupported") {
+                *voice.preload_status.lock().await = StatusCode::NOT_FOUND;
+                if outcome.starts_with("unsupported-stt") {
+                    voice.stt_delay_ms.store(1_000, Ordering::SeqCst);
+                } else if outcome.ends_with("fail") {
+                    voice.tts_fail_after.store(0, Ordering::SeqCst);
+                } else {
+                    voice.tts_chunk_delay_ms.store(1_000, Ordering::SeqCst);
+                    *voice.tts_pcm_bytes.lock().await = [0x40_u8, 0x1F].repeat(480);
+                }
+            }
+            let voice_url = spawn_mock_voice_http(Arc::clone(&voice)).await;
+            let sip = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+            let rtp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+            let hub = Arc::new(ClientHub::new());
+            let (outbox, mut notifications) = client_outbox(256);
+            hub.add_client_with_metadata(outbox, ClientConnectionMetadata::default())
+                .await;
+            let service = PhoneCallService::with_options(
+                Some(sample_runtime_config(
+                    sip.local_addr().unwrap().port(),
+                    &voice_url,
+                )),
+                hub,
+                Weak::new(),
+                PhoneCallTimeouts {
+                    approval_timeout: Duration::from_secs(5),
+                    max_call_duration: Duration::from_secs(60),
+                    opening_greeting_wait: Duration::from_secs(20),
+                },
+                None,
+            );
+            let start_service = Arc::clone(&service);
+            let start = tokio::spawn(async move {
+                start_service
+                    .start_phone_call(TRUNK_OWNER, parking_request())
+                    .await
+            });
+            let call_id = await_approval_call_id(&mut notifications).await;
+            service
+                .resolve_ui_action(&ui_action(
+                    &approval_surface_id(&call_id),
+                    TRUNK_OWNER,
+                    "approve",
+                ))
+                .await;
+            timeout(TEST_TIMEOUT, async {
+                while voice.preload_requests.load(Ordering::SeqCst) == 0 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            if outcome.starts_with("unsupported-stt") {
+                stt_requests_reach(&voice, 1).await;
+            }
+            voice.preload_delay_ms.store(0, Ordering::SeqCst);
+            let preparing = service.get_phone_call(TRUNK_OWNER, &call_id).unwrap();
+            assert_eq!(preparing.status, PhoneCallStatus::Dialing);
+            assert!(preparing.connected_at.is_none());
+            assert_eq!(service.snapshot_surfaces().len(), 1);
+            let mut packet = [0; 2048];
+            assert!(
+                timeout(Duration::from_millis(200), sip.recv_from(&mut packet))
+                    .await
+                    .is_err(),
+                "SIP started while voice was still loading: {outcome}"
+            );
+            match outcome {
+                "ready" | "unsupported-stt-ready" | "unsupported-tts-ready" => {
+                    let dialog = timeout(
+                        TEST_TIMEOUT,
+                        MockSipDialog::accept_invite(
+                            &sip,
+                            rtp.local_addr().unwrap().port(),
+                            false,
+                            true,
+                        ),
+                    )
+                    .await
+                    .unwrap();
+                    assert!(timeout(TEST_TIMEOUT, start).await.unwrap().unwrap().is_ok());
+                    assert_eq!(
+                        service
+                            .get_phone_call(TRUNK_OWNER, &call_id)
+                            .unwrap()
+                            .status,
+                        PhoneCallStatus::InProgress
+                    );
+                    let (hangup, ()) = tokio::join!(
+                        service.hangup_phone_call(TRUNK_OWNER, &call_id),
+                        dialog.expect_bye_and_reply_ok(&sip)
+                    );
+                    assert_eq!(hangup.unwrap().status, HangupPhoneCallStatus::HungUp);
+                }
+                "cancel" | "unsupported-stt-cancel" | "unsupported-tts-cancel" => {
+                    assert_eq!(
+                        service
+                            .hangup_phone_call(TRUNK_OWNER, &call_id)
+                            .await
+                            .unwrap()
+                            .status,
+                        HangupPhoneCallStatus::HungUp
+                    );
+                    assert!(timeout(TEST_TIMEOUT, start)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .is_err());
+                    assert_eq!(
+                        service
+                            .get_phone_call(TRUNK_OWNER, &call_id)
+                            .unwrap()
+                            .status,
+                        PhoneCallStatus::Cancelled
+                    );
+                    assert!(
+                        timeout(Duration::from_millis(50), sip.recv_from(&mut packet))
+                            .await
+                            .is_err()
+                    );
+                }
+                "fail" | "unsupported-tts-fail" => {
+                    assert!(timeout(TEST_TIMEOUT, start)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .is_err());
+                    let failed = service.get_phone_call(TRUNK_OWNER, &call_id).unwrap();
+                    assert_eq!(failed.status, PhoneCallStatus::Failed);
+                    assert!(failed.end_reason.unwrap().contains(if outcome == "fail" {
+                        "503"
+                    } else {
+                        "500"
+                    }));
+                    assert!(
+                        timeout(Duration::from_millis(50), sip.recv_from(&mut packet))
+                            .await
+                            .is_err()
+                    );
+                }
+                _ => unreachable!(),
+            }
+            timeout(TEST_TIMEOUT, async {
+                while service.live_work_count() != 0 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert!(service.snapshot_surfaces().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn punctuation_only_closing_is_not_a_successful_spoken_goodbye() {
+        for native in [true, false] {
+            let reply = if native {
+                let delta = json!({"choices":[{"delta":{"content":json!({
+                    "decision":"end_call","speech":"...","digits":"","on_hold":false,"outcome_summary":"The restaurant closes at nine."
+                }).to_string()}}]});
+                vec![format!("data: {delta}\n\ndata: [DONE]\n\n").into_bytes()]
+            } else {
+                voice_reply(
+                    "...",
+                    voice_tools(&[(
+                        "end_call",
+                        json!({
+                            "reason":"hours_confirmed","outcome_summary":"Closes at nine."
+                        }),
+                    )]),
+                )
+            };
+            let voice = MockVoiceState::new(vec![reply], vec!["We close at nine tonight."], 2_400);
+            let mut call = TrunkCall::connect(
+                &voice,
+                TrunkCallOptions::new(Duration::from_secs(20), Duration::from_secs(60)),
+            )
+            .await;
+            call.callee_speaks(VAD_DEFAULT_HANGOVER_FRAMES + 2).await;
+            timeout(TEST_TIMEOUT, call.dialog.expect_bye_and_reply_ok(&call.sip))
+                .await
+                .unwrap();
+            let card = call
+                .update_matching(|params| params["title"] == "Phone call failed")
+                .await;
+            assert_eq!(card["tone"], "error");
+            let snapshot = call.settled().await;
+            assert_eq!(snapshot.status, PhoneCallStatus::Failed);
+            assert!(voice.tts_requests.lock().await.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_closing_synthesis_settles_as_failed_not_completed() {
+        for pcm in [vec![], vec![0x01], [1_u8, 0].repeat(2_400)] {
+            let voice = MockVoiceState::new(
+                vec![
+                    voice_reply("Hello, what time do you close?", json!([])),
+                    voice_reply(
+                        "Thank you. Goodbye.",
+                        voice_tools(&[(
+                            "end_call",
+                            json!({"reason": "hours_confirmed", "outcome_summary": "Open until nine"}),
+                        )]),
+                    ),
+                ],
+                vec!["We close at nine tonight."],
+                2_400,
+            );
+            let mut call = TrunkCall::connect(
+                &voice,
+                TrunkCallOptions::new(Duration::from_millis(20), Duration::from_secs(60)),
+            )
+            .await;
+            call.card_shows("Hello, what time do you close?").await;
+            *voice.tts_pcm_bytes.lock().await = pcm;
+            call.callee_speaks(VAD_DEFAULT_HANGOVER_FRAMES + 2).await;
+            timeout(TEST_TIMEOUT, call.dialog.expect_bye_and_reply_ok(&call.sip))
+                .await
+                .unwrap();
+            let card = call
+                .update_matching(|params| params["title"] == "Phone call failed")
+                .await;
+            assert_eq!(card["tone"], "error");
+            let snapshot = call.settled().await;
+            assert_eq!(snapshot.status, PhoneCallStatus::Failed);
+            let failure = snapshot.outcome_summary.as_deref().unwrap();
+            assert!(
+                failure.contains("PCM") || failure.contains("silent after telephone encoding"),
+                "{failure}"
+            );
+            assert!(!snapshot
+                .transcript
+                .iter()
+                .any(|entry| entry.text == "Thank you. Goodbye."));
+            let report = call.report().await;
+            assert!(report.starts_with("[Outbound phone call failed]"));
+            assert!(!report.contains("End reason: hours_confirmed"));
+        }
     }
 
     #[tokio::test]

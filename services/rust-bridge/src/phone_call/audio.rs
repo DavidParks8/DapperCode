@@ -398,6 +398,7 @@ impl TelephonyVad {
         }
     }
 
+    #[cfg(test)]
     pub fn is_in_speech(&self) -> bool {
         self.in_speech
     }
@@ -455,6 +456,15 @@ impl TelephonyVad {
         self.barge_in_emitted = false;
         self.preroll.clear();
         VadEvent::UtteranceComplete(std::mem::take(&mut self.utterance_buf))
+    }
+
+    pub fn finish_after_media_quiet(&mut self) -> Option<VadEvent> {
+        if self.in_speech {
+            Some(self.finish_utterance())
+        } else {
+            self.speech_streak = 0;
+            None
+        }
     }
 
     /// Processes one 20 ms (`160`-sample) inbound 8 kHz PCM frame.

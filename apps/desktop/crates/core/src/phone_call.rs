@@ -9,7 +9,8 @@ use crate::{
 
 pub const DEFAULT_SIP_TRANSPORT: &str = "tls";
 pub const DEFAULT_VOICE_BASE_URL: &str = "http://127.0.0.1:11434/v1";
-pub const DEFAULT_VOICE_LLM_MODEL: &str = "gemma4:e4b";
+pub const DEFAULT_VOICE_STT_MODEL: &str = "gemma4:e4b";
+pub const DEFAULT_VOICE_LLM_MODEL: &str = "gpt-oss:20b";
 pub const DEFAULT_VOICE_TTS_MODEL: &str = "phonon";
 pub const DEFAULT_VOICE_TTS_VOICE: &str = "default";
 
@@ -24,7 +25,7 @@ pub struct PhoneCallSettings {
     pub user_display_name: String,
     #[serde(default = "default_voice_base_url")]
     pub stt_base_url: String,
-    #[serde(default = "default_voice_llm_model")]
+    #[serde(default = "default_voice_stt_model")]
     pub stt_model: String,
     #[serde(default = "default_voice_base_url")]
     pub llm_base_url: String,
@@ -282,6 +283,9 @@ fn default_voice_base_url() -> String {
 }
 fn default_voice_llm_model() -> String {
     DEFAULT_VOICE_LLM_MODEL.to_string()
+}
+fn default_voice_stt_model() -> String {
+    DEFAULT_VOICE_STT_MODEL.to_string()
 }
 fn default_voice_tts_model() -> String {
     DEFAULT_VOICE_TTS_MODEL.to_string()
