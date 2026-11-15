@@ -39,6 +39,8 @@ distribution notices.
 The macOS desktop shell uses operating-system SwiftUI/AppKit frameworks and bundles only the Rust
 operator and Rust bridge. Include generated `THIRD_PARTY_NOTICES.txt` for both Cargo dependency
 closures and the DapperCode license in every distributed `.app` or archive.
+Cargo notices retain normal and build dependencies, but exclude development-only dependency paths
+and their transitive closures because test executables are not shipped.
 
 The Windows desktop package uses a C# WinUI 3 shell and packages managed .NET/NuGet components
 alongside the Rust operator and bridge. Windows notice generation must consume the restored NuGet
