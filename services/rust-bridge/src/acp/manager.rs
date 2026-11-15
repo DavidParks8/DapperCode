@@ -5543,6 +5543,7 @@ mod tests {
             std::sync::Weak::<crate::runtime_backend::RuntimeBackend>::new(),
             std::sync::Weak::<crate::BridgeQueueService>::new(),
             crate::scheduled_prompts::ScheduledPromptService::inert_for_test(),
+            crate::phone_call::PhoneCallService::inert_for_test(),
         )
         .await
         .expect("shared MCP listener starts");
@@ -5617,6 +5618,7 @@ mod tests {
             std::sync::Weak::<crate::runtime_backend::RuntimeBackend>::new(),
             std::sync::Weak::<crate::BridgeQueueService>::new(),
             crate::scheduled_prompts::ScheduledPromptService::inert_for_test(),
+            crate::phone_call::PhoneCallService::inert_for_test(),
         )
         .await
         .expect("shared MCP listener starts");

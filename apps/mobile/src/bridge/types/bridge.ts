@@ -183,6 +183,7 @@ export interface BridgeCapabilitySupport {
   fastMode?: boolean;
   browserPreview: boolean;
   genericUiSurface: boolean;
+  phoneCalls?: boolean;
 }
 
 export interface BrowserPreviewSession {

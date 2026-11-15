@@ -387,6 +387,47 @@ pub(crate) fn secret_delete(
     }
 }
 
+pub(crate) fn secret_store_sip_password(
+    layout: CredentialLayout,
+    store: &SecretStore,
+    paths: &AppPaths,
+    password: &str,
+) -> Result<SecretBackend> {
+    match layout {
+        CredentialLayout::SharedVault => store.store_sip_password_shared(paths, password),
+        #[cfg(any(target_os = "windows", test))]
+        CredentialLayout::WindowsPerProfile => {
+            windows_credentials::store_sip_password(store, paths, password)
+        }
+    }
+}
+
+pub(crate) fn secret_load_sip_password(
+    layout: CredentialLayout,
+    store: &SecretStore,
+    paths: &AppPaths,
+) -> Result<Option<(String, SecretBackend)>> {
+    match layout {
+        CredentialLayout::SharedVault => store.load_sip_password_shared(paths),
+        #[cfg(any(target_os = "windows", test))]
+        CredentialLayout::WindowsPerProfile => windows_credentials::load_sip_password(store, paths),
+    }
+}
+
+pub(crate) fn secret_delete_sip_password(
+    layout: CredentialLayout,
+    store: &SecretStore,
+    paths: &AppPaths,
+) -> Result<()> {
+    match layout {
+        CredentialLayout::SharedVault => store.delete_sip_password_shared(paths),
+        #[cfg(any(target_os = "windows", test))]
+        CredentialLayout::WindowsPerProfile => {
+            windows_credentials::delete_sip_password(store, paths)
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) use windows_support::windows_runtime_candidates;
 

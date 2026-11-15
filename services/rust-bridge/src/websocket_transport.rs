@@ -369,6 +369,9 @@ pub(super) async fn handle_bridge_method(
             .map_err(|error| BridgeError::server(&error.to_string())),
         "bridge/capabilities/read" => serde_json::to_value(state.bridge_capabilities())
             .map_err(|error| BridgeError::server(&error.to_string())),
+        "bridge/phoneCall/surfaces/read" => Ok(json!({
+            "surfaces": state.phone_calls.snapshot_surfaces(),
+        })),
         "bridge/push/observed" => {
             let params = params.unwrap_or_else(|| json!({}));
             let candidate_id = read_string(params.get("candidateId"))
@@ -597,6 +600,7 @@ pub(super) async fn handle_bridge_method(
                 return Err(BridgeError::invalid_params("actionId must not be empty"));
             }
 
+            state.phone_calls.resolve_ui_action(&request).await;
             state
                 .hub
                 .broadcast_notification(
@@ -1823,6 +1827,7 @@ mod tests {
                 per_client_in_flight: DEFAULT_WS_PER_CLIENT_IN_FLIGHT,
                 global_in_flight: DEFAULT_WS_GLOBAL_IN_FLIGHT,
             },
+            phone_call: None,
         }
     }
 

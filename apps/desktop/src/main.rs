@@ -5,6 +5,9 @@
 #![forbid(unsafe_code)]
 
 use std::path::{Path, PathBuf};
+mod voice;
+#[cfg(test)]
+use voice::{clear_voice, configure_voice, voice_status};
 
 use anyhow::{bail, Context, Result};
 use dappercode_broker::BrokerServer;
@@ -121,6 +124,7 @@ fn run() -> Result<()> {
             ensure_no_args(&args)?;
             emit(list_profiles(&paths, &secrets, owner_pid)?, human)
         }
+        "voice" => voice::run(args, human, &paths, &secrets),
         "stop" if take_flag(&mut args, "--all") => {
             let _ = workspace_arg(&mut args)?;
             ensure_no_args(&args)?;
@@ -584,6 +588,12 @@ Commands:\n\
   restart [--owner-pid PID]\n\
   setup --host HOST [--network local|tailscale] [--port 8787] [--replace-broker-endpoint]\n\
         [--agent-id opencode] [--agent-executable PATH] [--agent-args 'acp']\n\
+  voice configure --sip-server HOST:PORT --sip-username USER --caller-id +E164 --display-name NAME\n\
+        [--sip-transport udp|tls] [--stt-base-url URL] [--stt-model MODEL]\n\
+        [--llm-base-url URL] [--llm-model MODEL] [--tts-base-url URL] [--tts-model MODEL]\n\
+        [--tts-voice VOICE] [--sip-password-stdin]\n\
+  voice status\n\
+  voice clear\n\
   forget\n\
   discover-agent [--agent-id opencode]\n\
   version\n\n\
@@ -679,5 +689,152 @@ mod tests {
         assert_eq!(json["bridgeHost"], "192.168.1.20");
         assert_eq!(json["bridgePort"], 18_787);
         assert!(json["pairingPayload"].is_null());
+    }
+
+    #[test]
+    fn voice_cli_configures_updates_reports_and_clears_without_leaking_sip_password() {
+        let data = tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let secrets = SecretStore::file_backend_for_tests();
+
+        let initial = voice_status(&paths, &secrets).unwrap();
+        assert!(!initial.configured);
+        assert!(!initial.secret_present);
+        assert!(initial.settings.is_none());
+
+        let base_args = || {
+            vec![
+                "--sip-server".to_string(),
+                "sip.telnyx.com:5061".to_string(),
+                "--sip-username".to_string(),
+                "telnyx-user".to_string(),
+                "--caller-id".to_string(),
+                "+15551234567".to_string(),
+                "--display-name".to_string(),
+                "David Parks".to_string(),
+            ]
+        };
+
+        assert!(configure_voice(base_args(), std::io::empty(), &paths, &secrets).is_err());
+        assert!(!paths.config_path().exists());
+
+        let bad_e164 = vec![
+            "--sip-server".into(),
+            "sip.telnyx.com:5061".into(),
+            "--sip-username".into(),
+            "telnyx-user".into(),
+            "--caller-id".into(),
+            "5551234567".into(),
+            "--display-name".into(),
+            "David Parks".into(),
+            "--sip-password-stdin".into(),
+        ];
+        assert!(configure_voice(
+            bad_e164,
+            std::io::Cursor::new(b"sip-pass-1\n"),
+            &paths,
+            &secrets,
+        )
+        .is_err());
+        assert_eq!(secrets.load_sip_password(&paths).unwrap(), None);
+
+        let bad_loopback = vec![
+            "--sip-server".into(),
+            "sip.telnyx.com:5061".into(),
+            "--sip-username".into(),
+            "telnyx-user".into(),
+            "--caller-id".into(),
+            "+15551234567".into(),
+            "--display-name".into(),
+            "David Parks".into(),
+            "--llm-base-url".into(),
+            "https://api.openai.com/v1".into(),
+            "--sip-password-stdin".into(),
+        ];
+        assert!(configure_voice(
+            bad_loopback,
+            std::io::Cursor::new(b"sip-pass-1\n"),
+            &paths,
+            &secrets,
+        )
+        .is_err());
+
+        let mut create_args = base_args();
+        create_args.push("--sip-password-stdin".to_string());
+        let configured = configure_voice(
+            create_args,
+            std::io::Cursor::new(b"sip-s3cr3t-value\r\n"),
+            &paths,
+            &secrets,
+        )
+        .unwrap();
+        assert!(configured.configured);
+        assert!(configured.secret_present);
+        assert_eq!(configured.secret_backend.as_deref(), Some("file"));
+        assert_eq!(
+            secrets.load_sip_password(&paths).unwrap().unwrap().0,
+            "sip-s3cr3t-value"
+        );
+
+        let json_out = serde_json::to_string(&CommandResponse {
+            ok: true,
+            result: &configured,
+        })
+        .unwrap();
+        let human_out = serde_json::to_string_pretty(&configured).unwrap();
+        let config_disk = std::fs::read_to_string(paths.config_path()).unwrap();
+        for surface in [&json_out, &human_out, &config_disk] {
+            assert!(!surface.contains("sip-s3cr3t-value"));
+        }
+
+        let updated = configure_voice(
+            vec![
+                "--stt-base-url".into(),
+                "http://127.0.0.1:11501/v1".into(),
+                "--stt-model".into(),
+                "example-stt".into(),
+                "--llm-base-url".into(),
+                "http://localhost:11502/v1".into(),
+                "--llm-model".into(),
+                "example-voice".into(),
+                "--tts-base-url".into(),
+                "http://[::1]:11503/v1".into(),
+                "--tts-model".into(),
+                "example-tts".into(),
+                "--tts-voice".into(),
+                "warm".into(),
+            ],
+            std::io::empty(),
+            &paths,
+            &secrets,
+        )
+        .unwrap();
+        assert!(updated.configured);
+        assert_eq!(updated.settings.as_ref().unwrap().tts_voice, "warm");
+        let settings = updated.settings.as_ref().unwrap();
+        assert_eq!(settings.stt_base_url, "http://127.0.0.1:11501/v1");
+        assert_eq!(settings.stt_model, "example-stt");
+        assert_eq!(settings.llm_base_url, "http://localhost:11502/v1");
+        assert_eq!(settings.llm_model, "example-voice");
+        assert_eq!(settings.tts_base_url, "http://[::1]:11503/v1");
+        assert_eq!(settings.tts_model, "example-tts");
+        assert_eq!(
+            updated.settings.as_ref().unwrap().sip_server,
+            "sip.telnyx.com:5061"
+        );
+        assert_eq!(
+            secrets.load_sip_password(&paths).unwrap().unwrap().0,
+            "sip-s3cr3t-value"
+        );
+
+        let status = voice_status(&paths, &secrets).unwrap();
+        assert_eq!(status, updated);
+
+        let cleared = clear_voice(&paths, &secrets).unwrap();
+        assert!(!cleared.configured);
+        assert!(!cleared.secret_present);
+        assert!(cleared.settings.is_none());
+        assert!(paths.load_config().unwrap().phone_call.is_none());
+        assert_eq!(secrets.load_sip_password(&paths).unwrap(), None);
     }
 }

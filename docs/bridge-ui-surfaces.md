@@ -95,7 +95,7 @@ type BridgeUiAction = {
 - Use `banner` for compact warnings or status updates near the composer.
 - Keep `title` short and user-facing.
 - Put provider-specific raw data in `code` only when it helps the user act.
-- Keep `kind` stable for semantic grouping, for example `goal`, `quota`, `compaction`, or `provider-warning`.
+- Keep `kind` stable for semantic grouping, for example `goal`, `phone-call`, `quota`, `compaction`, or `provider-warning`.
 
 ## Implemented ACP Plan Example
 
@@ -296,6 +296,47 @@ latest list as `commands`, and the projector emits each update as a `CUSTOM` eve
   the chat wins a name clash; one that cannot defers to the agent's command.
 - **Selecting a command only inserts its text.** Sending `/name args` delivers it to the agent as
   ordinary prompt text, so ACP agents and on-device skills each interpret their own commands.
+
+## Implemented Outbound Phone Call Surfaces
+
+Outbound agent phone calls (`services/rust-bridge/src/phone_call/mod.rs`) use `kind: "phone-call"`.
+Mobile maps the approval modal to the `call-outline` icon in `surfaceHelpers.ts`, and docks the live
+card as a compact call bar above the composer (`PhoneCallDock.tsx`) instead of the top cards row:
+
+- **Pre-call approval (`presentation: "modal"`)**: emitted via `bridge/ui.present` with
+  `id: "phone-call-approval:<callId>"`, `tone: "warning"`, and `dismissible: false`. Carries a
+  `keyValue` block (`To`, `From`, `On behalf of`, and the complete `Objective`), an optional
+  opening-message `markdown` block, an optional `**Background for the calling agent**` markdown
+  block carrying the request `context`, and two actions: `approve` (`Approve & Call`, `style: "primary"`,
+  `dismissesSurface: true`) and `cancel` (`Cancel`, `style: "destructive"`,
+  `dismissesSurface: true`). Resolving `cancel` or letting approval time out dismisses the modal
+  without sending any SIP traffic.
+- **Live and settled call card (`presentation: "workflowCard"`)**: presented after approval with
+  `id: "phone-call-live:<callId>"`, `dismissible: false`, and a `hangup` action (`Hang Up`,
+  `style: "destructive"`, `dismissesSurface: false` so tapping Hang Up sends `bridge/ui/resolve`
+  while keeping the card visible until SIP teardown completes). `bridge/ui.update` advances status
+  (`Dialing` → `Ringing` → `In call`) and appends a bounded rolling `**Live transcript**` markdown
+  block (`**Agent:**`, the callee name or `**Recipient:**`, `**Instruction (not spoken):**` for
+  live steering, and `[interrupted]`). The post-call report uses the same speaker labels. When the
+  call ends, a final `bridge/ui.update` settles the card (`Ended`, `Cancelled`, or `Failed`) with
+  `actions: []` and `dismissible: true`. Its `Summary` (the agent's outcome) or plain-language
+  `Reason` ("They hung up", "Line busy", "No answer") is written for the user; failures add a
+  secondary `Details` row with the raw SIP or voice-pipeline cause, which the agent's report keeps.
+  While waiting on hold, the same card shows **On hold**, retains **Hang Up**, and remains
+  non-dismissible. Resuming the conversation changes it back to **In call** without settling the
+  ACP call or delivering a premature final report.
+- **Mobile call bar**: the bar reads the `Status`, `To`, `From`, `Duration`, `Objective`, and
+  `Summary`/`Reason` key-value labels and the transcript block above, so keep those labels stable.
+  It rests as one row (callee, state with a locally ticking timer, and **Hang Up**), stays inside the
+  composer's rail-aware column, and expands on tap to the objective and a transcript that follows the
+  newest line. A settled call collapses to a dismissible one-line summary.
+  The timer anchors bridge-reported duration to local surface receipt time, so host/phone clock
+  skew and remounting cannot add time or freeze it. Receipt metadata stays off the wire.
+- **Replay recovery**: `bridge/phoneCall/surfaces/read` returns the authoritative pending approval
+  or active call surface for this workspace, including silent and held calls. Live duration is
+  computed at read time rather than copied from the last notification. Mobile snapshot recovery
+  reinstalls these controls before acknowledging the replay gap, without overwriting newer UI
+  events or unrelated queue state. Terminal calls are not returned by this active-call snapshot.
 
 ## Rules For Future Integrations
 

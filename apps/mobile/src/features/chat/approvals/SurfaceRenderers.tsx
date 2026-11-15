@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import Animated, {
   Easing,
   FadeIn,
@@ -39,10 +39,16 @@ import {
   useModalAccessibilityFocus,
 } from '@shared/accessibility';
 
+/** Returning a promise lets the surface show pending and failure feedback where the user acted. */
+export type BridgeUiActionHandler = (
+  surface: BridgeUiSurface,
+  action: BridgeUiAction,
+) => void | Promise<boolean>;
+
 interface BridgeUiSurfaceProps {
   surface: BridgeUiSurface;
   scrollMaxHeight?: number;
-  onAction: (surface: BridgeUiSurface, action: BridgeUiAction) => void;
+  onAction: BridgeUiActionHandler;
   onDismiss: (surface: BridgeUiSurface) => void;
 }
 
@@ -295,12 +301,20 @@ function SurfaceBlock({ block, compact }: { block: BridgeUiBlock; compact?: bool
     case 'keyValue':
       return (
         <View style={[styles.keyValueGrid, compact && styles.keyValueGridCompact]}>
-          {block.items.map((item) => (
-            <View key={item.label} style={styles.keyValueRow}>
-              <Text style={styles.keyLabel}>{item.label}</Text>
-              <Text style={styles.keyValue}>{item.value}</Text>
-            </View>
-          ))}
+          {block.items.map((item) => {
+            // Prose reads left to right at full width; only short facts pair label and value.
+            const stacked =
+              item.value.length > KEY_VALUE_INLINE_MAX_CHARS || item.value.includes('\n');
+            return (
+              <View
+                key={item.label}
+                style={[styles.keyValueRow, stacked && styles.keyValueRowStacked]}
+              >
+                <Text style={styles.keyLabel}>{item.label}</Text>
+                <Text style={stacked ? styles.keyValueStacked : styles.keyValue}>{item.value}</Text>
+              </View>
+            );
+          })}
         </View>
       );
     case 'code':
@@ -316,6 +330,8 @@ function SurfaceBlock({ block, compact }: { block: BridgeUiBlock; compact?: bool
       return <ProgressBlock block={block} />;
   }
 }
+
+const KEY_VALUE_INLINE_MAX_CHARS = 40;
 
 function ProgressBlock({ block }: { block: BridgeUiProgressBlock }) {
   const theme = useAppTheme();
@@ -368,45 +384,95 @@ function SurfaceActions({
   compact = false,
 }: {
   surface: BridgeUiSurface;
-  onAction: (surface: BridgeUiSurface, action: BridgeUiAction) => void;
+  onAction: BridgeUiActionHandler;
   compact?: boolean;
 }) {
   const theme = useAppTheme();
   const styles = useMemo(() => createBridgeUiSurfaceStyles(theme), [theme]);
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const inFlight = useRef(false);
+  const [failed, setFailed] = useState(false);
 
   if (surface.actions.length === 0) {
     return null;
   }
 
+  const run = (action: BridgeUiAction) => {
+    // A second tap can land before the disabled state renders; one decision at a time.
+    if (inFlight.current) {
+      return;
+    }
+    inFlight.current = true;
+    setFailed(false);
+    setPendingActionId(action.id);
+    const settle = (ok: boolean) => {
+      inFlight.current = false;
+      setPendingActionId(null);
+      setFailed(!ok);
+    };
+    try {
+      void feedback.selection();
+      const outcome = onAction(surface, action);
+      if (outcome instanceof Promise) {
+        void outcome.then(settle, () => settle(false));
+      } else {
+        settle(true);
+      }
+    } catch {
+      settle(false);
+    }
+  };
+
   return (
-    <View style={[styles.actions, compact && styles.actionsCompact]}>
-      {surface.actions.map((action) => (
-        <Pressable
-          key={action.id}
-          onPress={() => {
-            void feedback.selection();
-            onAction(surface, action);
-          }}
-          accessibilityRole="button"
-          accessibilityLabel={action.label}
-          style={({ pressed }) => [
-            styles.actionButton,
-            action.style === 'primary' && styles.actionButtonPrimary,
-            action.style === 'destructive' && styles.actionButtonDestructive,
-            pressed && styles.pressed,
-          ]}
-        >
-          <Text
-            style={[
-              styles.actionLabel,
-              action.style === 'primary' && styles.actionLabelPrimary,
-              action.style === 'destructive' && styles.actionLabelDestructive,
-            ]}
-          >
-            {action.label}
-          </Text>
-        </Pressable>
-      ))}
+    <View style={styles.actionsColumn}>
+      <View style={[styles.actions, compact && styles.actionsCompact]}>
+        {surface.actions.map((action) => {
+          const pending = pendingActionId === action.id;
+          return (
+            <Pressable
+              key={action.id}
+              onPress={() => run(action)}
+              disabled={pendingActionId !== null}
+              accessibilityRole="button"
+              accessibilityLabel={action.label}
+              accessibilityState={controlAccessibilityState({
+                disabled: pendingActionId !== null,
+                busy: pending,
+              })}
+              style={({ pressed }) => [
+                styles.actionButton,
+                action.style === 'primary' && styles.actionButtonPrimary,
+                action.style === 'destructive' && styles.actionButtonDestructive,
+                (pressed || pendingActionId !== null) && styles.pressed,
+              ]}
+            >
+              {pending ? (
+                <ActivityIndicator
+                  size="small"
+                  color={
+                    action.style === 'primary' ? theme.colors.accentText : theme.colors.textPrimary
+                  }
+                />
+              ) : (
+                <Text
+                  style={[
+                    styles.actionLabel,
+                    action.style === 'primary' && styles.actionLabelPrimary,
+                    action.style === 'destructive' && styles.actionLabelDestructive,
+                  ]}
+                >
+                  {action.label}
+                </Text>
+              )}
+            </Pressable>
+          );
+        })}
+      </View>
+      {failed ? (
+        <Text style={styles.actionError} accessibilityRole="alert" accessibilityLiveRegion="polite">
+          That didn't go through. Check the connection and try again.
+        </Text>
+      ) : null}
     </View>
   );
 }

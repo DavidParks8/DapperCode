@@ -133,6 +133,14 @@ export const createBridgeUiSurfaceStyles = (theme: AppTheme) =>
       textAlign: 'right',
       fontWeight: '600',
     },
+    keyValueRowStacked: {
+      flexDirection: 'column',
+      gap: 2,
+    },
+    keyValueStacked: {
+      ...theme.typography.caption,
+      color: theme.colors.textPrimary,
+    },
     codeBlock: {
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.inlineCodeBorder,
@@ -169,6 +177,14 @@ export const createBridgeUiSurfaceStyles = (theme: AppTheme) =>
       height: 6,
       borderRadius: theme.radius.full,
       backgroundColor: theme.colors.accent,
+    },
+    actionsColumn: {
+      gap: theme.spacing.xs,
+    },
+    actionError: {
+      ...theme.typography.caption,
+      color: theme.colors.error,
+      textAlign: 'right',
     },
     actions: {
       flexDirection: 'row',

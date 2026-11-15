@@ -9,7 +9,12 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::platform;
+#[cfg(test)]
+use crate::phone_call::{
+    DEFAULT_VOICE_BASE_URL, DEFAULT_VOICE_LLM_MODEL, DEFAULT_VOICE_TTS_MODEL,
+    DEFAULT_VOICE_TTS_VOICE,
+};
+use crate::{phone_call::PhoneCallSettings, platform};
 
 const CONFIG_VERSION: u32 = 2;
 const LEGACY_CONFIG_VERSION: u32 = 1;
@@ -79,6 +84,10 @@ impl AppPaths {
 
     pub fn secret_vault_file_path(&self) -> PathBuf {
         self.base.join("secrets").join("bridge-auth-vault.json")
+    }
+
+    pub fn sip_secret_file_path(&self) -> PathBuf {
+        self.base.join("secrets").join("phone-call-sip.json")
     }
 
     pub fn secret_vault_lock_path(&self) -> PathBuf {
@@ -235,7 +244,10 @@ impl AppPaths {
         FileLease::acquire(&self.config_lock_path())
     }
 
-    fn with_rollback_error(primary: anyhow::Error, rollback: Result<()>) -> anyhow::Error {
+    pub(crate) fn with_rollback_error(
+        primary: anyhow::Error,
+        rollback: Result<()>,
+    ) -> anyhow::Error {
         match rollback {
             Ok(()) => primary,
             Err(rollback) => anyhow!("{primary:#}; side-effect rollback also failed: {rollback:#}"),
@@ -249,15 +261,18 @@ pub struct AppConfig {
     pub version: u32,
     #[serde(default)]
     pub broker: Option<BrokerSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone_call: Option<PhoneCallSettings>,
     #[serde(default)]
     pub profiles: Vec<Profile>,
 }
 
 impl AppConfig {
-    fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             version: CONFIG_VERSION,
             broker: None,
+            phone_call: None,
             profiles: Vec::new(),
         }
     }
@@ -290,6 +305,9 @@ impl AppConfig {
             broker.validate()?;
         } else if !self.profiles.is_empty() {
             bail!("configured workspaces require broker settings");
+        }
+        if let Some(phone_call) = &self.phone_call {
+            phone_call.validate()?;
         }
         Ok(())
     }
@@ -1337,5 +1355,168 @@ mod tests {
         }
         #[cfg(not(unix))]
         create_private_dir(&path).unwrap();
+    }
+
+    fn sample_phone_call_settings() -> PhoneCallSettings {
+        PhoneCallSettings {
+            sip_server: "sip.telnyx.com:5061".to_string(),
+            sip_transport: "tls".to_string(),
+            sip_username: "telnyx-user".to_string(),
+            caller_id: "+15551234567".to_string(),
+            user_display_name: "David Parks".to_string(),
+            stt_base_url: DEFAULT_VOICE_BASE_URL.to_string(),
+            stt_model: DEFAULT_VOICE_LLM_MODEL.to_string(),
+            llm_base_url: DEFAULT_VOICE_BASE_URL.to_string(),
+            llm_model: DEFAULT_VOICE_LLM_MODEL.to_string(),
+            tts_base_url: DEFAULT_VOICE_BASE_URL.to_string(),
+            tts_model: DEFAULT_VOICE_TTS_MODEL.to_string(),
+            tts_voice: DEFAULT_VOICE_TTS_VOICE.to_string(),
+        }
+    }
+
+    #[test]
+    fn phone_call_settings_preserve_v2_config_compatibility_and_defaults() {
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::for_tests(temp.path().to_path_buf());
+        fs::write(paths.config_path(), br#"{"version":2,"profiles":[]}"#).unwrap();
+
+        let loaded = paths.load_config().unwrap();
+        assert!(loaded.phone_call.is_none());
+        paths.update_config(|_| Ok(())).unwrap();
+        let raw = fs::read_to_string(paths.config_path()).unwrap();
+        assert!(!raw.contains("phoneCall"));
+
+        let minimal: PhoneCallSettings = serde_json::from_value(serde_json::json!({
+            "sipServer": "sip.telnyx.com:5061",
+            "sipTransport": "udp",
+            "sipUsername": "alice",
+            "callerId": "+15551234567",
+            "userDisplayName": "Alice",
+        }))
+        .unwrap();
+        minimal.validate().unwrap();
+        assert_eq!(minimal.stt_base_url, "http://127.0.0.1:11434/v1");
+        assert_eq!(minimal.stt_model, "gemma4:e4b");
+        assert_eq!(minimal.llm_base_url, "http://127.0.0.1:11434/v1");
+        assert_eq!(minimal.llm_model, "gemma4:e4b");
+        assert_eq!(minimal.tts_base_url, "http://127.0.0.1:11434/v1");
+        assert_eq!(minimal.tts_model, "phonon");
+        assert_eq!(minimal.tts_voice, "default");
+
+        assert!(
+            serde_json::from_value::<PhoneCallSettings>(serde_json::json!({
+                "sipServer": "sip.telnyx.com:5061",
+                "sipTransport": "tls",
+                "sipUsername": "alice",
+                "callerId": "+15551234567",
+                "userDisplayName": "Alice",
+                "sipPassword": "forbidden-secret-in-config"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn phone_call_settings_validate_e164_sip_endpoints_and_loopback_urls() {
+        let valid = sample_phone_call_settings();
+        valid.validate().unwrap();
+
+        for loopback in [
+            "http://127.0.0.1:11434/v1",
+            "https://localhost:11434/v1",
+            "http://LOCALHOST/v1",
+            "http://[::1]:11434/v1",
+            "https://[::1]/v1",
+        ] {
+            let mut candidate = valid.clone();
+            candidate.stt_base_url = loopback.to_string();
+            candidate.llm_base_url = loopback.to_string();
+            candidate.tts_base_url = loopback.to_string();
+            candidate.validate().unwrap();
+        }
+
+        let mut ipv6_sip = valid.clone();
+        ipv6_sip.sip_server = "[::1]:5060".to_string();
+        ipv6_sip.sip_transport = "udp".to_string();
+        ipv6_sip.validate().unwrap();
+
+        for bad_caller_id in [
+            "",
+            "15551234567",
+            "+123456",
+            "+1234567890123456",
+            "+1-555-123-4567",
+            "+1555123456a",
+        ] {
+            let mut invalid = valid.clone();
+            invalid.caller_id = bad_caller_id.to_string();
+            assert!(
+                invalid.validate().is_err(),
+                "expected E.164 rejection for {bad_caller_id}"
+            );
+        }
+
+        for bad_url in [
+            "https://api.openai.com/v1",
+            "http://192.168.1.20:11434/v1",
+            "http://0.0.0.0:11434/v1",
+            "http://127.0.0.2:11434/v1",
+            "ftp://127.0.0.1:11434/v1",
+            "http://127.0.0.1@evil.com:11434/v1",
+            "http://127.0.0.1:0/v1",
+            "http://[2001:db8::1]:11434/v1",
+            "",
+            &format!("http://127.0.0.1/{}", "v".repeat(1024)),
+            "http://127.0.0.1:11434/\tv1",
+            "http://127.0.0.1 :11434/v1",
+            "127.0.0.1:11434/v1",
+            "http:///v1",
+            "http://[::2]/v1",
+            "http://[::1/v1",
+        ] {
+            let mut invalid = valid.clone();
+            invalid.llm_base_url = bad_url.to_string();
+            assert!(
+                invalid.validate().is_err(),
+                "expected URL rejection for {bad_url}"
+            );
+        }
+
+        for bad_server in [
+            "",
+            "sip.telnyx.com",
+            "sip.telnyx.com:0",
+            ":5061",
+            "http://sip.telnyx.com:5061",
+            "999.999.999.999:5060",
+            "sip.telnyx.com:5061\n",
+            &format!("{}.example:5060", "a".repeat(260)),
+            "sip..telnyx.com:5061",
+            ".sip.telnyx.com:5061",
+            "-sip.telnyx.com:5061",
+            "sip.telnyx.com-:5061",
+            "sip_telnyx.com:5061",
+        ] {
+            let mut invalid = valid.clone();
+            invalid.sip_server = bad_server.to_string();
+            assert!(
+                invalid.validate().is_err(),
+                "expected SIP server rejection for {bad_server}"
+            );
+        }
+
+        let mut bad_transport = valid.clone();
+        bad_transport.sip_transport = "tcp".to_string();
+        assert!(bad_transport.validate().is_err());
+
+        let mut long_user = valid.clone();
+        long_user.sip_username = "u".repeat(257);
+        assert!(long_user.validate().is_err());
+
+        let mut bad_display = valid;
+        bad_display.user_display_name = "Name\nInjected".to_string();
+        assert!(bad_display.validate().is_err());
+        bad_display.user_display_name = "n".repeat(129);
+        assert!(bad_display.validate().is_err());
     }
 }

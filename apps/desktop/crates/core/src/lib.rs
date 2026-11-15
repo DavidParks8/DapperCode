@@ -4,6 +4,7 @@
 
 mod broker_supervisor;
 mod config;
+mod phone_call;
 mod platform;
 mod secrets;
 mod setup;
@@ -14,6 +15,10 @@ mod test_env;
 pub use broker_supervisor::{BridgeSnapshot, BridgeState, BrokerLifecycleAction, BrokerSupervisor};
 pub use config::{
     runtime_executable_available, validate_workspace, BridgeRuntimeConfig, RuntimePaths,
+};
+pub use phone_call::{
+    PhoneCallSettings, DEFAULT_SIP_TRANSPORT, DEFAULT_VOICE_BASE_URL, DEFAULT_VOICE_LLM_MODEL,
+    DEFAULT_VOICE_TTS_MODEL, DEFAULT_VOICE_TTS_VOICE,
 };
 pub use platform::{
     process_start_identity, resolve_bridge_host, stop_child, wait_for_shutdown_signal, NetworkMode,

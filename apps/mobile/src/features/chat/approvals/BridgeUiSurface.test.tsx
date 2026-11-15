@@ -1,12 +1,13 @@
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
-import { Platform, StyleSheet } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { BridgeUiAction, BridgeUiSurface } from '@bridge/types/types';
 import { feedback } from '@shared/feedback';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { AppSheet } from '@shared/ui/AppSheet';
 import { BridgeUiBanner, BridgeUiModal, BridgeUiWorkflowCard } from './BridgeUiSurface';
+import { getSurfaceIconName } from './surfaceHelpers';
 import { createBridgeUiSurfaceStyles } from './surfaceStyles';
 
 jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
@@ -285,6 +286,145 @@ describe('BridgeUiWorkflowCard', () => {
     act(() => tree.unmount());
   });
 
+  it.each(['success', 'failure', 'rejection'] as const)(
+    'guards same-batch approval choices and releases them after %s',
+    async (outcome) => {
+      const objective =
+        'Request a prescription refill and ask when it can be ready for pickup at the counter.';
+      const surface: BridgeUiSurface = {
+        id: 'phone-call-approval:call-1',
+        threadId: 'thread-1',
+        turnId: null,
+        kind: 'phone-call',
+        presentation: 'modal',
+        tone: 'warning',
+        title: 'Approve outbound phone call',
+        subtitle: '+15551234567',
+        bodyMarkdown: null,
+        blocks: [
+          {
+            type: 'keyValue',
+            items: [
+              { label: 'To', value: '+15551234567' },
+              { label: 'Objective', value: objective },
+            ],
+          },
+        ],
+        actions: [
+          { id: 'approve', label: 'Approve & Call', style: 'primary', dismissesSurface: true },
+          { id: 'cancel', label: 'Cancel', style: 'destructive', dismissesSurface: true },
+        ],
+        dismissible: false,
+      };
+      let settle: (ok: boolean) => void = () => undefined;
+      let reject: (error: Error) => void = () => undefined;
+      const onAction = jest.fn(
+        () =>
+          new Promise<boolean>((resolve, rejectPromise) => {
+            settle = resolve;
+            reject = rejectPromise;
+          }),
+      );
+      let rendered: ReactTestRenderer | undefined;
+      act(() => {
+        rendered = renderer.create(
+          <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+            <AppThemeProvider theme={theme}>
+              <BridgeUiModal surface={surface} onAction={onAction} onDismiss={jest.fn()} />
+            </AppThemeProvider>
+          </SafeAreaProvider>,
+        );
+      });
+      const root = expectValue(rendered).root as QueryableTestInstance;
+      const objectiveText = root.findAll(
+        (node) => node.children.includes(objective) && node.props['style'] !== undefined,
+      )[0];
+      expect(objectiveText).toBeDefined();
+      expect(
+        StyleSheet.flatten(objectiveText?.props['style'] as never) as { textAlign?: string },
+      ).not.toHaveProperty('textAlign', 'right');
+
+      const approve = readOnPress(findPressableByLabel(root, 'Approve & Call').props);
+      const cancel = readOnPress(findPressableByLabel(root, 'Cancel').props);
+      act(() => {
+        approve();
+        cancel();
+      });
+      expect(onAction).toHaveBeenCalledTimes(1);
+      expect(onAction).toHaveBeenLastCalledWith(surface, surface.actions[0]);
+      expect(findPressableByLabel(root, 'Approve & Call').props['disabled']).toBe(true);
+      expect(findPressableByLabel(root, 'Cancel').props['disabled']).toBe(true);
+      expect(findPressableByLabel(root, 'Approve & Call').props['accessibilityState']).toEqual({
+        disabled: true,
+        busy: true,
+      });
+      expect(findPressableByLabel(root, 'Cancel').props['accessibilityState']).toEqual({
+        disabled: true,
+        busy: false,
+      });
+      expect(root.findAll((node) => node.type === ActivityIndicator)).toHaveLength(1);
+      act(() => readOnPress(findPressableByLabel(root, 'Cancel').props)());
+      expect(onAction).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        if (outcome === 'rejection') {
+          reject(new Error('Disconnected'));
+        } else {
+          settle(outcome === 'success');
+        }
+        await Promise.resolve();
+      });
+      expect(findText(root, "That didn't go through. Check the connection and try again.")).toBe(
+        outcome !== 'success',
+      );
+      expect(findPressableByLabel(root, 'Approve & Call').props['disabled']).toBe(false);
+      expect(findPressableByLabel(root, 'Cancel').props['disabled']).toBe(false);
+      expect(root.findAll((node) => node.type === ActivityIndicator)).toHaveLength(0);
+
+      act(() => {
+        cancel();
+        approve();
+      });
+      expect(onAction).toHaveBeenCalledTimes(2);
+      expect(onAction).toHaveBeenLastCalledWith(surface, surface.actions[1]);
+      expect(findPressableByLabel(root, 'Cancel').props['accessibilityState']).toEqual({
+        disabled: true,
+        busy: true,
+      });
+      expect(findText(root, "That didn't go through. Check the connection and try again.")).toBe(
+        false,
+      );
+      await act(async () => {
+        settle(true);
+        await Promise.resolve();
+      });
+      expect(findPressableByLabel(root, 'Cancel').props['disabled']).toBe(false);
+      expect(root.findAll((node) => node.type === ActivityIndicator)).toHaveLength(0);
+
+      onAction.mockImplementationOnce(() => {
+        throw new Error('Disconnected before dispatch');
+      });
+      act(() => approve());
+      expect(onAction).toHaveBeenCalledTimes(3);
+      expect(findText(root, "That didn't go through. Check the connection and try again.")).toBe(
+        true,
+      );
+      expect(findPressableByLabel(root, 'Approve & Call').props['disabled']).toBe(false);
+      expect(findPressableByLabel(root, 'Cancel').props['disabled']).toBe(false);
+      await act(async () => {
+        cancel();
+        settle(true);
+        await Promise.resolve();
+      });
+      expect(onAction).toHaveBeenCalledTimes(4);
+      expect(findText(root, "That didn't go through. Check the connection and try again.")).toBe(
+        false,
+      );
+      expect(findPressableByLabel(root, 'Cancel').props['disabled']).toBe(false);
+      act(() => expectValue(rendered).unmount());
+    },
+  );
+
   it('fires selection haptic on collapse/expand toggle', () => {
     const surface: BridgeUiSurface = {
       id: 'haptic-test',
@@ -422,6 +562,90 @@ describe('BridgeUiWorkflowCard', () => {
     } finally {
       Platform.OS = originalOS;
     }
+  });
+});
+
+describe('getSurfaceIconName', () => {
+  const theme = createAppTheme('dark');
+  const baseSurface: BridgeUiSurface = {
+    id: 'surface-1',
+    threadId: 'thread-1',
+    turnId: null,
+    kind: null,
+    presentation: 'workflowCard',
+    tone: 'info',
+    title: 'Surface',
+    subtitle: null,
+    bodyMarkdown: null,
+    blocks: [],
+    actions: [],
+    dismissible: true,
+  };
+
+  it('maps phone-call surfaces to call-outline for modal and workflowCard while preserving existing icons', () => {
+    const modalCallSurface: BridgeUiSurface = {
+      ...baseSurface,
+      id: 'call-modal',
+      kind: 'phone-call',
+      presentation: 'modal',
+      tone: 'info',
+      title: 'Call me?',
+    };
+    const cardCallSurface: BridgeUiSurface = {
+      ...baseSurface,
+      id: 'call-card',
+      kind: 'phone-call',
+      presentation: 'workflowCard',
+      tone: 'warning',
+      title: 'Active phone call',
+    };
+
+    expect(getSurfaceIconName(modalCallSurface)).toBe('call-outline');
+    expect(getSurfaceIconName(cardCallSurface)).toBe('call-outline');
+    expect(getSurfaceIconName({ ...baseSurface, kind: 'goal', tone: 'warning' })).toBe(
+      'flag-outline',
+    );
+    expect(getSurfaceIconName({ ...baseSurface, kind: 'review', tone: 'warning' })).toBe(
+      'warning-outline',
+    );
+    expect(getSurfaceIconName({ ...baseSurface, kind: 'status', tone: 'error' })).toBe(
+      'alert-circle-outline',
+    );
+    expect(getSurfaceIconName({ ...baseSurface, kind: 'status', tone: 'success' })).toBe(
+      'checkmark-circle-outline',
+    );
+    expect(getSurfaceIconName({ ...baseSurface, kind: 'status', tone: 'info' })).toBe(
+      'layers-outline',
+    );
+
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <BridgeUiModal surface={modalCallSurface} onAction={jest.fn()} onDismiss={jest.fn()} />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    const tree = expectValue(rendered);
+    expect(findText(tree.root as QueryableTestInstance, 'call-outline')).toBe(true);
+
+    act(() => {
+      tree.update(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <BridgeUiWorkflowCard
+              surface={cardCallSurface}
+              onAction={jest.fn()}
+              onDismiss={jest.fn()}
+            />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    expect(findText(tree.root as QueryableTestInstance, 'call-outline')).toBe(true);
+    act(() => tree.unmount());
   });
 });
 

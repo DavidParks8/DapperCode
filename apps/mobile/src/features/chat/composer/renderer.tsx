@@ -2,6 +2,7 @@ import { pendingApprovalAtom, stoppingTurnAtom } from '../state/turn';
 import {
   composerHeightAtom,
   keyboardVisibleAtom,
+  topChromeHeightAtom,
   queueActionItemIdAtom,
   queueActionKindAtom,
 } from '../state/composer';
@@ -17,6 +18,7 @@ import { Pressable, Text, View, useWindowDimensions, type LayoutChangeEvent } fr
 import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
 import { ApprovalBanner } from '../approvals/ApprovalBanner';
 import { BridgeUiBanner } from '../approvals/BridgeUiSurface';
+import { PhoneCallDock, phoneCallDetailsMaxHeight } from '../approvals/PhoneCallDock';
 import { ChatInput } from './ChatInput';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { computeHitSlop } from '@shared/ui/touchTarget';
@@ -43,6 +45,8 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     attachmentControlsDisabled,
     attachmentController,
     bannerBridgeUiSurfaces,
+    callBridgeUiSurfaces,
+    supersededCallBridgeUiSurfaces,
     canCancelQueuedMessage,
     canEditQueuedMessage,
     canSteerQueuedMessage,
@@ -108,7 +112,13 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         };
   // Send moves onto a trailing bar, lined up with the bar's buttons. The scene ends at the window's
   // trailing edge, so the composer ends where the scene's padding and its own margin begin.
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const topChromeHeight = useAtomValue(topChromeHeightAtom);
+  const callDetailsMaxHeight = phoneCallDetailsMaxHeight({
+    windowHeight,
+    topChromeHeight,
+    bottomInset: composerOverlayInset + composerSafeAreaBottomInset,
+  });
   const actionRail = useTrailingActionRail();
   const actionColumn = actionRail
     ? {
@@ -156,6 +166,20 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         !overlay && !keyboardVisible ? styles.composerContainerResting : null,
       ]}
     >
+      {callBridgeUiSurfaces.map((surface) => (
+        <PhoneCallDock
+          key={surface.id}
+          surface={surface}
+          detailsMaxHeight={callDetailsMaxHeight}
+          onAction={handleBridgeUiAction}
+          onDismiss={(nextSurface) => {
+            // Older results are superseded by this one; retire them together so none resurfaces.
+            for (const retired of [nextSurface, ...supersededCallBridgeUiSurfaces]) {
+              void dismissBridgeUiSurface(retired);
+            }
+          }}
+        />
+      ))}
       <ComposerErrorAlert
         visibleError={visibleError}
         retry={failedTurnRetry}

@@ -2,6 +2,7 @@ import type { HostBridgeApiClient } from '@bridge/client/client';
 import { isThreadNotFoundError } from '@bridge/client/clientChatCloneAndRetryInternals';
 import type {
   BridgeCapabilities,
+  BridgeUiSurface,
   BridgeThreadQueueState,
   BridgeThreadSchedulesState,
   Chat,
@@ -9,6 +10,7 @@ import type {
   PendingUserInputRequest,
 } from '@bridge/types/types';
 import { isPendingChatId } from '@shell/session/interruptedChatCreation';
+import { toBridgeUiSurface } from '../../helpers/bridgeUi';
 
 export const REPLAY_RECOVERY_CONCURRENCY = 4;
 export const REPLAY_RECOVERY_MAX_LOADED_THREADS = 2_048;
@@ -29,6 +31,7 @@ type ReplayRecoveryApi = Pick<
   | 'listLoadedChatIds'
   | 'listPendingUserInputs'
   | 'readBridgeCapabilities'
+  | 'readPhoneCallSurfaces'
   | 'readThreadQueue'
   | 'readThreadSchedules'
 >;
@@ -37,6 +40,7 @@ export interface ReplayRecoveryThreadSnapshot {
   chat: Chat;
   queue: BridgeThreadQueueState;
   schedules: BridgeThreadSchedulesState;
+  bridgeUiSurfaces: BridgeUiSurface[];
 }
 
 export interface ReplayRecoverySnapshot {
@@ -132,11 +136,22 @@ export async function fetchReplayRecoverySnapshot(
   if (loadedThreadIds.length > REPLAY_RECOVERY_MAX_LOADED_THREADS) {
     throw new ReplayRecoveryProtocolError(loadedThreadIds.length);
   }
+  const phoneCallSurfaces = capabilities.supports?.phoneCalls
+    ? await awaitWithReplayRecoveryCancellation(api.readPhoneCallSurfaces(), signal)
+    : [];
+  const recoveredSurfaces = phoneCallSurfaces.map((surface) => {
+    const parsed = toBridgeUiSurface(surface);
+    if (!parsed || parsed.kind !== 'phone-call') {
+      throw new Error('Bridge returned an invalid phone-call recovery surface');
+    }
+    return parsed;
+  });
   const threadIds = collectReplayRecoveryThreadIds([
     trackedThreadIds,
     loadedThreadIds,
     approvals.map((approval) => approval.threadId),
     userInputs.map((request) => request.threadId),
+    recoveredSurfaces.map((surface) => surface.threadId),
   ]).filter((threadId) => !isPendingChatId(threadId) && !excludedThreadIds?.has(threadId));
 
   const results = await mapWithConcurrency(
@@ -153,7 +168,14 @@ export async function fetchReplayRecoverySnapshot(
         api.readThreadQueue(threadId),
         api.readThreadSchedules(threadId),
       ]);
-      return chat ? { chat, queue, schedules } : threadId;
+      return chat
+        ? {
+            chat,
+            queue,
+            schedules,
+            bridgeUiSurfaces: recoveredSurfaces.filter((surface) => surface.threadId === threadId),
+          }
+        : threadId;
     },
     signal,
   );
