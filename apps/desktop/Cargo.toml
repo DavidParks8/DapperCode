@@ -18,6 +18,10 @@ rust-version = "1.97.1"
 license = "MIT"
 publish = false
 
+[profile.dev]
+incremental = false
+debug = 1
+
 [workspace.dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
