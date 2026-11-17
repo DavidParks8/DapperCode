@@ -12,6 +12,14 @@ pub const DEFAULT_STT_MODEL: &str = "gemma4:e4b";
 pub const DEFAULT_LLM_MODEL: &str = "gpt-oss:20b";
 pub const DEFAULT_TTS_MODEL: &str = "phonon";
 pub const DEFAULT_TTS_VOICE: &str = "default";
+pub const CONVERSATIONAL_FEMALE_TTS_MODEL: &str =
+    "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit";
+pub const CONVERSATIONAL_FEMALE_TTS_VOICE: &str = "conversational-female";
+const CONVERSATIONAL_FEMALE_INSTRUCT: &str =
+    "An adult woman with a warm, clear, medium-pitched voice and a General American accent. \
+     Speak naturally and casually in American English, as if calling a restaurant. \
+     Warm and relaxed, with connected phrasing, varied rhythm and gentle intonation. \
+     Not an announcer or a customer-service recording. Do not add any words.";
 pub const DEFAULT_KEEP_ALIVE: &str = "15m";
 pub const DEFAULT_STT_LANGUAGE: &str = "en";
 #[cfg(test)]
@@ -106,6 +114,16 @@ impl VoicePipelineConfig {
         validate_non_empty_field("llm_model", &self.llm_model)?;
         validate_non_empty_field("tts_model", &self.tts_model)?;
         validate_non_empty_field("tts_voice", &self.tts_voice)?;
+        if self.tts_voice.trim() == CONVERSATIONAL_FEMALE_TTS_VOICE
+            && self.tts_model.trim() != CONVERSATIONAL_FEMALE_TTS_MODEL
+        {
+            return Err(VoiceError::InvalidConfig {
+                field: "tts_model",
+                reason: format!(
+                    "{CONVERSATIONAL_FEMALE_TTS_VOICE} requires {CONVERSATIONAL_FEMALE_TTS_MODEL}"
+                ),
+            });
+        }
         Ok(())
     }
 
@@ -1496,11 +1514,21 @@ impl VoicePipelineClient {
         }
 
         let endpoint = append_endpoint_path(&self.endpoints.tts_base, "audio/speech");
+        let conversational_female = self.config.tts_voice.trim() == CONVERSATIONAL_FEMALE_TTS_VOICE;
         let payload = SpeechSynthesisRequest {
             model: self.config.tts_model.trim(),
             input,
-            voice: self.config.tts_voice.trim(),
+            voice: (!conversational_female).then_some(self.config.tts_voice.trim()),
             response_format: "pcm",
+            style: conversational_female.then_some(SpeechSynthesisStyle {
+                instruct: CONVERSATIONAL_FEMALE_INSTRUCT,
+                lang_code: "English",
+                temperature: 0.9,
+                top_p: 1.0,
+                top_k: 50,
+                repetition_penalty: 1.05,
+                max_tokens: 1024,
+            }),
         };
 
         let response = tokio::select! {
@@ -1623,8 +1651,22 @@ enum HoldAction {
 struct SpeechSynthesisRequest<'a> {
     model: &'a str,
     input: &'a str,
-    voice: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    voice: Option<&'a str>,
     response_format: &'static str,
+    #[serde(flatten)]
+    style: Option<SpeechSynthesisStyle>,
+}
+
+#[derive(Debug, Serialize)]
+struct SpeechSynthesisStyle {
+    instruct: &'static str,
+    lang_code: &'static str,
+    temperature: f64,
+    top_p: f64,
+    top_k: u32,
+    repetition_penalty: f64,
+    max_tokens: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3826,6 +3868,114 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires an isolated local MLX speech server; use the local E2E resource lease"]
+    async fn local_conversational_female_tts_profile() {
+        let base = std::env::var("DAPPERCODE_TEST_VOICE_TTS_BASE_URL")
+            .expect("isolated local TTS endpoint is required");
+        let directory = std::fs::canonicalize(
+            std::env::var_os("DAPPERCODE_TEST_VOICE_AUDIO_DATA_DIR")
+                .expect("scenario-owned output directory is required"),
+        )
+        .unwrap();
+        let client = VoicePipelineClient::new(VoicePipelineConfig {
+            stt_base_url: base.clone(),
+            llm_base_url: base.clone(),
+            tts_base_url: base,
+            tts_model: CONVERSATIONAL_FEMALE_TTS_MODEL.to_string(),
+            tts_voice: CONVERSATIONAL_FEMALE_TTS_VOICE.to_string(),
+            ..VoicePipelineConfig::default()
+        })
+        .unwrap();
+        let cancel = CancellationToken::new();
+        tokio::time::timeout(
+            Duration::from_secs(PRELOAD_REQUEST_TIMEOUT_SECS),
+            client.synthesize_speech_pcm24k("Ready.", &cancel, |_| {}),
+        )
+        .await
+        .expect("real speech preparation must complete within its production deadline")
+        .unwrap();
+        let mut pcm = Vec::new();
+        let count = tokio::time::timeout(
+            Duration::from_secs(180),
+            client.synthesize_speech_pcm24k(
+                "Hi, I'm calling about a table for six this Friday at seven. Would you have anything available?",
+                &cancel,
+                |samples| pcm.extend_from_slice(samples),
+            ),
+        )
+        .await
+        .expect("real HTTP synthesis must settle")
+        .unwrap();
+        assert_eq!(count, pcm.len());
+        assert!(count > 0 && count <= 24_000 * 30);
+        let bytes: Vec<u8> = pcm.iter().flat_map(|sample| sample.to_le_bytes()).collect();
+        let mut output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(directory.join("female-profile.pcm"))
+            .unwrap();
+        std::io::Write::write_all(&mut output, &bytes).unwrap();
+        println!(
+            "FEMALE_PROFILE_HTTP {}",
+            json!({
+                "model": CONVERSATIONAL_FEMALE_TTS_MODEL,
+                "voice": CONVERSATIONAL_FEMALE_TTS_VOICE,
+                "samples": count,
+                "sample_rate": 24_000,
+                "warmup_discarded": true,
+                "path": "production VoicePipelineClient over real local HTTP",
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn conversational_female_profile_sends_private_style_and_english_language() {
+        assert!(matches!(
+            VoicePipelineClient::new(VoicePipelineConfig {
+                tts_voice: CONVERSATIONAL_FEMALE_TTS_VOICE.to_string(),
+                ..VoicePipelineConfig::default()
+            }),
+            Err(VoiceError::InvalidConfig {
+                field: "tts_model",
+                ..
+            })
+        ));
+        let state = MockServerState::new();
+        *state.speech_pcm_chunks.lock().await = vec![[0x40_u8, 0x1F].repeat(480)];
+        let base = spawn_mock_voice_server(Arc::clone(&state)).await;
+        let client = VoicePipelineClient::new(VoicePipelineConfig {
+            tts_base_url: base,
+            tts_model: "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit".to_string(),
+            tts_voice: "conversational-female".to_string(),
+            ..VoicePipelineConfig::default()
+        })
+        .unwrap();
+        let spoken = "Hi, I'm calling about a table for six.";
+        let samples = client
+            .synthesize_speech_pcm24k(spoken, &CancellationToken::new(), |_| {})
+            .await
+            .unwrap();
+        assert_eq!(samples, 480);
+        let requests = state.speech_requests.lock().await;
+        assert_eq!(requests.len(), 1);
+        let request = &requests[0];
+        assert_eq!(request["input"], spoken);
+        assert_eq!(request["lang_code"], "English");
+        let style = request["instruct"].as_str().expect("private speech style");
+        assert!(style.contains("adult woman") && style.contains("General American"));
+        assert!(style.contains("connected phrasing") && style.contains("varied rhythm"));
+        assert!(
+            request.get("voice").is_none(),
+            "voice design has no preset speaker"
+        );
+        assert_eq!(request["temperature"], 0.9);
+        assert_eq!(request["top_p"], 1.0);
+        assert_eq!(request["top_k"], 50);
+        assert_eq!(request["repetition_penalty"], 1.05);
+        assert_eq!(request["max_tokens"], 1024);
+    }
+
+    #[tokio::test]
     async fn synthesize_speech_pcm24k_omits_speed_handles_odd_byte_frames_and_aborts_on_cancel() {
         let state = MockServerState::new();
         let expected_samples: [i16; 4] = [100, -200, 300, -400];
@@ -3864,6 +4014,11 @@ mod tests {
             let speech_reqs = state.speech_requests.lock().await;
             assert_eq!(speech_reqs.len(), 1);
             let req_obj = speech_reqs[0].as_object().expect("speech JSON object");
+            assert_eq!(
+                req_obj.len(),
+                4,
+                "ordinary voices retain the legacy request shape"
+            );
             assert_eq!(req_obj.get("model"), Some(&json!(DEFAULT_TTS_MODEL)));
             assert_eq!(req_obj.get("voice"), Some(&json!(DEFAULT_TTS_VOICE)));
             assert_eq!(req_obj.get("response_format"), Some(&json!("pcm")));

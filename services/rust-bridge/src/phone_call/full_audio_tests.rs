@@ -15,6 +15,74 @@ mod full_audio_validation {
     const MAX_DIALOGUE_CAPTURE_BYTES: usize = 256 * 1024;
     const POST_DRAIN_GUARD: Duration = Duration::from_secs(2);
 
+    #[test]
+    #[ignore = "converts scenario-owned PCM using the production telephone audio path"]
+    fn local_intelligibility_telephone_conversion() {
+        let directory = fs::canonicalize(
+            std::env::var_os("DAPPERCODE_TEST_VOICE_AUDIO_DATA_DIR")
+                .expect("scenario-owned audio directory is required"),
+        )
+        .expect("audio directory exists");
+        let manifest: Vec<String> = serde_json::from_slice(
+            &fs::read(directory.join("intelligibility-inputs.json")).expect("read audio manifest"),
+        )
+        .expect("manifest contains flat PCM filenames");
+        assert!(!manifest.is_empty(), "at least one PCM input is required");
+        for name in manifest {
+            assert!(
+                name.ends_with(".pcm")
+                    && name
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+                    && !name.starts_with('.'),
+                "PCM input must have a flat, non-hidden filename"
+            );
+            let input = fs::canonicalize(directory.join(&name)).expect("PCM input exists");
+            assert_eq!(input.parent(), Some(directory.as_path()));
+            let bytes = fs::read(input).expect("read PCM input");
+            assert!(
+                !bytes.is_empty()
+                    && bytes.len().is_multiple_of(2)
+                    && bytes.len() <= MAX_STIMULUS_SAMPLES * 2,
+                "PCM input must contain complete 24 kHz samples, bounded to thirty seconds"
+            );
+            let samples: Vec<i16> = bytes
+                .chunks_exact(2)
+                .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+                .collect();
+            let mut downsampled = Vec::new();
+            Downsampler24kTo8k::new().push_pcm24k_samples(&samples, &mut downsampled);
+            let mut decoded = Vec::new();
+            for chunk in downsampled.chunks(RTP_FRAME_SAMPLES) {
+                let mut frame = [0; RTP_FRAME_SAMPLES];
+                frame[..chunk.len()].copy_from_slice(chunk);
+                decoded.extend(
+                    encode_mulaw_frame_with_headroom(&frame)
+                        .into_iter()
+                        .map(decode_mulaw),
+                );
+            }
+            let output = directory.join(name.replace(".pcm", "-telephone.wav"));
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(output)
+                .expect("telephone output must be new");
+            std::io::Write::write_all(&mut file, &super::super::audio::encode_wav_8k_mono(&decoded))
+                .expect("write complete telephone WAV");
+            println!(
+                "INTELLIGIBILITY_CONVERSION {}",
+                json!({
+                    "input": name,
+                    "input_samples": samples.len(),
+                    "telephone_samples": decoded.len(),
+                    "frame_samples": RTP_FRAME_SAMPLES,
+                    "path": "production FIR/headroom/PCMU encode/decode; final frame padded only",
+                })
+            );
+        }
+    }
+
     #[derive(Default)]
     struct OutputObservation {
         first_nonsilent: Option<Instant>,

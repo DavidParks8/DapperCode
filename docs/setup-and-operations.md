@@ -448,6 +448,46 @@ live controls, and settled reports. Synthetic speech/noise is not an accents or 
 evaluation. Warm pipeline runs may still include model loads when memory pressure evicts a model;
 do not substitute the faster dialogue-only figures for full-call latency.
 
+Speech intelligibility is a separate offline gate, not a check added to live calls.
+`scripts/voice-intelligibility.mjs` requires an independent local recognizer's exact
+normalized transcription of each complete waveform. Nonzero PCM, generated text, and
+successful playback alone do not prove intelligibility. Transcribe the native waveform
+and its telephone-path version without giving ASR the expected text or vocabulary hints.
+The gate compares a fixed spoken reference against each transcription, preserves
+negation and meaningful numeric distinctions, and fails the whole batch on any mismatch,
+unverified completion, missing sample, empty recognition, or ASR error.
+
+Run `node scripts/voice-intelligibility.mjs /absolute/manifest.json`. The manifest must
+contain `expectedSamples` and exactly that many `samples`, each with a unique `id`,
+`reference`, `audioFile` (relative to the manifest), `completion: { verified, reason }`,
+and `recognition: { status: "ok", text, model, audioSha256, prompted: false }`.
+`audioSha256` must identify the exact WAV passed to ASR. Keep runtime/model revisions
+and the observed completion/drain evidence with the manifest; setting `verified` is
+not itself evidence of completion. No failed samples may be filtered out or retried
+to obtain a passing batch.
+
+Normalization ignores case, ordinary punctuation, and whitespace; it equates standalone
+digits zero through nineteen with their spoken words. Apostrophes, number signs, decimal
+and time notation, currency/percent signs, and leading zeros are not discarded.
+It does not equate synonyms, homophones, or alternative AM/PM expressions. Exact matching
+may therefore reject understandable speech because of ASR mistakes; report those as
+failed or inconclusive qualification, not automatically as unintelligible generation.
+An ASR pass means **ASR-verified; listening/naturalness unverified**.
+
+For production telephone conversion without a second codec implementation, place bounded
+mono PCM16 little-endian 24 kHz inputs in a scenario-owned directory and list their flat
+filenames in `intelligibility-inputs.json`. The ignored test below writes new
+`*-telephone.wav` files using the production FIR filter, headroom, PCMU encoding/decoding,
+and 20 ms frames. It does not place calls or exercise SIP transport:
+
+```bash
+DAPPERCODE_TEST_VOICE_AUDIO_DATA_DIR=/absolute/scenario-owned-data \
+  pnpm run cargo test --locked --package dappercode-bridge --features e2e-agent \
+  --manifest-path services/rust-bridge/Cargo.toml \
+  local_intelligibility_telephone_conversion -- --ignored --nocapture --test-threads=1
+node --test scripts/__tests__/voice-intelligibility.test.mjs
+```
+
 By default, speech-to-text, tool-calling voice turns, and 24 kHz streaming text-to-speech run
 against one local Ollama daemon (`>= v0.40.9`, `http://127.0.0.1:11434/v1`):
 
@@ -540,6 +580,63 @@ repository.
 Validate the complete audio path on the intended host. Larger models alone can worsen recognition
 or exhaust available memory; paging and other model workloads can introduce long pauses. Synthetic
 noise checks do not replace accent coverage, consented listening tests, or review of a real call.
+
+### Conversational female voice on Apple silicon
+
+The opt-in `conversational-female` voice profile uses
+`mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit` through a local MLX Audio
+server. It targets the warm, conversational US-English female delivery evaluated
+with the listening samples, rather than cloning the macOS system voice.
+It changes speech synthesis only: dialogue, private text steering, sentence-boundary
+ordinary steering, immediate stop, DTMF, holds, and hang-up remain bridge-controlled.
+Existing Phonon defaults and saved voice selections are unchanged.
+
+Use the same separate Python environment described above. The verified provider
+version is `mlx-audio[server,stt]==0.6.5`; keep it outside repositories:
+
+```bash
+python -m pip install 'mlx-audio[server,stt]==0.6.5'
+python -m uvicorn mlx_audio.server:app --host 127.0.0.1 --port 0
+```
+
+Set `TTS_BASE_URL` to the printed loopback URL with `/v1` appended. Choose a stable
+available service port for ongoing use; do not use a workspace bridge port.
+Load the speech model, then select the profile using the existing voice settings:
+
+```bash
+curl --fail --request POST \
+  "$TTS_BASE_URL/models?model_name=mlx-community%2FQwen3-TTS-12Hz-1.7B-VoiceDesign-8bit"
+dappercode voice configure \
+  --tts-base-url "$TTS_BASE_URL" \
+  --tts-model mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit \
+  --tts-voice conversational-female
+dappercode voice status --human
+```
+
+The alias requires that exact model ID; incompatible model/profile combinations
+are rejected instead of silently falling back to another voice. The bridge sends
+the female voice description, conversational style, English language, and the
+evaluated sampling parameters separately from the spoken text. No style instructions
+are inserted into the callee transcript or read aloud as part of the speech input.
+Providers other than this selected profile retain the original speech request shape.
+
+The provider is host-managed; the bridge does not install or supervise Python or
+download voice weights during a call. Model downloads may happen during setup,
+but inference remains local. Keep the provider running and finish active calls
+before explicitly restarting an affected worker to pick up changed settings.
+No SIP credentials need to be re-entered. Changing other settings without voice
+flags preserves the selected profile.
+
+Speech generation and memory use must be validated on the intended host. VoiceDesign
+does not guarantee an identical speaker across generations, and the approved short
+sample does not establish naturalness for every sentence. The earlier Phonon latency
+measurements do not apply to this profile. Use the independent waveform-ASR gate
+above for intelligibility; listening is still needed for accent, prosody, and
+context-sensitive delivery.
+
+To return to Phonon, explicitly select the original local Ollama endpoint,
+`--tts-model phonon`, and `--tts-voice default`. This profile does not adopt MiniCPM
+or remove the existing approval/authorization safeguards.
 
 Security and storage boundaries:
 
