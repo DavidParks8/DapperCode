@@ -401,7 +401,7 @@ function createTypography(colors: AppColors, fonts: AppFontFamilies): AppTypogra
   };
 }
 
-export function resolveThemeMode(systemScheme: ColorSchemeName): ThemeMode {
+export function resolveThemeMode(systemScheme: ColorSchemeName | null): ThemeMode {
   return systemScheme === 'light' ? 'light' : 'dark';
 }
 

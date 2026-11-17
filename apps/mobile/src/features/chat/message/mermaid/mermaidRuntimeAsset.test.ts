@@ -1,3 +1,5 @@
+/** @jest-environment-options {"customExportConditions":["require","node","node-addons"]} */
+
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { TextDecoder, TextEncoder } from 'node:util';
@@ -32,11 +34,11 @@ describe('generated Mermaid runtime asset', () => {
   });
 
   it('contains the pinned Mermaid version marker', () => {
-    expect(runtime).toMatch(/dappercode-mermaid-runtime 11\.17\.2 [a-f0-9]{64}/u);
+    expect(runtime).toMatch(/dappercode-mermaid-runtime 12\.3\.0 [a-f0-9]{64}/u);
   });
 
   it('embeds the patched sanitizer rather than the prebuilt sanitizer copy', () => {
-    expect(runtime).toContain('version="3.4.17"');
+    expect(runtime).toContain('version="3.4.18"');
     expect(runtime).not.toContain('version="3.4.12"');
   });
 
@@ -109,12 +111,15 @@ describe('generated Mermaid runtime asset', () => {
       expect(result['type']).toBe('rendered');
       const rendered = new JSDOM(String(result['svg']), { contentType: 'image/svg+xml' });
       try {
+        const expectedColor = dom.window.document.createElement('span');
+        expectedColor.style.color = theme['actorTextColor']!;
         expect(
           rendered.window.document.querySelector('text.actor > tspan')?.getAttribute('fill'),
-        ).toBe(theme['actorTextColor']);
+        ).toBe(expectedColor.style.color);
+        expectedColor.style.color = theme['signalTextColor']!;
         expect(
           rendered.window.document.querySelector('text.messageText')?.getAttribute('fill'),
-        ).toBe(theme['signalTextColor']);
+        ).toBe(expectedColor.style.color);
         expect(runtimeErrors).toEqual([]);
       } finally {
         rendered.window.close();

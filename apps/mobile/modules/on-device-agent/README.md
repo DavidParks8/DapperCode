@@ -36,7 +36,7 @@ See [product setup and limitations](../../../../docs/on-device.md).
   persist resume data (`resume.data`/`transfer.json`). When iOS relaunches the app for transfer events,
   `ModelDownloadEvents.swift` recreates the session and takes the system completion handler
   directly: `plugins/withOnDeviceAgentNative.js` adds an `AppDelegate` override ahead of Expo's
-  subscriber aggregation, because in SDK 57 expo-file-system's handler and
+  subscriber aggregation, because in SDK 58 expo-file-system's handler and
   `EXLegacyAppDelegateWrapper` never complete their share for another library's session, so the
   aggregated handler would never reach iOS. A checksum or size mismatch deletes the staged file so
   a corrupt download is not re-verified on every activation. A pause whose checkpoint cannot be
@@ -50,7 +50,7 @@ See [product setup and limitations](../../../../docs/on-device.md).
   expiration event (`onLocalRunExpired`) stops the turn. On the short budget the event fires once
   `backgroundReserve` (10 s) remains, while the task is still held; module destruction ends every
   activity.
-- The native ABI is versioned (currently 12: local run activities, LFM3 inference, bounded glob/regex search, synchronous workspace
+- The native ABI is versioned (currently 13: updated inference engine, local run activities, LFM3 inference, bounded glob/regex search, synchronous workspace
   cancellation, observed-revision coordinated patches, workspace rename/delete, change tokens, UI file
   rename/delete, fetch/pull, init, branch creation, discard, remote-aware status, typed errors,
   background model downloads, verification progress/cancellation, storage info, Git transfer
@@ -61,7 +61,7 @@ See [product setup and limitations](../../../../docs/on-device.md).
   The source archive is SHA-256 verified. HTTPS uses SecureTransport; SSH, the CLI, and tests are
   excluded from the app library. Unmodified upstream notices (including bundled dependency
   licenses, llama.rn, and llama.cpp/ggml) are copied into the `OnDeviceAgentNotices` app resource bundle.
-- Inference uses pinned `llama.rn` 0.13.0-rc.10 (llama.cpp b12211), loaded only by the on-device feature.
+- Inference uses pinned `llama.rn` 0.13.0-rc.11 (llama.cpp b12292), loaded only by the on-device feature.
   This maintained pre-release supports LFM3's architecture/tool template and the upstream Hadamard
   runtime needed by Bonsai 2 Q2_0 weights. Its install script
   verifies the downloaded native artifacts. Android autolinking is disabled for this iOS-only
@@ -137,10 +137,12 @@ node .agents/skills/local-e2e-validation/scripts/run.mjs \
   apps/mobile/modules/on-device-agent/tests/native-inference.mjs
 ```
 
-It requires the iOS 27.0 iPhone 18 Pro simulator runtime and downloads a checksum-verified Qwen3.5-2B
+By default it uses an iOS 27.0 iPhone 18 Pro simulator and downloads a checksum-verified Qwen3.5-2B
 Q4_K_M fixture (approximately 1.3 GB) into test-owned storage. The runner removes the fixture and
 simulator after the run. It asserts structured tool calls, actual file reads, JSON tool-result
 consumption, streaming, cancellation, unload/reload, and native credential storage/removal.
+To use another compatible simulator, set `IOS_RUNTIME` and `IOS_DEVICE_TYPE`; set
+`DAPPERCODE_NATIVE_TEST_APP` to use a signed Release simulator app built elsewhere in this worktree.
 It also runs the production history projection after a stopped push and a successful file read,
 requiring a genuine answer from the tool result without an extra user instruction or retry.
 Set `DAPPERCODE_NATIVE_TEST_MODEL` to a bundled catalog ID to run the same complete-tool-schema
@@ -162,7 +164,7 @@ and 256K for Qwen3.5, Bonsai 2, and LFM3. A load chooses power-of-two tiers thro
 explicitly constrain memory so the larger catalog ceilings cannot silently bypass their assertions.
 The original Qwen3 entries and ABI-6 representatives of Bonsai 2, Qwen3.5,
 and Gemma 4 have passed the simulator gate, and LFM3 1.7B Q4_K_M passes it on ABI 11 (131,072-token
-context). Prism-only Bonsai packings are explicitly unavailable.
+context). Qwen3.5 2B Q4_K_M passes the gate on ABI 13. Prism-only Bonsai packings are explicitly unavailable.
 This is not proof
 of physical-iPhone Metal performance or measured phone RAM compatibility.
 

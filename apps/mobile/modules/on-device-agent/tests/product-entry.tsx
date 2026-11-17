@@ -28,7 +28,7 @@ const shellJournal = new File(Paths.document, 'product-shell.json');
 const shellEvents: unknown[] = [];
 function recordShell(event: unknown) {
   shellEvents.push({ at: Date.now(), event });
-  shellJournal.write(JSON.stringify(shellEvents));
+  shellJournal.writeSync(JSON.stringify(shellEvents));
 }
 function ShellObserver() {
   const store = useStore();
@@ -96,7 +96,7 @@ function ObservedAppLayout() {
           appState: AppState.currentState,
           state: navigation.getRootState(),
         });
-        navigationJournal.write(JSON.stringify(navigationEvents));
+        navigationJournal.writeSync(JSON.stringify(navigationEvents));
       }
     };
     const unsubscribe = navigation.addListener('state', record);
@@ -121,7 +121,7 @@ const result = new File(Paths.document, 'product-network.json');
 let networkRequests = 0;
 globalThis.fetch = () => {
   networkRequests += 1;
-  result.write(JSON.stringify({ networkRequests }));
+  result.writeSync(JSON.stringify({ networkRequests }));
   return Promise.reject(new Error('Network is disabled for the offline product fixture.'));
 };
 
@@ -141,9 +141,9 @@ async function prepare() {
         author: { name: 'Offline UI Fixture', email: 'fixture@example.invalid' },
       }),
     );
-    prepared.write(JSON.stringify({ workspaceId: workspace.id }));
+    prepared.writeSync(JSON.stringify({ workspaceId: workspace.id }));
   }
-  result.write(JSON.stringify({ networkRequests }));
+  result.writeSync(JSON.stringify({ networkRequests }));
 }
 
 /**

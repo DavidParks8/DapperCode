@@ -33,12 +33,12 @@ function wrap(runtime: FakeSettingsRuntime, children: ReactNode) {
   );
 }
 
-function openFamily(runtime: FakeSettingsRuntime, familyId: string) {
+async function openFamily(runtime: FakeSettingsRuntime, familyId: string) {
   router.replace({
     pathname: '/profiles/[profileId]/settings/models/[familyId]',
     params: { profileId: 'on-device', familyId },
   });
-  return render(wrap(runtime, <LocalModelFamilyScreen />));
+  return await render(wrap(runtime, <LocalModelFamilyScreen />));
 }
 
 function row(modelId: string) {
@@ -65,7 +65,7 @@ afterEach(() => {
 });
 
 describe('Models settings', () => {
-  it('shows two downloads in parallel with readable, accessible progress and per-model controls', () => {
+  it('shows two downloads in parallel with readable, accessible progress and per-model controls', async () => {
     const runtime = new FakeSettingsRuntime();
     const alert = jest.spyOn(Alert, 'alert');
     runtime.setDownload('qwen35-0.8b-q4-0', {
@@ -81,7 +81,7 @@ describe('Models settings', () => {
       bytesWritten: 1_000 * MB,
       totalBytes: 2_000 * MB,
     });
-    render(wrap(runtime, <LocalModelsScreen />));
+    await render(wrap(runtime, <LocalModelsScreen />));
 
     const first = row('qwen35-0.8b-q4-0');
     expect(
@@ -101,20 +101,20 @@ describe('Models settings', () => {
       row('qwen3-0.6b-q4-0').getByText('Queued · starts when a download finishes'),
     ).toBeTruthy();
 
-    fireEvent.press(first.getByLabelText('Pause Qwen3.5 0.8B Q4_0'));
+    await fireEvent.press(first.getByLabelText('Pause Qwen3.5 0.8B Q4_0'));
     expect(runtime.downloads.pause).toHaveBeenCalledWith('qwen35-0.8b-q4-0');
-    fireEvent.press(row('gemma-4-e2b-q4-0').getByLabelText('Cancel Gemma 4 E2B Q4_0'));
+    await fireEvent.press(row('gemma-4-e2b-q4-0').getByLabelText('Cancel Gemma 4 E2B Q4_0'));
     expect(runtime.downloads.cancel).toHaveBeenCalledWith('gemma-4-e2b-q4-0');
     expect(runtime.downloads.cancel).not.toHaveBeenCalledWith('qwen35-0.8b-q4-0');
     expect(alert).not.toHaveBeenCalled();
     alert.mockRestore();
   });
 
-  it('keeps the measured download speed current on the row and its progress value', () => {
+  it('keeps the measured download speed current on the row and its progress value', async () => {
     const runtime = new FakeSettingsRuntime();
     const id = 'qwen35-0.8b-q4-0';
     runtime.setDownload(id, { phase: 'preparing', totalBytes: 740 * MB });
-    render(wrap(runtime, <LocalModelsScreen />));
+    await render(wrap(runtime, <LocalModelsScreen />));
     const progressText = () =>
       (
         screen.getAllByTestId(`local-model-progress-${id}`)[0]!.props['accessibilityValue'] as {
@@ -124,7 +124,7 @@ describe('Models settings', () => {
     expect(row(id).getByText('Starting download…')).toBeTruthy();
 
     // A rate below 1 KB/s, or one that is not a finite number, is not worth showing.
-    act(() =>
+    await act(() =>
       runtime.setDownload(id, {
         phase: 'downloading',
         bytesWritten: 10 * MB,
@@ -134,16 +134,16 @@ describe('Models settings', () => {
     );
     expect(row(id).getByText('Downloading 1% · 10 MB of 740 MB')).toBeTruthy();
     expect(progressText()).toBe('1%, 10 MB of 740 MB');
-    act(() => runtime.setDownload(id, { bytesPerSecond: Number.NaN }));
+    await act(() => runtime.setDownload(id, { bytesPerSecond: Number.NaN }));
     expect(row(id).getByText('Downloading 1% · 10 MB of 740 MB')).toBeTruthy();
 
-    act(() => runtime.setDownload(id, { bytesPerSecond: 850_000, etaSeconds: 860 }));
+    await act(() => runtime.setDownload(id, { bytesPerSecond: 850_000, etaSeconds: 860 }));
     expect(
       row(id).getByText('Downloading 1% · 10 MB of 740 MB · 850 KB/s · 15 min left'),
     ).toBeTruthy();
     expect(progressText()).toBe('1%, 10 MB of 740 MB, 850 kilobytes per second, 15 min left');
 
-    act(() =>
+    await act(() =>
       runtime.setDownload(id, {
         bytesWritten: 370 * MB,
         bytesPerSecond: 123_400_000,
@@ -155,13 +155,13 @@ describe('Models settings', () => {
     ).toBeTruthy();
 
     // Speed describes moving bytes only; a paused transfer drops it.
-    act(() => runtime.setDownload(id, { phase: 'paused' }));
+    await act(() => runtime.setDownload(id, { phase: 'paused' }));
     expect(row(id).getByText('Paused at 50% · 370 MB of 740 MB')).toBeTruthy();
     expect(row(id).queryByText(/MB\/s/u)).toBeNull();
     expect(progressText()).toBe('50%, paused');
   });
 
-  it('announces a completed download but not the state rows already had when shown', () => {
+  it('announces a completed download but not the state rows already had when shown', async () => {
     const runtime = new FakeSettingsRuntime();
     runtime.setDownload('qwen3-1.7b-q4-k-m', { phase: 'ready' });
     runtime.setDownload('qwen35-2b-q4-k-m', {
@@ -169,22 +169,22 @@ describe('Models settings', () => {
       verifiedBytes: 600 * MB,
       totalBytes: 1_280_835_840,
     });
-    render(wrap(runtime, <LocalModelsScreen />));
+    await render(wrap(runtime, <LocalModelsScreen />));
     expect(row('qwen35-2b-q4-k-m').getByText('Verifying 46%')).toBeTruthy();
     expect(announce).not.toHaveBeenCalled();
 
-    act(() => runtime.setDownload('qwen35-2b-q4-k-m', { phase: 'ready' }));
+    await act(() => runtime.setDownload('qwen35-2b-q4-k-m', { phase: 'ready' }));
     expect(announce).toHaveBeenCalledWith('Qwen3.5 2B Q4_K_M downloaded.');
     expect(screen.queryAllByTestId('local-model-qwen35-2b-q4-k-m')).toHaveLength(0);
   });
 
-  it('announces each change once while a family page is stacked on the Models page', () => {
+  it('announces each change once while a family page is stacked on the Models page', async () => {
     const runtime = new FakeSettingsRuntime();
     router.replace({
       pathname: '/profiles/[profileId]/settings/models/[familyId]',
       params: { profileId: 'on-device', familyId: 'qwen3.5' },
     });
-    const { rerender } = render(
+    const { rerender } = await render(
       wrap(
         runtime,
         <>
@@ -193,7 +193,7 @@ describe('Models settings', () => {
         </>,
       ),
     );
-    act(() =>
+    await act(() =>
       runtime.setDownload('qwen35-0.8b-q4-0', { phase: 'downloading', totalBytes: 740 * MB }),
     );
     expect(
@@ -201,42 +201,42 @@ describe('Models settings', () => {
     ).toHaveLength(1);
 
     // Popping the family page leaves the Models page as the only announcer.
-    rerender(wrap(runtime, <LocalModelsScreen />));
+    await rerender(wrap(runtime, <LocalModelsScreen />));
     announce.mockClear();
-    act(() => runtime.setDownload('qwen35-0.8b-q4-0', { phase: 'ready' }));
+    await act(() => runtime.setDownload('qwen35-0.8b-q4-0', { phase: 'ready' }));
     expect(announce.mock.calls).toEqual([['Qwen3.5 0.8B Q4_0 downloaded.']]);
   });
 
-  it('shows storage used and free, and finds families by size or quant', () => {
+  it('shows storage used and free, and finds families by size or quant', async () => {
     const runtime = new FakeSettingsRuntime();
-    render(wrap(runtime, <LocalModelsScreen />));
+    await render(wrap(runtime, <LocalModelsScreen />));
     expect(screen.getByLabelText('Used by models, 1.3 GB')).toBeTruthy();
     expect(screen.getByLabelText('Available, 42 GB')).toBeTruthy();
     expect(runtime.downloads.refreshStorage).toHaveBeenCalled();
 
-    fireEvent.changeText(screen.getByTestId('settings-local-models-search'), 'q8');
+    await fireEvent.changeText(screen.getByTestId('settings-local-models-search'), 'q8');
     expect(screen.getByTestId('settings-local-family-qwen3.5')).toBeTruthy();
     expect(screen.queryByTestId('settings-local-family-bonsai-2')).toBeNull();
     expect(screen.queryByTestId('settings-local-family-qwen3')).toBeNull();
 
-    fireEvent.changeText(screen.getByTestId('settings-local-models-search'), '0.6b');
+    await fireEvent.changeText(screen.getByTestId('settings-local-models-search'), '0.6b');
     expect(screen.getByTestId('settings-local-family-qwen3')).toBeTruthy();
     expect(screen.queryByTestId('settings-local-family-qwen3.5')).toBeNull();
 
-    fireEvent.press(screen.getByTestId('settings-local-family-qwen3'));
+    await fireEvent.press(screen.getByTestId('settings-local-family-qwen3'));
     expect(router.push).toHaveBeenCalledWith({
       pathname: '/profiles/[profileId]/settings/models/[familyId]',
       params: { profileId: 'on-device', familyId: 'qwen3' },
     });
   });
 
-  it('shows which model is loaded and which one new chats use, separately', () => {
+  it('shows which model is loaded and which one new chats use, separately', async () => {
     const runtime = new FakeSettingsRuntime();
     runtime.setDownload('qwen3-1.7b-q4-k-m', { phase: 'ready' });
     runtime.setDownload('qwen3-0.6b-q4-0', { phase: 'ready' });
     runtime.setSession({ phase: 'ready', modelId: 'qwen3-0.6b-q4-0', contextTokens: 8192 });
     runtime.setPreferences({ modelId: 'qwen3-1.7b-q4-k-m' });
-    render(wrap(runtime, <LocalModelsScreen />));
+    await render(wrap(runtime, <LocalModelsScreen />));
     expect(row('qwen3-0.6b-q4-0').getByText('Loaded · 8K context')).toBeTruthy();
     expect(row('qwen3-1.7b-q4-k-m').getByText('Used for new chats')).toBeTruthy();
     expect(screen.getByText('Start a new chat')).toBeTruthy();
@@ -248,39 +248,39 @@ describe('Model family settings', () => {
     const runtime = new FakeSettingsRuntime();
     runtime.memory = { physicalBytes: 8 * GiB, availableBytes: 6 * GiB, isSimulator: false };
     const source = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
-    openFamily(runtime, 'lfm3');
+    await openFamily(runtime, 'lfm3');
     expect(screen.getByText(/^Liquid AI\./)).toBeTruthy();
     for (const quant of ['Q4_K_M', 'Q5_K_M', 'Q8_0']) {
       expect(screen.getByLabelText(`Download LFM3 1.7B ${quant}`)).toBeTruthy();
     }
     await act(async () => {
-      fireEvent.press(row('lfm3-1.7b-q4-k-m').getByLabelText('Download LFM3 1.7B Q4_K_M'));
+      await fireEvent.press(row('lfm3-1.7b-q4-k-m').getByLabelText('Download LFM3 1.7B Q4_K_M'));
     });
     expect(runtime.downloadModel).toHaveBeenCalledWith('lfm3-1.7b-q4-k-m');
     await act(async () => {
-      fireEvent.press(
+      await fireEvent.press(
         row('lfm3-1.7b-q4-k-m').getByLabelText(
           'Source and LFM Open License v1.0 license for LFM3 1.7B Q4_K_M',
         ),
       );
     });
     expect(source).toHaveBeenCalledWith('https://huggingface.co/LiquidAI/LFM3-1.7B-GGUF');
-    act(() => runtime.setDownload('lfm3-1.7b-q4-k-m', { phase: 'ready' }));
+    await act(() => runtime.setDownload('lfm3-1.7b-q4-k-m', { phase: 'ready' }));
     await act(async () => {
-      fireEvent.press(row('lfm3-1.7b-q4-k-m').getByLabelText('Load LFM3 1.7B Q4_K_M'));
+      await fireEvent.press(row('lfm3-1.7b-q4-k-m').getByLabelText('Load LFM3 1.7B Q4_K_M'));
     });
     expect(runtime.selectModel).toHaveBeenCalledWith('lfm3-1.7b-q4-k-m');
-    act(() =>
+    await act(() =>
       runtime.setSession({ phase: 'ready', modelId: 'lfm3-1.7b-q4-k-m', contextTokens: 32768 }),
     );
     expect(row('lfm3-1.7b-q4-k-m').getByText('Loaded · 32K context')).toBeTruthy();
     source.mockRestore();
   });
 
-  it('lists quants per size with one Recommended badge style and labels unsupported packings', () => {
+  it('lists quants per size with one Recommended badge style and labels unsupported packings', async () => {
     const runtime = new FakeSettingsRuntime();
     runtime.memory = { physicalBytes: 16 * GiB, availableBytes: 12 * GiB, isSimulator: false };
-    openFamily(runtime, 'bonsai-2');
+    await openFamily(runtime, 'bonsai-2');
     expect(screen.getByText('2B')).toBeTruthy();
     expect(screen.getByText('4B')).toBeTruthy();
     const unsupported = row('bonsai-2-2b-pq2-0');
@@ -292,14 +292,14 @@ describe('Model family settings', () => {
     expect(screen.queryByText(/next page/)).toBeNull();
 
     runtime.memory = { physicalBytes: 16 * GiB, availableBytes: 12 * GiB, isSimulator: false };
-    openFamily(runtime, 'qwen3.5');
+    await openFamily(runtime, 'qwen3.5');
     expect(row('qwen35-2b-q4-k-m').getByText('Recommended')).toBeTruthy();
     expect(
       row('qwen35-2b-q4-k-m').getByLabelText('Source and Apache-2.0 license for Qwen3.5 2B Q4_K_M'),
     ).toBeTruthy();
   });
 
-  it('offers Gemma on an 8 GB iPhone that reports slightly less physical memory than advertised', () => {
+  it('offers Gemma on an 8 GB iPhone that reports slightly less physical memory than advertised', async () => {
     const runtime = new FakeSettingsRuntime();
     // iOS reports an 8 GB iPhone's physical memory below a full 8 GiB.
     runtime.memory = {
@@ -307,27 +307,27 @@ describe('Model family settings', () => {
       availableBytes: 6 * GiB,
       isSimulator: false,
     };
-    openFamily(runtime, 'gemma-4');
+    await openFamily(runtime, 'gemma-4');
     const gemma = row('gemma-4-e2b-q4-0');
     expect(
       gemma.getByLabelText('Download Gemma 4 E2B Q4_0').props['accessibilityState'],
     ).toMatchObject({ disabled: false });
     expect(gemma.queryByText(/exceeds the conservative RAM budget/)).toBeNull();
-    fireEvent.press(gemma.getByLabelText('Download Gemma 4 E2B Q4_0'));
+    await fireEvent.press(gemma.getByLabelText('Download Gemma 4 E2B Q4_0'));
     expect(runtime.downloadModel).toHaveBeenCalledWith('gemma-4-e2b-q4-0');
   });
 
-  it('names the Models page, not Settings, as the back destination', () => {
-    openFamily(new FakeSettingsRuntime(), 'qwen3.5');
+  it('names the Models page, not Settings, as the back destination', async () => {
+    await openFamily(new FakeSettingsRuntime(), 'qwen3.5');
     expect(screen.getByLabelText('Back to Models')).toBeTruthy();
     expect(screen.queryByLabelText('Back to Settings')).toBeNull();
-    screen.unmount();
+    await screen.unmount();
 
-    render(wrap(new FakeSettingsRuntime(), <LocalModelsScreen />));
+    await render(wrap(new FakeSettingsRuntime(), <LocalModelsScreen />));
     expect(screen.getByLabelText('Back to Settings')).toBeTruthy();
   });
 
-  it('credits the resident model when another model only fits after it is released', () => {
+  it('credits the resident model when another model only fits after it is released', async () => {
     const runtime = new FakeSettingsRuntime();
     runtime.setDownload('qwen3-1.7b-q4-k-m', { phase: 'ready' });
     runtime.setDownload('qwen3-4b-q4-k-m', { phase: 'ready' });
@@ -338,26 +338,26 @@ describe('Model family settings', () => {
       availableBytes: Math.round(2.2 * GiB),
       isSimulator: false,
     };
-    openFamily(runtime, 'qwen3');
+    await openFamily(runtime, 'qwen3');
     const larger = row('qwen3-4b-q4-k-m');
     expect(larger.getByText('Loading replaces the current model in memory.')).toBeTruthy();
     const load = larger.getByLabelText('Load Qwen3 4B Q4_K_M');
     expect(load.props['accessibilityState']).toMatchObject({ disabled: false });
-    fireEvent.press(load);
+    await fireEvent.press(load);
     expect(runtime.selectModel).toHaveBeenCalledWith('qwen3-4b-q4-k-m');
   });
 
-  it('re-measures memory instead of keeping a stale reading', () => {
+  it('re-measures memory instead of keeping a stale reading', async () => {
     jest.useFakeTimers();
     const runtime = new FakeSettingsRuntime();
     runtime.setDownload('qwen3-4b-q4-k-m', { phase: 'ready' });
     runtime.memory = { physicalBytes: 16 * GiB, availableBytes: 1 * GiB, isSimulator: false };
-    openFamily(runtime, 'qwen3');
+    await openFamily(runtime, 'qwen3');
     expect(
       row('qwen3-4b-q4-k-m').getByLabelText('Load Qwen3 4B Q4_K_M').props['accessibilityState'],
     ).toMatchObject({ disabled: true });
     runtime.memory = { physicalBytes: 16 * GiB, availableBytes: 12 * GiB, isSimulator: false };
-    act(() => {
+    await act(() => {
       jest.advanceTimersByTime(MEMORY_REFRESH_MS);
     });
     expect(
@@ -377,9 +377,9 @@ describe('Model family settings', () => {
     runtime.removeModel.mockRejectedValueOnce(
       new Error('Stop the running local conversation before deleting the model it uses.'),
     );
-    openFamily(runtime, 'qwen3');
+    await openFamily(runtime, 'qwen3');
     await act(async () => {
-      fireEvent.press(row('qwen3-1.7b-q4-k-m').getByLabelText('Load Qwen3 1.7B Q4_K_M'));
+      await fireEvent.press(row('qwen3-1.7b-q4-k-m').getByLabelText('Load Qwen3 1.7B Q4_K_M'));
     });
     expect(
       row('qwen3-1.7b-q4-k-m').getByText('Loaded · 8K context · Used for new chats'),
@@ -388,7 +388,7 @@ describe('Model family settings', () => {
     expect(row('qwen3-1.7b-q4-k-m').getByLabelText('Unload Qwen3 1.7B Q4_K_M')).toBeTruthy();
 
     await act(async () => {
-      fireEvent.press(row('qwen3-0.6b-q4-0').getByLabelText('Delete Qwen3 0.6B Q4_0'));
+      await fireEvent.press(row('qwen3-0.6b-q4-0').getByLabelText('Delete Qwen3 0.6B Q4_0'));
     });
     expect(
       row('qwen3-0.6b-q4-0').getByText(
@@ -402,12 +402,12 @@ describe('Model family settings', () => {
     ).toBeNull();
   });
 
-  it('opens the model source only when asked', () => {
+  it('opens the model source only when asked', async () => {
     const runtime = new FakeSettingsRuntime();
     const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
-    openFamily(runtime, 'qwen3');
+    await openFamily(runtime, 'qwen3');
     expect(open).not.toHaveBeenCalled();
-    fireEvent.press(row('qwen3-0.6b-q4-0').getByLabelText(/Source and Apache-2.0 license/));
+    await fireEvent.press(row('qwen3-0.6b-q4-0').getByLabelText(/Source and Apache-2.0 license/));
     expect(open).toHaveBeenCalledWith(expect.stringContaining('huggingface.co'));
     open.mockRestore();
   });

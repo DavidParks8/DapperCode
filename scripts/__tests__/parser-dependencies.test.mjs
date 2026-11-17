@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const mobileRequire = createRequire(new URL('../../apps/mobile/package.json', import.meta.url));
+const rootRequire = createRequire(new URL('../../package.json', import.meta.url));
 
 function loadDependency(...names) {
   let require = mobileRequire;
@@ -55,6 +57,22 @@ const yamlPaths = [
   ['jest-expo', 'babel-jest', 'babel-plugin-istanbul', '@istanbuljs/load-nyc-config', 'js-yaml'],
 ];
 
+test('advertised and CI Node versions satisfy the Mermaid test runtime', () => {
+  const semver = loadDependency('react-native', 'semver');
+  const jsdomRange = mobileRequire('jsdom/package.json').engines.node;
+  const supportedRange = rootRequire('./package.json').engines.node;
+  assert.ok(semver.subset(supportedRange, jsdomRange), `${supportedRange} exceeds ${jsdomRange}`);
+
+  const yaml = loadDependency(...yamlPaths[0]);
+  for (const filename of ['build-and-test.yml', 'mobile-release.yml']) {
+    const workflow = yaml.load(
+      readFileSync(new URL(`../../.github/workflows/${filename}`, import.meta.url), 'utf8'),
+    );
+    const version = workflow.env.NODE_VERSION;
+    assert.ok(semver.satisfies(version, supportedRange), `${filename} uses unsupported ${version}`);
+  }
+});
+
 for (const dependencyPath of yamlPaths) {
   test(`${dependencyPath.at(-2)}'s YAML parser budgets empty merge sources`, () => {
     const yaml = loadDependency(...dependencyPath);
@@ -69,22 +87,18 @@ for (const dependencyPath of yamlPaths) {
   });
 }
 
-test("expo-router's query parser decodes through the patched URI decoder", () => {
-  const queryString = loadDependency('expo-router', 'query-string');
-  const decode = loadDependency('expo-router', 'query-string', 'decode-uri-component');
-
-  // query-string@7 calls require('decode-uri-component') directly, so the patched release must
-  // stay a callable CommonJS export rather than an ES module namespace.
-  assert.equal(typeof decode, 'function');
+test("expo-router's query parser handles malformed URI components in linear time", () => {
+  const routerRequire = createRequire(mobileRequire.resolve('expo-router'));
+  const { parseQueryParams } = routerRequire('./fork/getStateFromPath-forks');
+  const parse = (query) => parseQueryParams(`/?${query}`, { name: 'test' });
   assert.deepEqual(
-    { ...queryString.parse('mark=%E2%9C%93&bare=%&mixed=%C3%A5%ZZ') },
+    { ...parse('mark=%E2%9C%93&bare=%&mixed=%C3%A5%ZZ') },
     { mark: '✓', bare: '%', mixed: 'å%ZZ' },
   );
 
-  // GHSA-qr28-fpjm-wq7f: malformed percent runs must decode in linear time. Vulnerable releases
-  // take many seconds on this input; the patched decoder finishes it in milliseconds.
+  // GHSA-qr28-fpjm-wq7f: malformed percent runs must decode in linear time.
   const malformed = `${'%C3'.repeat(20_000)}%`;
   const started = performance.now();
-  assert.equal(decode(malformed), malformed);
+  assert.equal(parse(`value=${malformed}`).value, `${'\uFFFD'.repeat(20_000)}%`);
   assert.ok(performance.now() - started < 1_000, 'malformed percent runs decode in linear time');
 });

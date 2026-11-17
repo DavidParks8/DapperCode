@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use agent_client_protocol::schema::v1::ContentBlock;
+use agent_client_protocol::v1::schema::ContentBlock;
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use reqwest::{StatusCode, Url};
@@ -734,11 +734,10 @@ enum OpenCodePromptPart {
 mod tests {
     use super::*;
     use crate::acp::config::RuntimeIntegrity;
-    use agent_client_protocol::schema::v1::SessionId;
+    use agent_client_protocol::v1::schema::SessionId;
     use axum::extract::{Path as AxumPath, State};
     use axum::routing::{delete, get, post};
     use axum::{Json, Router};
-    use reqwest::Client;
     use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex as StdMutex;
@@ -757,7 +756,7 @@ mod tests {
         });
         (
             SessionContext {
-                http: Client::new(),
+                http: crate::tls::http_client(),
                 http_base: format!("http://{address}/"),
                 session_id: SessionId::new(session_id),
                 cwd: std::env::current_dir().expect("current directory"),
@@ -1230,7 +1229,7 @@ mod tests {
         let address = listener.local_addr().expect("test address");
         drop(listener);
         let context = SessionContext {
-            http: Client::new(),
+            http: crate::tls::http_client(),
             http_base: format!("http://{address}"),
             session_id: SessionId::new("source"),
             cwd: std::env::current_dir().expect("current directory"),
@@ -1433,7 +1432,7 @@ mod tests {
             axum::serve(listener, app).await.expect("test server");
         });
         let context = SessionContext {
-            http: Client::new(),
+            http: crate::tls::http_client(),
             http_base: format!("http://{address}/"),
             session_id: SessionId::new("source"),
             cwd: directory.clone(),
@@ -1482,7 +1481,7 @@ mod tests {
             axum::serve(listener, app).await.expect("test server");
         });
         let context = SessionContext {
-            http: Client::new(),
+            http: crate::tls::http_client(),
             http_base: format!("http://{address}/"),
             session_id: SessionId::new("source"),
             cwd: directory.clone(),
@@ -1714,7 +1713,7 @@ mod tests {
         });
         (
             SessionContext {
-                http: Client::new(),
+                http: crate::tls::http_client(),
                 http_base: format!("http://{address}/"),
                 session_id: SessionId::new("source"),
                 cwd: std::env::current_dir().expect("current directory"),

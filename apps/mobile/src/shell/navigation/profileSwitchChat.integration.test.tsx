@@ -1,5 +1,6 @@
 import type * as WsModule from '@bridge/ws/ws';
 import type * as WsErrorsModule from '@bridge/ws/errors';
+import type * as ReactNative from 'react-native';
 
 // The real chat screen, router, and local transport run; only the desktop bridge is replaced by a
 // double that rejects non-bridge thread ids exactly as the Rust bridge does.
@@ -14,10 +15,13 @@ jest.mock('@expo/vector-icons', () => ({
   Ionicons: Object.assign(() => null, { glyphMap: {} }),
 }));
 jest.mock('react-native-markdown-display', () => 'Markdown');
-jest.mock('../../features/chat/message/ChatMessage', () => ({
-  ChatMessage: ({ message }: { message: { content: string } }) => message.content,
-  ToolInvocationRow: () => null,
-}));
+jest.mock('../../features/chat/message/ChatMessage', () => {
+  const { Text } = jest.requireActual<typeof ReactNative>('react-native');
+  return {
+    ChatMessage: ({ message }: { message: { content: string } }) => <Text>{message.content}</Text>,
+    ToolInvocationRow: () => null,
+  };
+});
 jest.mock('../../features/chat/screen/AtomGlyph', () => ({ AtomGlyph: () => null }));
 
 interface MockRemoteCall {
@@ -224,7 +228,7 @@ async function renderLocalChat() {
   const Wrapper = ({ children }: PropsWithChildren) => (
     <AppStateProvider store={store}>{children}</AppStateProvider>
   );
-  const result = renderRouter(
+  const result = await renderRouter(
     { appDir: './src/app', overrides: { _layout: RootLayout } },
     { initialUrl: `/profiles/on-device/chats/${local.id}`, wrapper: Wrapper },
   );
@@ -243,8 +247,8 @@ describe('switching from On this iPhone to a desktop bridge', () => {
       JSON.stringify(call.params ?? {}).includes(localThreadId);
 
     // The drawer's "Runs on" switcher, as the user picked the desktop profile.
-    fireEvent.press(screen.getByTestId('drawer-profile-switcher'));
-    fireEvent.press(screen.getByLabelText('Desk'));
+    await fireEvent.press(screen.getByTestId('drawer-profile-switcher'));
+    await fireEvent.press(screen.getByLabelText('Desk'));
     await waitFor(() => expect(store.get(activeProfileIdAtom)).toBe('desk'));
     await waitFor(() =>
       expect(mockRemoteCalls.some((call) => call.method === 'bridge/capabilities/read')).toBe(true),
@@ -257,9 +261,9 @@ describe('switching from On this iPhone to a desktop bridge', () => {
     expect(screen.queryByText(/invalid opaque ACP thread ID/u)).toBeNull();
     expect(mockRemoteCalls.filter(namesLocalThread)).toEqual([]);
 
-    fireEvent.changeText(screen.getByLabelText('Message'), 'Hi');
+    await fireEvent.changeText(screen.getByLabelText('Message'), 'Hi');
     await act(async () => {
-      fireEvent.press(screen.getByLabelText('Send message'));
+      await fireEvent.press(screen.getByLabelText('Send message'));
       await Promise.resolve();
     });
 

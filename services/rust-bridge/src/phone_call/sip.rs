@@ -254,16 +254,9 @@ impl SipDialConfig {
 }
 
 pub fn default_rustls_client_config() -> Result<Arc<rustls::ClientConfig>, SipError> {
-    let mut root_store = rustls::RootCertStore::empty();
-    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    let config = rustls::ClientConfig::builder_with_provider(Arc::new(
-        rustls::crypto::ring::default_provider(),
-    ))
-    .with_safe_default_protocol_versions()
-    .map_err(|err| SipError::Tls(format!("failed configuring TLS protocol versions: {err}")))?
-    .with_root_certificates(root_store)
-    .with_no_client_auth();
-    Ok(Arc::new(config))
+    crate::tls::webpki_client_config()
+        .map(Arc::new)
+        .map_err(|err| SipError::Tls(format!("failed configuring TLS protocol versions: {err}")))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3293,6 +3286,105 @@ mod tests {
         "8mnWNiYqR0h6CYsUdGL1Ie6rCiX0NQIgPPHBaRQmCjA+kqa+IkSb6eXswq7wM/Ri",
         "MnrbbINy7ww=",
     );
+
+    #[tokio::test]
+    async fn http_tls_verifies_preview_certificates_and_preserves_webpki() {
+        let mut params =
+            rcgen::CertificateParams::new(vec!["localhost".to_string(), "127.0.0.1".to_string()])
+                .expect("localhost certificate parameters");
+        params.not_before = std::time::SystemTime::now().into();
+        params.not_after = params.not_before + Duration::from_secs(86_400);
+        params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::ServerAuth];
+        let key_pair = rcgen::KeyPair::generate().expect("generate test key");
+        let cert = params
+            .self_signed(&key_pair)
+            .expect("sign localhost certificate");
+        let cert = cert.der().clone();
+        let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_pair.serialize_der()));
+        let trusted_certificate =
+            reqwest::Certificate::from_der(&cert).expect("preview trust anchor");
+        let config = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .expect("server TLS versions")
+        .with_no_client_auth()
+        .with_single_cert(vec![cert], key)
+        .expect("server certificate");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind TLS listener");
+        let address = listener.local_addr().expect("TLS address");
+        let server = tokio::spawn(async move {
+            let acceptor = TlsAcceptor::from(Arc::new(config));
+            let mut handshakes = Vec::new();
+            for _ in 0..4 {
+                let (stream, _) = listener.accept().await.expect("accept TLS client");
+                match acceptor.accept(stream).await {
+                    Ok(mut stream) => {
+                        handshakes.push(true);
+                        let mut request = [0_u8; 1024];
+                        assert!(stream.read(&mut request).await.expect("read request") > 0);
+                        stream
+                            .write_all(
+                                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                            )
+                            .await
+                            .expect("write response");
+                    }
+                    Err(_) => handshakes.push(false),
+                }
+            }
+            handshakes
+        });
+        let url = format!("https://{address}/");
+        let client = crate::tls::http_client_builder()
+            .no_proxy()
+            .build()
+            .expect("build HTTP client");
+        let result = timeout(TEST_TIMEOUT, client.get(&url).send())
+            .await
+            .expect("TLS request finishes");
+        assert!(result.is_err(), "untrusted certificate must be rejected");
+        let preview = crate::preview::BrowserPreviewService::new(0, 0, None, None).http;
+        let result = timeout(TEST_TIMEOUT, preview.get(&url).send())
+            .await
+            .expect("untrusted preview request finishes");
+        assert!(
+            result.is_err(),
+            "preview must reject untrusted certificates"
+        );
+
+        let trusted_preview = crate::tls::preview_client_builder()
+            .tls_certs_merge([trusted_certificate])
+            .resolve("wrong-host.test", address)
+            .no_proxy()
+            .build()
+            .expect("build trusted preview client");
+        let result = timeout(
+            TEST_TIMEOUT,
+            trusted_preview
+                .get(format!("https://wrong-host.test:{}/", address.port()))
+                .send(),
+        )
+        .await
+        .expect("wrong-host preview request finishes");
+        assert!(
+            result.is_err(),
+            "preview must verify the certificate hostname"
+        );
+        let response = timeout(TEST_TIMEOUT, trusted_preview.get(&url).send())
+            .await
+            .expect("trusted preview request finishes")
+            .expect("preview accepts a valid explicitly trusted certificate");
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert_eq!(response.text().await.expect("read preview response"), "ok");
+        let handshakes = timeout(TEST_TIMEOUT, server)
+            .await
+            .expect("TLS server finishes")
+            .expect("TLS server task");
+        assert_eq!(handshakes, [false, false, false, true]);
+    }
 
     #[test]
     fn md5_matches_rfc1321_test_vectors() {

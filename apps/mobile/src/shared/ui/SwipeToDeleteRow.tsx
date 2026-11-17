@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ComponentProps } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
@@ -103,36 +103,39 @@ export function SwipeToDeleteRow({
     [translateX],
   );
 
-  const panGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .enabled(enabled)
-        .activeOffsetX(
-          open ? [-SWIPE_ACTIVATION_OFFSET, SWIPE_ACTIVATION_OFFSET] : -SWIPE_ACTIVATION_OFFSET,
-        )
-        .failOffsetY([-SWIPE_FAIL_OFFSET_Y, SWIPE_FAIL_OFFSET_Y])
-        .onStart(() => {
-          dragStartX.value = translateX.value;
-        })
-        .onUpdate((event) => {
-          const maxTranslate = rowWidth.value > 0 ? rowWidth.value : SWIPE_ACTION_WIDTH;
-          const next = dragStartX.value + event.translationX;
-          translateX.value = Math.min(0, Math.max(next, -maxTranslate));
-        })
-        .onEnd((event) => {
-          const distance = -translateX.value;
-          const width = rowWidth.value > 0 ? rowWidth.value : SWIPE_ACTION_WIDTH;
-          if (distance >= width * FULL_SWIPE_RATIO) {
-            translateX.value = withTiming(-width, { duration: SWIPE_ANIMATION_MS });
-            scheduleOnRN(commitDelete);
-            return;
-          }
-          const shouldOpen =
-            distance > SWIPE_ACTION_WIDTH / 2 || event.velocityX < SWIPE_OPEN_VELOCITY;
-          scheduleOnRN(settle, shouldOpen);
-        }),
-    [commitDelete, dragStartX, enabled, open, rowWidth, settle, translateX],
-  );
+  const panGesture = usePanGesture({
+    enabled,
+    activeOffsetX: open
+      ? [-SWIPE_ACTIVATION_OFFSET, SWIPE_ACTIVATION_OFFSET]
+      : -SWIPE_ACTIVATION_OFFSET,
+    failOffsetY: [-SWIPE_FAIL_OFFSET_Y, SWIPE_FAIL_OFFSET_Y],
+    onActivate: () => {
+      'worklet';
+      dragStartX.value = translateX.value;
+    },
+    onUpdate: (event) => {
+      'worklet';
+      const maxTranslate = rowWidth.value > 0 ? rowWidth.value : SWIPE_ACTION_WIDTH;
+      const next = dragStartX.value + event.translationX;
+      translateX.value = Math.min(0, Math.max(next, -maxTranslate));
+    },
+    onDeactivate: (event) => {
+      'worklet';
+      if (event.canceled) {
+        scheduleOnRN(settle, open);
+        return;
+      }
+      const distance = -translateX.value;
+      const width = rowWidth.value > 0 ? rowWidth.value : SWIPE_ACTION_WIDTH;
+      if (distance >= width * FULL_SWIPE_RATIO) {
+        translateX.value = withTiming(-width, { duration: SWIPE_ANIMATION_MS });
+        scheduleOnRN(commitDelete);
+        return;
+      }
+      const shouldOpen = distance > SWIPE_ACTION_WIDTH / 2 || event.velocityX < SWIPE_OPEN_VELOCITY;
+      scheduleOnRN(settle, shouldOpen);
+    },
+  });
 
   const contentStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],

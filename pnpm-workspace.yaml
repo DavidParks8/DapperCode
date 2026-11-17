@@ -2,30 +2,28 @@ packages:
   - apps/mobile
 
 allowBuilds:
-  'esbuild@0.28.1': true
+  '@parcel/watcher@2.6.0': true
+  '@parcel/watcher': set this to true or false
+  'esbuild@0.28.2': true
   esbuild: set this to true or false
-  'llama.rn@0.13.0-rc.10': true
+  'llama.rn@0.13.0-rc.11': true
   llama.rn: set this to true or false
 
 overrides:
-  '@expo/metro-config>postcss': 8.5.23
-  'brace-expansion@^1.0.0': 1.1.20
-  'brace-expansion@^5.0.0': 5.0.11
+  '@expo/dom-webview': 58.0.2
+  '@expo/metro-config>postcss': 8.5.33
+  'brace-expansion@^1.0.0': 1.1.22
+  'brace-expansion@^5.0.0': 5.0.13
   compression: 1.8.2
-  dompurify: 3.4.17
-  image-size: 2.0.3
+  dompurify: 3.4.18
+  image-size: 2.1.0
   linkify-it: ^5.0.2
   markdown-it: ^14.3.3
-  node-forge: 1.4.1
-  'query-string>decode-uri-component': 0.5.1
-  shell-quote: 1.11.0
+  node-forge: 1.4.3
+  shell-quote: 1.12.0
   source-map-js: 1.2.2
   zod: 4.6.7
 
-patchedDependencies:
-  decode-uri-component@0.5.1: patches/decode-uri-component@0.5.1.patch
-
 peerDependencyRules:
   allowedVersions:
-    '@gorhom/bottom-sheet>react-native-reanimated': 4.5.0
-    'react-native>@react-native/jest-preset': 0.86.2
+    '@gorhom/bottom-sheet>react-native-reanimated': 4.7.1

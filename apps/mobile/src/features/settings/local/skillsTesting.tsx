@@ -46,7 +46,7 @@ export async function openSkillsPage(
     await runtime.initialize();
     await prepare?.(runtime);
   });
-  render(
+  await render(
     <SafeAreaProvider
       initialMetrics={{
         frame: { x: 0, y: 0, width: 390, height: 844 },

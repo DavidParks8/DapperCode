@@ -1,6 +1,6 @@
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { createRef, isValidElement, type ReactElement, type ReactNode } from 'react';
-import { FlatList, ScrollView } from 'react-native';
+import { ScrollView, type FlatList } from 'react-native';
 import type * as ReactNative from 'react-native';
 import { Provider } from 'jotai';
 
@@ -50,7 +50,7 @@ const runningChat = {
   ],
 } satisfies Chat;
 
-function setup() {
+async function setup() {
   const scrollRef = createRef<FlatList<TranscriptDisplayItem>>();
   const recoveryRef = createRef<MainScreenLifecycleRecoveryResult>();
   const context: Parameters<typeof useMainScreenLifecycleRecovery>[0] = {
@@ -92,7 +92,7 @@ function setup() {
       </AppThemeProvider>
     </Provider>
   );
-  const tree = render(element(runningChat));
+  const tree = await render(element(runningChat));
   if (!scrollRef.current || !recoveryRef.current) {
     throw new Error('Expected mounted transcript and scroll controller');
   }
@@ -100,9 +100,11 @@ function setup() {
   const scrollToOffset = jest
     .spyOn(scrollRef.current, 'scrollToOffset')
     .mockImplementation(() => {});
-  const list = () => tree.UNSAFE_getByType(FlatList);
-  const scroll = (y: number, height = 1000) =>
-    fireEvent.scroll(list(), {
+  const list = () =>
+    tree.container.queryAll((node) => typeof node.props['onScroll'] === 'function')[0]!;
+  const listProps = () => scrollRef.current!.props;
+  const scroll = async (y: number, height = 1000) =>
+    await fireEvent.scroll(list(), {
       nativeEvent: {
         contentOffset: { x: 0, y },
         contentSize: { width: 390, height },
@@ -112,18 +114,20 @@ function setup() {
   return {
     tree,
     list,
+    listProps,
     scroll,
     scrollRef,
     scrollToOffset,
     recovery,
     context,
-    update: (chat: Chat) => tree.rerender(element(chat)),
+    update: async (chat: Chat) => await tree.rerender(element(chat)),
   };
 }
 
 type ContentPosition = { minIndexForVisible: number } | null | undefined;
 type NativeFrame = { key: string; y: number; height: number };
 type NativeChild = ReactElement<{
+  children?: ReactNode;
   collapsable?: boolean;
   item?: TranscriptDisplayItem;
   style?: unknown;
@@ -140,9 +144,10 @@ function nativeChildren(node: ReactNode): NativeChild[] {
 }
 
 /** Lays out the native scroll content: stacked cells plus the sentinel spanning all content. */
-function measureNativeContent(app: ReturnType<typeof setup>, answerHeight: number) {
-  const scrollView = app.list().findByType(ScrollView);
-  const children = nativeChildren(scrollView.props['children'] as ReactNode);
+function measureNativeContent(app: Awaited<ReturnType<typeof setup>>, answerHeight: number) {
+  const scrollView = app.list();
+  const [content] = nativeChildren(scrollView.props['children'] as ReactNode);
+  const children = nativeChildren(content?.props.children);
   let y = CONTENT_INSET;
   const frames = children.map((child): NativeFrame => {
     const item = child.props.item;
@@ -210,45 +215,45 @@ describe('streaming scroll ownership', () => {
     jest.useRealTimers();
   });
 
-  it('cancels an already queued animation frame when a stationary finger touches the transcript', () => {
+  it('cancels an already queued animation frame when a stationary finger touches the transcript', async () => {
     const frames: FrameRequestCallback[] = [];
     jest.spyOn(global, 'requestAnimationFrame').mockImplementation((callback) => {
       frames.push(callback);
       return frames.length;
     });
-    const app = setup();
-    app.scroll(12);
-    act(() => {
+    const app = await setup();
+    await app.scroll(12);
+    await act(() => {
       app.recovery.scrollToBottomIfPinned(false);
       jest.advanceTimersByTime(0);
     });
     expect(frames).toHaveLength(1);
 
-    fireEvent(app.list(), 'touchStart');
+    await fireEvent(app.list(), 'touchStart');
     expect(app.recovery.autoScrollStateRef.current.isUserInteracting).toBe(true);
-    act(() => frames[0]?.(0));
-    fireEvent(app.list(), 'contentSizeChange', 390, 1200);
-    act(() => jest.advanceTimersByTime(1000));
+    await act(() => frames[0]?.(0));
+    await fireEvent(app.list(), 'contentSizeChange', 390, 1200);
+    await act(() => jest.advanceTimersByTime(1000));
     expect(app.scrollToOffset).not.toHaveBeenCalled();
 
-    fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
+    await fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
     expect(app.recovery.autoScrollStateRef.current.isUserInteracting).toBe(false);
-    fireEvent(app.list(), 'contentSizeChange', 390, 1400);
-    act(() => jest.advanceTimersByTime(0));
-    act(() => frames.at(-1)?.(0));
+    await fireEvent(app.list(), 'contentSizeChange', 390, 1400);
+    await act(() => jest.advanceTimersByTime(0));
+    await act(() => frames.at(-1)?.(0));
     expect(app.scrollToOffset).toHaveBeenCalledWith({ offset: 0, animated: false });
   });
 
-  it('suppresses auto-scroll through streamed updates until the last finger lifts', () => {
-    const app = setup();
-    fireEvent(app.list(), 'touchStart');
-    fireEvent(app.list(), 'scrollBeginDrag');
-    app.scroll(12);
-    fireEvent(app.list(), 'scrollEndDrag');
-    fireEvent(app.list(), 'momentumScrollEnd');
+  it('suppresses auto-scroll through streamed updates until the last finger lifts', async () => {
+    const app = await setup();
+    await fireEvent(app.list(), 'touchStart');
+    await fireEvent(app.list(), 'scrollBeginDrag');
+    await app.scroll(12);
+    await fireEvent(app.list(), 'scrollEndDrag', { nativeEvent: { velocity: { x: 0, y: 0 } } });
+    await fireEvent(app.list(), 'momentumScrollEnd');
 
     for (const height of [1100, 1200, 1300]) {
-      app.update({
+      await app.update({
         ...runningChat,
         messages: runningChat.messages.map((message) =>
           message.role === 'assistant'
@@ -257,8 +262,8 @@ describe('streaming scroll ownership', () => {
         ),
       });
       expect(app.tree.getByText(`Streaming ${String(height)}`)).toBeTruthy();
-      fireEvent(app.list(), 'contentSizeChange', 390, height);
-      act(() => {
+      await fireEvent(app.list(), 'contentSizeChange', 390, height);
+      await act(() => {
         app.recovery.schedulePinnedScrollToBottom();
         app.recovery.scrollToBottomReliable();
         jest.advanceTimersByTime(500);
@@ -267,66 +272,66 @@ describe('streaming scroll ownership', () => {
       expect(app.scrollToOffset).not.toHaveBeenCalled();
     }
 
-    fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [{ identifier: 1 }] } });
+    await fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [{ identifier: 1 }] } });
     expect(app.recovery.autoScrollStateRef.current.isUserInteracting).toBe(true);
-    fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
+    await fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
     expect(app.recovery.autoScrollStateRef.current.isUserInteracting).toBe(false);
-    fireEvent(app.list(), 'contentSizeChange', 390, 1500);
-    act(() => jest.advanceTimersByTime(500));
+    await fireEvent(app.list(), 'contentSizeChange', 390, 1500);
+    await act(() => jest.advanceTimersByTime(500));
     expect(app.scrollToOffset).toHaveBeenCalledWith({ offset: 0, animated: false });
   });
 
-  it('does not replay a cancelled frame after a history drag is released', () => {
+  it('does not replay a cancelled frame after a history drag is released', async () => {
     const frames: FrameRequestCallback[] = [];
     jest.spyOn(global, 'requestAnimationFrame').mockImplementation((callback) => {
       frames.push(callback);
       return frames.length;
     });
-    const app = setup();
-    act(() => {
+    const app = await setup();
+    await act(() => {
       app.recovery.scrollToBottomIfPinned(false);
       jest.advanceTimersByTime(0);
     });
     expect(frames).toHaveLength(1);
-    fireEvent(app.list(), 'touchStart');
-    fireEvent(app.list(), 'scrollBeginDrag');
-    app.scroll(160);
-    fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
-    fireEvent(app.list(), 'scrollEndDrag');
-    act(() => frames[0]?.(0));
+    await fireEvent(app.list(), 'touchStart');
+    await fireEvent(app.list(), 'scrollBeginDrag');
+    await app.scroll(160);
+    await fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
+    await fireEvent(app.list(), 'scrollEndDrag', { nativeEvent: { velocity: { x: 0, y: 0 } } });
+    await act(() => frames[0]?.(0));
     expect(app.scrollToOffset).not.toHaveBeenCalled();
     expect(app.tree.getByLabelText('Jump to latest message')).toBeTruthy();
     expect(app.recovery.autoScrollStateRef.current.shouldStickToBottom).toBe(false);
-    fireEvent.press(app.tree.getByLabelText('Jump to latest message'));
-    act(() => jest.advanceTimersByTime(0));
-    act(() => frames.at(-1)?.(0));
+    await fireEvent.press(app.tree.getByLabelText('Jump to latest message'));
+    await act(() => jest.advanceTimersByTime(0));
+    await act(() => frames.at(-1)?.(0));
     expect(app.scrollToOffset).toHaveBeenCalledWith({ offset: 0, animated: true });
     expect(app.tree.queryByLabelText('Jump to latest message')).toBeNull();
   });
 
-  it('rechecks pinned state when a throttled scroll becomes due', () => {
-    const app = setup();
+  it('rechecks pinned state when a throttled scroll becomes due', async () => {
+    const app = await setup();
     app.context.lastPinnedScrollAtRef.current = Date.now();
-    act(() => app.recovery.schedulePinnedScrollToBottom(false));
+    await act(() => app.recovery.schedulePinnedScrollToBottom(false));
     expect(app.context.scheduledPinnedScrollTimeoutRef.current).not.toBeNull();
     app.recovery.autoScrollStateRef.current.shouldStickToBottom = false;
-    act(() => jest.advanceTimersByTime(500));
+    await act(() => jest.advanceTimersByTime(500));
     expect(app.scrollToOffset).not.toHaveBeenCalled();
   });
 
-  it('preserves native drag ownership on touch cancellation and clears it after momentum', () => {
-    const app = setup();
-    fireEvent(app.list(), 'touchStart');
-    fireEvent(app.list(), 'scrollBeginDrag');
-    fireEvent(app.list(), 'touchCancel', { nativeEvent: { touches: [] } });
+  it('preserves native drag ownership on touch cancellation and clears it after momentum', async () => {
+    const app = await setup();
+    await fireEvent(app.list(), 'touchStart');
+    await fireEvent(app.list(), 'scrollBeginDrag');
+    await fireEvent(app.list(), 'touchCancel', { nativeEvent: { touches: [] } });
     expect(app.recovery.autoScrollStateRef.current.isUserInteracting).toBe(true);
-    app.scroll(160);
-    fireEvent(app.list(), 'scrollEndDrag');
-    fireEvent(app.list(), 'momentumScrollBegin');
-    fireEvent(app.list(), 'contentSizeChange', 390, 1200);
-    act(() => jest.advanceTimersByTime(500));
+    await app.scroll(160);
+    await fireEvent(app.list(), 'scrollEndDrag', { nativeEvent: { velocity: { x: 0, y: 0 } } });
+    await fireEvent(app.list(), 'momentumScrollBegin');
+    await fireEvent(app.list(), 'contentSizeChange', 390, 1200);
+    await act(() => jest.advanceTimersByTime(500));
     expect(app.scrollToOffset).not.toHaveBeenCalled();
-    fireEvent(app.list(), 'momentumScrollEnd');
+    await fireEvent(app.list(), 'momentumScrollEnd');
     expect(app.recovery.autoScrollStateRef.current).toEqual({
       shouldStickToBottom: false,
       isUserInteracting: false,
@@ -334,17 +339,17 @@ describe('streaming scroll ownership', () => {
     });
   });
 
-  it('releases a cancelled touch that never became a drag and resets contact on chat navigation', () => {
-    const app = setup();
-    fireEvent(app.list(), 'touchStart');
-    fireEvent(app.list(), 'touchCancel', { nativeEvent: { touches: [] } });
+  it('releases a cancelled touch that never became a drag and resets contact on chat navigation', async () => {
+    const app = await setup();
+    await fireEvent(app.list(), 'touchStart');
+    await fireEvent(app.list(), 'touchCancel', { nativeEvent: { touches: [] } });
     expect(app.recovery.autoScrollStateRef.current.isUserInteracting).toBe(false);
     expect(app.recovery.autoScrollStateRef.current.shouldStickToBottom).toBe(true);
 
-    fireEvent(app.list(), 'touchStart');
-    fireEvent(app.list(), 'scrollBeginDrag');
-    app.update({ ...runningChat, id: 'next-chat' });
-    fireEvent(app.list(), 'momentumScrollEnd');
+    await fireEvent(app.list(), 'touchStart');
+    await fireEvent(app.list(), 'scrollBeginDrag');
+    await app.update({ ...runningChat, id: 'next-chat' });
+    await fireEvent(app.list(), 'momentumScrollEnd');
     expect(app.recovery.autoScrollStateRef.current).toEqual({
       shouldStickToBottom: true,
       isUserInteracting: false,
@@ -352,62 +357,62 @@ describe('streaming scroll ownership', () => {
     });
   });
 
-  it('does not reconfigure native anchoring underneath a tap in a settled transcript', () => {
-    const app = setup();
-    app.update({
+  it('does not reconfigure native anchoring underneath a tap in a settled transcript', async () => {
+    const app = await setup();
+    await app.update({
       ...runningChat,
       status: 'complete',
       messages: runningChat.messages.map((message) =>
         message.role === 'assistant' ? { ...message, pending: false } : message,
       ),
     });
-    app.scroll(12);
-    const anchoring = app.list().props['maintainVisibleContentPosition'];
+    await app.scroll(12);
+    const anchoring = app.listProps().maintainVisibleContentPosition;
     expect(anchoring).toBeUndefined();
-    fireEvent(app.list(), 'touchStart');
+    await fireEvent(app.list(), 'touchStart');
     expect(app.recovery.autoScrollStateRef.current.isUserInteracting).toBe(true);
-    expect(app.list().props['maintainVisibleContentPosition']).toBe(anchoring);
-    fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
-    expect(app.list().props['maintainVisibleContentPosition']).toBe(anchoring);
+    expect(app.listProps().maintainVisibleContentPosition).toBe(anchoring);
+    await fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
+    expect(app.listProps().maintainVisibleContentPosition).toBe(anchoring);
   });
 
-  it('anchors native growth above the streaming response from touch-down until release', () => {
-    const app = setup();
-    app.scroll(12);
-    expect(app.list().props['maintainVisibleContentPosition']).toBeUndefined();
-    fireEvent(app.list(), 'touchStart');
-    expect(app.list().props['maintainVisibleContentPosition']).toEqual({ minIndexForVisible: 1 });
-    fireEvent(app.list(), 'scrollBeginDrag');
-    app.scroll(12);
-    fireEvent(app.list(), 'scrollEndDrag');
-    expect(app.list().props['maintainVisibleContentPosition']).toEqual({ minIndexForVisible: 1 });
-    fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
-    expect(app.list().props['maintainVisibleContentPosition']).toBeUndefined();
+  it('anchors native growth above the streaming response from touch-down until release', async () => {
+    const app = await setup();
+    await app.scroll(12);
+    expect(app.listProps().maintainVisibleContentPosition).toBeUndefined();
+    await fireEvent(app.list(), 'touchStart');
+    expect(app.listProps().maintainVisibleContentPosition).toEqual({ minIndexForVisible: 1 });
+    await fireEvent(app.list(), 'scrollBeginDrag');
+    await app.scroll(12);
+    await fireEvent(app.list(), 'scrollEndDrag', { nativeEvent: { velocity: { x: 0, y: 0 } } });
+    expect(app.listProps().maintainVisibleContentPosition).toEqual({ minIndexForVisible: 1 });
+    await fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
+    expect(app.listProps().maintainVisibleContentPosition).toBeUndefined();
   });
 
-  it('uses a zero-height history edge when an agent transcript has no user anchor', () => {
-    const app = setup();
-    app.update({
+  it('uses a zero-height history edge when an agent transcript has no user anchor', async () => {
+    const app = await setup();
+    await app.update({
       ...runningChat,
       messages: runningChat.messages.filter((message) => message.role === 'assistant'),
     });
-    fireEvent(app.list(), 'touchStart');
-    expect(app.list().props['maintainVisibleContentPosition']).toEqual({ minIndexForVisible: 1 });
-    expect(app.list().props['ListFooterComponent']).not.toBeNull();
-    expect(app.list().props['ListFooterComponentStyle']).toBeUndefined();
+    await fireEvent(app.list(), 'touchStart');
+    expect(app.listProps().maintainVisibleContentPosition).toEqual({ minIndexForVisible: 1 });
+    expect(app.listProps().ListFooterComponent).not.toBeNull();
+    expect(app.listProps().ListFooterComponentStyle).toBeUndefined();
   });
 
-  it('does not jump when a finger starts anchoring a transcript that grew since its last anchor', () => {
-    const app = setup();
+  it('does not jump when a finger starts anchoring a transcript that grew since its last anchor', async () => {
+    const app = await setup();
     const native = createNativeAnchoringModel(12);
     let answerHeight = 100;
     const commit = () => {
       const content = measureNativeContent(app, answerHeight);
       native.mount(content.position, content.frames);
     };
-    const stream = (height: number, status: Chat['status'] = 'running') => {
+    const stream = async (height: number, status: Chat['status'] = 'running') => {
       answerHeight = height;
-      app.update({
+      await app.update({
         ...runningChat,
         status,
         messages: runningChat.messages.map((message) =>
@@ -418,40 +423,40 @@ describe('streaming scroll ownership', () => {
       });
       commit();
     };
-    app.scroll(12);
+    await app.scroll(12);
     commit();
 
     // A brief touch during the run anchors the prompt, then output keeps streaming untouched.
-    fireEvent(app.list(), 'touchStart');
+    await fireEvent(app.list(), 'touchStart');
     commit();
-    fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
+    await fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
     commit();
-    stream(400);
+    await stream(400);
 
     let offset = native.offset;
-    fireEvent(app.list(), 'touchStart');
+    await fireEvent(app.list(), 'touchStart');
     commit();
     expect(app.recovery.autoScrollStateRef.current.isUserInteracting).toBe(true);
     expect(native.offset).toBe(offset);
-    stream(550);
+    await stream(550);
     expect(native.offset).toBe(offset + 150);
-    fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
+    await fireEvent(app.list(), 'touchEnd', { nativeEvent: { touches: [] } });
     commit();
-    stream(900);
-    stream(900, 'complete');
+    await stream(900);
+    await stream(900, 'complete');
     expect(app.tree.queryByLabelText('Jump to latest message')).toBeNull();
 
     // Browsing the settled transcript starts anchoring under the finger once it leaves the latest.
-    fireEvent(app.list(), 'touchStart');
+    await fireEvent(app.list(), 'touchStart');
     commit();
-    fireEvent(app.list(), 'scrollBeginDrag');
+    await fireEvent(app.list(), 'scrollBeginDrag');
     native.drag(160);
-    app.scroll(160);
+    await app.scroll(160);
     offset = native.offset;
     commit();
     expect(native.offset).toBe(offset);
     expect(app.tree.getByLabelText('Jump to latest message')).toBeTruthy();
-    expect(app.list().props['maintainVisibleContentPosition']).toEqual({ minIndexForVisible: 1 });
+    expect(app.listProps().maintainVisibleContentPosition).toEqual({ minIndexForVisible: 1 });
     expect(measureNativeContent(app, answerHeight).position).toEqual({ minIndexForVisible: 2 });
     expect(app.recovery.autoScrollStateRef.current.isUserInteracting).toBe(true);
     // The model's idle anchor assumes a real first child pinned to the content origin.

@@ -60,7 +60,7 @@ impl PushService {
         Arc::new(Self {
             registry,
             project_label,
-            http: reqwest::Client::new(),
+            http: crate::tls::http_client(),
             access_token,
             recent_replies: RwLock::new(HashMap::new()),
             metrics,
@@ -548,7 +548,7 @@ impl PushEvent {
 mod tests {
     use super::*;
     use crate::acp::events::{CanonicalEvent, MessageRole};
-    use agent_client_protocol::schema::v1::{ContentBlock, StopReason};
+    use agent_client_protocol::v1::schema::{ContentBlock, StopReason};
     use axum::{
         extract::State,
         http::StatusCode,
@@ -1524,7 +1524,7 @@ mod tests {
         let authenticated = Arc::new(PushService {
             registry: PushRegistryStore::load(&directory).await,
             project_label: "project".to_string(),
-            http: reqwest::Client::new(),
+            http: crate::tls::http_client(),
             access_token: Some("access".to_string()),
             recent_replies: RwLock::new(HashMap::new()),
             metrics: Arc::new(OperationalMetrics::new()),

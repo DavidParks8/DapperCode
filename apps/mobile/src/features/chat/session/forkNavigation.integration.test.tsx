@@ -138,7 +138,7 @@ describe('forking a conversation', () => {
   });
 
   it('lands on the forked chat without leaving a second chat screen behind', async () => {
-    const result = renderRouter(
+    const result = await renderRouter(
       {
         appDir: './src/app',
         overrides: {

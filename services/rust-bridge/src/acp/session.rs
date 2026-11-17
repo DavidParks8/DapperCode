@@ -4,7 +4,7 @@ use std::sync::{
     Arc, Mutex as StdMutex,
 };
 
-use agent_client_protocol::schema::v1::{ContentBlock, SessionId, SessionNotification};
+use agent_client_protocol::v1::schema::{ContentBlock, SessionId, SessionNotification};
 use tokio::sync::{mpsc, oneshot, Mutex, OwnedMutexGuard};
 use uuid::Uuid;
 
@@ -672,9 +672,9 @@ impl AcpSession {
             status.trim().to_ascii_lowercase().as_str(),
             "failed" | "error" | "aborted" | "cancelled" | "canceled"
         ) {
-            agent_client_protocol::schema::v1::ToolCallStatus::Failed
+            agent_client_protocol::v1::schema::ToolCallStatus::Failed
         } else {
-            agent_client_protocol::schema::v1::ToolCallStatus::Completed
+            agent_client_protocol::v1::schema::ToolCallStatus::Completed
         };
         self.inner
             .lock()
@@ -2061,7 +2061,7 @@ mod tests {
                 run_id: "run".to_string(),
                 source_turn_id: "turn".to_string(),
                 generation: old_generation,
-                stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
+                stop_reason: agent_client_protocol::v1::schema::StopReason::Cancelled,
             })
             .await;
         let (successor_generation, _) = session
@@ -2141,7 +2141,7 @@ mod tests {
                 run_id: "run".to_string(),
                 source_turn_id: "turn".to_string(),
                 generation,
-                stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
+                stop_reason: agent_client_protocol::v1::schema::StopReason::Cancelled,
             })
             .await;
         session.release_handoff().await;
@@ -2261,7 +2261,7 @@ mod tests {
                         run_id: "run".into(),
                         source_turn_id: "turn".into(),
                         generation: 1,
-                        stop_reason: agent_client_protocol::schema::v1::StopReason::EndTurn,
+                        stop_reason: agent_client_protocol::v1::schema::StopReason::EndTurn,
                     })
                     .await;
             })
@@ -3487,7 +3487,7 @@ mod tests {
                 run_id: "run-1".into(),
                 source_turn_id: "turn-1".into(),
                 generation: 1,
-                stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
+                stop_reason: agent_client_protocol::v1::schema::StopReason::Cancelled,
             })
             .await;
         let (generation, _) = session
@@ -3548,7 +3548,7 @@ mod tests {
                 run_id: "stale".into(),
                 source_turn_id: "stale".into(),
                 generation: 99,
-                stop_reason: agent_client_protocol::schema::v1::StopReason::EndTurn,
+                stop_reason: agent_client_protocol::v1::schema::StopReason::EndTurn,
             })
             .await;
         assert_eq!(session.active_interaction_generation().await, Some(1));
@@ -3559,7 +3559,7 @@ mod tests {
                 run_id: "run".into(),
                 source_turn_id: "turn".into(),
                 generation: 1,
-                stop_reason: agent_client_protocol::schema::v1::StopReason::EndTurn,
+                stop_reason: agent_client_protocol::v1::schema::StopReason::EndTurn,
             })
             .await;
         assert_eq!(session.active_interaction_generation().await, None);

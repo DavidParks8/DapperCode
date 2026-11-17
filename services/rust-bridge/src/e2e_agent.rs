@@ -10,7 +10,7 @@ use std::{
 
 use agent_client_protocol::{
     on_receive_notification, on_receive_request,
-    schema::v1::{
+    v1::schema::{
         AgentCapabilities, CancelNotification, ContentChunk, DeleteSessionRequest,
         DeleteSessionResponse, InitializeRequest, InitializeResponse, ListSessionsRequest,
         ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, MessageId,
@@ -41,11 +41,11 @@ const FORK_METHOD: &str = "_dappercode.dev/session/fork";
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[request(method = "_dappercode.dev/session/steer", response = SteerResponse)]
 struct SteerRequest {
-    session_id: agent_client_protocol::schema::v1::SessionId,
+    session_id: agent_client_protocol::v1::schema::SessionId,
     expected_run_id: String,
     expected_source_turn_id: String,
     prompt_generation: u64,
-    prompt: Vec<agent_client_protocol::schema::v1::ContentBlock>,
+    prompt: Vec<agent_client_protocol::v1::schema::ContentBlock>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonRpcResponse)]
@@ -58,7 +58,7 @@ struct SteerResponse {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[request(method = "_dappercode.dev/session/fork", response = ForkResponse)]
 struct ForkRequest {
-    session_id: agent_client_protocol::schema::v1::SessionId,
+    session_id: agent_client_protocol::v1::schema::SessionId,
     message_id: Option<String>,
     user_message_ordinal: u64,
 }
@@ -66,7 +66,7 @@ struct ForkRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonRpcResponse)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ForkResponse {
-    session_id: agent_client_protocol::schema::v1::SessionId,
+    session_id: agent_client_protocol::v1::schema::SessionId,
     title: Option<String>,
 }
 
@@ -173,7 +173,7 @@ fn scenario_agent(
     let deleted_sessions = Arc::new(RwLock::new(HashSet::<String>::new()));
     let live_history = Arc::new(LiveHistory::default());
     Agent
-        .builder()
+        .v1()
         .on_receive_request(
             async |request: InitializeRequest, responder, _| {
                 let capabilities = AgentCapabilities::new()
@@ -404,7 +404,7 @@ fn scenario_agent(
         .on_receive_request(
             async |request: ForkRequest, responder, _| {
                 responder.respond(ForkResponse {
-                    session_id: agent_client_protocol::schema::v1::SessionId::new(format!(
+                    session_id: agent_client_protocol::v1::schema::SessionId::new(format!(
                         "{}-fork",
                         request.session_id
                     )),
@@ -429,8 +429,8 @@ async fn send_prompt_output(
     control: &PromptControl,
     control_path: &Path,
     live_history: &LiveHistory,
-    session_id: &agent_client_protocol::schema::v1::SessionId,
-    connection: &agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    session_id: &agent_client_protocol::v1::schema::SessionId,
+    connection: &agent_client_protocol::v1::ConnectionTo<agent_client_protocol::Client>,
 ) -> Result<(), agent_client_protocol::Error> {
     if control.hold_before_chunks {
         wait_for_release(control_path, "").await?;
@@ -500,7 +500,7 @@ async fn replay_chat(
     scenario: &Scenario,
     live_history: &LiveHistory,
     session_id: &str,
-    connection: &agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    connection: &agent_client_protocol::v1::ConnectionTo<agent_client_protocol::Client>,
 ) -> Result<(), agent_client_protocol::Error> {
     if let Some(chat) = scenario.chats.iter().find(|chat| chat.id == session_id) {
         for (index, message) in chat.messages.iter().enumerate() {
@@ -536,7 +536,7 @@ async fn replay_chat(
 async fn record_and_send(
     live_history: &LiveHistory,
     notification: SessionNotification,
-    connection: &agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    connection: &agent_client_protocol::v1::ConnectionTo<agent_client_protocol::Client>,
 ) -> Result<(), agent_client_protocol::Error> {
     live_history
         .write()
@@ -551,7 +551,7 @@ async fn record_and_send(
 fn send_chat_metadata(
     scenario: &Scenario,
     session_id: &str,
-    connection: &agent_client_protocol::ConnectionTo<agent_client_protocol::Client>,
+    connection: &agent_client_protocol::v1::ConnectionTo<agent_client_protocol::Client>,
 ) -> Result<(), agent_client_protocol::Error> {
     let Some(chat) = scenario.chats.iter().find(|chat| chat.id == session_id) else {
         return Ok(());
@@ -574,7 +574,7 @@ mod tests {
 
     #[tokio::test]
     async fn permission_response_releases_the_fixture_prompt() {
-        use agent_client_protocol::schema::v1::{
+        use agent_client_protocol::v1::schema::{
             RequestPermissionResponse, SelectedPermissionOutcome,
         };
 
@@ -599,7 +599,7 @@ mod tests {
         let result = tokio::time::timeout(
             Duration::from_secs(2),
             agent_client_protocol::Client
-                .builder()
+                .v1()
                 .on_receive_request(
                     async |_: RequestPermissionRequest, responder, _| {
                         responder.respond(RequestPermissionResponse::new(
@@ -685,7 +685,7 @@ mod tests {
         let result = tokio::time::timeout(
             Duration::from_secs(2),
             agent_client_protocol::Client
-                .builder()
+                .v1()
                 .on_receive_notification(
                     async move |notification: SessionNotification, _| {
                         observed
@@ -809,7 +809,7 @@ mod tests {
         tokio::time::timeout(
             Duration::from_secs(1),
             agent_client_protocol::Client
-                .builder()
+                .v1()
                 .on_receive_notification(
                     async move |notification: SessionNotification, _| {
                         observed.lock().unwrap().push(notification.update);

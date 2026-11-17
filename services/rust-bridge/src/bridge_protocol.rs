@@ -353,7 +353,7 @@ impl From<crate::acp::interactions::PendingPermissionSummary> for PendingApprova
             request_id: entry.request_id,
             agent_id: entry.agent_id,
             kind: match entry.kind {
-                agent_client_protocol::schema::v1::ToolKind::Execute => "commandExecution",
+                agent_client_protocol::v1::schema::ToolKind::Execute => "commandExecution",
                 _ => "fileChange",
             }
             .to_string(),
@@ -500,7 +500,7 @@ pub(super) struct PendingUserInputQuestionOption {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod pending_interaction_contract_tests {
-    use agent_client_protocol::schema::v1::{PermissionOptionKind, ToolCallStatus, ToolKind};
+    use agent_client_protocol::v1::schema::{PermissionOptionKind, ToolCallStatus, ToolKind};
 
     use super::*;
     use crate::acp::interactions::{

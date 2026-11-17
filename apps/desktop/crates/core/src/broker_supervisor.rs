@@ -114,25 +114,25 @@ fn wait_for_broker_start(
     poll_interval: Duration,
     elapsed: &mut dyn FnMut() -> Duration,
     fetch_health: &mut dyn FnMut() -> bool,
-    process_matches: &mut dyn FnMut() -> bool,
+    process_matches: &mut dyn FnMut() -> Result<bool>,
     sleep: &mut dyn FnMut(Duration),
-) -> BrokerStartupWait {
+) -> Result<BrokerStartupWait> {
     while elapsed() < timeout {
         if fetch_health() {
-            return BrokerStartupWait::Healthy;
+            return Ok(BrokerStartupWait::Healthy);
         }
-        if !process_matches() {
-            return if fetch_health() {
+        if !process_matches()? {
+            return Ok(if fetch_health() {
                 BrokerStartupWait::Healthy
             } else {
                 BrokerStartupWait::Exited
-            };
+            });
         }
         sleep(poll_interval);
     }
-    if fetch_health() {
+    Ok(if fetch_health() {
         BrokerStartupWait::Healthy
-    } else if !process_matches() {
+    } else if !process_matches()? {
         if fetch_health() {
             BrokerStartupWait::Healthy
         } else {
@@ -140,7 +140,7 @@ fn wait_for_broker_start(
         }
     } else {
         BrokerStartupWait::TimedOut
-    }
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -202,7 +202,14 @@ impl BrokerSupervisor {
     }
 
     pub fn snapshot(&self) -> BridgeSnapshot {
-        let replacement_required = self.owned_runtime_unavailable();
+        let replacement_required = match self.owned_runtime_unavailable() {
+            Ok(value) => value,
+            Err(error) => return BridgeSnapshot::error(format!("{error:#}")),
+        };
+        let managed_process = match self.owns_running_process() {
+            Ok(value) => value,
+            Err(error) => return BridgeSnapshot::error(format!("{error:#}")),
+        };
         match self.fetch_health() {
             Ok(_) if replacement_required => self.runtime_replacement_snapshot(),
             Ok(health) => BridgeSnapshot {
@@ -224,10 +231,10 @@ impl BrokerSupervisor {
                 ready_agents: health.running_workers.saturating_sub(health.busy_workers),
                 total_agents: health.running_workers,
                 recent_error_count: 0,
-                managed_process: self.owns_running_process(),
+                managed_process,
             },
             Err(_) if replacement_required => self.runtime_replacement_snapshot(),
-            Err(error) if self.owns_running_process() => BridgeSnapshot {
+            Err(error) if managed_process => BridgeSnapshot {
                 state: BridgeState::Inaccessible,
                 headline: "Broker starting".to_string(),
                 detail: format!("The broker process is running but not reachable yet: {error}"),
@@ -329,7 +336,7 @@ impl BrokerSupervisor {
             &mut fetch_health,
             &mut process_alive,
             &mut sleep,
-        ) {
+        )? {
             BrokerStartupWait::Healthy => return Ok(self.snapshot()),
             BrokerStartupWait::Exited => {
                 let _ = remove_file_if_exists(&self.paths.broker_ownership_path());
@@ -365,7 +372,7 @@ impl BrokerSupervisor {
             }
             return Ok(false);
         };
-        if !process_matches_for_recovery(&ownership) {
+        if !process_matches_for_recovery(&ownership)? {
             if health_available && self.fetch_health().is_ok() {
                 bail!("a broker is already listening but its ownership record is stale");
             }
@@ -390,13 +397,17 @@ impl BrokerSupervisor {
         Ok(())
     }
 
-    fn owned_runtime_unavailable(&self) -> bool {
-        let Ok(Some(record)) = read_ownership(&self.paths.broker_ownership_path()) else {
-            return false;
+    fn owned_runtime_unavailable(&self) -> Result<bool> {
+        let Some(record) = read_ownership(&self.paths.broker_ownership_path())? else {
+            return Ok(false);
         };
-        process_matches_for_recovery(&record)
-            && self.validate_ownership_data_dir(&record).is_ok()
-            && runtime_executable_unavailable_for_recovery(&record.executable)
+        if !process_matches_for_recovery(&record)? {
+            return Ok(false);
+        }
+        self.validate_ownership_data_dir(&record)?;
+        Ok(runtime_executable_unavailable_for_recovery(
+            &record.executable,
+        ))
     }
 
     pub fn stop(&self) -> Result<BridgeSnapshot> {
@@ -411,7 +422,7 @@ impl BrokerSupervisor {
             }
             return Ok(self.snapshot());
         };
-        if !process_matches(&ownership) {
+        if !process_matches(&ownership)? {
             remove_file_if_exists(&self.paths.broker_ownership_path())?;
             return Ok(self.snapshot());
         }
@@ -421,7 +432,7 @@ impl BrokerSupervisor {
 
     fn restart_locked(&self) -> Result<BridgeSnapshot> {
         if let Some(ownership) = read_ownership(&self.paths.broker_ownership_path())? {
-            if process_matches(&ownership) {
+            if process_matches(&ownership)? {
                 stop_owned_process(&ownership, &self.paths.broker_ownership_path())?;
             } else {
                 remove_file_if_exists(&self.paths.broker_ownership_path())?;
@@ -435,7 +446,7 @@ impl BrokerSupervisor {
         action: BrokerLifecycleAction,
     ) -> Result<(BridgeSnapshot, bool)> {
         let _lease = self.acquire_transition_lease()?;
-        let was_running = self.owns_running_process();
+        let was_running = self.owns_running_process()?;
         let snapshot = match action {
             BrokerLifecycleAction::Start => self.start_locked()?,
             BrokerLifecycleAction::Stop => self.stop_locked()?,
@@ -468,18 +479,18 @@ impl BrokerSupervisor {
     }
 
     fn restore_process_state_locked(&self, should_be_running: bool) -> Result<()> {
-        match (should_be_running, self.owns_running_process()) {
+        match (should_be_running, self.owns_running_process()?) {
             (true, false) => self.start_locked().map(|_| ()),
             (false, true) => self.stop_locked().map(|_| ()),
             _ => Ok(()),
         }
     }
 
-    pub fn owns_running_process(&self) -> bool {
-        read_ownership(&self.paths.broker_ownership_path())
-            .ok()
-            .flatten()
-            .is_some_and(|record| process_matches(&record))
+    pub fn owns_running_process(&self) -> Result<bool> {
+        match read_ownership(&self.paths.broker_ownership_path())? {
+            Some(record) => process_matches(&record),
+            None => Ok(false),
+        }
     }
 
     fn persist_transition_or_restore<T>(
@@ -535,7 +546,7 @@ impl BrokerSupervisor {
         let Some(record) = read_ownership(&self.paths.broker_ownership_path())? else {
             return Ok(());
         };
-        if !process_matches(&record) {
+        if !process_matches(&record)? {
             remove_file_if_exists(&self.paths.broker_ownership_path())?;
             return Ok(());
         }
@@ -554,7 +565,7 @@ pub(crate) fn clean_stale_broker_ownership(paths: &AppPaths) -> Result<bool> {
     let Some(record) = read_ownership(&paths.broker_ownership_path())? else {
         return Ok(false);
     };
-    if process_matches(&record) {
+    if process_matches(&record)? {
         return Ok(true);
     }
     remove_file_if_exists(&paths.broker_ownership_path())?;
@@ -588,11 +599,24 @@ fn legacy_settings_digest(settings: &BrokerSettings) -> String {
 
 fn digest_settings(settings: &BrokerSettings) -> String {
     let encoded = serde_json::to_vec(settings).expect("broker settings serialize");
-    format!("sha256:{:x}", Sha256::digest(encoded))
+    format!("sha256:{}", hex::encode(Sha256::digest(encoded)))
 }
 
 fn settings_digest_matches(recorded: &str, settings: &BrokerSettings) -> bool {
     recorded == settings_digest(settings) || recorded == legacy_settings_digest(settings)
+}
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_NEXT_PROCESS_INSPECTION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn new_process_system() -> Result<System> {
+    #[cfg(test)]
+    if FAIL_NEXT_PROCESS_INSPECTION.replace(false) {
+        bail!("failed to initialize process inspection: injected failure");
+    }
+    System::new().context("failed to initialize process inspection")
 }
 
 fn process_identity(
@@ -602,7 +626,7 @@ fn process_identity(
     config_sha256: &str,
     owner_pid: Option<u32>,
 ) -> Result<BrokerOwnershipRecord> {
-    let mut system = System::new();
+    let mut system = new_process_system()?;
     let pid_value = Pid::from_u32(pid);
     system.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[pid_value]),
@@ -641,12 +665,15 @@ fn process_identity(
     })
 }
 
-fn process_matches(record: &BrokerOwnershipRecord) -> bool {
+fn process_matches(record: &BrokerOwnershipRecord) -> Result<bool> {
     process_matches_with(record, false)
 }
 
-fn process_matches_with(record: &BrokerOwnershipRecord, allow_unlinked_executable: bool) -> bool {
-    let mut system = System::new();
+fn process_matches_with(
+    record: &BrokerOwnershipRecord,
+    allow_unlinked_executable: bool,
+) -> Result<bool> {
+    let mut system = new_process_system()?;
     let pid = Pid::from_u32(record.pid);
     system.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[pid]),
@@ -654,19 +681,47 @@ fn process_matches_with(record: &BrokerOwnershipRecord, allow_unlinked_executabl
         ProcessRefreshKind::everything(),
     );
     let Some(process) = system.process(pid) else {
-        return false;
+        return Ok(false);
     };
-    let executable_matches = process
-        .exe()
-        .is_some_and(|path| process_path_matches(path, &record.executable))
-        || allow_unlinked_executable && !record.executable.exists();
-    process_start_identity(record.pid, process.start_time()).ok()
-        == Some(record.started_at_epoch_sec)
-        && executable_matches
-        && process.cwd().and_then(|path| path.canonicalize().ok()) == Some(record.data_dir.clone())
+    if process.status() == sysinfo::ProcessStatus::Zombie {
+        return Ok(false);
+    }
+    let matches = (|| {
+        if process_start_identity(record.pid, process.start_time())? != record.started_at_epoch_sec
+        {
+            return Ok(false);
+        }
+        let executable_matches = if allow_unlinked_executable && !record.executable.exists() {
+            true
+        } else {
+            process_path_matches(
+                process
+                    .exe()
+                    .context("broker executable identity is unavailable")?,
+                &record.executable,
+            )?
+        };
+        let actual_data_dir = process
+            .cwd()
+            .context("broker working directory identity is unavailable")?
+            .canonicalize()
+            .context("failed to resolve broker working directory identity")?;
+        Ok(executable_matches && actual_data_dir == record.data_dir)
+    })();
+    if matches.is_err() {
+        // A process can exit between the status sample and executable/cwd inspection.
+        system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
+        if system
+            .process(pid)
+            .is_none_or(|process| process.status() == sysinfo::ProcessStatus::Zombie)
+        {
+            return Ok(false);
+        }
+    }
+    matches
 }
 
-fn process_matches_for_recovery(record: &BrokerOwnershipRecord) -> bool {
+fn process_matches_for_recovery(record: &BrokerOwnershipRecord) -> Result<bool> {
     // macOS can resolve an unlinked executable to its new vnode path. Recovery still requires the
     // private record's exact PID start identity and canonical central-data cwd.
     process_matches_with_retry(record, true)
@@ -675,16 +730,16 @@ fn process_matches_for_recovery(record: &BrokerOwnershipRecord) -> bool {
 fn process_matches_with_retry(
     record: &BrokerOwnershipRecord,
     allow_unlinked_executable: bool,
-) -> bool {
+) -> Result<bool> {
     for attempt in 0..3 {
-        if process_matches_with(record, allow_unlinked_executable) {
-            return true;
+        if process_matches_with(record, allow_unlinked_executable)? {
+            return Ok(true);
         }
         if attempt < 2 {
             thread::sleep(Duration::from_millis(10));
         }
     }
-    false
+    Ok(false)
 }
 
 fn runtime_executable_unavailable_for_recovery(path: &Path) -> bool {
@@ -699,23 +754,28 @@ fn runtime_executable_unavailable_for_recovery(path: &Path) -> bool {
     true
 }
 
-fn process_path_matches(observed: &Path, recorded: &Path) -> bool {
-    if observed == recorded || observed.canonicalize().ok().as_deref() == Some(recorded) {
-        return true;
+fn process_path_matches(observed: &Path, recorded: &Path) -> Result<bool> {
+    if observed == recorded {
+        return Ok(true);
     }
     #[cfg(target_os = "macos")]
     {
         let observed = observed.to_string_lossy();
         let recorded = recorded.to_string_lossy();
-        observed
+        if observed
             .strip_prefix("/var/")
             .is_some_and(|suffix| recorded == format!("/private/var/{suffix}"))
             || observed
                 .strip_prefix("/tmp/")
                 .is_some_and(|suffix| recorded == format!("/private/tmp/{suffix}"))
+        {
+            return Ok(true);
+        }
     }
-    #[cfg(not(target_os = "macos"))]
-    false
+    Ok(observed
+        .canonicalize()
+        .context("failed to resolve broker executable identity")?
+        == recorded)
 }
 
 fn read_ownership(path: &Path) -> Result<Option<BrokerOwnershipRecord>> {
@@ -759,8 +819,8 @@ fn stop_owned_process_with(
     let process_matches = |record: &BrokerOwnershipRecord| {
         process_matches_with_retry(record, allow_unlinked_executable)
     };
-    if !process_matches(record) {
-        if !process_exists(record.pid) {
+    if !process_matches(record)? {
+        if !process_exists(record.pid)? {
             remove_file_if_exists(ownership_path)?;
             return Ok(());
         }
@@ -776,14 +836,14 @@ fn stop_owned_process_with(
     )? {
         let started = Instant::now();
         while started.elapsed() < STOP_TIMEOUT {
-            if !process_matches(record) {
+            if !process_matches(record)? {
                 remove_file_if_exists(ownership_path)?;
                 return Ok(());
             }
             thread::sleep(Duration::from_millis(200));
         }
     }
-    if process_matches(record) {
+    if process_matches(record)? {
         request_process_stop(
             record.pid,
             record.started_at_epoch_sec,
@@ -792,7 +852,7 @@ fn stop_owned_process_with(
     }
     let forced = Instant::now();
     while forced.elapsed() < Duration::from_secs(3) {
-        if !process_matches(record) {
+        if !process_matches(record)? {
             remove_file_if_exists(ownership_path)?;
             return Ok(());
         }
@@ -801,11 +861,13 @@ fn stop_owned_process_with(
     bail!("broker process {} did not stop", record.pid)
 }
 
-fn process_exists(pid: u32) -> bool {
-    let mut system = System::new();
+fn process_exists(pid: u32) -> Result<bool> {
+    let mut system = new_process_system()?;
     let pid = Pid::from_u32(pid);
     system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
-    system.process(pid).is_some()
+    Ok(system
+        .process(pid)
+        .is_some_and(|process| process.status() != sysinfo::ProcessStatus::Zombie))
 }
 
 #[cfg(test)]
@@ -1004,7 +1066,7 @@ mod tests {
             let elapsed = std::cell::Cell::new(Duration::ZERO);
             let mut read_elapsed = || elapsed.get();
             let mut fetch_health = || elapsed.get() >= ready_at;
-            let mut process_alive = || true;
+            let mut process_alive = || Ok(true);
             let mut sleep = |duration| elapsed.set(elapsed.get() + duration);
             wait_for_broker_start(
                 START_TIMEOUT,
@@ -1014,6 +1076,7 @@ mod tests {
                 &mut process_alive,
                 &mut sleep,
             )
+            .unwrap()
         };
 
         assert!(START_TIMEOUT > Duration::from_secs(15));
@@ -1029,7 +1092,7 @@ mod tests {
             .checked_sub(Duration::from_millis(100))
             .expect("startup timeout must exceed the test margin");
         let mut fetch_overshot_health = || overshot.get() >= threshold;
-        let mut overshot_process_alive = || true;
+        let mut overshot_process_alive = || Ok(true);
         let mut overshooting_sleep =
             |_| overshot.set(overshot.get() + Duration::from_millis(1_200));
         assert_eq!(
@@ -1040,7 +1103,8 @@ mod tests {
                 &mut fetch_overshot_health,
                 &mut overshot_process_alive,
                 &mut overshooting_sleep,
-            ),
+            )
+            .unwrap(),
             BrokerStartupWait::Healthy
         );
         assert!(overshot.get() >= START_TIMEOUT);
@@ -1048,7 +1112,7 @@ mod tests {
         let elapsed = std::cell::Cell::new(Duration::ZERO);
         let mut read_elapsed = || elapsed.get();
         let mut never_healthy = || false;
-        let mut process_alive = || true;
+        let mut process_alive = || Ok(true);
         let mut sleep = |duration| elapsed.set(elapsed.get() + duration);
         assert_eq!(
             wait_for_broker_start(
@@ -1058,12 +1122,13 @@ mod tests {
                 &mut never_healthy,
                 &mut process_alive,
                 &mut sleep,
-            ),
+            )
+            .unwrap(),
             BrokerStartupWait::TimedOut
         );
         let mut zero_elapsed = || Duration::ZERO;
         let mut never_healthy = || false;
-        let mut process_exited = || false;
+        let mut process_exited = || Ok(false);
         let mut no_sleep = |_| {};
         assert_eq!(
             wait_for_broker_start(
@@ -1073,7 +1138,8 @@ mod tests {
                 &mut never_healthy,
                 &mut process_exited,
                 &mut no_sleep,
-            ),
+            )
+            .unwrap(),
             BrokerStartupWait::Exited
         );
 
@@ -1083,7 +1149,7 @@ mod tests {
             health_probes.set(health_probes.get() + 1);
             health_probes.get() == 2
         };
-        let mut transient_identity_miss = || false;
+        let mut transient_identity_miss = || Ok(false);
         let mut no_sleep = |_| {};
         assert_eq!(
             wait_for_broker_start(
@@ -1093,13 +1159,14 @@ mod tests {
                 &mut eventually_healthy,
                 &mut transient_identity_miss,
                 &mut no_sleep,
-            ),
+            )
+            .unwrap(),
             BrokerStartupWait::Healthy
         );
 
         let mut at_timeout = || Duration::from_secs(2);
         let mut never_healthy = || false;
-        let mut exited_at_boundary = || false;
+        let mut exited_at_boundary = || Ok(false);
         let mut no_sleep = |_| {};
         assert_eq!(
             wait_for_broker_start(
@@ -1109,7 +1176,8 @@ mod tests {
                 &mut never_healthy,
                 &mut exited_at_boundary,
                 &mut no_sleep,
-            ),
+            )
+            .unwrap(),
             BrokerStartupWait::Exited
         );
 
@@ -1119,7 +1187,7 @@ mod tests {
             final_health_probes.set(final_health_probes.get() + 1);
             final_health_probes.get() == 2
         };
-        let mut exited_at_boundary = || false;
+        let mut exited_at_boundary = || Ok(false);
         let mut no_sleep = |_| {};
         assert_eq!(
             wait_for_broker_start(
@@ -1129,9 +1197,123 @@ mod tests {
                 &mut healthy_after_boundary_identity_miss,
                 &mut exited_at_boundary,
                 &mut no_sleep,
-            ),
+            )
+            .unwrap(),
             BrokerStartupWait::Healthy
         );
+    }
+
+    #[test]
+    fn dependency_upgrade_startup_inspection_failure_is_not_reported_as_an_exited_broker() {
+        for elapsed_value in [Duration::ZERO, START_TIMEOUT] {
+            let mut elapsed = || elapsed_value;
+            let mut health = || false;
+            let mut inspect = || bail!("process inspection unavailable");
+            let mut sleep = |_| panic!("must propagate inspection failure before sleeping");
+            let error = wait_for_broker_start(
+                START_TIMEOUT,
+                START_POLL_INTERVAL,
+                &mut elapsed,
+                &mut health,
+                &mut inspect,
+                &mut sleep,
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("process inspection unavailable"));
+        }
+    }
+
+    #[test]
+    fn dependency_upgrade_inspection_failure_preserves_live_ownership_across_lifecycle_actions() {
+        let data = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let supervisor = test_supervisor(&paths, closed_port(), None);
+        let (mut child, record) =
+            spawn_owned_fixture(paths.base_dir(), &settings_digest(&supervisor.settings));
+        write_ownership(&paths.broker_ownership_path(), &record).unwrap();
+        let original = fs::read(paths.broker_ownership_path()).unwrap();
+
+        for action in [
+            BrokerSupervisor::start_locked,
+            BrokerSupervisor::stop_locked,
+            BrokerSupervisor::restart_locked,
+        ] {
+            FAIL_NEXT_PROCESS_INSPECTION.set(true);
+            let error = action(&supervisor).unwrap_err();
+            assert!(error.to_string().contains("initialize process inspection"));
+            assert_eq!(fs::read(paths.broker_ownership_path()).unwrap(), original);
+            assert!(child.try_wait().unwrap().is_none());
+        }
+        FAIL_NEXT_PROCESS_INSPECTION.set(true);
+        assert!(supervisor
+            .transition_and_remember(BrokerLifecycleAction::Stop)
+            .is_err());
+        FAIL_NEXT_PROCESS_INSPECTION.set(true);
+        assert!(clean_stale_broker_ownership(&paths).is_err());
+        FAIL_NEXT_PROCESS_INSPECTION.set(true);
+        assert!(stop_owned_process(&record, &paths.broker_ownership_path()).is_err());
+        FAIL_NEXT_PROCESS_INSPECTION.set(true);
+        let snapshot = supervisor.snapshot();
+        assert_eq!(snapshot.state, BridgeState::Error);
+        assert_eq!(snapshot.headline, "Bridge needs attention");
+        assert!(snapshot.detail.contains("initialize process inspection"));
+        assert_eq!(fs::read(paths.broker_ownership_path()).unwrap(), original);
+        assert!(child.try_wait().unwrap().is_none());
+        assert!(supervisor.owns_running_process().unwrap());
+
+        stop_owned_process(&record, &paths.broker_ownership_path()).unwrap();
+        child.wait().unwrap();
+        assert!(!paths.broker_ownership_path().exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dependency_upgrade_terminated_unreaped_broker_is_stopped_without_metadata_errors() {
+        let data = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(data.path().to_path_buf());
+        let supervisor = test_supervisor(&paths, closed_port(), None);
+        let (mut child, record) =
+            spawn_owned_fixture(paths.base_dir(), &settings_digest(&supervisor.settings));
+        write_ownership(&paths.broker_ownership_path(), &record).unwrap();
+        assert!(supervisor.owns_running_process().unwrap());
+        assert!(request_process_stop(
+            record.pid,
+            record.started_at_epoch_sec,
+            ProcessStopRequest::Graceful,
+        )
+        .unwrap());
+
+        let mut status = std::mem::MaybeUninit::<libc::siginfo_t>::uninit();
+        // SAFETY: this is our child PID and status is writable; WNOWAIT leaves it unreaped.
+        let settled = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                record.pid,
+                status.as_mut_ptr(),
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+        assert_eq!(
+            settled,
+            0,
+            "wait for owned child: {}",
+            io::Error::last_os_error()
+        );
+        assert!(!process_matches(&record).unwrap());
+        assert!(!process_exists(record.pid).unwrap());
+        let snapshot = supervisor.snapshot();
+        assert_eq!(snapshot.state, BridgeState::Stopped);
+        assert_eq!(snapshot.headline, "Broker stopped");
+        assert!(!snapshot.managed_process);
+        assert_eq!(
+            snapshot.url.as_deref(),
+            Some(supervisor.settings.connect_url.as_str())
+        );
+        assert!(paths.broker_ownership_path().exists());
+
+        stop_owned_process(&record, &paths.broker_ownership_path()).unwrap();
+        assert!(!paths.broker_ownership_path().exists());
+        child.wait().unwrap();
     }
 
     #[test]
@@ -1146,6 +1328,10 @@ mod tests {
         )
         .unwrap();
         let digest = settings_digest(&settings);
+        assert_eq!(
+            digest,
+            "sha256:f62ef72b793a5c2c9820f2c985ad4104746edd3f4455bc3db4a9d4ede2fc6e4c"
+        );
         assert!(digest.starts_with("sha256:"));
         assert_eq!(digest.len(), 71);
         assert!(settings_digest_matches(&digest, &settings));
@@ -1322,7 +1508,7 @@ mod tests {
         let moved_executable = paths.base_dir().join("moved-dappercode");
         fs::rename(&executable, &moved_executable).unwrap();
 
-        assert!(process_matches_for_recovery(&ownership));
+        assert!(process_matches_for_recovery(&ownership).unwrap());
         assert!(!runtime_executable_available(&ownership.executable));
         stop_owned_process_for_recovery(&ownership, &paths.broker_ownership_path()).unwrap();
         child.wait().unwrap();
@@ -1557,7 +1743,7 @@ mod tests {
         stop_owned_process(&ownership, &paths.broker_ownership_path()).unwrap();
         child.wait().unwrap();
 
-        assert!(!process_matches(&ownership));
+        assert!(!process_matches(&ownership).unwrap());
         assert!(!paths.broker_ownership_path().exists());
     }
 
@@ -1573,11 +1759,18 @@ mod tests {
             Some(42),
         )
         .unwrap();
-        assert!(process_matches(&current));
+        assert!(process_matches(&current).unwrap());
         let different_executable_dir = tempfile::tempdir().unwrap();
         let different_executable = different_executable_dir.path().join("different-executable");
         fs::write(&different_executable, b"not the test executable").unwrap();
         let different_executable = different_executable.canonicalize().unwrap();
+        assert!(process_path_matches(
+            &different_executable_dir
+                .path()
+                .join("unavailable-executable"),
+            &current_executable,
+        )
+        .is_err());
         assert!(process_identity(
             std::process::id(),
             &different_executable,
@@ -1597,10 +1790,10 @@ mod tests {
         .is_err());
         let mut wrong_start = current.clone();
         wrong_start.started_at_epoch_sec = wrong_start.started_at_epoch_sec.saturating_add(1);
-        assert!(!process_matches(&wrong_start));
+        assert!(!process_matches(&wrong_start).unwrap());
         let mut wrong_executable = current.clone();
         wrong_executable.executable = different_executable;
-        assert!(!process_matches(&wrong_executable));
+        assert!(!process_matches(&wrong_executable).unwrap());
         let stale_record = BrokerOwnershipRecord {
             version: OWNERSHIP_VERSION,
             pid: u32::MAX,

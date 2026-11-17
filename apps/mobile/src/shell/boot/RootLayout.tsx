@@ -42,7 +42,7 @@ export function RootLayout() {
       <GestureHandlerRootView style={styles.root}>
         <SafeAreaProvider initialMetrics={initialWindowMetrics}>
           <BottomSheetModalProvider>
-            <StatusBar barStyle={theme.statusBarStyle} backgroundColor={theme.colors.bgMain} />
+            <StatusBar barStyle={theme.statusBarStyle} />
             <WindowLayoutObserver />
             <RootNavigator theme={theme} styles={styles} />
           </BottomSheetModalProvider>

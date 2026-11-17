@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     CloseSessionRequest, DeleteSessionRequest, ElicitationContentValue, ListSessionsRequest,
     LoadSessionRequest, McpServer, NewSessionRequest, PromptRequest, ResumeSessionRequest,
     SessionConfigOptionValue, SessionId, SetSessionConfigOptionRequest,
@@ -100,6 +100,8 @@ pub enum AgentManagerError {
     Fork(String),
     #[error("agent messaging MCP configuration failed: {0}")]
     AgentMessaging(String),
+    #[error("failed to initialize the ACP agent HTTP client: {0}")]
+    HttpClient(#[source] reqwest::Error),
     #[error(transparent)]
     Harness(#[from] HarnessError),
     #[error(transparent)]
@@ -1409,7 +1411,9 @@ impl AgentManager {
         {
             for (_, result) in &results {
                 if let Ok((connection, _)) = result {
-                    let _ = connection.shutdown().await;
+                    if connection.shutdown().await.is_err() {
+                        eprintln!("ACP agent shutdown failed (details redacted)");
+                    }
                 }
             }
             return Err(AgentManagerError::PreferredStart(redact_error(error)));
@@ -1472,10 +1476,10 @@ impl AgentManager {
             agent_messaging: OnceLock::new(),
             stopped: AtomicBool::new(false),
             // Loopback only: the agent's HTTP server is never reached through a proxy.
-            http: reqwest::Client::builder()
+            http: crate::tls::http_client_builder()
                 .no_proxy()
                 .build()
-                .unwrap_or_default(),
+                .map_err(AgentManagerError::HttpClient)?,
             #[cfg(test)]
             policy_snapshot_barrier: Mutex::new(None),
         })
@@ -3417,7 +3421,7 @@ impl AgentManager {
     pub async fn prompt(
         &self,
         thread_id: &str,
-        prompt: Vec<agent_client_protocol::schema::v1::ContentBlock>,
+        prompt: Vec<agent_client_protocol::v1::schema::ContentBlock>,
         run_id: String,
         source_turn_id: String,
     ) -> Result<PromptAdmission, AgentManagerError> {
@@ -3430,7 +3434,7 @@ impl AgentManager {
     pub async fn prompt_with_outcome(
         &self,
         thread_id: &str,
-        prompt: Vec<agent_client_protocol::schema::v1::ContentBlock>,
+        prompt: Vec<agent_client_protocol::v1::schema::ContentBlock>,
         run_id: String,
         source_turn_id: String,
     ) -> Result<PromptAdmission, AgentOperationFailure> {
@@ -3447,7 +3451,7 @@ impl AgentManager {
     pub async fn prompt_with_policy_outcome(
         &self,
         thread_id: &str,
-        prompt: Vec<agent_client_protocol::schema::v1::ContentBlock>,
+        prompt: Vec<agent_client_protocol::v1::schema::ContentBlock>,
         run_id: String,
         source_turn_id: String,
         approval_policy: ApprovalPolicy,
@@ -3700,7 +3704,7 @@ impl AgentManager {
         expected_source_turn_id: String,
         prompt_generation: u64,
         interaction_epoch: u64,
-        prompt: Vec<agent_client_protocol::schema::v1::ContentBlock>,
+        prompt: Vec<agent_client_protocol::v1::schema::ContentBlock>,
     ) -> Result<HarnessAgentMessageOutcome, AgentOperationFailure> {
         let (identity, session_id, connection) = self
             .route_thread(thread_id)
@@ -3763,7 +3767,7 @@ impl AgentManager {
         expected_source_turn_id: String,
         prompt_generation: u64,
         interaction_epoch: u64,
-        prompt: Vec<agent_client_protocol::schema::v1::ContentBlock>,
+        prompt: Vec<agent_client_protocol::v1::schema::ContentBlock>,
     ) -> Result<(), AgentManagerError> {
         let (identity, session_id, connection) = self.route_thread(thread_id)?;
         let transcript_prompt = prompt.clone();
@@ -3877,7 +3881,7 @@ impl AgentManager {
                     run_id: expected_run_id,
                     source_turn_id: expected_source_turn_id,
                     generation,
-                    stop_reason: agent_client_protocol::schema::v1::StopReason::EndTurn,
+                    stop_reason: agent_client_protocol::v1::schema::StopReason::EndTurn,
                 })
                 .await;
         });
@@ -3983,7 +3987,9 @@ impl AgentManager {
         }
         for runtime in self.agents.values() {
             if let Some(connection) = &runtime.connection {
-                let _ = connection.shutdown().await;
+                if connection.shutdown().await.is_err() {
+                    eprintln!("ACP agent shutdown failed (details redacted)");
+                }
             }
         }
     }
@@ -4399,7 +4405,7 @@ impl AgentManager {
         &self,
         connection: &AcpConnection,
         session_id: &SessionId,
-        config_options: Option<Vec<agent_client_protocol::schema::v1::SessionConfigOption>>,
+        config_options: Option<Vec<agent_client_protocol::v1::schema::SessionConfigOption>>,
     ) -> Result<(), AgentManagerError> {
         let Some(config_options) = config_options.filter(|options| !options.is_empty()) else {
             return Ok(());
@@ -4782,13 +4788,13 @@ fn exported_session_events(
                 };
                 let status = match state.status.as_deref() {
                     Some("completed") => {
-                        agent_client_protocol::schema::v1::ToolCallStatus::Completed
+                        agent_client_protocol::v1::schema::ToolCallStatus::Completed
                     }
-                    Some("error") => agent_client_protocol::schema::v1::ToolCallStatus::Failed,
+                    Some("error") => agent_client_protocol::v1::schema::ToolCallStatus::Failed,
                     Some("running") => {
-                        agent_client_protocol::schema::v1::ToolCallStatus::InProgress
+                        agent_client_protocol::v1::schema::ToolCallStatus::InProgress
                     }
-                    _ => agent_client_protocol::schema::v1::ToolCallStatus::Pending,
+                    _ => agent_client_protocol::v1::schema::ToolCallStatus::Pending,
                 };
                 let content = state.output.or(state.error).unwrap_or_default();
                 events.push(CanonicalEvent::Tool {
@@ -4798,7 +4804,7 @@ fn exported_session_events(
                     source_turn_id: None,
                     generation: None,
                     tool_call_id: canonical_id,
-                    kind: agent_client_protocol::schema::v1::ToolKind::Other,
+                    kind: agent_client_protocol::v1::schema::ToolKind::Other,
                     status,
                     title: state
                         .title
@@ -4914,7 +4920,7 @@ fn parse_opencode_model_catalog(bytes: &[u8]) -> Vec<HarnessModelCatalogEntry> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod catalog_tests {
-    use agent_client_protocol::schema::v1::ToolCallStatus;
+    use agent_client_protocol::v1::schema::ToolCallStatus;
 
     use super::*;
     use crate::acp::session::AcpSession;
@@ -5420,7 +5426,7 @@ mod tests {
     use super::*;
 
     use crate::acp::config::test_executable_root;
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         AgentCapabilities, CancelNotification, CloseSessionResponse, DeleteSessionResponse,
         InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
         LoadSessionResponse, McpCapabilities, NewSessionResponse, PromptResponse,
@@ -5452,7 +5458,7 @@ mod tests {
 
     fn echo_digest() -> String {
         let bytes = std::fs::read("/bin/echo").expect("read /bin/echo");
-        format!("sha256:{:x}", Sha256::digest(bytes))
+        format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
     }
 
     fn manifest(agent_id: &str, display_name: &str) -> LocalAgentManifest {
@@ -5801,7 +5807,7 @@ mod tests {
             AgentCapabilities::new()
         };
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async move |request: InitializeRequest, responder, _| {
                     responder.respond(
@@ -5856,7 +5862,7 @@ mod tests {
         let load_agent = agent_id.to_string();
         let resume_agent = agent_id.to_string();
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async move |request: InitializeRequest, responder, _| {
                     responder.respond(
@@ -5895,7 +5901,7 @@ mod tests {
     ) -> (AcpConnection, NegotiatedInitialize) {
         let session_id = format!("{agent_id}-session");
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async move |request: InitializeRequest, responder, _| {
                     responder.respond(
@@ -5957,7 +5963,7 @@ mod tests {
         let deleted = Arc::new(AtomicBool::new(false));
         let listed_deleted = deleted.clone();
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async move |request: InitializeRequest, responder, _| {
                     responder.respond(
@@ -6022,7 +6028,7 @@ mod tests {
         let delete_agent = agent_id.to_string();
         let delete_applied = deleted.clone();
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async move |request: InitializeRequest, responder, _| {
                     responder.respond(
@@ -6063,7 +6069,7 @@ mod tests {
 
     async fn native_extension_connection(agent_id: &str) -> (AcpConnection, NegotiatedInitialize) {
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async move |request: InitializeRequest, responder, _| {
                     let mut response = InitializeResponse::new(request.protocol_version)
@@ -6192,7 +6198,7 @@ mod tests {
         response_barrier: Option<Arc<(tokio::sync::Notify, tokio::sync::Notify)>>,
     ) -> (AcpConnection, NegotiatedInitialize) {
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async move |request: InitializeRequest, responder, _| {
                     responder.respond(
@@ -6224,7 +6230,7 @@ mod tests {
                         }))
                         .expect("typed update");
                         connection.send_notification(
-                            agent_client_protocol::schema::v1::SessionNotification::new(
+                            agent_client_protocol::v1::schema::SessionNotification::new(
                                 request.session_id,
                                 update,
                             ),
@@ -6261,7 +6267,7 @@ mod tests {
 
     async fn paginated_connection(agent_id: &str) -> (AcpConnection, NegotiatedInitialize) {
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async move |request: InitializeRequest, responder, _| {
                     responder.respond(
@@ -6318,7 +6324,7 @@ mod tests {
         requests: Arc<std::sync::atomic::AtomicUsize>,
     ) -> (AcpConnection, NegotiatedInitialize) {
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async move |request: InitializeRequest, responder, _| {
                     responder.respond(
@@ -6860,7 +6866,7 @@ mod tests {
     #[tokio::test]
     async fn manager_preserves_remote_session_summary_metadata() {
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async move |request: InitializeRequest, responder, _| {
                     responder.respond(
@@ -7622,8 +7628,8 @@ mod tests {
                 source_turn_id: None,
                 generation: None,
                 tool_call_id: "task-persisted".into(),
-                kind: agent_client_protocol::schema::v1::ToolKind::Other,
-                status: agent_client_protocol::schema::v1::ToolCallStatus::Completed,
+                kind: agent_client_protocol::v1::schema::ToolKind::Other,
+                status: agent_client_protocol::v1::schema::ToolCallStatus::Completed,
                 title: "task".into(),
                 content: FieldUpdate::Set(
                     "<task id=\"child-persisted\" state=\"completed\"></task>".into(),
@@ -7862,8 +7868,8 @@ exec /bin/sleep 5
                 source_turn_id: Some("turn".into()),
                 generation: Some(generation),
                 tool_call_id: "tool".into(),
-                kind: agent_client_protocol::schema::v1::ToolKind::Execute,
-                status: agent_client_protocol::schema::v1::ToolCallStatus::InProgress,
+                kind: agent_client_protocol::v1::schema::ToolKind::Execute,
+                status: agent_client_protocol::v1::schema::ToolCallStatus::InProgress,
                 title: "Running tool".into(),
                 content: FieldUpdate::Unchanged,
                 structured_content: FieldUpdate::Unchanged,
@@ -8017,7 +8023,7 @@ esac
     }
 
     async fn assert_completed_history_recovery(explicit_resume: bool) {
-        use agent_client_protocol::schema::v1::{SessionNotification, SessionUpdate};
+        use agent_client_protocol::v1::schema::{SessionNotification, SessionUpdate};
 
         let directory = std::env::temp_dir().join(format!(
             "dappercode-completed-history-{}",
@@ -8047,7 +8053,7 @@ esac
         let complete = Arc::new(tokio::sync::Notify::new());
         let (observed, mut methods) = mpsc::unbounded_channel();
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async |request: InitializeRequest, responder, _| {
                     responder.respond(
@@ -10380,7 +10386,7 @@ esac
         model: Arc<Mutex<String>>,
     ) -> (AcpConnection, NegotiatedInitialize) {
         let agent = Agent
-            .builder()
+            .v1()
             .on_receive_request(
                 async move |request: InitializeRequest, responder, _| {
                     responder.respond(
@@ -11813,7 +11819,7 @@ esac
     async fn authoritative_session_listing_rejects_non_progressing_pagination() {
         async fn listing_connection(mode: u8) -> AcpConnection {
             let agent = Agent
-                .builder()
+                .v1()
                 .on_receive_request(
                     async move |request: InitializeRequest, responder, _| {
                         responder.respond(

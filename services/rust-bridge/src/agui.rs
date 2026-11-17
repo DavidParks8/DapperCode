@@ -476,8 +476,8 @@ impl AgUiProjector {
                 state.subagent_activity |= subagent_tool || update_has_task;
                 let terminal = matches!(
                     status,
-                    agent_client_protocol::schema::v1::ToolCallStatus::Completed
-                        | agent_client_protocol::schema::v1::ToolCallStatus::Failed
+                    agent_client_protocol::v1::schema::ToolCallStatus::Completed
+                        | agent_client_protocol::v1::schema::ToolCallStatus::Failed
                 );
                 let content = match content {
                     FieldUpdate::Set(content) => {
@@ -490,9 +490,9 @@ impl AgUiProjector {
                     )),
                     FieldUpdate::Unchanged => None,
                 };
-                let result_revision = content
-                    .as_ref()
-                    .map(|content| format!("sha256:{:x}", Sha256::digest(content.as_bytes())));
+                let result_revision = content.as_ref().map(|content| {
+                    format!("sha256:{}", hex::encode(Sha256::digest(content.as_bytes())))
+                });
                 let changed_result = match content.as_deref() {
                     None => false,
                     Some("") if state.result_revision.is_none() => false,
@@ -523,8 +523,10 @@ impl AgUiProjector {
                     },
                 });
                 let structured_revision = format!(
-                    "sha256:{:x}",
-                    Sha256::digest(serde_json::to_vec(&structured_value).unwrap_or_default())
+                    "sha256:{}",
+                    hex::encode(Sha256::digest(
+                        serde_json::to_vec(&structured_value).unwrap_or_default()
+                    ))
                 );
                 let changed_structured = changed_structured_state
                     && state.structured_revision.as_deref() != Some(&structured_revision);
@@ -695,7 +697,7 @@ impl AgUiProjector {
                         &run.run_id,
                         run.source_turn_id.clone(),
                         AgUiEvent {
-                            delta: Some(Delta::String("{}".to_string())),
+                            delta: Some(Delta::PurpleString("{}".to_string())),
                             ..tool_event(
                                 AgUiEventType::ToolCallArgs,
                                 tool_call_id.clone(),
@@ -782,7 +784,7 @@ impl AgUiProjector {
                 {
                     let wrapper_failed = matches!(
                         status,
-                        agent_client_protocol::schema::v1::ToolCallStatus::Failed
+                        agent_client_protocol::v1::schema::ToolCallStatus::Failed
                     );
                     let status = state
                         .subagent_terminal_status
@@ -867,7 +869,9 @@ impl AgUiProjector {
                                         run.run_id
                                     )),
                                     role: Some(AgUiEventRole::Tool),
-                                    content: Some(AgUiEventContent::String(chunk.to_string())),
+                                    content: Some(AgUiEventContent::PurpleString(
+                                        chunk.to_string(),
+                                    )),
                                     ..tool_event(
                                         AgUiEventType::ToolCallResult,
                                         tool_call_id.clone(),
@@ -939,7 +943,7 @@ impl AgUiProjector {
                 let run_cancelled = matches!(
                     canonical,
                     CanonicalEvent::RunFinished {
-                        stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
+                        stop_reason: agent_client_protocol::v1::schema::StopReason::Cancelled,
                         ..
                     }
                 );
@@ -1548,7 +1552,7 @@ pub(super) fn messages_snapshot_envelope(
                         MessageRole::Agent => AgUiMessageRole::Assistant,
                         MessageRole::Thought => AgUiMessageRole::Reasoning,
                     },
-                    content: Some(MessageContent::String(snapshot_message_text(message))),
+                    content: Some(MessageContent::PurpleString(snapshot_message_text(message))),
                     encrypted_value: None,
                     metadata: None,
                     subagent_run_id: None,
@@ -1639,7 +1643,7 @@ pub(super) fn messages_snapshot_envelope(
                 messages.push(Message {
                     id: format!("tool-call:{}", tool.id),
                     role: AgUiMessageRole::Assistant,
-                    content: Some(MessageContent::String(String::new())),
+                    content: Some(MessageContent::PurpleString(String::new())),
                     encrypted_value: None,
                     metadata: None,
                     subagent_run_id: None,
@@ -1668,7 +1672,7 @@ pub(super) fn messages_snapshot_envelope(
                 messages.push(Message {
                     id: format!("tool-result:{}", tool.id),
                     role: AgUiMessageRole::Tool,
-                    content: Some(MessageContent::String(tool_snapshot_text(tool))),
+                    content: Some(MessageContent::PurpleString(tool_snapshot_text(tool))),
                     encrypted_value: None,
                     metadata: None,
                     subagent_run_id: None,
@@ -1676,7 +1680,7 @@ pub(super) fn messages_snapshot_envelope(
                     tool_calls: None,
                     error: (matches!(
                         tool.status,
-                        agent_client_protocol::schema::v1::ToolCallStatus::Failed
+                        agent_client_protocol::v1::schema::ToolCallStatus::Failed
                     ) && !tool.interrupted)
                         .then(|| "Tool failed".to_string()),
                     tool_call_id: Some(tool.id.clone()),
@@ -2109,14 +2113,14 @@ fn is_failed_subagent_status(status: &str) -> bool {
 }
 
 fn snapshot_subagent_status(
-    tool_status: agent_client_protocol::schema::v1::ToolCallStatus,
+    tool_status: agent_client_protocol::v1::schema::ToolCallStatus,
     child_status: Option<&str>,
 ) -> &str {
     match tool_status {
-        agent_client_protocol::schema::v1::ToolCallStatus::Completed => child_status
+        agent_client_protocol::v1::schema::ToolCallStatus::Completed => child_status
             .filter(|status| is_failed_subagent_status(status))
             .unwrap_or("completed"),
-        agent_client_protocol::schema::v1::ToolCallStatus::Failed => child_status
+        agent_client_protocol::v1::schema::ToolCallStatus::Failed => child_status
             .filter(|status| is_failed_subagent_status(status))
             .unwrap_or("failed"),
         _ => child_status.unwrap_or("running"),
@@ -2221,8 +2225,8 @@ fn subagent_progress(canonical: &CanonicalEvent) -> Option<SubagentProgress> {
                 title
             };
             match status {
-                agent_client_protocol::schema::v1::ToolCallStatus::Pending => None,
-                agent_client_protocol::schema::v1::ToolCallStatus::Failed => {
+                agent_client_protocol::v1::schema::ToolCallStatus::Pending => None,
+                agent_client_protocol::v1::schema::ToolCallStatus::Failed => {
                     Some(SubagentProgress {
                         status: "running",
                         latest: format!("Tool failed {title}"),
@@ -2232,7 +2236,7 @@ fn subagent_progress(canonical: &CanonicalEvent) -> Option<SubagentProgress> {
                 }
                 // A completed tool reuses the running tool's revision, so it never repaints the
                 // card; it is projected only to hand the card back to whatever happens next.
-                agent_client_protocol::schema::v1::ToolCallStatus::Completed => {
+                agent_client_protocol::v1::schema::ToolCallStatus::Completed => {
                     Some(SubagentProgress {
                         status: "running",
                         latest: format!("Working on {title}"),
@@ -2267,7 +2271,7 @@ fn subagent_progress(canonical: &CanonicalEvent) -> Option<SubagentProgress> {
             source: ProgressSource::Standalone,
         }),
         CanonicalEvent::RunFinished {
-            stop_reason: agent_client_protocol::schema::v1::StopReason::Cancelled,
+            stop_reason: agent_client_protocol::v1::schema::StopReason::Cancelled,
             ..
         } => Some(SubagentProgress {
             status: "cancelled",
@@ -2357,7 +2361,7 @@ fn message_event(
     AgUiEvent {
         message_id: Some(message_id),
         role,
-        delta: delta.map(Delta::String),
+        delta: delta.map(Delta::PurpleString),
         ..generated_event(event_type, timestamp)
     }
 }
@@ -2650,7 +2654,10 @@ fn push_structured_chunks(
         ));
         return;
     }
-    let revision = format!("sha256:{:x}", Sha256::digest(serialized.as_bytes()));
+    let revision = format!(
+        "sha256:{}",
+        hex::encode(Sha256::digest(serialized.as_bytes()))
+    );
     let chunks = utf8_chunks(&serialized, STRUCTURED_CHUNK_BYTES).collect::<Vec<_>>();
     for (index, data) in chunks.iter().enumerate() {
         events.push(envelope(
@@ -2798,12 +2805,12 @@ fn acp_wire_value<T: serde::Serialize + std::fmt::Debug>(value: &T) -> String {
         .unwrap_or_else(|| format!("{value:?}").to_ascii_lowercase())
 }
 
-fn tool_kind_wire(kind: agent_client_protocol::schema::v1::ToolKind) -> String {
+fn tool_kind_wire(kind: agent_client_protocol::v1::schema::ToolKind) -> String {
     acp_wire_value(&kind)
 }
 
 pub(crate) fn tool_status_wire(
-    status: agent_client_protocol::schema::v1::ToolCallStatus,
+    status: agent_client_protocol::v1::schema::ToolCallStatus,
 ) -> String {
     acp_wire_value(&status)
 }
@@ -2871,7 +2878,7 @@ mod tests {
             .is_some_and(Value::is_null));
     }
     use crate::acp::snapshot::SessionSnapshot;
-    use agent_client_protocol::schema::v1::{StopReason, ToolCallStatus, ToolKind};
+    use agent_client_protocol::v1::schema::{StopReason, ToolCallStatus, ToolKind};
 
     #[test]
     fn tool_snapshot_text_renders_structured_content_without_raw_json() {
@@ -6170,7 +6177,7 @@ mod tests {
                 .iter()
                 .filter_map(|envelope| envelope.event.delta.as_ref())
                 .filter_map(|delta| match delta {
-                    Delta::String(value) => Some(value.as_str()),
+                    Delta::PurpleString(value) => Some(value.as_str()),
                     _ => None,
                 })
                 .collect::<String>();
@@ -6221,7 +6228,7 @@ mod tests {
             .iter()
             .filter_map(|envelope| envelope.event.content.as_ref())
             .filter_map(|content| match content {
-                AgUiEventContent::String(value) => Some(value.as_str()),
+                AgUiEventContent::PurpleString(value) => Some(value.as_str()),
                 _ => None,
             })
             .collect::<String>();

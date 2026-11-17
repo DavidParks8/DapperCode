@@ -6,6 +6,9 @@
 
 //! Authenticated broker and worker proxy used by the desktop operator.
 
+#[cfg(test)]
+mod http_client_tests;
+
 use std::{
     collections::HashMap,
     fs::OpenOptions,
@@ -896,7 +899,7 @@ fn config_revision(paths: &AppPaths) -> Option<[u8; 32]> {
 }
 
 fn token_digest(token: &str) -> String {
-    format!("{:x}", Sha256::digest(token.as_bytes()))
+    hex::encode(Sha256::digest(token.as_bytes()))
 }
 
 fn extract_bearer(headers: &HeaderMap) -> Option<&str> {
@@ -1642,9 +1645,7 @@ impl WorkerPool {
 }
 
 fn worker_http_client() -> Result<Client> {
-    Client::builder()
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
+    broker_http_client_builder()?
         .connect_timeout(Duration::from_secs(1))
         .timeout(Duration::from_secs(2))
         .build()
@@ -1652,12 +1653,26 @@ fn worker_http_client() -> Result<Client> {
 }
 
 fn proxy_http_client() -> Result<Client> {
-    Client::builder()
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
+    broker_http_client_builder()?
         .connect_timeout(Duration::from_secs(2))
         .build()
         .context("failed to build broker proxy client")
+}
+
+fn broker_http_client_builder() -> Result<reqwest::ClientBuilder> {
+    // Workers currently use loopback HTTP. Preserve ring and WebPKI-only trust for HTTPS too.
+    let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()?
+    .with_root_certificates(rustls::RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    })
+    .with_no_client_auth();
+    Ok(Client::builder()
+        .tls_backend_preconfigured(tls)
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none()))
 }
 
 #[derive(Clone, Copy)]
@@ -1674,7 +1689,7 @@ impl OwnerIdentity {
                 started_at: None,
             });
         };
-        let started_at = process_start_time(pid)
+        let started_at = process_start_time(pid)?
             .with_context(|| format!("owning desktop process {pid} is not running"))?;
         Ok(Self {
             pid: Some(pid),
@@ -1683,21 +1698,34 @@ impl OwnerIdentity {
     }
 
     async fn wait_for_exit(self) {
+        self.wait_for_exit_with(process_start_time, Duration::from_secs(1))
+            .await;
+    }
+
+    async fn wait_for_exit_with(
+        self,
+        mut inspect: impl FnMut(u32) -> Result<Option<u64>>,
+        poll_interval: Duration,
+    ) {
         let Some(pid) = self.pid else {
             std::future::pending::<()>().await;
             return;
         };
         loop {
-            if process_start_time(pid) != self.started_at {
-                return;
+            match inspect(pid) {
+                Ok(started_at) if started_at != self.started_at => return,
+                Ok(_) => {}
+                Err(error) => {
+                    eprintln!("failed to inspect owning desktop process {pid}: {error:#}");
+                }
             }
-            sleep(Duration::from_secs(1)).await;
+            sleep(poll_interval).await;
         }
     }
 }
 
-fn process_start_time(pid: u32) -> Option<u64> {
-    let mut system = System::new();
+fn process_start_time(pid: u32) -> Result<Option<u64>> {
+    let mut system = System::new().context("failed to initialize process inspection")?;
     let pid = Pid::from_u32(pid);
     system.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[pid]),
@@ -1706,7 +1734,9 @@ fn process_start_time(pid: u32) -> Option<u64> {
     );
     system
         .process(pid)
-        .and_then(|process| process_start_identity(pid.as_u32(), process.start_time()).ok())
+        .filter(|process| process.status() != sysinfo::ProcessStatus::Zombie)
+        .map(|process| process_start_identity(pid.as_u32(), process.start_time()))
+        .transpose()
 }
 
 async fn wait_for_shutdown(receiver: &mut tokio::sync::watch::Receiver<bool>) {
@@ -1743,6 +1773,65 @@ mod tests {
     use dappercode_desktop_core::ProfileAgent;
     use std::sync::atomic::{AtomicBool, AtomicUsize};
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn dependency_upgrade_owner_watch_retries_inspection_failures_until_confirmed_exit() {
+        let owner = OwnerIdentity {
+            pid: Some(42),
+            started_at: Some(123),
+        };
+        let mut observations = [
+            Err(anyhow!("inspection unavailable")),
+            Ok(Some(123)),
+            Err(anyhow!("inspection unavailable again")),
+            Ok(None),
+        ]
+        .into_iter();
+        let mut samples = 0;
+        timeout(
+            Duration::from_secs(1),
+            owner.wait_for_exit_with(
+                |pid| {
+                    assert_eq!(pid, 42);
+                    samples += 1;
+                    observations
+                        .next()
+                        .expect("watch must stop when the owner exits")
+                },
+                Duration::from_millis(1),
+            ),
+        )
+        .await
+        .expect("watch must detect the confirmed exit");
+        assert_eq!(samples, 4);
+
+        let running = OwnerIdentity::capture(Some(std::process::id())).unwrap();
+        assert!(running.started_at.is_some());
+        assert!(OwnerIdentity::capture(Some(u32::MAX)).is_err());
+        assert!(timeout(
+            Duration::from_millis(10),
+            OwnerIdentity::capture(None).unwrap().wait_for_exit(),
+        )
+        .await
+        .is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dependency_upgrade_owner_watch_detects_a_terminated_unreaped_process() {
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let owner = OwnerIdentity::capture(Some(child.id())).unwrap();
+        child.kill().unwrap();
+        let settled = timeout(Duration::from_secs(2), owner.wait_for_exit()).await;
+        child.wait().unwrap();
+        assert!(
+            settled.is_ok(),
+            "watch must recognize a terminated owner before reaping"
+        );
+    }
 
     #[cfg(unix)]
     #[tokio::test]
@@ -1806,8 +1895,10 @@ mod tests {
         let mut current = stale.clone();
         current.agent.executable = std::env::current_exe().unwrap();
         current.agent.verified_digest = format!(
-            "sha256:{:x}",
-            Sha256::digest(std::fs::read(&current.agent.executable).unwrap())
+            "sha256:{}",
+            hex::encode(Sha256::digest(
+                std::fs::read(&current.agent.executable).unwrap()
+            ))
         );
         paths
             .update_config(|config| {
@@ -1858,7 +1949,7 @@ mod tests {
                         .spawn()
                         .unwrap(),
                 ),
-                http: Client::new(),
+                http: worker_http_client().unwrap(),
             })
         };
         let failed = create_worker();

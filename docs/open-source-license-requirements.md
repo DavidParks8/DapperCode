@@ -20,7 +20,7 @@ At minimum, generate and keep a `THIRD_PARTY_NOTICES` file for each release buil
 - license identifier
 - attribution text when required by license
 
-The mobile runtime directly depends on `@ag-ui/core` version `1.0.3` under the MIT License.
+The mobile runtime directly depends on `@ag-ui/core` version `1.0.4` under the MIT License.
 Include its distributed `LICENSE` text in generated mobile notices.
 
 The Mermaid browser asset is bundled locally from the pinned Mermaid module and the patched
@@ -28,17 +28,19 @@ DOMPurify dependency. Do not copy Mermaid's prebuilt browser bundle: it can embe
 even when the dependency lockfile selects a patched DOMPurify version. Preserve the bundler's
 upstream license comments in the generated asset.
 
-The mobile runtime directly depends on `expo-glass-effect` version `~57.0.1` under the MIT License.
+The mobile runtime directly depends on `expo-glass-effect` version `~58.0.5` under the MIT License.
 Include its distributed `LICENSE` text in generated mobile notices.
 
-The Rust bridge directly depends on `agent-client-protocol` version `1.2.0`
-with the `unstable_elicitation` feature. Include its Apache-2.0 license text
+The Rust bridge directly depends on `agent-client-protocol` version `5.3.0`.
+Include its Apache-2.0 license text
 and any transitive notices required by the resolved Cargo lockfile in bridge
 distribution notices.
 
 The macOS desktop shell uses operating-system SwiftUI/AppKit frameworks and bundles only the Rust
 operator and Rust bridge. Include generated `THIRD_PARTY_NOTICES.txt` for both Cargo dependency
 closures and the DapperCode license in every distributed `.app` or archive.
+Cargo notices retain normal and build dependencies, but exclude development-only dependency paths
+and their transitive closures because test executables are not shipped.
 
 The Windows desktop package uses a C# WinUI 3 shell and packages managed .NET/NuGet components
 alongside the Rust operator and bridge. Windows notice generation must consume the restored NuGet

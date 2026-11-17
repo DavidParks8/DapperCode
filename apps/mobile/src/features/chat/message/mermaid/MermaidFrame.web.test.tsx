@@ -1,5 +1,3 @@
-/** @jest-environment jsdom */
-
 import { createRef } from 'react';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
@@ -8,6 +6,7 @@ import type { MermaidFrameHandle } from './MermaidFrame';
 
 let mockIframeProps: Record<string, unknown> | null = null;
 let mockFrameNode: { contentWindow: { postMessage: jest.Mock } | null };
+const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 
 jest.mock('react', () => {
   const actual = jest.requireActual('react');
@@ -38,12 +37,16 @@ function requireIframeProps(): Record<string, unknown> {
 
 describe('MermaidFrame web', () => {
   beforeEach(() => {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: new EventTarget() });
     mockIframeProps = null;
     mockFrameNode = { contentWindow: { postMessage: jest.fn() } };
   });
 
   afterEach(() => {
     jest.restoreAllMocks();
+    if (originalWindow) {
+      Object.defineProperty(globalThis, 'window', originalWindow);
+    }
   });
 
   it('uses the URL string emitted by the web asset bundler', () => {

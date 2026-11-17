@@ -1,6 +1,6 @@
 {
-  "$comment": "Generated from @ag-ui/core@1.0.3 EventSchema; source sha256 e0e0293f048338058c3a223efd66c79c3d04fd0f2526d3f2683bafb364058396",
-  "x-ag-ui-core-version": "1.0.3",
+  "$comment": "Generated from @ag-ui/core@1.0.4 EventSchema; source sha256 e0e0293f048338058c3a223efd66c79c3d04fd0f2526d3f2683bafb364058396",
+  "x-ag-ui-core-version": "1.0.4",
   "x-ag-ui-core-source-sha256": "e0e0293f048338058c3a223efd66c79c3d04fd0f2526d3f2683bafb364058396",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "oneOf": [

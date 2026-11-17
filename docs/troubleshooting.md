@@ -30,7 +30,7 @@ An iOS 27 crash containing `UIScene life cycle is required for apps built with t
 means UIKit rejected the native startup configuration before JavaScript could run. Updating
 Metro or restarting the bridge cannot fix it.
 
-DapperCode uses Expo 57.0.24's native scene lifecycle through
+DapperCode uses Expo 58's native scene lifecycle through
 `apps/mobile/plugins/withIosSceneLifecycle.js`. The prebuild plugin registers
 `EXExpoAppSceneDelegate` and leaves React Native startup to that scene delegate, while preserving
 Expo's deep-link and application-state forwarding. Regenerate and rebuild the native app after
@@ -228,6 +228,15 @@ layout; older shared vaults are migrated automatically. The app reports the acti
 initial Credential Manager persistence is unavailable, set `DAPPERCODE_SECRETS_BACKEND=file` only if
 you accept the private-file fallback under `%APPDATA%\DapperCode\secrets`. A later failure to update
 existing Credential Manager entries fails closed rather than silently moving credentials to a file.
+
+## An HTTPS Browser Preview Fails to Load
+
+The bridge verifies HTTPS preview certificates against its machine's operating-system trust store.
+An untrusted self-signed, expired, or hostname-mismatched certificate fails with a preview gateway
+error. Configure the development server with a certificate from a CA you explicitly trust on the
+bridge machine, and use the hostname listed in that certificate (for example, `localhost` rather
+than `127.0.0.1`). Alternatively, serve the local development target over HTTP on loopback.
+There is no "accept any certificate" option.
 
 ## A Port Is Already Taken
 

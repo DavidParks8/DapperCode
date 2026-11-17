@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet, VecDeque};
 
-use agent_client_protocol::schema::v1::{ToolCallStatus, ToolKind};
+use agent_client_protocol::v1::schema::{ToolCallStatus, ToolKind};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::Utc;
@@ -573,7 +573,7 @@ impl SessionSnapshot {
             } if self.active_generation == Some(*generation) => {
                 if matches!(
                     stop_reason,
-                    agent_client_protocol::schema::v1::StopReason::Cancelled
+                    agent_client_protocol::v1::schema::StopReason::Cancelled
                 ) {
                     self.terminalize_active_tools(ToolCallStatus::Failed, true, observed_at_ms);
                     self.terminalize_unresolved_subagents("cancelled", *generation);
@@ -2040,7 +2040,7 @@ fn bound(mut value: String, max: usize) -> String {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use agent_client_protocol::schema::v1::{StopReason, ToolCallStatus, ToolKind};
+    use agent_client_protocol::v1::schema::{StopReason, ToolCallStatus, ToolKind};
 
     use super::*;
 

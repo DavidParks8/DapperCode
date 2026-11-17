@@ -98,11 +98,11 @@ export async function executeCodeTool(
       },
       throwIfCancellationRequested: operation.check,
     }),
-    resolveModuleNames: (modules, containingFile) =>
-      modules.map((moduleName) => {
+    resolveModuleNameLiterals: (modules, containingFile) =>
+      modules.map(({ text: moduleName }) => {
         operation.check();
         if (!moduleName.startsWith('./') && !moduleName.startsWith('../')) {
-          return undefined;
+          return { resolvedModule: undefined };
         }
         const resolved = ts.resolveModuleName(
           moduleName,
@@ -110,7 +110,9 @@ export async function executeCodeTool(
           SETTINGS,
           moduleHost,
         ).resolvedModule;
-        return resolved?.resolvedFileName.startsWith(ROOT) ? resolved : undefined;
+        return {
+          resolvedModule: resolved?.resolvedFileName.startsWith(ROOT) ? resolved : undefined,
+        };
       }),
   };
   const service = ts.createLanguageService(host);

@@ -1,9 +1,21 @@
+import type * as React from 'react';
+import type * as ReactNative from 'react-native';
+
 jest.mock('expo-router', () => jest.requireActual('@shared/testing/expoRouterMock'));
 jest.mock('@expo/vector-icons', () => ({
-  Ionicons: Object.assign(({ name }: { name: string }) => name, { glyphMap: {} }),
+  Ionicons: Object.assign(
+    ({ name }: { name: string }) =>
+      jest
+        .requireActual<typeof React>('react')
+        .createElement(
+          jest.requireActual<typeof ReactNative>('react-native').Text,
+          { testID: 'mock-ionicon', accessibilityLabel: name },
+          name,
+        ),
+    { glyphMap: {} },
+  ),
 }));
 
-import { Ionicons } from '@expo/vector-icons';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { router } from 'expo-router';
 import { Provider } from 'jotai';
@@ -74,8 +86,8 @@ function setupRuntime(patch: Partial<FakeSetupRuntimeState> = {}) {
   });
 }
 
-function renderIn(store: ReturnType<typeof storeWith>, element: ReactElement) {
-  return render(
+async function renderIn(store: ReturnType<typeof storeWith>, element: ReactElement) {
+  return await render(
     <SafeAreaProvider
       initialMetrics={{
         frame: { x: 0, y: 0, width: 390, height: 844 },
@@ -88,7 +100,9 @@ function renderIn(store: ReturnType<typeof storeWith>, element: ReactElement) {
 }
 
 function iconNames(): string[] {
-  return screen.UNSAFE_getAllByType(Ionicons as never).map((node) => node.props['name'] as string);
+  return screen
+    .getAllByTestId('mock-ionicon', { includeHiddenElements: true })
+    .map((node) => node.props['accessibilityLabel'] as string);
 }
 
 function expandedState(testID: string): boolean | undefined {
@@ -97,37 +111,39 @@ function expandedState(testID: string): boolean | undefined {
   return state?.expanded;
 }
 
-function pressedStyle(testID: string, pressed: boolean) {
-  // The Pressable element itself (not its host view) still holds the press-state style function.
-  const pressable = screen
-    .UNSAFE_getAllByProps({ testID })
-    .find((node) => typeof node.props['style'] === 'function');
-  if (!pressable) {
-    throw new Error(`Missing pressable ${testID}`);
+async function pressedStyle(testID: string, pressed: boolean) {
+  if (pressed) {
+    await fireEvent(screen.getByTestId(testID), 'responderGrant', {
+      persist: jest.fn(),
+      nativeEvent: { timestamp: 0 },
+      currentTarget: 1,
+    });
   }
-  const style = pressable.props['style'] as (state: { pressed: boolean }) => unknown;
-  return StyleSheet.flatten(style({ pressed }) as never) as Record<string, unknown>;
+  return StyleSheet.flatten(screen.getByTestId(testID).props['style'] as never) as Record<
+    string,
+    unknown
+  >;
 }
 
 describe('drawer profile row states', () => {
-  it('renders nothing when there is only one bridge and no local agent to choose', () => {
+  it('renders nothing when there is only one bridge and no local agent to choose', async () => {
     const store = storeWith({
       profiles: [bridge('desk', 'Desk')],
       activeProfileId: 'desk',
       localAvailable: false,
     });
-    renderIn(store, <DrawerProfileRow styles={ROW_STYLES} />);
+    await renderIn(store, <DrawerProfileRow styles={ROW_STYLES} />);
     expect(screen.queryByTestId('drawer-profile-switcher')).toBeNull();
   });
 
-  it('names the open bridge with its live connection state and host', () => {
+  it('names the open bridge with its live connection state and host', async () => {
     const store = storeWith({
       profiles: [bridge('desk', 'Desk'), bridge('lab', 'Lab')],
       activeProfileId: 'desk',
       localAvailable: false,
       connected: false,
     });
-    renderIn(store, <DrawerProfileRow styles={ROW_STYLES} />);
+    await renderIn(store, <DrawerProfileRow styles={ROW_STYLES} />);
 
     const row = screen.getByTestId('drawer-profile-switcher');
     expect(row.props['accessibilityLabel']).toBe(
@@ -137,13 +153,13 @@ describe('drawer profile row states', () => {
     expect(iconNames()[0]).toBe('desktop-outline');
   });
 
-  it('asks to choose when a persisted local selection is unavailable on this device', () => {
+  it('asks to choose when a persisted local selection is unavailable on this device', async () => {
     const store = storeWith({
       profiles: [bridge('desk', 'Desk'), bridge('lab', 'Lab')],
       activeProfileId: LOCAL_PROFILE_ID,
       localAvailable: false,
     });
-    renderIn(store, <DrawerProfileRow styles={ROW_STYLES} />);
+    await renderIn(store, <DrawerProfileRow styles={ROW_STYLES} />);
 
     expect(screen.getByTestId('drawer-profile-switcher').props['accessibilityLabel']).toBe(
       `${PROFILE_SWITCHER_TITLE}, No profile`,
@@ -152,38 +168,38 @@ describe('drawer profile row states', () => {
     expect(iconNames()[0]).toBe('swap-horizontal-outline');
   });
 
-  it('expands into the profile sheet on press and collapses when the sheet closes', () => {
+  it('expands into the profile sheet on press and collapses when the sheet closes', async () => {
     const store = storeWith({
       profiles: [bridge('desk', 'Desk')],
       activeProfileId: 'desk',
       localAvailable: true,
     });
-    renderIn(store, <DrawerProfileRow styles={ROW_STYLES} />);
+    await renderIn(store, <DrawerProfileRow styles={ROW_STYLES} />);
     const expanded = () => expandedState('drawer-profile-switcher');
     expect(expanded()).toBe(false);
 
-    fireEvent.press(screen.getByTestId('drawer-profile-switcher'));
+    await fireEvent.press(screen.getByTestId('drawer-profile-switcher'));
     expect(expanded()).toBe(true);
     expect(screen.getByLabelText('On this iPhone')).toBeTruthy();
     expect(screen.getByLabelText('Add bridge')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('selection-sheet-close'));
+    await fireEvent.press(screen.getByTestId('selection-sheet-close'));
     expect(expanded()).toBe(false);
   });
 
-  it('applies the drawer pressed style only while touched, without its own hairline', () => {
+  it('applies the drawer pressed style only while touched, without its own hairline', async () => {
     const store = storeWith({
       profiles: [bridge('desk', 'Desk')],
       activeProfileId: 'desk',
       localAvailable: true,
     });
-    renderIn(store, <DrawerProfileRow styles={ROW_STYLES} />);
+    await renderIn(store, <DrawerProfileRow styles={ROW_STYLES} />);
 
-    expect(pressedStyle('drawer-profile-switcher', false)).toEqual({
+    expect(await pressedStyle('drawer-profile-switcher', false)).toEqual({
       padding: 1,
       borderBottomWidth: 0,
     });
-    expect(pressedStyle('drawer-profile-switcher', true)).toEqual({
+    expect(await pressedStyle('drawer-profile-switcher', true)).toEqual({
       padding: 1,
       borderBottomWidth: 0,
       opacity: 0.5,
@@ -192,24 +208,24 @@ describe('drawer profile row states', () => {
 });
 
 describe('new chat run target states', () => {
-  it('renders nothing, including setup, when there is no choice to make', () => {
+  it('renders nothing, including setup, when there is no choice to make', async () => {
     const store = storeWith({
       profiles: [bridge('desk', 'Desk')],
       activeProfileId: 'desk',
       localAvailable: false,
     });
-    renderIn(store, <NewChatRunTarget />);
+    await renderIn(store, <NewChatRunTarget />);
     expect(screen.queryByTestId('new-chat-profile-switcher')).toBeNull();
     expect(screen.queryByTestId('local-setup-guide')).toBeNull();
   });
 
-  it('shows the bridge connection status next to its name', () => {
+  it('shows the bridge connection status next to its name', async () => {
     const store = storeWith({
       profiles: [bridge('desk', 'Desk')],
       activeProfileId: 'desk',
       localAvailable: true,
     });
-    renderIn(store, <NewChatRunTarget />);
+    await renderIn(store, <NewChatRunTarget />);
 
     expect(screen.getByText('Desk')).toBeTruthy();
     expect(screen.getByText('Connected')).toBeTruthy();
@@ -218,20 +234,20 @@ describe('new chat run target states', () => {
     );
   });
 
-  it('asks where to run, without a status, when no profile is open', () => {
+  it('asks where to run, without a status, when no profile is open', async () => {
     const store = storeWith({
       profiles: [bridge('desk', 'Desk'), bridge('lab', 'Lab')],
       activeProfileId: LOCAL_PROFILE_ID,
       localAvailable: false,
     });
-    renderIn(store, <NewChatRunTarget />);
+    await renderIn(store, <NewChatRunTarget />);
 
     expect(screen.getByText('Choose where to run')).toBeTruthy();
     expect(screen.queryByText('Connected')).toBeNull();
     expect(iconNames()[0]).toBe('swap-horizontal-outline');
   });
 
-  it('follows local setup status live and keeps the checklist until the first chat', () => {
+  it('follows local setup status live and keeps the checklist until the first chat', async () => {
     const store = storeWith({
       profiles: [],
       activeProfileId: LOCAL_PROFILE_ID,
@@ -239,7 +255,7 @@ describe('new chat run target states', () => {
     });
     const fake = setupRuntime();
     store.set(localRuntimeAtom, fake.runtime);
-    renderIn(store, <NewChatRunTarget />);
+    await renderIn(store, <NewChatRunTarget />);
 
     // Nothing is downloaded yet: the capsule shows the setup state and the checklist appears.
     expect(screen.getByText('On this iPhone')).toBeTruthy();
@@ -247,7 +263,7 @@ describe('new chat run target states', () => {
     expect(screen.getByTestId('local-setup-guide')).toBeTruthy();
     expect(iconNames()[0]).toBe('phone-portrait-outline');
 
-    act(() =>
+    await act(() =>
       fake.update({
         downloadPhase: 'ready',
         workspaceId: 'w1',
@@ -258,11 +274,11 @@ describe('new chat run target states', () => {
     // Ready to chat, the checklist stays to offer the Git author and the first chat.
     expect(screen.getByLabelText('4. Start your first chat, Ready')).toBeTruthy();
 
-    act(() => fake.update({ threadMessages: [1] }));
+    await act(() => fake.update({ threadMessages: [1] }));
     expect(screen.queryByTestId('local-setup-guide')).toBeNull();
   });
 
-  it('keeps the checklist hidden after the first chat even once every chat is deleted', () => {
+  it('keeps the checklist hidden after the first chat even once every chat is deleted', async () => {
     const store = storeWith({
       profiles: [],
       activeProfileId: LOCAL_PROFILE_ID,
@@ -285,17 +301,17 @@ describe('new chat run target states', () => {
         <NewChatRunTarget />
       </>
     );
-    const view = renderIn(store, screenWithGuide);
+    const view = await renderIn(store, screenWithGuide);
     expect(screen.getByTestId('local-setup-guide')).toBeTruthy();
 
-    act(() => fake.update({ threadMessages: [3] }));
+    await act(() => fake.update({ threadMessages: [3] }));
     expect(screen.queryByTestId('local-setup-guide')).toBeNull();
     expect(store.get(localSetupCompletedAtom)).toBe(true);
 
-    act(() => fake.update({ threadMessages: [] }));
+    await act(() => fake.update({ threadMessages: [] }));
     expect(screen.queryByTestId('local-setup-guide')).toBeNull();
-    view.unmount();
-    renderIn(store, <NewChatRunTarget />);
+    await view.unmount();
+    await renderIn(store, <NewChatRunTarget />);
     expect(
       screen.getByLabelText('Where agents run, On this iPhone, Ready · Private offline models'),
     ).toBeTruthy();
@@ -303,18 +319,20 @@ describe('new chat run target states', () => {
     expect(store.get(localSetupDismissedAtom)).toBe(false);
   });
 
-  it('scales the capsule while pressed and opens the sheet', () => {
+  it('scales the capsule while pressed and opens the sheet', async () => {
     const store = storeWith({
       profiles: [bridge('desk', 'Desk')],
       activeProfileId: 'desk',
       localAvailable: true,
     });
-    renderIn(store, <NewChatRunTarget />);
+    await renderIn(store, <NewChatRunTarget />);
 
-    expect(pressedStyle('new-chat-profile-switcher', false)['transform']).toBeUndefined();
-    expect(pressedStyle('new-chat-profile-switcher', true)['transform']).toEqual([{ scale: 0.97 }]);
+    expect((await pressedStyle('new-chat-profile-switcher', false))['transform']).toBeUndefined();
+    expect((await pressedStyle('new-chat-profile-switcher', true))['transform']).toEqual([
+      { scale: 0.97 },
+    ]);
 
-    fireEvent.press(screen.getByTestId('new-chat-profile-switcher'));
+    await fireEvent.press(screen.getByTestId('new-chat-profile-switcher'));
     expect(expandedState('new-chat-profile-switcher')).toBe(true);
   });
 });
@@ -324,29 +342,29 @@ describe('local setup guide states', () => {
     (router.push as jest.Mock).mockClear();
   });
 
-  it('renders nothing while the local runtime is not open', () => {
+  it('renders nothing while the local runtime is not open', async () => {
     const store = storeWith({
       profiles: [],
       activeProfileId: LOCAL_PROFILE_ID,
       localAvailable: true,
     });
-    renderIn(store, <LocalSetupGuide />);
+    await renderIn(store, <LocalSetupGuide />);
     expect(screen.queryByTestId('local-setup-guide')).toBeNull();
   });
 
-  it('marks a download in progress and routes each step to where it is completed', () => {
+  it('marks a download in progress and routes each step to where it is completed', async () => {
     const store = storeWith({
       profiles: [],
       activeProfileId: LOCAL_PROFILE_ID,
       localAvailable: true,
     });
     store.set(localRuntimeAtom, setupRuntime({ downloadPhase: 'downloading' }).runtime);
-    renderIn(store, <LocalSetupGuide />);
+    await renderIn(store, <LocalSetupGuide />);
 
     expect(screen.getByText('Downloading')).toBeTruthy();
     expect(screen.getByText('Required')).toBeTruthy();
 
-    fireEvent.press(screen.getByText('1. Download a model'));
+    await fireEvent.press(screen.getByText('1. Download a model'));
     expect(router.push).toHaveBeenCalledWith(LOCAL_SETUP_DESTINATIONS.models);
   });
 });

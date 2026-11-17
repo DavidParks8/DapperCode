@@ -268,8 +268,11 @@ function harness(documents = new Map<string, string>()) {
   return { documents, workspaces, native, context, runtime: new OnDeviceRuntime(native) };
 }
 
+const defaultWebFetch = jest.mocked(fetchPage).getMockImplementation()!;
+
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(fetchPage).mockReset().mockImplementation(defaultWebFetch);
   let sequence = 0;
   jest
     .mocked(randomUUID)

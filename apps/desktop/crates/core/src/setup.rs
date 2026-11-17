@@ -655,7 +655,7 @@ fn valid_agent_id(agent_id: &str) -> bool {
 
 fn file_digest(path: &Path) -> Result<String> {
     let bytes = fs::read(path)?;
-    Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
+    Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
 }
 
 fn executable_version(executable: &Path) -> String {

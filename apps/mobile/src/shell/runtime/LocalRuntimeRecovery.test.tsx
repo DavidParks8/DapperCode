@@ -52,12 +52,12 @@ function runtimeDouble(initialize: () => Promise<void>) {
   };
 }
 
-function renderHost() {
+async function renderHost() {
   const data = createDefaultAppStateData();
   data.bridgeProfiles = { activeProfileId: LOCAL_PROFILE_ID, profiles: [] };
   const store = createTestStore({ data });
   store.set(localProfileAvailableAtom, true);
-  render(
+  await render(
     withAppStore(
       store,
       <SafeAreaProvider
@@ -75,9 +75,9 @@ function renderHost() {
   return store;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   jest.mocked(OnDeviceRuntime).mockReset();
-  act(() => router.replace('/profiles/on-device/chats/new'));
+  await act(() => router.replace('/profiles/on-device/chats/new'));
 });
 
 describe('LocalRuntimeRecovery', () => {
@@ -94,7 +94,7 @@ describe('LocalRuntimeRecovery', () => {
       .mocked(OnDeviceRuntime)
       .mockImplementationOnce(() => failed as unknown as OnDeviceRuntime)
       .mockImplementationOnce(() => next as unknown as OnDeviceRuntime);
-    const store = renderHost();
+    const store = await renderHost();
 
     // Starting: the host draws nothing, so ProfileRouteBoundary's "Opening On this iPhone" shows.
     await waitFor(() => expect(failed.initialize).toHaveBeenCalled());
@@ -112,7 +112,7 @@ describe('LocalRuntimeRecovery', () => {
     expect(screen.getByRole('button', { name: 'Connect a desktop instead' })).toBeTruthy();
     expect(store.get(localTransportAtom)).toBeNull();
 
-    fireEvent.press(screen.getByRole('button', { name: 'Retry without resetting storage' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Retry without resetting storage' }));
     await waitFor(() => expect(store.get(localTransportAtom)).not.toBeNull());
     expect(failed.dispose).toHaveBeenCalledTimes(1);
     expect(store.get(localRuntimeAtom)).toBe(next);

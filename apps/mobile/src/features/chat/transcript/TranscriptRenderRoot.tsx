@@ -1,12 +1,12 @@
-import type { ComponentProps, PropsWithChildren } from 'react';
-import { GestureDetector } from 'react-native-gesture-handler';
+import type { PropsWithChildren } from 'react';
+import { GestureDetector, type useSimultaneousGestures } from 'react-native-gesture-handler';
 
 import { MermaidRenderProvider } from '../message/mermaid/MermaidRenderProvider';
 
 export function TranscriptRenderRoot({
   gesture,
   children,
-}: PropsWithChildren<{ gesture: ComponentProps<typeof GestureDetector>['gesture'] }>) {
+}: PropsWithChildren<{ gesture: ReturnType<typeof useSimultaneousGestures> }>) {
   return (
     <MermaidRenderProvider>
       <GestureDetector gesture={gesture}>{children}</GestureDetector>

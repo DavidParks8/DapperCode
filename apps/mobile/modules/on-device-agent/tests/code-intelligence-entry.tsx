@@ -14,7 +14,7 @@ function check(condition: unknown, name: string, detail = ''): asserts condition
     throw new Error(`${name}${detail ? `: ${detail}` : ''}`);
   }
   checks[name] = true;
-  outcome.write(JSON.stringify({ status: 'running', checks }));
+  outcome.writeSync(JSON.stringify({ status: 'running', checks }));
 }
 
 async function exerciseNativeCodeTools() {
@@ -243,12 +243,12 @@ function NativeCodeIntelligenceGate() {
   useEffect(() => {
     void exerciseNativeCodeTools()
       .then(() => {
-        outcome.write(JSON.stringify({ status: 'pass', checks }));
+        outcome.writeSync(JSON.stringify({ status: 'pass', checks }));
         setStatus('pass');
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
-        outcome.write(JSON.stringify({ status: 'fail', checks, error: message }));
+        outcome.writeSync(JSON.stringify({ status: 'fail', checks, error: message }));
         setStatus('fail');
       });
   }, []);
