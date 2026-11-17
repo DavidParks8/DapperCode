@@ -388,7 +388,7 @@ pub fn build_system_prompt(params: &VoiceCallPromptParams) -> String {
          \n\
          CALLER-IDENTIFYING OPENING: Begin with who you are calling for and why: \"Hi, I'm calling for {caller_name} to book a table.\" Use the actual objective's facts. For routine questions like \"Who's calling?\" or \"Who am I speaking with?\", answer \"I'm calling for {caller_name}\" with the actual purpose. Answer their question; do not ask for their name, turn the question back, or restart the greeting. These are not questions about automation: use no AI, automation, bot, or model labels. Do not volunteer those labels or use a stock \"automated assistant\" introduction. Never pretend to be {caller_name} or claim to be human. Only if directly asked whether you are human, AI, or automated, answer truthfully and briefly.\n\
          \n\
-         RESPONSE: Return exactly one JSON object with speech, decision, digits, on_hold, and outcome_summary. Only speech is spoken. For send_dtmf, digits must contain the literal menu symbols, such as \"1\", never \"one\"; for other decisions use digits=\"\". Set on_hold=true whenever asked to hold or wait for a person; false for ordinary listening. Use one or two short sentences, at most one question, contractions and plain language. No markdown, stage directions, tool syntax, fake hesitations, or invented human experiences. In speech, write numbers, times and codes in spoken words: \"seven forty-five p m\", not \"7:45pm\"; \"October twenty-third\", not \"10/23\".\n\
+         RESPONSE: Return exactly one JSON object with speech, decision, digits, reason, on_hold, and outcome_summary. Only speech is spoken; reason is a brief private explanation of the action. For send_dtmf, digits must contain the literal menu symbols, such as \"1\", never \"one\"; for other decisions use digits=\"\". Set on_hold=true whenever asked to hold or wait for a person; false for ordinary listening. Use one or two short sentences, at most one question, contractions and plain language. No markdown, stage directions, tool syntax, fake hesitations, or invented human experiences. In speech, write numbers, times and codes in spoken words: \"seven forty-five p m\", not \"7:45pm\"; \"October twenty-third\", not \"10/23\".\n\
          \n\
          FIRST decide whether the recipient can continue:\n\
          - If they ask to stop, cannot help further, refuse automation, or report a wrong number: apologize or acknowledge their situation, say goodbye without another question, and decision=end_call. For a wrong number or refusal, do not repeat or explain the business request; a short apology and goodbye is enough.\n\
@@ -463,6 +463,8 @@ pub struct VoiceConversation {
     stt_vocabulary_prompt: String,
     on_hold: bool,
     caller_request: String,
+    steer_revision: usize,
+    pending_steers: Vec<(usize, String)>,
 }
 
 impl VoiceConversation {
@@ -479,6 +481,8 @@ impl VoiceConversation {
             transcript: Vec::new(),
             stt_vocabulary_prompt,
             on_hold: false,
+            steer_revision: 0,
+            pending_steers: Vec::new(),
             caller_request: format!(
                 "Caller request: {}\nAuthorized background: {}",
                 params.objective.trim(),
@@ -602,12 +606,28 @@ impl VoiceConversation {
             return;
         }
         let formatted = format!("{LIVE_STEER_PREFIX}{trimmed}");
+        self.steer_revision += 1;
+        self.pending_steers
+            .push((self.steer_revision, formatted.clone()));
         self.messages.push(ChatMessage::system(formatted));
         self.transcript.push(TranscriptEntry {
             speaker: TranscriptSpeaker::Steer,
             text: trimmed.to_string(),
             interrupted: false,
         });
+    }
+
+    pub fn steer_revision(&self) -> usize {
+        self.steer_revision
+    }
+
+    pub fn has_pending_steers(&self) -> bool {
+        !self.pending_steers.is_empty()
+    }
+
+    pub fn acknowledge_steers_through(&mut self, revision: usize) {
+        self.pending_steers
+            .retain(|(pending, _)| *pending > revision);
     }
 
     pub fn record_active_assistant_interrupted(&mut self, spoken_text: &str) {
@@ -943,7 +963,7 @@ pub fn voice_tool_definitions(can_end_call: bool) -> Value {
                             "description": "For end_call, summarize only what actually happened and any unresolved details. Otherwise empty."
                         }
                     },
-                    "required": ["decision", "speech", "digits", "on_hold", "outcome_summary"],
+                    "required": ["decision", "speech", "digits", "reason", "on_hold", "outcome_summary"],
                     "additionalProperties": false
                 }
             }
@@ -1032,6 +1052,24 @@ impl VoicePipelineClient {
                 if self.transcribe_wav(&wav, "", cancel).await?.is_some() {
                     eprintln!("Voice recognition warm-up produced text for synthetic silence; it was not added to the call");
                 }
+            } else if index == 1 && !prepared {
+                let probe = VoiceConversation::new(VoiceCallPromptParams {
+                    user_display_name: "the user".to_string(),
+                    callee_name: None,
+                    objective: "Check that the dialogue service is ready. Stay silent and choose wait_silently.".to_string(),
+                    first_message: Some("Stay silent and choose wait_silently.".to_string()),
+                    context: None,
+                });
+                tokio::time::timeout(
+                    Duration::from_secs(PRELOAD_REQUEST_TIMEOUT_SECS),
+                    self.stream_assistant_turn(&probe, cancel, |_| {}),
+                )
+                .await
+                .map_err(|_| VoiceError::InvalidResponse {
+                    endpoint: append_endpoint_path(&self.endpoints.llm_base, "chat/completions")
+                        .to_string(),
+                    reason: "dialogue warm-up did not complete before its deadline".to_string(),
+                })??;
             } else if index == 2 && !prepared {
                 tokio::time::timeout(
                     Duration::from_secs(PRELOAD_REQUEST_TIMEOUT_SECS),
@@ -1207,23 +1245,21 @@ impl VoicePipelineClient {
         let mut request_messages = conversation.build_request_messages();
         let held = conversation.is_on_hold();
         if held {
-            let latest_input = conversation
+            let latest_recipient = conversation
                 .messages
                 .iter()
                 .rev()
-                .find(|message| {
-                    message.role == MessageRole::User
-                        || (message.role == MessageRole::System
-                            && message
-                                .content
-                                .as_deref()
-                                .is_some_and(|text| text.starts_with(LIVE_STEER_PREFIX)))
-                })
+                .find(|message| message.role == MessageRole::User)
                 .and_then(|message| message.content.as_deref())
-                .unwrap_or("There is no new speech. Continue waiting.");
+                .unwrap_or("There is no new recipient speech. Continue waiting.");
+            let mut latest_input = format!("Recipient: {latest_recipient}");
+            for (_, steer) in &conversation.pending_steers {
+                latest_input.push_str("\nPrivate instruction (not recipient speech): ");
+                latest_input.push_str(steer);
+            }
             request_messages = vec![
                 ChatMessage::system(
-                    "Classify the latest input to a phone call that is ON HOLD. Return only JSON with one key, decision. Choose wait_silently for silence, music, recorded queue announcements, or requests to keep waiting. Choose resume_call when a live person directly addresses you again, including asking if you are still there. A live instruction from the user via the mobile app may explicitly request speech; that also permits resume_call. Do not carry out the call objective, write a spoken reply, or add other JSON fields.",
+                    "Classify the latest recipient speech and pending private live instructions for a phone call that is ON HOLD. Return only JSON with one key, decision. Choose wait_silently for silence, music, recorded queue announcements, or requests to keep waiting. Choose resume_call when a live person directly addresses you again, including asking if you are still there. A private live instruction from the user via the mobile app may explicitly request speech; that also permits resume_call even alongside a queue announcement. Apply private instructions oldest to newest; the latest conflicting instruction takes priority. Do not carry out the call objective, write a spoken reply, or add other JSON fields.",
                 ),
                 ChatMessage::user(latest_input),
             ];
@@ -2795,6 +2831,14 @@ mod tests {
             Arc::new(Self {
                 preload_status: status,
                 chat_status: Mutex::new(StatusCode::OK),
+                chat_sse_chunks: Mutex::new(vec![format!(
+                    "data: {}\n\ndata: [DONE]\n\n",
+                    json!({"choices":[{"delta":{"content":json!({
+                        "decision":"wait_silently", "speech":"", "digits":"",
+                        "reason":"prepared", "on_hold":false, "outcome_summary":""
+                    }).to_string()}}]})
+                )
+                .into_bytes()]),
                 ..Self::default()
             })
         }
@@ -2866,6 +2910,26 @@ mod tests {
         State(state): State<Arc<MockServerState>>,
         Json(body): Json<Value>,
     ) -> Response {
+        let schema = &body["response_format"]["json_schema"]["schema"];
+        if body["response_format"]["json_schema"]["strict"] == true
+            && schema["properties"].as_object().is_some_and(|properties| {
+                properties.keys().any(|key| {
+                    !schema["required"].as_array().is_some_and(|required| {
+                        required
+                            .iter()
+                            .any(|item| item.as_str() == Some(key.as_str()))
+                    })
+                })
+            })
+        {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "strict structured output must require every property"
+                })),
+            )
+                .into_response();
+        }
         state.chat_requests.lock().await.push(body);
         let status = *state.chat_status.lock().await;
         if !status.is_success() {
@@ -3405,6 +3469,77 @@ mod tests {
             matches!(result, Err(VoiceError::Transport { .. })),
             "{result:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn strict_provider_accepts_the_spoken_turn_schema() {
+        let state = MockServerState::with_preload_status(StatusCode::OK);
+        let base = spawn_mock_voice_server(Arc::clone(&state)).await;
+        let client = VoicePipelineClient::new(VoicePipelineConfig {
+            llm_base_url: base,
+            ..VoicePipelineConfig::default()
+        })
+        .unwrap();
+        let conversation = VoiceConversation::new(VoiceCallPromptParams {
+            user_display_name: "Test Caller".to_string(),
+            callee_name: None,
+            objective: "Ask for the opening hours.".to_string(),
+            first_message: None,
+            context: None,
+        });
+        let turn = client
+            .stream_assistant_turn(&conversation, &CancellationToken::new(), |_| {})
+            .await
+            .expect("a strict provider accepts the actual request schema");
+        assert!(matches!(
+            turn.tool_calls.as_slice(),
+            [VoiceToolCall::WaitSilently { .. }]
+        ));
+        assert_eq!(state.chat_requests.lock().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn held_classifier_keeps_a_steer_that_precedes_later_recipient_transcription() {
+        let state = MockServerState::new();
+        *state.chat_sse_chunks.lock().await = vec![format!(
+            "data: {}\n\ndata: [DONE]\n\n",
+            json!({"choices":[{"delta":{"content":"{\"decision\":\"resume_call\"}"}}]})
+        )
+        .into_bytes()];
+        let base = spawn_mock_voice_server(Arc::clone(&state)).await;
+        let client = VoicePipelineClient::new(VoicePipelineConfig {
+            llm_base_url: base,
+            ..VoicePipelineConfig::default()
+        })
+        .unwrap();
+        let mut conversation = VoiceConversation::new(VoiceCallPromptParams {
+            user_display_name: "Test Caller".to_string(),
+            callee_name: None,
+            objective: "Ask for the opening hours.".to_string(),
+            first_message: None,
+            context: None,
+        });
+        conversation.set_on_hold(true);
+        conversation.inject_steer("Resume speaking and ask about parking now.");
+        conversation
+            .push_callee_utterance("Your call is important to us. Please continue to hold.");
+        let turn = client
+            .stream_assistant_turn(&conversation, &CancellationToken::new(), |_| {})
+            .await
+            .unwrap();
+        assert!(turn.full_text.is_empty());
+        assert!(matches!(
+            turn.tool_calls.as_slice(),
+            [VoiceToolCall::ResumeCall { .. }]
+        ));
+        let requests = state.chat_requests.lock().await;
+        let input = requests[0]["messages"][1]["content"].as_str().unwrap();
+        assert!(
+            input.contains("Resume speaking and ask about parking now."),
+            "{input}"
+        );
+        assert!(input.contains("Your call is important to us."), "{input}");
+        assert!(!input.contains("Ask for the opening hours."), "{input}");
     }
 
     #[tokio::test]

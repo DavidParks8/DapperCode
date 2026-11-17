@@ -13,6 +13,7 @@ mod full_audio_validation {
     const SPEECH_THRESHOLD: i32 = 120;
     const MAX_STIMULUS_SAMPLES: usize = 24_000 * 30;
     const MAX_DIALOGUE_CAPTURE_BYTES: usize = 256 * 1024;
+    const MAX_RECEIVED_SAMPLES: usize = 8_000 * 180;
     const POST_DRAIN_GUARD: Duration = Duration::from_secs(2);
 
     #[test]
@@ -68,8 +69,11 @@ mod full_audio_validation {
                 .create_new(true)
                 .open(output)
                 .expect("telephone output must be new");
-            std::io::Write::write_all(&mut file, &super::super::audio::encode_wav_8k_mono(&decoded))
-                .expect("write complete telephone WAV");
+            std::io::Write::write_all(
+                &mut file,
+                &super::super::audio::encode_wav_8k_mono(&decoded),
+            )
+            .expect("write complete telephone WAV");
             println!(
                 "INTELLIGIBILITY_CONVERSION {}",
                 json!({
@@ -85,6 +89,8 @@ mod full_audio_validation {
 
     #[derive(Default)]
     struct OutputObservation {
+        received_pcm: Vec<i16>,
+        previous_packet: Option<(u16, u32, u32)>,
         first_nonsilent: Option<Instant>,
         first_speech_energy: Option<Instant>,
         last_nonsilent: Option<Instant>,
@@ -100,6 +106,46 @@ mod full_audio_validation {
         unexpected_late_audio_packets: usize,
         post_drain_guard_elapsed_us: Option<i64>,
         post_drain_guard_completion: Option<&'static str>,
+    }
+
+    impl OutputObservation {
+        fn capture_pcmu(
+            &mut self,
+            packet: &sip::ParsedRtpPacket<'_>,
+        ) -> Result<[i16; RTP_FRAME_SAMPLES], String> {
+            if packet.payload.len() != RTP_FRAME_SAMPLES {
+                return Err(format!(
+                    "output PCMU payload has {} bytes instead of twenty milliseconds",
+                    packet.payload.len()
+                ));
+            }
+            if let Some((sequence, timestamp, ssrc)) = self.previous_packet {
+                if packet.sequence_number != sequence.wrapping_add(1)
+                    || packet.timestamp
+                        != timestamp
+                            .wrapping_add(u32::try_from(RTP_FRAME_SAMPLES).expect("frame size"))
+                    || packet.ssrc != ssrc
+                {
+                    return Err("received PCMU capture has a missing, duplicate, reordered, or discontinuous packet".to_string());
+                }
+            }
+            let mut decoded = [0; RTP_FRAME_SAMPLES];
+            for (sample, byte) in decoded.iter_mut().zip(packet.payload) {
+                *sample = decode_mulaw(*byte);
+            }
+            if !self.received_pcm.is_empty() || decoded.iter().any(|sample| *sample != 0) {
+                if self.received_pcm.len() + decoded.len() > MAX_RECEIVED_SAMPLES {
+                    return Err(
+                        "received PCMU capture exceeded the bounded three-minute audio limit"
+                            .to_string(),
+                    );
+                }
+                self.received_pcm.extend_from_slice(&decoded);
+            }
+            self.previous_packet = Some((packet.sequence_number, packet.timestamp, packet.ssrc));
+            self.pcmu_packets += 1;
+            Ok(decoded)
+        }
     }
 
     struct InputTiming {
@@ -170,7 +216,7 @@ mod full_audio_validation {
         async fn start(config: &VoicePipelineConfig) -> Self {
             let calls = Arc::new(StdMutex::new(Vec::new()));
             let shutdown = CancellationToken::new();
-            let http = reqwest::Client::builder()
+            let http = crate::tls::http_client_builder()
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
                 .connect_timeout(Duration::from_secs(10))
@@ -649,11 +695,14 @@ mod full_audio_validation {
         evidence
     }
 
-    fn dialogue_evidence(calls: &StdMutex<Vec<StageHttpCall>>) -> DialogueEvidence {
+    fn dialogue_evidence(
+        calls: &StdMutex<Vec<StageHttpCall>>,
+        connected: Instant,
+    ) -> DialogueEvidence {
         let mut evidence = DialogueEvidence::default();
         for call in lock_unpoisoned(calls)
             .iter()
-            .filter(|call| call.stage == "dialogue")
+            .filter(|call| call.stage == "dialogue" && call.request_started >= connected)
         {
             let call = dialogue_call_evidence(call);
             evidence.structured_turn |= call.structured_turn;
@@ -668,8 +717,9 @@ mod full_audio_validation {
     fn assistant_response_checks(
         snapshot: &PhoneCallSnapshot,
         dialogue: &DialogueEvidence,
+        speech: &str,
     ) -> Value {
-        let speech = snapshot
+        let intended = snapshot
             .transcript
             .iter()
             .filter(|entry| entry.speaker == TranscriptSpeaker::Assistant)
@@ -728,27 +778,59 @@ mod full_audio_validation {
             || response.contains("that's all")
             || dialogue.action_names.iter().any(|name| name == "end_call");
         let appropriate_listen = !snapshot.on_hold
-            && dialogue.action_names.iter().any(|name| name == "wait_silently")
+            && dialogue
+                .action_names
+                .iter()
+                .any(|name| name == "wait_silently")
             && hours_understood;
         let objective_fulfilled_or_appropriate_listen =
             hours_understood && (closing || appropriate_listen);
-        let uninterrupted = !speech.contains(INTERRUPTED_MARKER);
+        let uninterrupted = !intended.contains(INTERRUPTED_MARKER);
+        let exact_received_readback =
+            !speech.trim().is_empty() && words(speech) == words(&intended);
         json!({
             "passed": !speech.is_empty() && hours_understood && no_invented_commitment
-                && objective_fulfilled_or_appropriate_listen && uninterrupted,
+                && objective_fulfilled_or_appropriate_listen && uninterrupted && exact_received_readback,
             "hours_understood": hours_understood,
             "no_invented_commitment": no_invented_commitment,
             "objective_fulfilled_or_appropriate_listen": objective_fulfilled_or_appropriate_listen,
             "appropriate_listen": appropriate_listen,
             "assistant_transcript_uninterrupted": uninterrupted,
-            "assistant_speech_word_count": words(&speech).len(),
-            "assistant_speech_excerpt": truncate_utf8_bytes(&speech, 512).0,
+            "exact_received_readback": exact_received_readback,
+            "assistant_transcript_excerpt": truncate_utf8_bytes(&intended, 512).0,
+            "received_audio_asr_excerpt": truncate_utf8_bytes(speech, 512).0,
+            "assistant_speech_word_count": words(speech).len(),
+            "assistant_speech_excerpt": truncate_utf8_bytes(speech, 512).0,
             "model_output_excerpt": truncate_utf8_bytes(&dialogue.model_text, 512).0,
             "model_action_names": dialogue.action_names,
             "structured_response_observed": dialogue.structured_turn,
-            "evidence_source": "hours and commitments use assistant-only spoken transcript; structured model output is used only for action validation/diagnostics",
-            "limitations": "strict hours-case lexical/action checks, not a general semantic or human-preference evaluation; factual readback must be audible speech, not hidden structured metadata",
+            "evidence_source": "independent, unprompted ASR of ordered received PCMU audio; exact normalized comparison with the intended assistant transcript; structured model output validates actions only",
+            "limitations": "strict hours-case lexical/action checks with exact case/punctuation and 9/nine, 5/five normalization; not a general semantic, prosody, or human-preference evaluation",
         })
+    }
+
+    async fn transcribe_received_audio(
+        client: &VoicePipelineClient,
+        samples: &[i16],
+    ) -> Result<String, String> {
+        if samples.is_empty() || samples.len() > MAX_RECEIVED_SAMPLES {
+            return Err("received speech capture is empty or exceeds its audio bound".to_string());
+        }
+        let wav = encode_wav_8k_mono(samples);
+        let cancel = CancellationToken::new();
+        timeout(
+            AUDIO_ACTION_TIMEOUT,
+            client.transcribe_wav(&wav, "", &cancel),
+        )
+        .await
+        .map_err(|_| "independent received-audio recognition exceeded 45 seconds".to_string())?
+        .map_err(|error| {
+            format!(
+                "independent received-audio recognition failed: {}",
+                diagnostic_text(&error.to_string())
+            )
+        })?
+        .ok_or_else(|| "received speech transcribed to silence or noise".to_string())
     }
 
     fn metric(value: Value) {
@@ -1202,7 +1284,7 @@ mod full_audio_validation {
         service: &PhoneCallService,
         call_id: &str,
         observed: &mut OutputObservation,
-        http_calls: &StdMutex<Vec<StageHttpCall>>,
+        (http_calls, connected): (&StdMutex<Vec<StageHttpCall>>, Instant),
     ) -> Result<(), String> {
         let mut packet = [0_u8; 2048];
         let mut quiet_frames = 0_usize;
@@ -1221,11 +1303,7 @@ mod full_audio_validation {
                     if parsed.payload_type != PCMU_PAYLOAD_TYPE {
                         continue;
                     }
-                    if parsed.payload.len() != RTP_FRAME_SAMPLES {
-                        return Err(format!("output PCMU payload has {} bytes instead of twenty milliseconds", parsed.payload.len()));
-                    }
-                    observed.pcmu_packets += 1;
-                    let decoded: Vec<i16> = parsed.payload.iter().copied().map(decode_mulaw).collect();
+                    let decoded = observed.capture_pcmu(&parsed)?;
                     if decoded.iter().any(|sample| *sample != 0) {
                         if guard_started.is_some() {
                             observed.unexpected_late_audio_packets += 1;
@@ -1295,7 +1373,8 @@ mod full_audio_validation {
                 && assistant_drained
                 && quiet_frames >= 25
             {
-                let accepted_structured_turn = dialogue_evidence(http_calls).structured_turn;
+                let accepted_structured_turn =
+                    dialogue_evidence(http_calls, connected).structured_turn;
                 if real_stages_succeeded(http_calls, accepted_structured_turn) {
                     observed.playback_completion_observed = true;
                     let completed = Instant::now();
@@ -1325,6 +1404,160 @@ mod full_audio_validation {
                     production_state(&snapshot)
                 ));
             }
+        }
+    }
+
+    #[test]
+    fn received_capture_checks_continuity_wraparound_and_audio_bounds() {
+        let payload = [0x10; RTP_FRAME_SAMPLES];
+        let first = build_rtp_packet(
+            false,
+            PCMU_PAYLOAD_TYPE,
+            u16::MAX,
+            u32::MAX - 159,
+            1,
+            &payload,
+        );
+        let second = build_rtp_packet(false, PCMU_PAYLOAD_TYPE, 0, 0, 1, &payload);
+        for (sequence, timestamp, ssrc) in [(0, 0, 1), (2, 160, 1), (1, 320, 1), (1, 160, 2)] {
+            let mut observed = OutputObservation::default();
+            observed
+                .capture_pcmu(&parse_rtp_packet(&first).unwrap())
+                .unwrap();
+            observed
+                .capture_pcmu(&parse_rtp_packet(&second).unwrap())
+                .unwrap();
+            assert_eq!(observed.received_pcm.len(), RTP_FRAME_SAMPLES * 2);
+            let broken = build_rtp_packet(
+                false,
+                PCMU_PAYLOAD_TYPE,
+                sequence,
+                timestamp,
+                ssrc,
+                &payload,
+            );
+            assert!(observed
+                .capture_pcmu(&parse_rtp_packet(&broken).unwrap())
+                .is_err());
+        }
+        let mut observed = OutputObservation {
+            received_pcm: vec![1; MAX_RECEIVED_SAMPLES],
+            ..OutputObservation::default()
+        };
+        assert!(observed
+            .capture_pcmu(&parse_rtp_packet(&first).unwrap())
+            .unwrap_err()
+            .contains("audio limit"));
+        let incomplete = build_rtp_packet(false, PCMU_PAYLOAD_TYPE, 0, 0, 1, &payload[..159]);
+        assert!(observed
+            .capture_pcmu(&parse_rtp_packet(&incomplete).unwrap())
+            .unwrap_err()
+            .contains("payload"));
+    }
+
+    #[tokio::test]
+    async fn received_speech_gate_uses_wire_audio_not_the_intended_transcript() {
+        for (recognized, expected, unsupported_preload) in [
+            (STIMULUS, true, false),
+            ("I would like to order a birthday cake.", false, false),
+            ("", false, false),
+            (STT_FAILURE_REPLY, false, false),
+            (STIMULUS, false, true),
+        ] {
+            let turns = if unsupported_preload {
+                vec![
+                    voice_reply(
+                        "",
+                        voice_tool(
+                            "wait_silently",
+                            json!({"reason":"prepared","on_hold":false}),
+                        ),
+                    ),
+                    voice_reply(STIMULUS, voice_tool("resume_call", json!({}))),
+                ]
+            } else {
+                vec![voice_reply(STIMULUS, json!([]))]
+            };
+            let transcriptions = if unsupported_preload {
+                vec!["", STIMULUS, recognized]
+            } else {
+                vec![STIMULUS, recognized]
+            };
+            let voice = MockVoiceState::new(turns, transcriptions, 2_400);
+            if unsupported_preload {
+                *voice.preload_status.lock().await = StatusCode::NOT_FOUND;
+            }
+            let base = spawn_mock_voice_http(Arc::clone(&voice)).await;
+            let config = VoicePipelineConfig {
+                stt_base_url: base.clone(),
+                llm_base_url: base.clone(),
+                tts_base_url: base,
+                ..VoicePipelineConfig::default()
+            };
+            let client = VoicePipelineClient::new(config.clone()).unwrap();
+            let forwarder = StageForwarder::start(&config).await;
+            let mut options =
+                TrunkCallOptions::new(Duration::from_secs(20), Duration::from_secs(60));
+            options.voice_config = Some(forwarder.config.clone());
+            let mut call = TrunkCall::connect(&voice, options).await;
+            let connected = Instant::now();
+            call.callee_speaks(VAD_DEFAULT_HANGOVER_FRAMES + 2).await;
+            let mut observed = OutputObservation::default();
+            timeout(
+                TEST_TIMEOUT,
+                observe_output(
+                    &call.rtp,
+                    call.dialog.client_rtp_addr,
+                    &mut call.notifications,
+                    &call.service,
+                    &call.call_id,
+                    &mut observed,
+                    (&forwarder.calls, connected),
+                ),
+            )
+            .await
+            .expect("bounded wire capture")
+            .expect("complete SIP/RTP playback");
+            let snapshot = call.snapshot();
+            let dialogue = dialogue_evidence(&forwarder.calls, connected);
+            let cleanup = cleanup_audio_call(&mut call, observed.terminal_card.take()).await;
+            assert!(cleanup.errors.is_empty(), "{:?}", cleanup.errors);
+            assert!(cleanup.bye_acknowledged && cleanup.report_observed);
+            assert!(cleanup
+                .final_card
+                .as_ref()
+                .is_some_and(|card| !card_has_hangup(card)));
+            assert_eq!(call.snapshot().status, PhoneCallStatus::Completed);
+            assert_eq!(call.service.live_work_count(), 0);
+            assert_eq!(
+                assistant_response_checks(&snapshot, &dialogue, STIMULUS)["passed"],
+                !unsupported_preload
+            );
+            let readback = transcribe_received_audio(&client, &observed.received_pcm).await;
+            assert_eq!(
+                readback
+                    .as_ref()
+                    .is_ok_and(
+                        |speech| assistant_response_checks(&snapshot, &dialogue, speech)["passed"]
+                            == true
+                    ),
+                expected,
+                "{readback:?}"
+            );
+            assert_eq!(
+                readback.is_err(),
+                recognized.is_empty() || recognized == STT_FAILURE_REPLY
+            );
+            let requests = voice.stt_request_fields.lock().await;
+            assert_eq!(requests.len(), if unsupported_preload { 3 } else { 2 });
+            let verification = requests.last().unwrap();
+            assert_eq!(
+                verification["file"],
+                encode_wav_8k_mono(&observed.received_pcm)
+            );
+            assert!(!verification.contains_key("prompt"));
+            drop(requests);
+            assert!(forwarder.stop().await.is_empty());
         }
     }
 
@@ -1397,22 +1630,31 @@ mod full_audio_validation {
         let mut options = TrunkCallOptions::new(ROUND_TIMEOUT, ROUND_TIMEOUT);
         options.voice_config = Some(forwarder.config.clone());
         options.connect_timeout = ROUND_TIMEOUT;
-        options.objective = Some("Ask for the opening and closing hours, then repeat both times back to confirm.");
+        options.objective =
+            Some("Ask for the opening and closing hours, then repeat both times back to confirm.");
         let dial_started = Instant::now();
         let mut call = TrunkCall::connect(&mock, options).await;
         let connected = Instant::now();
         let recognition_priming_required =
             std::env::var("DAPPERCODE_TEST_VOICE_EXPECT_STT_PRIME").as_deref() == Ok("1");
-        let recognition_primed_before_connection = lock_unpoisoned(&forwarder.calls).iter().any(|call| {
-            call.stage == "stt" && body_completed(call)
-                && call.completed.is_some_and(|completed| completed <= connected)
-        });
+        let recognition_primed_before_connection =
+            lock_unpoisoned(&forwarder.calls).iter().any(|call| {
+                call.stage == "stt"
+                    && body_completed(call)
+                    && call
+                        .completed
+                        .is_some_and(|completed| completed <= connected)
+            });
         let speech_priming_required =
             std::env::var("DAPPERCODE_TEST_VOICE_EXPECT_TTS_PRIME").as_deref() == Ok("1");
-        let speech_primed_before_connection = lock_unpoisoned(&forwarder.calls).iter().any(|call| {
-            call.stage == "tts" && body_completed(call)
-                && call.completed.is_some_and(|completed| completed <= connected)
-        });
+        let speech_primed_before_connection =
+            lock_unpoisoned(&forwarder.calls).iter().any(|call| {
+                call.stage == "tts"
+                    && body_completed(call)
+                    && call
+                        .completed
+                        .is_some_and(|completed| completed <= connected)
+            });
         assert_eq!(call.snapshot().status, PhoneCallStatus::InProgress);
         let mut observed = OutputObservation::default();
         let mut input = None;
@@ -1438,7 +1680,7 @@ mod full_audio_validation {
                     &call.service,
                     &call.call_id,
                     &mut observed,
-                    &forwarder.calls,
+                    (&forwarder.calls, connected),
                 ),
             );
             observation
@@ -1466,13 +1708,28 @@ mod full_audio_validation {
             Ok(Err(error)) => Some(diagnostic_text(error)),
             Err(_) => Some("full audio observation exceeded 180 seconds".to_string()),
         };
-        let dialogue = dialogue_evidence(&forwarder.calls);
-        let assistant_checks = assistant_response_checks(&snapshot, &dialogue);
-        let assistant_correct = assistant_checks["passed"] == true;
+        let dialogue = dialogue_evidence(&forwarder.calls, connected);
         let stages_succeeded = real_stages_succeeded(
             &forwarder.calls,
             dialogue.structured_turn && observed.playback_completion_observed,
         );
+        let cleanup = cleanup_audio_call(&mut call, observed.terminal_card.take()).await;
+        let verification_started = Instant::now();
+        let received_speech = if media_completed {
+            transcribe_received_audio(&client, &observed.received_pcm).await
+        } else {
+            Err(
+                "received-audio verification requires complete, ordered playback capture"
+                    .to_string(),
+            )
+        };
+        let verification_elapsed = verification_started.elapsed();
+        let assistant_checks = match &received_speech {
+            Ok(speech) => assistant_response_checks(&snapshot, &dialogue, speech),
+            Err(error) => json!({"passed":false, "failure":error,
+                "evidence_source":"independent ASR of received PCMU audio"}),
+        };
+        let assistant_correct = assistant_checks["passed"] == true;
         let primary_failure = if snapshot.status == PhoneCallStatus::Failed {
             Some(format!(
                 "production call failed before cleanup: {}",
@@ -1491,9 +1748,15 @@ mod full_audio_validation {
         } else if !stages_succeeded {
             Some("a real voice HTTP stage failed; see recorded http_stages".to_string())
         } else if recognition_priming_required && !recognition_primed_before_connection {
-            Some("recognition was not primed through its real endpoint before connection".to_string())
+            Some(
+                "recognition was not primed through its real endpoint before connection"
+                    .to_string(),
+            )
         } else if speech_priming_required && !speech_primed_before_connection {
-            Some("speech synthesis was not primed through its real endpoint before connection".to_string())
+            Some(
+                "speech synthesis was not primed through its real endpoint before connection"
+                    .to_string(),
+            )
         } else {
             None
         };
@@ -1541,6 +1804,16 @@ mod full_audio_validation {
             "cleanup_action_timeout_seconds": AUDIO_ACTION_TIMEOUT.as_secs(),
             "cleanup_total_timeout_seconds": AUDIO_CLEANUP_TIMEOUT.as_secs(),
             "assistant_response_checks": assistant_checks,
+            "dialogue_evidence_scope": "post-connection requests only; readiness probes cannot satisfy call action checks",
+            "received_audio_verification": {
+                "completed": received_speech.is_ok(),
+                "prompted": false,
+                "model": config.stt_model,
+                "samples_8k": observed.received_pcm.len(),
+                "elapsed_us": verification_elapsed.as_micros(),
+                "failure": received_speech.as_ref().err(),
+                "phase": "offline after complete playback capture and call cleanup; excluded from latency measurements and production HTTP stage traces",
+            },
             "recognition_priming_required": recognition_priming_required,
             "recognition_primed_before_connection": recognition_primed_before_connection,
             "speech_priming_required": speech_priming_required,
@@ -1558,7 +1831,6 @@ mod full_audio_validation {
                 .extend(details);
         }
         metric(round_metric);
-        let cleanup = cleanup_audio_call(&mut call, observed.terminal_card.take()).await;
         let mocks_unused = mock.stt_requests.load(Ordering::SeqCst) == 0
             && mock.chat_requests.lock().await.is_empty()
             && mock.tts_requests.lock().await.is_empty();

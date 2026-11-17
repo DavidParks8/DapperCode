@@ -1533,6 +1533,7 @@ impl SpokenTurnProgress {
 }
 
 struct ActiveAssistantTurn {
+    steer_revision: usize,
     cancel: CancellationToken,
     progress: Arc<StdMutex<SpokenTurnProgress>>,
     handle: JoinHandle<Result<AssistantTurnOutput, VoiceError>>,
@@ -1781,18 +1782,18 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                         transport_on_hold = on_hold;
                         pending_end = None;
                         if let Some(turn) = active_turn.take() {
+                            steer_pending_turn = true;
                             let spoken = turn.abort_and_extract_spoken(&sip_handle);
                             if !spoken.is_empty() {
                                 conversation.record_active_assistant_interrupted(&spoken);
                             }
                         }
-                        if let Some(stt) = active_stt.take() {
-                            stt.abort();
-                        }
                         opening_greeting_pending = false;
                         opening_window_elapsed = true;
-                        steer_pending_turn = false;
-                        pending_utterances.clear();
+                        steer_pending_turn |= conversation.has_pending_steers();
+                        if let Some(VadEvent::UtteranceComplete(samples)) = vad.finish_after_media_quiet() {
+                            new_utterance = Some(samples);
+                        }
                         speech_quiet_deadline = None;
                         set_call_hold(&ctx.slot, &mut conversation, on_hold);
                         vad = TelephonyVad::new();
@@ -1821,7 +1822,7 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                 sync_shared_transcript(&ctx.slot, conversation.transcript());
                 publish_in_call_card_update(&ctx, conversation.transcript()).await;
 
-                if active_turn.is_none() && active_stt.is_none() && !vad.has_pending_speech() {
+                if !transport_on_hold && active_turn.is_none() && active_stt.is_none() && !vad.has_pending_speech() {
                     opening_greeting_pending = false;
                     opening_window_elapsed = true;
                     steer_pending_turn = false;
@@ -1853,11 +1854,16 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                     outbound_mean,
                 ) {
                     Some(VadEvent::BargeIn) => {
-                        if let Some(turn) = active_turn.take() {
-                            let spoken = turn.abort_and_extract_spoken(&sip_handle);
-                            conversation.record_active_assistant_interrupted(&spoken);
-                            sync_shared_transcript(&ctx.slot, conversation.transcript());
-                            publish_in_call_card_update(&ctx, conversation.transcript()).await;
+                        match active_turn.take() {
+                            Some(turn) => {
+                                let spoken = turn.abort_and_extract_spoken(&sip_handle);
+                                conversation.record_active_assistant_interrupted(&spoken);
+                                sync_shared_transcript(&ctx.slot, conversation.transcript());
+                                publish_in_call_card_update(&ctx, conversation.transcript()).await;
+                            }
+                            None => {
+                                sip_handle.clear_outbound_audio();
+                            }
                         }
                     }
                     Some(VadEvent::UtteranceComplete(samples)) => {
@@ -1896,6 +1902,7 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                             }
                             continue;
                         }
+                        pending_end = None;
                         opening_greeting_pending = false;
                         opening_window_elapsed = true;
                         steer_pending_turn = true;
@@ -1906,7 +1913,7 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                         conversation.push_callee_utterance(&callee_text);
                         sync_shared_transcript(&ctx.slot, conversation.transcript());
                         publish_in_call_card_update(&ctx, conversation.transcript()).await;
-                        if active_stt.is_none() && !vad.has_pending_speech() {
+                        if !transport_on_hold && active_stt.is_none() && !vad.has_pending_speech() {
                             steer_pending_turn = false;
                             active_turn = Some(start_assistant_turn(
                                 &ctx,
@@ -1918,7 +1925,8 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                     }
                     Ok(Ok(None)) => {
                         let should_speak_now =
-                            ((opening_greeting_pending && opening_window_elapsed)
+                            !transport_on_hold
+                                && ((opening_greeting_pending && opening_window_elapsed)
                                 || steer_pending_turn)
                                 && active_turn.is_none()
                                 && active_stt.is_none()
@@ -1962,6 +1970,9 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                 let completed_turn = active_turn.take();
                 match turn_join {
                     Ok(Ok(mut turn_output)) => {
+                        if let Some(turn) = &completed_turn {
+                            conversation.acknowledge_steers_through(turn.steer_revision);
+                        }
                         let was_on_hold = conversation.is_on_hold();
                         if was_on_hold {
                             turn_output.full_text.clear();
@@ -2063,7 +2074,7 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
 
                         publish_in_call_card_update(&ctx, conversation.transcript()).await;
 
-                        if steer_pending_turn && active_stt.is_none() && !vad.has_pending_speech() {
+                        if !transport_on_hold && steer_pending_turn && active_stt.is_none() && !vad.has_pending_speech() {
                             steer_pending_turn = false;
                             active_turn = Some(start_assistant_turn(
                                 &ctx,
@@ -2116,7 +2127,7 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
             }
             () = tokio::time::sleep_until(opening_deadline), if opening_greeting_pending && !opening_window_elapsed && active_turn.is_none() => {
                 opening_window_elapsed = true;
-                if !vad.has_pending_speech() && active_stt.is_none() {
+                if !transport_on_hold && !vad.has_pending_speech() && active_stt.is_none() {
                     opening_greeting_pending = false;
                     steer_pending_turn = false;
                     active_turn = Some(start_assistant_turn(
@@ -2148,7 +2159,8 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                 ));
             }
         }
-        if active_turn.is_none()
+        if !transport_on_hold
+            && active_turn.is_none()
             && active_stt.is_none()
             && !vad.has_pending_speech()
             && (steer_pending_turn || (opening_greeting_pending && opening_window_elapsed))
@@ -2504,13 +2516,16 @@ fn spawn_assistant_turn(
                 .iter()
                 .map(|(_, text)| text.clone())
                 .collect();
-            turn_output.tool_calls.clear();
+            turn_output
+                .tool_calls
+                .retain(|tool| matches!(tool, VoiceToolCall::WaitSilently { on_hold: true, .. }));
             turn_output.raw_tool_calls.clear();
         }
         Ok(turn_output)
     }));
 
     ActiveAssistantTurn {
+        steer_revision: conversation.steer_revision(),
         cancel: turn_cancel,
         progress,
         handle,
@@ -3218,9 +3233,11 @@ mod tests {
         stt_replies: Mutex<VecDeque<String>>,
         stt_delay_ms: AtomicUsize,
         stt_requests: AtomicUsize,
+        stt_request_fields: Mutex<Vec<std::collections::BTreeMap<String, Vec<u8>>>>,
         tts_pcm_bytes: Mutex<Vec<u8>>,
         tts_chunk_delay_ms: AtomicUsize,
         chat_requests: Mutex<Vec<Value>>,
+        chat_status: Mutex<StatusCode>,
         tts_requests: Mutex<Vec<Value>>,
         tts_fail_after: AtomicUsize,
     }
@@ -3243,9 +3260,11 @@ mod tests {
                 stt_replies: Mutex::new(stt_replies.into_iter().map(ToOwned::to_owned).collect()),
                 stt_delay_ms: AtomicUsize::new(0),
                 stt_requests: AtomicUsize::new(0),
+                stt_request_fields: Mutex::new(Vec::new()),
                 tts_pcm_bytes: Mutex::new(pcm),
                 tts_chunk_delay_ms: AtomicUsize::new(0),
                 chat_requests: Mutex::new(Vec::new()),
+                chat_status: Mutex::new(StatusCode::OK),
                 tts_requests: Mutex::new(Vec::new()),
                 tts_fail_after: AtomicUsize::new(usize::MAX),
             })
@@ -3280,9 +3299,19 @@ mod tests {
                 "/v1/audio/transcriptions",
                 post(
                     |State(st): State<Arc<MockVoiceState>>, mut mp: Multipart| async move {
+                        let mut fields = std::collections::BTreeMap::new();
                         while let Ok(Some(field)) = mp.next_field().await {
-                            let _ = field.bytes().await;
+                            let name = field.name().expect("named transcription field").to_string();
+                            fields.insert(
+                                name,
+                                field
+                                    .bytes()
+                                    .await
+                                    .expect("complete transcription field")
+                                    .to_vec(),
+                            );
                         }
+                        st.stt_request_fields.lock().await.push(fields);
                         // Replies and delays are bound before the arrival is counted, so tests can
                         // change the delay for the next request once they observe this one.
                         let delay_ms = st.stt_delay_ms.load(Ordering::SeqCst);
@@ -3309,6 +3338,11 @@ mod tests {
                 post(
                     |State(st): State<Arc<MockVoiceState>>, Json(body): Json<Value>| async move {
                         st.chat_requests.lock().await.push(body);
+                        let status = *st.chat_status.lock().await;
+                        if !status.is_success() {
+                            return (status, Json(json!({"error":"model not found"})))
+                                .into_response();
+                        }
                         let chunks = st
                             .chat_turns
                             .lock()
@@ -7291,7 +7325,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn remote_hold_aborts_speech_and_pending_transcription_and_blocks_model_resume() {
+    async fn remote_hold_aborts_speech_preserves_transcription_and_blocks_model_resume() {
         let voice = MockVoiceState::new(
             vec![
                 voice_reply(SLOW_GREETING, json!([])),
@@ -7330,12 +7364,10 @@ mod tests {
         let ivr_silence = crate::phone_call::audio::VAD_IVR_HANGOVER_FRAMES + 10;
         call.callee_speaks(ivr_silence).await;
         call.card_shows("Thanks for holding, I am back now.").await;
-        call.update_matching(|params| params["subtitle"] == "On hold")
-            .await;
         assert!(call.snapshot().on_hold);
-        assert_eq!(voice.chat_requests.lock().await.len(), 2);
+        assert_eq!(voice.chat_requests.lock().await.len(), 1);
 
-        // A remote resume aborts a transcription that is still pending.
+        // A remote resume preserves a transcription that is still pending.
         voice.stt_delay_ms.store(1_000, Ordering::SeqCst);
         call.callee_speaks(ivr_silence).await;
         stt_requests_reach(&voice, 2).await;
@@ -7346,11 +7378,12 @@ mod tests {
         assert!(response.contains("a=sendrecv"), "{response}");
         call.update_matching(|params| params["subtitle"] == "In call")
             .await;
-        tokio::time::sleep(Duration::from_millis(1_200)).await;
+        call.card_shows("Sorry, one more moment.").await;
+        chat_requests_reach(&voice, 2).await;
         let resumed = call.snapshot();
         assert!(!resumed.on_hold);
         assert!(
-            !resumed
+            resumed
                 .transcript
                 .iter()
                 .any(|entry| entry.text.contains("one more moment")),
@@ -7365,6 +7398,328 @@ mod tests {
         let report = call.report().await;
         assert!(report.contains("End reason: remote_bye"), "{report}");
         assert!(report.contains(INTERRUPTED_MARKER), "{report}");
+        assert!(report.contains("Sorry, one more moment."), "{report}");
+    }
+
+    #[tokio::test]
+    async fn remote_hold_preserves_inflight_details_and_queued_correction_until_resume() {
+        let voice = MockVoiceState::new(
+            vec![voice_reply("Thursday, got it.", json!([]))],
+            vec!["Book for two on Tuesday.", "Actually use Thursday instead."],
+            2_400,
+        );
+        voice.stt_delay_ms.store(1_500, Ordering::SeqCst);
+        let mut call = TrunkCall::connect(
+            &voice,
+            TrunkCallOptions::new(Duration::from_secs(20), Duration::from_secs(60)),
+        )
+        .await;
+        call.callee_speaks(VAD_DEFAULT_HANGOVER_FRAMES + 2).await;
+        stt_requests_reach(&voice, 1).await;
+        voice.stt_delay_ms.store(0, Ordering::SeqCst);
+        call.callee_speaks(VAD_DEFAULT_HANGOVER_FRAMES + 2).await;
+        call.dialog
+            .renegotiate(&call.sip, 2, "INVITE", "sendonly", call.rtp_port)
+            .await;
+        call.update_matching(|params| params["subtitle"] == "On hold")
+            .await;
+        let held_card = call
+            .update_matching(|params| {
+                params["subtitle"] == "On hold"
+                    && params["blocks"]
+                        .to_string()
+                        .contains("Actually use Thursday instead.")
+            })
+            .await;
+        assert!(held_card.to_string().contains("hangup"), "{held_card}");
+        assert!(call.snapshot().on_hold);
+        assert_eq!(call.snapshot().status, PhoneCallStatus::InProgress);
+        assert!(voice.chat_requests.lock().await.is_empty());
+        assert!(voice.tts_requests.lock().await.is_empty());
+
+        call.dialog
+            .renegotiate(&call.sip, 3, "INVITE", "sendrecv", call.rtp_port)
+            .await;
+        call.card_shows("Thursday, got it.").await;
+        assert!(!call.snapshot().on_hold);
+        assert_eq!(call.snapshot().status, PhoneCallStatus::InProgress);
+        let requests = voice.chat_requests.lock().await;
+        assert_eq!(requests.len(), 1);
+        let recipient: Vec<_> = requests[0]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|message| message["role"] == "user")
+            .map(|message| message["content"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            recipient,
+            [
+                "Recipient: Book for two on Tuesday.",
+                "Recipient: Actually use Thursday instead."
+            ]
+        );
+        drop(requests);
+        call.agent_hangup().await;
+        assert_eq!(call.settled().await.status, PhoneCallStatus::Completed);
+        let report = call.report().await;
+        assert!(report.contains("Book for two on Tuesday."), "{report}");
+        assert!(
+            report.contains("Actually use Thursday instead."),
+            "{report}"
+        );
+    }
+
+    #[tokio::test]
+    async fn remote_hold_retries_the_captured_reply_when_its_assistant_turn_was_aborted() {
+        let reply = "Four for Thursday, got it.";
+        let voice = MockVoiceState::new(
+            vec![voice_reply(reply, json!([])), voice_reply(reply, json!([]))],
+            vec!["Please book four for Thursday."],
+            2_400,
+        );
+        voice.tts_chunk_delay_ms.store(2_000, Ordering::SeqCst);
+        let mut call = TrunkCall::connect(
+            &voice,
+            TrunkCallOptions::new(Duration::from_secs(20), Duration::from_secs(60)),
+        )
+        .await;
+        call.callee_speaks(VAD_DEFAULT_HANGOVER_FRAMES + 2).await;
+        chat_requests_reach(&voice, 1).await;
+        call.dialog
+            .renegotiate(&call.sip, 2, "INVITE", "sendonly", call.rtp_port)
+            .await;
+        call.update_matching(|params| params["subtitle"] == "On hold")
+            .await;
+        assert!(call.snapshot().on_hold);
+        assert_eq!(voice.chat_requests.lock().await.len(), 1);
+        assert!(call
+            .snapshot()
+            .transcript
+            .iter()
+            .any(|entry| entry.text == "Please book four for Thursday."));
+        voice.tts_chunk_delay_ms.store(0, Ordering::SeqCst);
+        call.dialog
+            .renegotiate(&call.sip, 3, "INVITE", "sendrecv", call.rtp_port)
+            .await;
+        call.card_shows(reply).await;
+        assert!(!call.snapshot().on_hold);
+        assert_eq!(call.snapshot().status, PhoneCallStatus::InProgress);
+        assert_eq!(voice.chat_requests.lock().await.len(), 2);
+        call.agent_hangup().await;
+        assert_eq!(call.settled().await.status, PhoneCallStatus::Completed);
+        let report = call.report().await;
+        assert!(
+            report.contains("Please book four for Thursday."),
+            "{report}"
+        );
+        assert!(report.contains(reply), "{report}");
+    }
+
+    #[tokio::test]
+    async fn barge_in_clears_queued_inband_dtmf_without_an_assistant_task() {
+        let voice = MockVoiceState::new(
+            vec![voice_reply(
+                "",
+                voice_tool("send_dtmf", json!({"digits":"01234567890123456789"})),
+            )],
+            vec![],
+            2_400,
+        );
+        let mut options = TrunkCallOptions::new(Duration::from_millis(20), Duration::from_secs(60));
+        options.include_dtmf = false;
+        let mut call = TrunkCall::connect(&voice, options).await;
+        call.assistant_audio_reaches_trunk().await;
+        assert_eq!(voice.chat_requests.lock().await.len(), 1);
+        assert!(voice.tts_requests.lock().await.is_empty());
+        send_rtp_utterance(
+            &call.rtp,
+            call.dialog.client_rtp_addr,
+            &mut call.seq,
+            &mut call.ts,
+            14,
+            0,
+        )
+        .await;
+        timeout(Duration::from_secs(1), async {
+            let mut quiet = 0;
+            let mut packet = [0; 2048];
+            while quiet < 15 {
+                let (len, _) = call.rtp.recv_from(&mut packet).await.unwrap();
+                let rtp = parse_rtp_packet(&packet[..len]).unwrap();
+                assert_eq!(rtp.payload_type, PCMU_PAYLOAD_TYPE);
+                if rtp.payload.iter().all(|byte| matches!(*byte, 0xFF | 0x7F)) {
+                    quiet += 1;
+                } else {
+                    quiet = 0;
+                }
+            }
+        })
+        .await
+        .expect("barge-in discards remaining in-band tones immediately");
+        assert_eq!(call.snapshot().status, PhoneCallStatus::InProgress);
+        assert!(!call.snapshot().on_hold);
+        call.agent_hangup().await;
+        assert_eq!(
+            call.settled().await.end_reason.as_deref(),
+            Some("agent_hangup")
+        );
+    }
+
+    #[tokio::test]
+    async fn queued_substantive_correction_then_fragment_cancels_the_old_hangup_without_more_rtp() {
+        let voice = MockVoiceState::new(
+            vec![
+                voice_reply(
+                    "Thanks, goodbye.",
+                    voice_tool(
+                        "end_call",
+                        json!({
+                            "reason":"Got the hours", "outcome_summary":"Closes at nine"
+                        }),
+                    ),
+                ),
+                voice_reply("Ten, got it. Thanks.", json!([])),
+            ],
+            vec!["We close at nine.", "Actually we close at ten.", "Bye"],
+            2_400,
+        );
+        let mut call = TrunkCall::connect(
+            &voice,
+            TrunkCallOptions::new(Duration::from_secs(20), Duration::from_secs(60)),
+        )
+        .await;
+        call.callee_speaks(VAD_DEFAULT_HANGOVER_FRAMES + 2).await;
+        call.card_shows("Thanks, goodbye.").await;
+        voice.stt_delay_ms.store(1_000, Ordering::SeqCst);
+        call.callee_speaks(VAD_DEFAULT_HANGOVER_FRAMES + 2).await;
+        stt_requests_reach(&voice, 2).await;
+        voice.stt_delay_ms.store(0, Ordering::SeqCst);
+        call.callee_speaks(VAD_DEFAULT_HANGOVER_FRAMES + 2).await;
+        call.card_shows("Ten, got it. Thanks.").await;
+        let snapshot = call.snapshot();
+        assert_eq!(snapshot.status, PhoneCallStatus::InProgress);
+        assert!(snapshot.end_reason.is_none());
+        assert!(snapshot.outcome_summary.is_none());
+        assert!(snapshot
+            .transcript
+            .iter()
+            .any(|entry| entry.text == "Actually we close at ten."));
+        assert!(snapshot.transcript.iter().any(|entry| entry.text == "Bye"));
+        let requests = voice.chat_requests.lock().await;
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1]["messages"]
+            .to_string()
+            .contains("Actually we close at ten."));
+        assert!(requests[1]["messages"].to_string().contains("Bye"));
+        drop(requests);
+        call.agent_hangup().await;
+        assert_eq!(
+            call.settled().await.end_reason.as_deref(),
+            Some("agent_hangup")
+        );
+    }
+
+    #[tokio::test]
+    async fn ordinary_steering_preserves_hold_then_late_transcription_keeps_explicit_resume() {
+        let voice = MockVoiceState::new(
+            vec![
+                voice_reply(
+                    "Of course, I'll hold. I'll wait for you here.",
+                    voice_tool(
+                        "wait_silently",
+                        json!({"reason":"Recipient requested hold", "on_hold":true}),
+                    ),
+                ),
+                voice_reply(
+                    "",
+                    voice_tool(
+                        "wait_silently",
+                        json!({"reason":"Still holding", "on_hold":true}),
+                    ),
+                ),
+                voice_reply("", voice_tool("resume_call", json!({}))),
+                voice_reply("Is there parking?", json!([])),
+            ],
+            vec![
+                "Please hold while I check.",
+                "Your call is important to us. Please continue to hold.",
+            ],
+            24_000,
+        );
+        let mut call = TrunkCall::connect(
+            &voice,
+            TrunkCallOptions::new(Duration::from_secs(20), Duration::from_secs(60)),
+        )
+        .await;
+        call.callee_speaks(VAD_DEFAULT_HANGOVER_FRAMES + 2).await;
+        call.assistant_audio_reaches_trunk().await;
+        call.service
+            .steer_phone_call(
+                TRUNK_OWNER,
+                &call.call_id,
+                "Use a concise reply when they return.",
+            )
+            .unwrap();
+        call.update_matching(|params| params["subtitle"] == "On hold")
+            .await;
+        chat_requests_reach(&voice, 2).await;
+        call.update_matching(|params| params["subtitle"] == "On hold")
+            .await;
+        {
+            let requests = voice.chat_requests.lock().await;
+            assert_eq!(
+                requests[1]["response_format"]["json_schema"]["name"],
+                "hold_decision"
+            );
+            assert!(requests[1]["messages"][1]["content"]
+                .as_str()
+                .unwrap()
+                .contains("Use a concise reply when they return."));
+        }
+        assert!(call.snapshot().on_hold);
+        assert!(call
+            .snapshot()
+            .transcript
+            .iter()
+            .any(|entry| entry.text == "Of course, I'll hold."));
+        assert!(!call
+            .snapshot()
+            .transcript
+            .iter()
+            .any(|entry| entry.text.contains("I'll wait for you here.")));
+        voice.stt_delay_ms.store(500, Ordering::SeqCst);
+        call.callee_speaks(crate::phone_call::audio::VAD_IVR_HANGOVER_FRAMES + 2)
+            .await;
+        stt_requests_reach(&voice, 2).await;
+        call.service
+            .steer_phone_call(
+                TRUNK_OWNER,
+                &call.call_id,
+                "Resume speaking and ask about parking now.",
+            )
+            .unwrap();
+        call.card_shows("Is there parking?").await;
+        let requests = voice.chat_requests.lock().await;
+        assert_eq!(requests.len(), 4);
+        let held_input = requests[2]["messages"][1]["content"].as_str().unwrap();
+        assert!(
+            held_input.contains("Resume speaking and ask about parking now."),
+            "{held_input}"
+        );
+        assert!(
+            held_input.contains("Your call is important to us."),
+            "{held_input}"
+        );
+        assert!(
+            !held_input.contains("Use a concise reply when they return."),
+            "{held_input}"
+        );
+        drop(requests);
+        assert!(!call.snapshot().on_hold);
+        assert_eq!(call.snapshot().status, PhoneCallStatus::InProgress);
+        call.agent_hangup().await;
+        assert_eq!(call.settled().await.status, PhoneCallStatus::Completed);
     }
 
     #[tokio::test]
@@ -8086,14 +8441,30 @@ mod tests {
             "unsupported-tts-ready",
             "unsupported-tts-cancel",
             "unsupported-tts-fail",
+            "missing-dialogue",
         ] {
-            let voice = MockVoiceState::new(vec![], vec![], 2_400);
+            let voice = MockVoiceState::new(
+                vec![voice_reply(
+                    "",
+                    voice_tool(
+                        "wait_silently",
+                        json!({
+                            "reason":"prepared", "on_hold":false
+                        }),
+                    ),
+                )],
+                vec![],
+                2_400,
+            );
             voice.preload_delay_ms.store(1_000, Ordering::SeqCst);
             if outcome == "fail" {
                 *voice.preload_status.lock().await = StatusCode::SERVICE_UNAVAILABLE;
-            } else if outcome.starts_with("unsupported") {
+            } else if outcome.starts_with("unsupported") || outcome == "missing-dialogue" {
                 *voice.preload_status.lock().await = StatusCode::NOT_FOUND;
-                if outcome.starts_with("unsupported-stt") {
+                if outcome == "missing-dialogue" {
+                    voice.stt_delay_ms.store(1_000, Ordering::SeqCst);
+                    *voice.chat_status.lock().await = StatusCode::NOT_FOUND;
+                } else if outcome.starts_with("unsupported-stt") {
                     voice.stt_delay_ms.store(1_000, Ordering::SeqCst);
                 } else if outcome.ends_with("fail") {
                     voice.tts_fail_after.store(0, Ordering::SeqCst);
@@ -8213,7 +8584,7 @@ mod tests {
                             .is_err()
                     );
                 }
-                "fail" | "unsupported-tts-fail" => {
+                "fail" | "unsupported-tts-fail" | "missing-dialogue" => {
                     assert!(timeout(TEST_TIMEOUT, start)
                         .await
                         .unwrap()
@@ -8223,6 +8594,8 @@ mod tests {
                     assert_eq!(failed.status, PhoneCallStatus::Failed);
                     assert!(failed.end_reason.unwrap().contains(if outcome == "fail" {
                         "503"
+                    } else if outcome == "missing-dialogue" {
+                        "404"
                     } else {
                         "500"
                     }));

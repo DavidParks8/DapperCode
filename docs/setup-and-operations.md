@@ -378,20 +378,23 @@ leaving them waiting for inference. Recognition providers without the optional O
 are primed through their normal transcription endpoint with a generated silent clip. That clip
 is neither played nor added to the call transcript. Speech providers without the optional API
 are similarly primed with a short, discarded synthesis request with a 30-second deadline.
-Other providers without the
-optional API retain their normal inference path. Preparation time is separate from connected-call
-duration.
+Dialogue providers without the optional API must also complete an isolated structured chat
+request within 30 seconds. This catches missing dialogue models and incompatible response schemas
+before dialing. None of the preparation replies are spoken, executed as phone actions, or added
+to the call history. Preparation time is separate from connected-call duration.
 
 The voice assistant waits through incomplete replies and ordinary pauses. Single-word
 transcriptions are provisional and cannot authorize autonomous hang-up, even if the model invents a
 completed outcome. Otherwise a spoken closing and two-second quiet grace period are required. A
 short reply such as "Bye" or a noise burst after the closing still ends the call; a substantive
-reply or user steering cancels the hang-up and gives the assistant another turn. User hang-up and
-remote disconnect always work.
+reply or user steering cancels the hang-up and gives the assistant another turn, even when a
+later one-word fragment is queued behind the correction. User hang-up and remote disconnect
+always work.
 
 Ordinary mobile steering lets the sentence already being spoken finish, then discards subsequent
 superseded speech and actions. An explicit instruction such as "stop speaking" interrupts
-immediately, as do recipient barge-in and hang-up. A temporary synthesis gap does not turn ordinary
+immediately, as do recipient barge-in and hang-up. Barge-in also clears queued in-band DTMF tones.
+A temporary synthesis gap does not turn ordinary
 steering into an immediate interruption. Interrupted history includes only fully played sentences;
 an unfinished sentence is represented as `[partially spoken sentence] [interrupted]`, not as if
 the recipient heard its complete text. Earlier completed answers remain in the history.
@@ -407,6 +410,12 @@ recorded queue announcements until a live person returns. The mobile card shows 
 keeping **Hang Up** available; `get_phone_call` reports `onHold: true` and `status: "in_progress"`.
 SIP hold/resume via in-dialog `INVITE` or `UPDATE` is also supported, including renegotiated RTP
 ports and offerless re-`INVITE`s answered in the `ACK`. Live steering remains available while held.
+Captured recipient audio and queued corrections survive SIP hold/resume and are transcribed in
+order; no assistant response starts while the remote transport is held. A SIP-interrupted reply
+is retried when the transport resumes instead of abandoning the captured recipient request.
+Ordinary steering during a hold acknowledgement preserves the hold transition. Pending private instructions remain
+available to the held-call classifier even if a later transcription is a queue announcement;
+only instructions processed by an accepted turn are acknowledged.
 Hold time counts toward the existing 15-minute maximum call duration; user hang-up, remote
 disconnect, and shutdown still end the call.
 
@@ -447,6 +456,14 @@ text generation, and captures model residency, stage timings, controlled-noise r
 live controls, and settled reports. Synthetic speech/noise is not an accents or human-listening
 evaluation. Warm pipeline runs may still include model loads when memory pressure evicts a model;
 do not substitute the faster dialogue-only figures for full-call latency.
+The regression also captures bounded, ordered received PCMU audio and independently transcribes
+its decoded 8 kHz waveform without expected-text or vocabulary hints. After call cleanup, it
+requires an exact normalized match to the intended assistant speech and checks the recognized
+readback for the correct hours and unsupported commitments. Missing/discontinuous RTP, empty
+recognition, ASR errors, or unrelated audible synthesis fail the run. Verification is offline and
+excluded from latency measurements and production HTTP-stage traces. Earlier energy/transcript-only
+runs do not establish this received-content gate.
+Call-action checks use only post-connection dialogue, never discarded readiness-probe decisions.
 
 Speech intelligibility is a separate offline gate, not a check added to live calls.
 `scripts/voice-intelligibility.mjs` requires an independent local recognizer's exact
