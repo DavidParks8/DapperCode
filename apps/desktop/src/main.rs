@@ -830,6 +830,34 @@ mod tests {
         let status = voice_status(&paths, &secrets).unwrap();
         assert_eq!(status, updated);
 
+        configure_voice(
+            vec![
+                "--tts-model".into(),
+                "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit".into(),
+                "--tts-voice".into(),
+                "conversational-female".into(),
+            ],
+            std::io::empty(),
+            &paths,
+            &secrets,
+        )
+        .unwrap();
+        let preserved = configure_voice(
+            vec!["--display-name".into(), "Updated Caller".into()],
+            std::io::empty(),
+            &paths,
+            &secrets,
+        )
+        .unwrap()
+        .settings
+        .unwrap();
+        assert_eq!(preserved.tts_voice, "conversational-female");
+        assert_eq!(
+            preserved.tts_model,
+            "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit"
+        );
+        assert_eq!(preserved.sip_server, "sip.telnyx.com:5061");
+
         let cleared = clear_voice(&paths, &secrets).unwrap();
         assert!(!cleared.configured);
         assert!(!cleared.secret_present);

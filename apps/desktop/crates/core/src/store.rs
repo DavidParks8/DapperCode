@@ -11,8 +11,8 @@ use sha2::{Digest, Sha256};
 
 #[cfg(test)]
 use crate::phone_call::{
-    DEFAULT_VOICE_BASE_URL, DEFAULT_VOICE_LLM_MODEL, DEFAULT_VOICE_TTS_MODEL,
-    DEFAULT_VOICE_TTS_VOICE,
+    DEFAULT_VOICE_BASE_URL, DEFAULT_VOICE_LLM_MODEL, DEFAULT_VOICE_STT_MODEL,
+    DEFAULT_VOICE_TTS_MODEL, DEFAULT_VOICE_TTS_VOICE,
 };
 use crate::{phone_call::PhoneCallSettings, platform};
 
@@ -1362,7 +1362,7 @@ mod tests {
             caller_id: "+15551234567".to_string(),
             user_display_name: "David Parks".to_string(),
             stt_base_url: DEFAULT_VOICE_BASE_URL.to_string(),
-            stt_model: DEFAULT_VOICE_LLM_MODEL.to_string(),
+            stt_model: DEFAULT_VOICE_STT_MODEL.to_string(),
             llm_base_url: DEFAULT_VOICE_BASE_URL.to_string(),
             llm_model: DEFAULT_VOICE_LLM_MODEL.to_string(),
             tts_base_url: DEFAULT_VOICE_BASE_URL.to_string(),
@@ -1395,7 +1395,7 @@ mod tests {
         assert_eq!(minimal.stt_base_url, "http://127.0.0.1:11434/v1");
         assert_eq!(minimal.stt_model, "gemma4:e4b");
         assert_eq!(minimal.llm_base_url, "http://127.0.0.1:11434/v1");
-        assert_eq!(minimal.llm_model, "gemma4:e4b");
+        assert_eq!(minimal.llm_model, "gpt-oss:20b");
         assert_eq!(minimal.tts_base_url, "http://127.0.0.1:11434/v1");
         assert_eq!(minimal.tts_model, "phonon");
         assert_eq!(minimal.tts_voice, "default");

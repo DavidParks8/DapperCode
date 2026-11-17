@@ -335,6 +335,7 @@ pub struct OutboundPlaybackSnapshot {
     pub outbound_playing: bool,
     pub current_outbound_pcmu: [u8; PCMU_FRAME_BYTES],
     pub cleared_frames: usize,
+    pub discarded_frames: usize,
 }
 
 // ============================================================================
@@ -1721,6 +1722,7 @@ struct OutboundMediaState {
     current_outbound_pcmu: [u8; PCMU_FRAME_BYTES],
     active_dtmf_timestamp: Option<u32>,
     remote_media: Option<SdpAnswer>,
+    discarded_voice_frames: usize,
 }
 
 impl Default for OutboundMediaState {
@@ -1733,6 +1735,7 @@ impl Default for OutboundMediaState {
             current_outbound_pcmu: [PCMU_SILENCE_BYTE; PCMU_FRAME_BYTES],
             active_dtmf_timestamp: None,
             remote_media: None,
+            discarded_voice_frames: 0,
         }
     }
 }
@@ -2014,6 +2017,11 @@ impl SipCallHandle {
             return;
         }
         let mut state = lock_unpoisoned(&self.media_state);
+        if state.remote_media.as_ref().is_some_and(SdpAnswer::on_hold) {
+            state.discarded_voice_frames =
+                state.discarded_voice_frames.saturating_add(frames.len());
+            return;
+        }
         state.voice_queue.extend(frames);
     }
 
@@ -2022,6 +2030,7 @@ impl SipCallHandle {
         let cleared_frames = state.voice_queue.len();
         let prev_playing = state.outbound_playing;
         let prev_frame = state.current_outbound_pcmu;
+        state.discarded_voice_frames = state.discarded_voice_frames.saturating_add(cleared_frames);
         state.voice_queue.clear();
         state.outbound_playing = false;
         state.was_playing_voice = false;
@@ -2030,10 +2039,10 @@ impl SipCallHandle {
             outbound_playing: prev_playing,
             current_outbound_pcmu: prev_frame,
             cleared_frames,
+            discarded_frames: state.discarded_voice_frames,
         }
     }
 
-    #[cfg(test)]
     #[must_use]
     pub fn outbound_playback_state(&self) -> OutboundPlaybackSnapshot {
         let state = lock_unpoisoned(&self.media_state);
@@ -2041,7 +2050,24 @@ impl SipCallHandle {
             outbound_playing: state.outbound_playing,
             current_outbound_pcmu: state.current_outbound_pcmu,
             cleared_frames: state.voice_queue.len(),
+            discarded_frames: state.discarded_voice_frames,
         }
+    }
+
+    pub fn trim_outbound_audio(
+        &self,
+        total_frames: usize,
+        discarded_base: usize,
+        sentence_end: usize,
+    ) {
+        let mut state = lock_unpoisoned(&self.media_state);
+        let played = total_frames
+            .saturating_sub(state.discarded_voice_frames.saturating_sub(discarded_base))
+            .saturating_sub(state.voice_queue.len());
+        let keep_frames = sentence_end.saturating_sub(played);
+        let removed = state.voice_queue.len().saturating_sub(keep_frames);
+        state.voice_queue.truncate(keep_frames);
+        state.discarded_voice_frames = state.discarded_voice_frames.saturating_add(removed);
     }
 
     #[must_use]
@@ -3034,6 +3060,9 @@ fn apply_remote_media(state: &Mutex<OutboundMediaState>, offer: SdpAnswer) -> Si
     };
     let mut state = lock_unpoisoned(state);
     if offer.on_hold() {
+        state.discarded_voice_frames = state
+            .discarded_voice_frames
+            .saturating_add(state.voice_queue.len());
         state.voice_queue.clear();
         state.dtmf_queue.clear();
         state.outbound_playing = false;
@@ -4649,6 +4678,38 @@ mod tests {
             }),
         };
         (handle, cmd_rx, state_tx)
+    }
+
+    #[test]
+    fn late_voice_frames_are_discarded_while_remotely_held() {
+        let (handle, _, _) = detached_call_handle();
+        let offer = parse_sdp_answer(
+            "v=0\r\nc=IN IP4 127.0.0.1\r\nm=audio 9000 RTP/AVP 0\r\na=sendonly\r\n",
+        )
+        .unwrap();
+        apply_remote_media(&handle.media_state, offer);
+        handle.enqueue_pcmu_frames(vec![[0x11; PCMU_FRAME_BYTES]; 5]);
+        let snapshot = handle.clear_outbound_audio();
+        assert_eq!(snapshot.cleared_frames, 0);
+        assert_eq!(snapshot.discarded_frames, 5);
+        assert!(!handle.has_pending_outbound_media());
+    }
+
+    #[test]
+    fn sentence_trim_uses_the_current_queue_position() {
+        let (handle, _, _) = detached_call_handle();
+        handle.enqueue_pcmu_frames(vec![[0x11; PCMU_FRAME_BYTES]; 5]);
+        handle.enqueue_pcmu_frames(vec![[0x22; PCMU_FRAME_BYTES]; 5]);
+        let snapshot = handle.outbound_playback_state();
+        assert_eq!(snapshot.cleared_frames, 10);
+        lock_unpoisoned(&handle.media_state).voice_queue.pop_front();
+        handle.trim_outbound_audio(10, 0, 5);
+        let state = lock_unpoisoned(&handle.media_state);
+        assert_eq!(state.voice_queue.len(), 4);
+        assert!(state
+            .voice_queue
+            .iter()
+            .all(|frame| *frame == [0x11; PCMU_FRAME_BYTES]));
     }
 
     #[test]

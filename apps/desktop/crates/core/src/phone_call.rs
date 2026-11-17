@@ -9,9 +9,12 @@ use crate::{
 
 pub const DEFAULT_SIP_TRANSPORT: &str = "tls";
 pub const DEFAULT_VOICE_BASE_URL: &str = "http://127.0.0.1:11434/v1";
-pub const DEFAULT_VOICE_LLM_MODEL: &str = "gemma4:e4b";
+pub const DEFAULT_VOICE_STT_MODEL: &str = "gemma4:e4b";
+pub const DEFAULT_VOICE_LLM_MODEL: &str = "gpt-oss:20b";
 pub const DEFAULT_VOICE_TTS_MODEL: &str = "phonon";
 pub const DEFAULT_VOICE_TTS_VOICE: &str = "default";
+const CONVERSATIONAL_FEMALE_TTS_MODEL: &str = "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit";
+const CONVERSATIONAL_FEMALE_TTS_VOICE: &str = "conversational-female";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -24,7 +27,7 @@ pub struct PhoneCallSettings {
     pub user_display_name: String,
     #[serde(default = "default_voice_base_url")]
     pub stt_base_url: String,
-    #[serde(default = "default_voice_llm_model")]
+    #[serde(default = "default_voice_stt_model")]
     pub stt_model: String,
     #[serde(default = "default_voice_base_url")]
     pub llm_base_url: String,
@@ -152,6 +155,11 @@ impl PhoneCallSettings {
         validate_loopback_url("ttsBaseUrl", &self.tts_base_url)?;
         validate_bounded_text("ttsModel", &self.tts_model, 256)?;
         validate_bounded_text("ttsVoice", &self.tts_voice, 256)?;
+        if self.tts_voice.trim() == CONVERSATIONAL_FEMALE_TTS_VOICE
+            && self.tts_model.trim() != CONVERSATIONAL_FEMALE_TTS_MODEL
+        {
+            bail!("{CONVERSATIONAL_FEMALE_TTS_VOICE} requires {CONVERSATIONAL_FEMALE_TTS_MODEL}");
+        }
         Ok(())
     }
 }
@@ -283,6 +291,9 @@ fn default_voice_base_url() -> String {
 fn default_voice_llm_model() -> String {
     DEFAULT_VOICE_LLM_MODEL.to_string()
 }
+fn default_voice_stt_model() -> String {
+    DEFAULT_VOICE_STT_MODEL.to_string()
+}
 fn default_voice_tts_model() -> String {
     DEFAULT_VOICE_TTS_MODEL.to_string()
 }
@@ -296,6 +307,41 @@ mod tests {
     use super::*;
     use crate::{secrets::generate_token, store::atomic_private_write};
     use std::{collections::BTreeMap, sync::mpsc, time::Duration};
+
+    #[test]
+    fn conversational_female_profile_rejects_an_incompatible_model_before_saving() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = AppPaths::for_tests(directory.path().to_path_buf());
+        let secrets = SecretStore::file_backend_for_tests();
+        let mut settings: PhoneCallSettings = serde_json::from_value(serde_json::json!({
+            "sipServer": "sip.example.test:5061", "sipUsername": "test-account",
+            "callerId": "+15551234567", "userDisplayName": "Example Caller",
+            "ttsVoice": "conversational-female"
+        }))
+        .unwrap();
+        let secret = generate_token();
+        assert!(paths
+            .configure_phone_call(&secrets, Some(&secret), |_| Ok(settings.clone()))
+            .is_err());
+        assert!(paths.load_config().unwrap().phone_call.is_none());
+        assert!(secrets.load_sip_password(&paths).unwrap().is_none());
+        settings.tts_model = CONVERSATIONAL_FEMALE_TTS_MODEL.to_string();
+        paths
+            .configure_phone_call(&secrets, Some(&secret), |_| Ok(settings.clone()))
+            .unwrap();
+        let mut runtime = BridgeRuntimeConfig {
+            values: BTreeMap::new(),
+            host: "127.0.0.1".to_string(),
+            port: 8787,
+            connect_url: "http://127.0.0.1:8787".to_string(),
+            auth_token: generate_token(),
+            secret_backend: SecretBackend::File,
+        };
+        runtime.apply_phone_call(&paths, &secrets).unwrap();
+        assert_eq!(runtime.values["PHONE_CALL_TTS_MODEL"], settings.tts_model);
+        assert_eq!(runtime.values["PHONE_CALL_TTS_VOICE"], settings.tts_voice);
+        assert_eq!(paths.load_config().unwrap().phone_call, Some(settings));
+    }
 
     #[test]
     fn worker_phone_call_settings_and_password_wait_for_the_same_config_commit() {
