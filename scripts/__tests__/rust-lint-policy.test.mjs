@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+
+import {
+  collectVerifiedTestOnlyRustFiles,
+  parseExternalModDeclarations,
+  parseIncludeTargets,
+} from '../rust-bridge-source-inventory.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const workspaces = ['apps/desktop', 'services/rust-bridge'];
@@ -222,4 +229,228 @@ test('unsafe-free Rust crates prevent introducing unsafe code', () => {
 test('generated bridge types remain subject to Clippy correctness checks', () => {
   const bridge = read('services/rust-bridge/src/main.rs');
   assert.doesNotMatch(bridge, /#\[allow\(clippy::all(?:,|\))/);
+});
+
+test('Rust workspaces share pinned Dylint perfectionist configuration and tool registration', () => {
+  let baseline;
+  for (const workspace of workspaces) {
+    const dylintConfig = read(`${workspace}/dylint.toml`);
+    assert.match(
+      dylintConfig,
+      /git\s*=\s*"https:\/\/github\.com\/KSXGitHub\/perfectionist",\s*rev\s*=\s*"[0-9a-f]{40}"/,
+      `${workspace}/dylint.toml must pin KSXGitHub/perfectionist by commit SHA`,
+    );
+    assert.match(
+      dylintConfig,
+      /\["perfectionist::excessive_inline_tests"\]\r?\ninline_style\s*=\s*"external_only"/,
+      `${workspace}/dylint.toml must enforce external-only Rust unit tests`,
+    );
+    if (baseline) assert.equal(dylintConfig, baseline);
+    baseline = dylintConfig;
+
+    const manifest = read(`${workspace}/Cargo.toml`);
+    assert.match(
+      manifest,
+      /cfg\(dylint_lib,\s*values\("perfectionist"\)\)/,
+      `${workspace}/Cargo.toml must declare dylint_lib in unexpected_cfgs`,
+    );
+  }
+
+  for (const crateRoot of [
+    'apps/desktop/src/main.rs',
+    'apps/desktop/crates/core/src/lib.rs',
+    'apps/desktop/crates/broker/src/lib.rs',
+    'services/rust-bridge/src/main.rs',
+    'services/rust-bridge/src/e2e_agent.rs',
+    'services/rust-bridge/crates/core/src/lib.rs',
+    'services/rust-bridge/crates/path-policy/src/lib.rs',
+    'services/rust-bridge/crates/platform/src/lib.rs',
+  ]) {
+    const source = read(crateRoot);
+    assert.match(
+      source,
+      /^#!\[cfg_attr\(dylint_lib = "perfectionist", feature\(register_tool\)\)\]/m,
+      `${crateRoot} must gate register_tool feature on dylint_lib`,
+    );
+    assert.match(
+      source,
+      /^#!\[cfg_attr\(dylint_lib = "perfectionist", register_tool\(perfectionist\)\)\]/m,
+      `${crateRoot} must register the perfectionist tool namespace`,
+    );
+  }
+
+  const pkg = JSON.parse(read('package.json'));
+  assert.equal(pkg.scripts.dylint, 'node ./scripts/run-dylint.mjs');
+  assert.ok(pkg.scripts.lint.includes('pnpm run dylint'), 'local lint must run dylint');
+
+  const dylintRunner = read('scripts/run-dylint.mjs');
+  assert.match(
+    dylintRunner,
+    /'--lib',\s*'perfectionist'/,
+    'run-dylint.mjs must pass --lib perfectionist so missing libraries fail closed',
+  );
+  assert.doesNotMatch(
+    dylintRunner,
+    /'--all'/,
+    'run-dylint.mjs must not use --all, which exits 0 when no libraries are discovered',
+  );
+
+  const workflow = read('.github/workflows/build-and-test.yml');
+  assert.match(workflow, /^\s+rust-dylint:/m, 'CI must include a rust-dylint job');
+  assert.match(workflow, /node \.\/scripts\/run-dylint\.mjs/, 'CI must invoke run-dylint.mjs');
+});
+
+const ALLOWED_NON_SIBLING_TEST_DECLARATIONS = new Set([
+  'services/rust-bridge/src/main.rs::source_policy',
+  'apps/desktop/crates/core/src/lib.rs::test_env',
+  'apps/desktop/crates/broker/src/lib.rs::http_client_tests',
+]);
+
+function walkWorkspaceRustFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === 'target' || entry.name === 'tests') return [];
+      return walkWorkspaceRustFiles(entryPath);
+    }
+    return entry.name.endsWith('.rs') ? [entryPath] : [];
+  });
+}
+
+function findExternalTestLayoutViolations(sourceRoot, displayRoot) {
+  const allFiles = walkWorkspaceRustFiles(sourceRoot);
+  const testOnly = collectVerifiedTestOnlyRustFiles(allFiles, sourceRoot);
+  const violations = [];
+
+  for (const file of allFiles) {
+    const resolved = path.resolve(file);
+    if (testOnly.has(resolved)) continue;
+    const relative = path.relative(displayRoot, resolved).split(path.sep).join('/');
+    const source = readFileSync(resolved, 'utf8');
+    const stem = path.basename(resolved, '.rs');
+    const expectedSibling = `${stem}_tests.rs`;
+
+    if (/^\s*#\[(?:tokio::)?test\]/m.test(source)) {
+      violations.push(`${relative} must not contain inline #[test] functions`);
+    }
+    if (
+      /^\s*#\[cfg\([^\]]*test[^\]]*\)\](?:\r?\n\s*#\[[^\]]*\])*\r?\n\s*mod\s+\w+\s*\{/m.test(source)
+    ) {
+      violations.push(`${relative} must move inline #[cfg(test)] modules into ${expectedSibling}`);
+    }
+
+    for (const decl of parseExternalModDeclarations(resolved, source)) {
+      if (!decl.isCfgTest) {
+        if (path.basename(decl.target).endsWith('_tests.rs')) {
+          violations.push(`${relative} links ${path.basename(decl.target)} without #[cfg(test)]`);
+        }
+        continue;
+      }
+      const scopedKey = `${relative}::${decl.modName}`;
+      if (
+        decl.topLevel &&
+        decl.explicitPath === null &&
+        ALLOWED_NON_SIBLING_TEST_DECLARATIONS.has(scopedKey)
+      ) {
+        continue;
+      }
+      if (decl.explicitPath !== expectedSibling) {
+        violations.push(
+          `${relative} external test module "${decl.modName}" must use #[path = "${expectedSibling}"]`,
+        );
+      }
+    }
+
+    for (const included of parseIncludeTargets(resolved, source)) {
+      if (path.basename(included).endsWith('_tests.rs')) {
+        violations.push(`${relative} includes ${path.basename(included)} from production code`);
+      }
+    }
+  }
+  return violations;
+}
+
+test('production Rust files keep unit tests in verified sibling *_tests.rs modules', () => {
+  const violations = [];
+  for (const workspace of workspaces) {
+    const workspaceRoot = path.join(root, workspace);
+    violations.push(...findExternalTestLayoutViolations(path.join(workspaceRoot, 'src'), root));
+    const cratesDir = path.join(workspaceRoot, 'crates');
+    for (const entry of readdirSync(cratesDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const crateSrc = path.join(cratesDir, entry.name, 'src');
+      violations.push(...findExternalTestLayoutViolations(crateSrc, root));
+    }
+  }
+  assert.deepEqual(violations, []);
+});
+
+test('external test layout checker rejects production-linked *_tests.rs, include! links, and misnamed test modules', () => {
+  const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'dappercode-test-layout-'));
+  try {
+    const coreSrc = path.join(tempRoot, 'apps/desktop/crates/core/src');
+    mkdirSync(coreSrc, { recursive: true });
+    writeFileSync(
+      path.join(coreSrc, 'lib.rs'),
+      [
+        'mod prod_tests;',
+        'mod helper;',
+        'include /* note */ ! { "included_tests.rs" }',
+        'mod nested {',
+        '  const TEXT: &str = "line 1\\',
+        '  } still inside continued string";',
+        '  const CONTINUED: &str = "ends with continuation\\',
+        '";',
+        '  #[cfg(test)]',
+        '  mod test_env;',
+        '}',
+        '#[cfg(test)]',
+        '#[path = "wrong_name.rs"]',
+        'mod tests;',
+      ].join('\n'),
+    );
+    writeFileSync(
+      path.join(coreSrc, 'helper.rs'),
+      '#[cfg(test)]\n#[path = "wrong_helper.rs"]\nmod test_env;\n',
+    );
+    writeFileSync(path.join(coreSrc, 'prod_tests.rs'), '#[test]\nfn leaked() {}\n');
+    writeFileSync(path.join(coreSrc, 'included_tests.rs'), 'pub fn included() {}\n');
+    writeFileSync(path.join(coreSrc, 'wrong_name.rs'), '#[test]\nfn misnamed() {}\n');
+    writeFileSync(path.join(coreSrc, 'wrong_helper.rs'), '#[test]\nfn misnamed_helper() {}\n');
+
+    const violations = findExternalTestLayoutViolations(coreSrc, tempRoot);
+    assert.ok(
+      violations.some(
+        (item) => item.includes('prod_tests.rs') && item.includes('without #[cfg(test)]'),
+      ),
+      `expected production-linked *_tests.rs violation, got: ${violations.join('; ')}`,
+    );
+    assert.ok(
+      violations.some((item) => item.includes('prod_tests.rs') && item.includes('inline #[test]')),
+      `expected production-linked *_tests.rs to still be scanned as production, got: ${violations.join('; ')}`,
+    );
+    assert.ok(
+      violations.some((item) => item.includes('included_tests.rs') && item.includes('includes')),
+      `expected brace-form production include! of *_tests.rs violation, got: ${violations.join('; ')}`,
+    );
+    assert.ok(
+      violations.some(
+        (item) => item.includes('external test module "test_env"') && item.includes('lib.rs'),
+      ),
+      `expected nested mod test_env inside allowlisted lib.rs to be rejected, got: ${violations.join('; ')}`,
+    );
+    assert.ok(
+      violations.some((item) => item.includes('must use #[path = "lib_tests.rs"]')),
+      `expected misnamed external test module violation, got: ${violations.join('; ')}`,
+    );
+    assert.ok(
+      violations.some(
+        (item) =>
+          item.includes('helper.rs') && item.includes('must use #[path = "helper_tests.rs"]'),
+      ),
+      `expected non-root mod test_env pointing at wrong_helper.rs to be rejected, got: ${violations.join('; ')}`,
+    );
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 });

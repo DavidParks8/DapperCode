@@ -5,20 +5,16 @@ mod ports;
 #[path = "unix/process.rs"]
 mod process;
 
-use std::{
-    ffi::OsStr,
-    fs::{File, Metadata},
-    io,
-    path::{Path, PathBuf},
-};
-
-use tokio::process::{Child, Command};
-
 use super::{
     PlatformFuture, PlatformSecureRoots, PreviewStrategy, PrivateStorageStrategy, ProcessStrategy,
     SecureFilesystemStrategy,
 };
 use dappercode_bridge_core::BridgeError;
+use std::ffi::OsStr;
+use std::fs::{File, Metadata};
+use std::io;
+use std::path::{Path, PathBuf};
+use tokio::process::{Child, Command};
 
 #[derive(Debug)]
 pub(crate) struct CurrentPlatform;

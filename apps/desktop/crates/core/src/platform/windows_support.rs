@@ -1,7 +1,5 @@
-use std::{
-    net::Ipv4Addr,
-    path::{Path, PathBuf},
-};
+use std::net::Ipv4Addr;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct LocalIpv4Candidate {
@@ -39,7 +37,8 @@ pub(crate) fn windows_tailscale_install_candidates(
 ) -> Vec<PathBuf> {
     roots
         .into_iter()
-        .map(|root| root.join("Tailscale").join("tailscale.exe"))
+        .map(|root| root.join("Tailscale"))
+        .map(|dir| dir.join("tailscale.exe"))
         .collect()
 }
 

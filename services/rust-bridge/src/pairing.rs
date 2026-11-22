@@ -1,3 +1,10 @@
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use crate::*;
 
 pub(super) async fn send_rpc_error(
@@ -53,7 +60,7 @@ pub(super) fn path_to_string(path: &Path) -> String {
 pub(super) fn is_unspecified_bind_host(host: &str) -> bool {
     matches!(
         host.trim().to_ascii_lowercase().as_str(),
-        "0.0.0.0" | "::" | "[::]"
+        "0.0.0.0" | "::" | "[::]",
     )
 }
 
@@ -77,7 +84,7 @@ pub(super) fn bridge_access_url(config: &BridgeConfig) -> Option<String> {
     Some(format!(
         "http://{}:{}",
         format_host_for_url(&config.host),
-        config.port
+        config.port,
     ))
 }
 
@@ -145,7 +152,7 @@ pub(super) fn maybe_print_pairing_qr(config: &BridgeConfig) {
         return;
     }
     println!(
-        "Full pairing QR unavailable because no phone-connectable bridge URL was resolved. Enter URL manually in onboarding."
+        "Full pairing QR unavailable because no phone-connectable bridge URL was resolved. Enter URL manually in onboarding.",
     );
     println!();
     flush_pairing_output();
@@ -156,15 +163,5 @@ pub(super) async fn wait_for_shutdown_trigger(shutdown_rx: &mut watch::Receiver<
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn shutdown_wait_returns_when_channel_closes_before_triggering() {
-        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
-        drop(shutdown_tx);
-
-        wait_for_shutdown_trigger(&mut shutdown_rx).await;
-        assert!(!*shutdown_rx.borrow());
-    }
-}
+#[path = "pairing_tests.rs"]
+mod tests;

@@ -1,11 +1,8 @@
+use crate::config::{insert_env, BridgeRuntimeConfig};
+use crate::secrets::{SecretBackend, SecretStore};
+use crate::store::{AppPaths, ConfigSideEffects};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-
-use crate::{
-    config::{insert_env, BridgeRuntimeConfig},
-    secrets::{SecretBackend, SecretStore},
-    store::{AppPaths, ConfigSideEffects},
-};
 
 pub const DEFAULT_SIP_TRANSPORT: &str = "tls";
 pub const DEFAULT_VOICE_BASE_URL: &str = "http://127.0.0.1:11434/v1";
@@ -18,6 +15,13 @@ const CONVERSATIONAL_FEMALE_TTS_VOICE: &str = "conversational-female";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::too_many_struct_fields,
+        reason = "matches persisted phoneCall schema in config.json"
+    )
+)]
 pub struct PhoneCallSettings {
     pub sip_server: String,
     #[serde(default = "default_sip_transport")]
@@ -167,16 +171,29 @@ impl PhoneCallSettings {
 fn validate_bounded_text(field: &str, value: &str, max_bytes: usize) -> Result<()> {
     if value.trim().is_empty() || value.len() > max_bytes || value.chars().any(char::is_control) {
         bail!(
-            "{field} must be non-empty, at most {max_bytes} bytes, and free of control characters"
+            "{field} must be non-empty, at most {max_bytes} bytes, and free of control characters",
         );
     }
     Ok(())
 }
 
+fn is_valid_sip_host(host: &str) -> bool {
+    let bad_edges =
+        host.is_empty() || host.starts_with('.') || host.starts_with('-') || host.ends_with('-');
+    let bad_chars = host.contains(':')
+        || host.contains("..")
+        || !host
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-'));
+    !bad_edges && !bad_chars
+}
+
 fn validate_host_port(value: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > 265
-        || value.chars().any(|c| c.is_control() || c.is_whitespace())
+        || value
+            .chars()
+            .any(|ch| ch.is_control() || ch.is_whitespace())
     {
         bail!("sipServer must be a valid host:port");
     }
@@ -191,19 +208,13 @@ fn validate_host_port(value: &str) -> Result<()> {
         let (host, port_part) = value
             .rsplit_once(':')
             .context("sipServer must include a :port")?;
-        if host.is_empty()
-            || host.contains(':')
-            || host.contains("..")
-            || host.starts_with('.')
-            || host.starts_with('-')
-            || host.ends_with('-')
-            || !host
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'))
-        {
+        if !is_valid_sip_host(host) {
             bail!("sipServer contains an invalid host");
         }
-        if host.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
+        if host
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || byte == b'.')
+        {
             host.parse::<std::net::Ipv4Addr>()
                 .context("sipServer contains an invalid IPv4 address")?;
         }
@@ -222,10 +233,34 @@ fn validate_e164(value: &str) -> Result<()> {
     let Some(digits) = value.strip_prefix('+') else {
         bail!("callerId must be in E.164 format starting with '+'");
     };
-    if !(7..=15).contains(&digits.len()) || !digits.bytes().all(|b| b.is_ascii_digit()) {
+    if !(7..=15).contains(&digits.len()) || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
         bail!("callerId must start with '+' followed by 7 to 15 ASCII digits");
     }
     Ok(())
+}
+
+fn parse_loopback_port<'a>(field: &str, authority: &'a str) -> Result<Option<&'a str>> {
+    if let Some(bracketed) = authority.strip_prefix('[') {
+        let (ipv6, port) = if let Some(ipv6) = bracketed.strip_suffix(']') {
+            (ipv6, None)
+        } else if let Some((ipv6, port)) = bracketed.split_once("]:") {
+            (ipv6, Some(port))
+        } else {
+            bail!("{field} contains an invalid IPv6 host");
+        };
+        if ipv6 != "::1" {
+            bail!("{field} host must be 127.0.0.1, ::1, or localhost");
+        }
+        return Ok(port);
+    }
+    let (host, port) = match authority.split_once(':') {
+        Some((host, port)) => (host, Some(port)),
+        None => (authority, None),
+    };
+    if host != "127.0.0.1" && !host.eq_ignore_ascii_case("localhost") {
+        bail!("{field} host must be 127.0.0.1, ::1, or localhost");
+    }
+    Ok(port)
 }
 
 fn validate_loopback_url(field: &str, value: &str) -> Result<()> {
@@ -233,7 +268,7 @@ fn validate_loopback_url(field: &str, value: &str) -> Result<()> {
         || value.len() > 1024
         || value
             .chars()
-            .any(|c| c.is_control() || c.is_whitespace() || matches!(c, '\\' | '@' | '?' | '#'))
+            .any(|ch| ch.is_control() || ch.is_whitespace() || matches!(ch, '\\' | '@' | '?' | '#'))
     {
         bail!("{field} must be a valid loopback HTTP/HTTPS URL");
     }
@@ -247,31 +282,7 @@ fn validate_loopback_url(field: &str, value: &str) -> Result<()> {
     if authority.is_empty() {
         bail!("{field} is missing a host");
     }
-    let port_str = if let Some(bracketed) = authority.strip_prefix('[') {
-        if let Some(ipv6) = bracketed.strip_suffix(']') {
-            if ipv6 != "::1" {
-                bail!("{field} host must be 127.0.0.1, ::1, or localhost");
-            }
-            None
-        } else if let Some((ipv6, port)) = bracketed.split_once("]:") {
-            if ipv6 != "::1" {
-                bail!("{field} host must be 127.0.0.1, ::1, or localhost");
-            }
-            Some(port)
-        } else {
-            bail!("{field} contains an invalid IPv6 host");
-        }
-    } else {
-        let (host, port) = match authority.split_once(':') {
-            Some((host, port)) => (host, Some(port)),
-            None => (authority, None),
-        };
-        if host != "127.0.0.1" && !host.eq_ignore_ascii_case("localhost") {
-            bail!("{field} host must be 127.0.0.1, ::1, or localhost");
-        }
-        port
-    };
-    if let Some(port_str) = port_str {
+    if let Some(port_str) = parse_loopback_port(field, authority)? {
         let port: u16 = port_str
             .parse()
             .with_context(|| format!("{field} port must be an integer in 1..=65535"))?;
@@ -303,96 +314,5 @@ fn default_voice_tts_voice() -> String {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-    use crate::{secrets::generate_token, store::atomic_private_write};
-    use std::{collections::BTreeMap, sync::mpsc, time::Duration};
-
-    #[test]
-    fn conversational_female_profile_rejects_an_incompatible_model_before_saving() {
-        let directory = tempfile::tempdir().unwrap();
-        let paths = AppPaths::for_tests(directory.path().to_path_buf());
-        let secrets = SecretStore::file_backend_for_tests();
-        let mut settings: PhoneCallSettings = serde_json::from_value(serde_json::json!({
-            "sipServer": "sip.example.test:5061", "sipUsername": "test-account",
-            "callerId": "+15551234567", "userDisplayName": "Example Caller",
-            "ttsVoice": "conversational-female"
-        }))
-        .unwrap();
-        let secret = generate_token();
-        assert!(paths
-            .configure_phone_call(&secrets, Some(&secret), |_| Ok(settings.clone()))
-            .is_err());
-        assert!(paths.load_config().unwrap().phone_call.is_none());
-        assert!(secrets.load_sip_password(&paths).unwrap().is_none());
-        settings.tts_model = CONVERSATIONAL_FEMALE_TTS_MODEL.to_string();
-        paths
-            .configure_phone_call(&secrets, Some(&secret), |_| Ok(settings.clone()))
-            .unwrap();
-        let mut runtime = BridgeRuntimeConfig {
-            values: BTreeMap::new(),
-            host: "127.0.0.1".to_string(),
-            port: 8787,
-            connect_url: "http://127.0.0.1:8787".to_string(),
-            auth_token: generate_token(),
-            secret_backend: SecretBackend::File,
-        };
-        runtime.apply_phone_call(&paths, &secrets).unwrap();
-        assert_eq!(runtime.values["PHONE_CALL_TTS_MODEL"], settings.tts_model);
-        assert_eq!(runtime.values["PHONE_CALL_TTS_VOICE"], settings.tts_voice);
-        assert_eq!(paths.load_config().unwrap().phone_call, Some(settings));
-    }
-
-    #[test]
-    fn worker_phone_call_settings_and_password_wait_for_the_same_config_commit() {
-        let directory = tempfile::tempdir().unwrap();
-        let paths = AppPaths::for_tests(directory.path().to_path_buf());
-        let secrets = SecretStore::file_backend_for_tests();
-        let settings: PhoneCallSettings = serde_json::from_value(serde_json::json!({
-            "sipServer": "sip.example.test:5061", "sipUsername": "old-account",
-            "callerId": "+15551234567", "userDisplayName": "Example Caller"
-        }))
-        .unwrap();
-        paths
-            .configure_phone_call(&secrets, Some(&generate_token()), |_| Ok(settings))
-            .unwrap();
-
-        // Pause account reconfiguration after its secret write but before the config commit.
-        let lease = paths.acquire_config_lease().unwrap();
-        let next_password = generate_token();
-        secrets.store_sip_password(&paths, &next_password).unwrap();
-        let (entered_tx, entered_rx) = mpsc::channel();
-        let (completed_tx, completed_rx) = mpsc::channel();
-        let worker_paths = paths.clone();
-        let worker = std::thread::spawn(move || {
-            let mut runtime = BridgeRuntimeConfig {
-                values: BTreeMap::new(),
-                host: "127.0.0.1".to_string(),
-                port: 8787,
-                connect_url: "http://127.0.0.1:8787".to_string(),
-                auth_token: generate_token(),
-                secret_backend: SecretBackend::File,
-            };
-            entered_tx.send(()).unwrap();
-            let outcome =
-                runtime.apply_phone_call(&worker_paths, &SecretStore::file_backend_for_tests());
-            completed_tx.send((outcome, runtime)).unwrap();
-        });
-        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        let blocked = completed_rx.recv_timeout(Duration::from_millis(100));
-        let mut next = paths.load_config().unwrap();
-        next.phone_call.as_mut().unwrap().sip_username = "new-account".to_string();
-        atomic_private_write(
-            &paths.config_path(),
-            &serde_json::to_vec_pretty(&next).unwrap(),
-        )
-        .unwrap();
-        drop(lease);
-        assert!(matches!(blocked, Err(mpsc::RecvTimeoutError::Timeout)));
-        let (outcome, runtime) = completed_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        outcome.unwrap();
-        worker.join().unwrap();
-        assert_eq!(runtime.values["PHONE_CALL_SIP_USERNAME"], "new-account");
-        assert_eq!(runtime.values["PHONE_CALL_SIP_PASSWORD"], next_password);
-    }
-}
+#[path = "phone_call_tests.rs"]
+mod tests;

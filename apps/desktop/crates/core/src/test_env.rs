@@ -1,4 +1,6 @@
-use std::{cell::RefCell, collections::HashMap, ffi::OsString};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::ffi::OsString;
 
 thread_local! {
     static OVERRIDES: RefCell<HashMap<String, Option<OsString>>> = RefCell::new(HashMap::new());

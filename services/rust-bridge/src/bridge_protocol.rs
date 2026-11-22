@@ -1,3 +1,17 @@
+#![cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_file,
+        reason = "existing bridge module predates perfectionist 500-line cap; keep ratcheted until split"
+    )
+)]
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use crate::*;
 
 #[derive(Debug, Serialize)]
@@ -329,6 +343,13 @@ pub(super) struct FileSystemListResponse {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::too_many_struct_fields,
+        reason = "existing protocol, configuration, or runtime state struct predates perfectionist field cap"
+    )
+)]
 pub(super) struct PendingApproval {
     pub(super) request_id: String,
     pub(super) agent_id: String,
@@ -455,9 +476,7 @@ impl From<crate::acp::interactions::PendingElicitationSummary> for PendingUserIn
                         }
                     }
                     .to_string(),
-                    default_value: field
-                        .default
-                        .and_then(|value| serde_json::to_value(value).ok()),
+                    default_value: field.default.map(serde_json::to_value).and_then(Result::ok),
                     options: (!field.options.is_empty()).then(|| {
                         field
                             .options
@@ -499,72 +518,18 @@ pub(super) struct PendingUserInputQuestionOption {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod pending_interaction_contract_tests {
-    use agent_client_protocol::v1::schema::{PermissionOptionKind, ToolCallStatus, ToolKind};
-
-    use super::*;
-    use crate::acp::interactions::{
-        ElicitationFieldKind, ElicitationFieldSummary, PendingElicitationSummary,
-        PendingPermissionSummary, PermissionOptionSummary,
-    };
-
-    #[test]
-    fn production_pending_dtos_match_cross_language_fixtures() {
-        let manifest: Value = serde_json::from_str(include_str!(
-            "../../../contracts/bridge-rpc/v2/manifest.json"
-        ))
-        .unwrap();
-        let approval = PendingApproval::from(PendingPermissionSummary {
-            agent_id: "agent-alpha".into(),
-            request_id: "approval-1".into(),
-            thread_id: "thread-1".into(),
-            turn_id: "turn-1".into(),
-            tool_call_id: "tool-1".into(),
-            title: "Run tests".into(),
-            kind: ToolKind::Execute,
-            status: ToolCallStatus::Pending,
-            options: vec![PermissionOptionSummary {
-                id: "allow-once".into(),
-                name: "Allow once".into(),
-                kind: PermissionOptionKind::AllowOnce,
-            }],
-            requested_at: "2026-07-20T00:00:00+00:00".into(),
-            requested_order: 1,
-        });
-        assert_eq!(
-            serde_json::to_value(approval).unwrap(),
-            manifest["fixtures"]["notification"]["params"]
-        );
-
-        let user_input = PendingUserInputRequest::from(PendingElicitationSummary {
-            agent_id: "agent-alpha".into(),
-            request_id: "input-1".into(),
-            thread_id: "thread-1".into(),
-            turn_id: "turn-1".into(),
-            tool_call_id: Some("tool-1".into()),
-            message: "Deployment settings".into(),
-            fields: vec![ElicitationFieldSummary {
-                name: "environment".into(),
-                title: Some("Environment".into()),
-                description: Some("Choose an environment".into()),
-                kind: ElicitationFieldKind::String,
-                required: true,
-                sensitive: true,
-                options: vec![("production".into(), "Production".into())],
-                default: None,
-            }],
-            requested_at: "2026-07-20T00:00:01+00:00".into(),
-            requested_order: 2,
-        });
-        assert_eq!(
-            serde_json::to_value(user_input).unwrap(),
-            manifest["fixtures"]["pendingUserInput"]
-        );
-    }
-}
+#[path = "bridge_protocol_tests.rs"]
+mod pending_interaction_contract_tests;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::too_many_struct_fields,
+        reason = "existing protocol, configuration, or runtime state struct predates perfectionist field cap"
+    )
+)]
 pub(super) struct BridgeUiSurface {
     pub(super) id: String,
     pub(super) thread_id: String,
@@ -853,6 +818,13 @@ pub(super) struct BridgeThreadQueueActionResponse {
 }
 
 #[derive(Debug, Clone, Default)]
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::too_many_struct_fields,
+        reason = "existing protocol, configuration, or runtime state struct predates perfectionist field cap"
+    )
+)]
 pub(super) struct BridgeThreadQueueRuntime {
     pub(super) items: VecDeque<BridgeQueuedMessageEntry>,
     pub(super) pending_steers: VecDeque<BridgeQueuedMessageEntry>,
@@ -891,6 +863,13 @@ pub(super) enum QueueCompletionDisposition {
     Continued,
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::too_many_struct_fields,
+        reason = "existing protocol, configuration, or runtime state struct predates perfectionist field cap"
+    )
+)]
 pub(super) struct BridgeQueueService {
     pub(super) backend: Arc<dyn QueueRuntimeDispatcher>,
     pub(super) hub: Arc<ClientHub>,

@@ -1,58 +1,52 @@
-use std::{
-    ffi::{c_void, OsStr, OsString},
-    fs::File,
-    io::{self, Write},
-    mem::{offset_of, size_of},
-    os::windows::{
-        ffi::{OsStrExt, OsStringExt},
-        io::{AsRawHandle, FromRawHandle, RawHandle},
-    },
-    path::{Component, Path, PathBuf, Prefix},
-    ptr::{null, null_mut},
-    sync::Arc,
-};
-
-use uuid::Uuid;
-use windows_sys::{
-    Wdk::{
-        Foundation::OBJECT_ATTRIBUTES,
-        Storage::FileSystem::{
-            NtCreateFile, FILE_CREATE, FILE_DIRECTORY_FILE, FILE_NON_DIRECTORY_FILE, FILE_OPEN,
-            FILE_OPEN_IF, FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT,
-        },
-    },
-    Win32::{
-        Foundation::{
-            LocalFree, RtlNtStatusToDosError, HANDLE, INVALID_HANDLE_VALUE, OBJ_CASE_INSENSITIVE,
-            OBJ_DONT_REPARSE,
-        },
-        Security::{
-            Authorization::{
-                ConvertStringSecurityDescriptorToSecurityDescriptorW, SetSecurityInfo,
-                SDDL_REVISION_1, SE_FILE_OBJECT,
-            },
-            GetSecurityDescriptorDacl, ACL, DACL_SECURITY_INFORMATION,
-            PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SECURITY_DESCRIPTOR,
-        },
-        Storage::FileSystem::{
-            CreateFileW, FileAttributeTagInfo, FileDispositionInfo, FileRenameInfo,
-            FlushFileBuffers, GetFileInformationByHandle, GetFileInformationByHandleEx,
-            GetFinalPathNameByHandleW, SetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
-            DELETE, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY, FILE_ATTRIBUTE_DIRECTORY,
-            FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
-            FILE_DELETE_CHILD, FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS,
-            FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
-            FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_READ_EA, FILE_RENAME_INFO,
-            FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_EA,
-            OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE, WRITE_DAC,
-        },
-        System::IO::IO_STATUS_BLOCK,
-    },
-};
-
-use dappercode_bridge_core::BridgeError;
+#![cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_file,
+        reason = "Windows handle-based NT filesystem implementation lives in one platform module"
+    )
+)]
 
 use crate::platform::PlatformSecureRoots;
+use dappercode_bridge_core::BridgeError;
+use std::ffi::{c_void, OsStr, OsString};
+use std::fs::File;
+use std::io::{self, Write};
+use std::mem::{offset_of, size_of};
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::os::windows::io::{AsRawHandle, FromRawHandle, RawHandle};
+use std::path::{Component, Path, PathBuf, Prefix};
+use std::ptr::{null, null_mut};
+use std::sync::Arc;
+use uuid::Uuid;
+use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
+use windows_sys::Wdk::Storage::FileSystem::{
+    NtCreateFile, FILE_CREATE, FILE_DIRECTORY_FILE, FILE_NON_DIRECTORY_FILE, FILE_OPEN,
+    FILE_OPEN_IF, FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT,
+};
+use windows_sys::Win32::Foundation::{
+    LocalFree, RtlNtStatusToDosError, HANDLE, INVALID_HANDLE_VALUE, OBJ_CASE_INSENSITIVE,
+    OBJ_DONT_REPARSE,
+};
+use windows_sys::Win32::Security::Authorization::{
+    ConvertStringSecurityDescriptorToSecurityDescriptorW, SetSecurityInfo, SDDL_REVISION_1,
+    SE_FILE_OBJECT,
+};
+use windows_sys::Win32::Security::{
+    GetSecurityDescriptorDacl, ACL, DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+    PSECURITY_DESCRIPTOR, SECURITY_DESCRIPTOR,
+};
+use windows_sys::Win32::Storage::FileSystem::{
+    CreateFileW, FileAttributeTagInfo, FileDispositionInfo, FileRenameInfo, FlushFileBuffers,
+    GetFileInformationByHandle, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
+    SetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, DELETE, FILE_ADD_FILE,
+    FILE_ADD_SUBDIRECTORY, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_DELETE_CHILD,
+    FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_READ_EA,
+    FILE_RENAME_INFO, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FILE_WRITE_ATTRIBUTES,
+    FILE_WRITE_EA, OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE, WRITE_DAC,
+};
+use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
 const SAFE_SHARING: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE;
 const DIRECTORY_READ_ACCESS: u32 =
@@ -106,7 +100,7 @@ pub(super) fn initialize_windows_secure_roots(
         Some(path) => create_private_absolute_directory(path).map_err(|error| {
             format!(
                 "BRIDGE_ATTACHMENTS_DIR could not be securely created ({}): {error}",
-                path.to_string_lossy()
+                path.to_string_lossy(),
             )
         })?,
         None => {
@@ -149,12 +143,19 @@ pub(super) fn windows_path_component_is_valid(name: &OsStr) -> bool {
         .to_ascii_uppercase();
     !matches!(
         stem.as_str(),
-        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$",
     ) && !(stem.len() == 4
         && (stem.starts_with("COM") || stem.starts_with("LPT"))
         && matches!(stem.as_bytes()[3], b'1'..=b'9'))
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_function,
+        reason = "handles case-insensitive Windows prefix and path component comparison in one pass"
+    )
+)]
 pub(super) fn windows_relative_beneath(path: &Path, root: &Path) -> Option<PathBuf> {
     fn os_eq(left: &OsStr, right: &OsStr) -> bool {
         fn fold(unit: u16) -> u16 {
@@ -258,7 +259,7 @@ where
         )
         .map_err(|error| {
             BridgeError::invalid_params(&format!(
-                "path component is unsafe or inaccessible: {error}"
+                "path component is unsafe or inaccessible: {error}",
             ))
         })?;
         handles.push(directory);
@@ -297,7 +298,7 @@ pub(super) fn create_windows_directory_beneath(
         )
         .map_err(|error| {
             BridgeError::invalid_params(&format!(
-                "directory component is unsafe or inaccessible: {error}"
+                "directory component is unsafe or inaccessible: {error}",
             ))
         })?;
         handles.push(directory);
@@ -368,7 +369,7 @@ where
         {
             eprintln!(
                 "warning: {} was replaced, but its directory metadata could not be synced: {error}",
-                parent.join(file_name).display()
+                parent.join(file_name).display(),
             );
         }
         Ok(())
@@ -611,6 +612,13 @@ fn open_mutable_file(parent: &File, name: &OsStr) -> io::Result<File> {
     clippy::too_many_arguments,
     reason = "Mirrors the Windows file creation parameters"
 )]
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_function,
+        reason = "marshals OBJECT_ATTRIBUTES, UNICODE_STRING, and NtCreateFile invocation together"
+    )
+)]
 fn nt_create_relative(
     parent: &File,
     name: &OsStr,
@@ -631,7 +639,8 @@ fn nt_create_relative(
     let byte_length = name
         .len()
         .checked_mul(size_of::<u16>())
-        .and_then(|length| u16::try_from(length).ok())
+        .map(u16::try_from)
+        .and_then(Result::ok)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "child name is too long"))?;
     let unicode_name = windows_sys::Win32::Foundation::UNICODE_STRING {
         Length: byte_length,
@@ -645,7 +654,8 @@ fn nt_create_relative(
         ObjectName: &raw const unicode_name,
         Attributes: OBJ_CASE_INSENSITIVE | OBJ_DONT_REPARSE,
         SecurityDescriptor: security
-            .map_or(null(), PrivateSecurityDescriptor::as_security_descriptor),
+            .map(PrivateSecurityDescriptor::as_security_descriptor)
+            .unwrap_or(null()),
         SecurityQualityOfService: null(),
     };
     let mut io_status = IO_STATUS_BLOCK::default();
@@ -740,6 +750,13 @@ fn inspect_handle_information(file: &File) -> io::Result<BY_HANDLE_FILE_INFORMAT
     Ok(information)
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_function,
+        reason = "builds aligned FILE_RENAME_INFO buffer and invokes SetFileInformationByHandle"
+    )
+)]
 fn rename_file_handle(
     source: &File,
     target_parent: &File,
@@ -756,7 +773,8 @@ fn rename_file_handle(
     let name_bytes = name
         .len()
         .checked_mul(size_of::<u16>())
-        .and_then(|length| u32::try_from(length).ok())
+        .map(u32::try_from)
+        .and_then(Result::ok)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "target name is too long"))?;
     let information_size = offset_of!(FILE_RENAME_INFO, FileName)
         .checked_add(usize::try_from(name_bytes).expect("u32 fits in usize"))

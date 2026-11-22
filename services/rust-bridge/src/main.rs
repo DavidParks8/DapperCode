@@ -1,51 +1,42 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(dylint_lib = "perfectionist", feature(register_tool))]
+#![cfg_attr(dylint_lib = "perfectionist", register_tool(perfectionist))]
 #![forbid(unsafe_code)]
 
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    env,
-    future::Future,
-    io::Write,
-    path::{Component, Path, PathBuf},
-    sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc,
-    },
-    time::{Duration, Instant, SystemTime},
+use axum::body::{to_bytes, Body};
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{
+    DefaultBodyLimit, FromRequest, FromRequestParts, Multipart, Query, Request, State,
 };
-
-use axum::{
-    body::{to_bytes, Body},
-    extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
-        DefaultBodyLimit, FromRequest, FromRequestParts, Multipart, Query, Request, State,
-    },
-    http::{
-        header::{
-            CACHE_CONTROL, CONNECTION, CONTENT_ENCODING, CONTENT_TYPE, COOKIE, HOST, LOCATION,
-            ORIGIN, REFERER, REFERRER_POLICY, SET_COOKIE, UPGRADE, VARY,
-        },
-        HeaderMap, HeaderValue, Method, StatusCode, Uri,
-    },
-    response::{IntoResponse, Response},
-    routing::{any, get, post},
-    Json, Router,
+use axum::http::header::{
+    CACHE_CONTROL, CONNECTION, CONTENT_ENCODING, CONTENT_TYPE, COOKIE, HOST, LOCATION, ORIGIN,
+    REFERER, REFERRER_POLICY, SET_COOKIE, UPGRADE, VARY,
 };
-use base64::{engine::general_purpose, Engine as _};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{any, get, post};
+use axum::{Json, Router};
+use base64::engine::general_purpose;
+use base64::Engine as _;
 use chrono::Utc;
-use dappercode_bridge_core::{
-    protocol_constants::*,
-    resource_limits::{
-        FILESYSTEM_LIST_MAX_ENTRIES, LOCAL_IMAGE_MAX_BYTES, NOTIFICATION_MAX_BYTES,
-        PREVIEW_BUFFERED_RESPONSE_MAX_BYTES, PREVIEW_REQUEST_MAX_BYTES, PUSH_DEVICE_NAME_MAX_BYTES,
-        PUSH_ID_MAX_BYTES, PUSH_PLATFORM_MAX_BYTES, PUSH_PREVIEW_MAX_BYTES,
-        PUSH_PREVIEW_MAX_THREADS, PUSH_TOKEN_MAX_BYTES, QUEUE_MAX_BYTES_PER_THREAD,
-        QUEUE_MAX_CONTENT_BYTES, QUEUE_MAX_ITEMS_PER_THREAD, QUEUE_MAX_ITEM_BYTES,
-        REPLAY_MAX_BYTES, REPLAY_RESPONSE_MAX_BYTES, UI_SURFACE_MAX_ACTIONS, UI_SURFACE_MAX_BLOCKS,
-        UI_SURFACE_MAX_BYTES, UI_SURFACE_MAX_ITEMS_PER_BLOCK, UI_SURFACE_MAX_TEXT_BYTES,
-    },
-    BridgeError,
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "re-imports shared bridge protocol constants at the crate root"
+    )
+)]
+use dappercode_bridge_core::protocol_constants::*;
+use dappercode_bridge_core::resource_limits::{
+    FILESYSTEM_LIST_MAX_ENTRIES, LOCAL_IMAGE_MAX_BYTES, NOTIFICATION_MAX_BYTES,
+    PREVIEW_BUFFERED_RESPONSE_MAX_BYTES, PREVIEW_REQUEST_MAX_BYTES, PUSH_DEVICE_NAME_MAX_BYTES,
+    PUSH_ID_MAX_BYTES, PUSH_PLATFORM_MAX_BYTES, PUSH_PREVIEW_MAX_BYTES, PUSH_PREVIEW_MAX_THREADS,
+    PUSH_TOKEN_MAX_BYTES, QUEUE_MAX_BYTES_PER_THREAD, QUEUE_MAX_CONTENT_BYTES,
+    QUEUE_MAX_ITEMS_PER_THREAD, QUEUE_MAX_ITEM_BYTES, REPLAY_MAX_BYTES, REPLAY_RESPONSE_MAX_BYTES,
+    UI_SURFACE_MAX_ACTIONS, UI_SURFACE_MAX_BLOCKS, UI_SURFACE_MAX_BYTES,
+    UI_SURFACE_MAX_ITEMS_PER_BLOCK, UI_SURFACE_MAX_TEXT_BYTES,
 };
+use dappercode_bridge_core::BridgeError;
 use dappercode_bridge_path_policy::{PathKind, PathPolicy};
 use dappercode_bridge_platform::{process_is_alive, wait_for_shutdown_signal};
 use futures_util::{SinkExt, StreamExt};
@@ -53,23 +44,33 @@ use reqwest::{Method as HttpMethod, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use services::{GitService, TerminalService};
-#[cfg(test)]
-use tokio::sync::oneshot;
-use tokio::{
-    fs,
-    io::AsyncReadExt,
-    sync::{mpsc, watch, Mutex, Notify, OwnedSemaphorePermit, RwLock, Semaphore},
-    time::{sleep, timeout},
-};
-use tokio_tungstenite::{
-    connect_async,
-    tungstenite::{client::IntoClientRequest, Message as UpstreamWsMessage},
-};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::env;
+use std::future::Future;
+use std::io::Write;
+use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime};
+use tokio::fs;
+use tokio::io::AsyncReadExt;
+use tokio::sync::{mpsc, watch, Mutex, Notify, OwnedSemaphorePermit, RwLock, Semaphore};
+use tokio::time::{sleep, timeout};
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::Message as UpstreamWsMessage;
 use uuid::Uuid;
 
 mod acp;
 mod agent_messaging;
 mod agui;
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::too_many_struct_fields,
+        reason = "generated AG-UI bindings mirror the upstream @ag-ui/core schema"
+    )
+)]
 mod agui_generated;
 mod attachments;
 mod config;
@@ -120,21 +121,121 @@ mod runtime_backend;
 mod websocket_transport;
 mod workspace_auth;
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use agui::*;
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use app_state::*;
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use bridge_protocol::*;
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use client_hub::*;
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use client_outbox::*;
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use http_routes::*;
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use interaction_validation::*;
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use pairing::*;
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use preview_proxy::*;
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use push_delivery::*;
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use runtime_backend::*;
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use websocket_transport::*;
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use workspace_auth::*;
 
 #[tokio::main]
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::excessive_cognitive_complexity,
+        perfectionist::overly_long_function,
+        perfectionist::too_many_local_bindings,
+        reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+    )
+)]
 async fn main() {
     let config = match BridgeConfig::from_env() {
         Ok(config) => Arc::new(config),
@@ -161,12 +262,12 @@ async fn main() {
 
     if !config.auth_enabled && config.allow_insecure_no_auth {
         eprintln!(
-            "bridge auth is disabled by BRIDGE_ALLOW_INSECURE_NO_AUTH=true (local development only)"
+            "bridge auth is disabled by BRIDGE_ALLOW_INSECURE_NO_AUTH=true (local development only)",
         );
     }
     if config.allow_query_token_auth {
         eprintln!(
-            "query-token auth is enabled (BRIDGE_ALLOW_QUERY_TOKEN_AUTH=true); prefer Authorization headers instead"
+            "query-token auth is enabled (BRIDGE_ALLOW_QUERY_TOKEN_AUTH=true); prefer Authorization headers instead",
         );
     }
 
@@ -285,7 +386,8 @@ async fn main() {
     let project_label = config
         .workdir
         .file_name()
-        .map(|name| name.to_string_lossy().to_string())
+        .map(|name| name.to_string_lossy())
+        .map(|name| name.into_owned())
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "DapperCode".to_string());
     let push = PushService::load(&config.state_dir, project_label, metrics.clone()).await;
@@ -353,7 +455,7 @@ async fn main() {
         let bind_url = format!(
             "http://{}:{}",
             format_host_for_url(&config.host),
-            config.port
+            config.port,
         );
         if connect_url != bind_url {
             println!("bridge connect URL: {connect_url}");
@@ -404,14 +506,14 @@ async fn main() {
     }
 }
 
-async fn bind_then_start_backend<T, Start, StartFuture>(
+async fn bind_then_start_backend<Backend, Start, StartFuture>(
     host: &str,
     port: u16,
     start_backend: Start,
-) -> Result<(String, tokio::net::TcpListener, T), String>
+) -> Result<(String, tokio::net::TcpListener, Backend), String>
 where
     Start: FnOnce() -> StartFuture,
-    StartFuture: Future<Output = Result<T, String>>,
+    StartFuture: Future<Output = Result<Backend, String>>,
 {
     let requested_bind_addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&requested_bind_addr)
@@ -427,18 +529,5 @@ where
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::bind_then_start_backend;
-
-    #[tokio::test]
-    async fn port_zero_reports_the_os_assigned_bridge_address() {
-        let (address, listener, backend) =
-            bind_then_start_backend("127.0.0.1", 0, || async { Ok::<_, String>("ready") })
-                .await
-                .expect("bind bridge listener");
-
-        assert_eq!(address, listener.local_addr().unwrap().to_string());
-        assert_ne!(listener.local_addr().unwrap().port(), 0);
-        assert_eq!(backend, "ready");
-    }
-}
+#[path = "main_tests.rs"]
+mod tests;

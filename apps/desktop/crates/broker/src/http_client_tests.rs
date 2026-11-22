@@ -1,7 +1,12 @@
 use super::{proxy_http_client, worker_http_client};
-use axum::{body::Body, routing::get, Json, Router};
-use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
-use std::{io::Read, sync::Arc, time::Duration};
+use axum::body::Body;
+use axum::routing::get;
+use axum::{Json, Router};
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use std::io::Read;
+use std::sync::Arc;
+use std::time::Duration;
 
 // Disposable, self-signed localhost certificate/key; never installed in a system trust store.
 const CERTIFICATE: &str = "-----BEGIN CERTIFICATE-----
@@ -61,7 +66,7 @@ async fn dependency_upgrade_clients_preserve_loopback_json_streaming_and_no_redi
                 .await
                 .unwrap()
                 .status(),
-            axum::http::StatusCode::FOUND
+            axum::http::StatusCode::FOUND,
         );
         assert_eq!(
             client
@@ -72,7 +77,7 @@ async fn dependency_upgrade_clients_preserve_loopback_json_streaming_and_no_redi
                 .text()
                 .await
                 .unwrap(),
-            "firstsecond"
+            "firstsecond",
         );
     }
     server.abort();
@@ -109,7 +114,7 @@ async fn dependency_upgrade_clients_reject_self_signed_tls_with_webpki_unknown_i
             let mut request = [0_u8; 1024];
             assert!(
                 stream.read(&mut request).is_err(),
-                "untrusted TLS must not deliver HTTP"
+                "untrusted TLS must not deliver HTTP",
             );
         }
     });

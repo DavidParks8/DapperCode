@@ -90,7 +90,7 @@ unused_lifetimes = "deny"
 unused_macro_rules = "deny"
 unused_must_use = "deny"
 warnings = "deny"
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage_nightly)"] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)', 'cfg(dylint_lib, values("perfectionist"))'] }
 
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }

@@ -1,3 +1,17 @@
+#![cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_file,
+        reason = "existing bridge module predates perfectionist 500-line cap; keep ratcheted until split"
+    )
+)]
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use crate::*;
 
 pub(super) struct PreviewBootstrapParams {
@@ -174,6 +188,14 @@ pub(super) async fn resolve_preview_session_from_request(
     })
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::excessive_cognitive_complexity,
+        perfectionist::overly_long_function,
+        reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+    )
+)]
 pub(super) fn parse_preview_bootstrap_params(uri: &Uri) -> PreviewBootstrapParams {
     let Ok(mut parsed) = Url::parse(&format!("http://preview{}", uri)) else {
         return PreviewBootstrapParams {
@@ -184,7 +206,8 @@ pub(super) fn parse_preview_bootstrap_params(uri: &Uri) -> PreviewBootstrapParam
             raw_frame: false,
             sanitized_path_and_query: uri
                 .path_and_query()
-                .map(|value| value.as_str().to_string())
+                .map(|value| value.as_str())
+                .map(str::to_string)
                 .filter(|value| !value.is_empty())
                 .unwrap_or_else(|| "/".to_string()),
         };
@@ -248,7 +271,7 @@ pub(super) fn parse_preview_bootstrap_params(uri: &Uri) -> PreviewBootstrapParam
         parsed
             .query()
             .map(|value| format!("?{value}"))
-            .unwrap_or_default()
+            .unwrap_or_default(),
     );
 
     PreviewBootstrapParams {
@@ -349,7 +372,7 @@ pub(super) fn build_preview_shell_frame_src(
         parsed
             .query()
             .map(|value| format!("?{value}"))
-            .unwrap_or_default()
+            .unwrap_or_default(),
     )
 }
 
@@ -362,8 +385,8 @@ pub(super) fn build_preview_shell_request_key(
 
 pub(super) fn preview_error_response(status: StatusCode, message: &str) -> Response {
     let body = format!(
-        "<!doctype html><html><body style=\"font-family:-apple-system,system-ui,sans-serif;padding:24px;background:#111;color:#f5f5f5\"><h1 style=\"font-size:18px;margin:0 0 12px\">Preview unavailable</h1><p style=\"margin:0;color:#d4d4d4\">{}</p></body></html>",
-        html_escape(message)
+        r#"<!doctype html><html><body style="font-family:-apple-system,system-ui,sans-serif;padding:24px;background:#111;color:#f5f5f5"><h1 style="font-size:18px;margin:0 0 12px">Preview unavailable</h1><p style="margin:0;color:#d4d4d4">{}</p></body></html>"#,
+        html_escape(message),
     );
     Response::builder()
         .status(status)
@@ -393,7 +416,7 @@ pub(super) fn build_preview_viewport_cookie_header(
     HeaderValue::from_str(&format!(
         "{BROWSER_PREVIEW_VIEWPORT_COOKIE_NAME}={}; Path=/; SameSite=Lax; Max-Age={}",
         viewport.as_cookie_value(),
-        BROWSER_PREVIEW_SESSION_TTL.as_secs()
+        BROWSER_PREVIEW_SESSION_TTL.as_secs(),
     ))
     .map_err(|error| error.to_string())
 }
@@ -628,6 +651,13 @@ pub(super) fn preview_overview_shell_response(
     )
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_function,
+        reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+    )
+)]
 fn preview_shell_response(
     mode: PreviewShellMode,
     sanitized_path_and_query: &str,
@@ -643,7 +673,7 @@ fn preview_shell_response(
         bootstrap_session_id,
         bootstrap_token,
     );
-    let frame_src_json = serde_json::to_string(&frame_src).unwrap_or_else(|_| "\"/\"".to_string());
+    let frame_src_json = serde_json::to_string(&frame_src).unwrap_or_else(|_| r#""/""#.to_string());
     let shell_request_key_json = serde_json::to_string(&build_preview_shell_request_key(
         bootstrap_session_id,
         bootstrap_token,
@@ -935,7 +965,8 @@ fn preview_shell_response(
 pub(super) fn should_rewrite_preview_html_response(headers: &HeaderMap) -> bool {
     let Some(content_type) = headers
         .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
+        .map(HeaderValue::to_str)
+        .and_then(Result::ok)
     else {
         return false;
     };
@@ -946,8 +977,8 @@ pub(super) fn should_rewrite_preview_html_response(headers: &HeaderMap) -> bool 
 
     !matches!(headers
         .get(CONTENT_ENCODING)
-        .and_then(|value| value.to_str().ok())
-        .map(|value| value.trim().to_ascii_lowercase())
+        .map(HeaderValue::to_str).and_then(Result::ok)
+        .map(str::trim).map(str::to_ascii_lowercase)
         , Some(value) if !value.is_empty() && value != "identity")
 }
 
@@ -984,7 +1015,7 @@ pub(super) fn inject_preview_viewport_meta(document: &str, content: &str) -> Str
         let normalized_meta_tag = lower[meta_start..meta_end]
             .split_whitespace()
             .collect::<String>();
-        if normalized_meta_tag.contains("name=\"viewport\"")
+        if normalized_meta_tag.contains(r#"name="viewport""#)
             || normalized_meta_tag.contains("name='viewport'")
             || normalized_meta_tag.contains("name=viewport")
         {
@@ -1034,6 +1065,13 @@ pub(super) fn inject_preview_head_markup(document: &str, markup: &str) -> String
     format!("{markup}{document}")
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_function,
+        reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+    )
+)]
 pub(super) fn build_preview_runtime_script() -> String {
     format!(
         r#"(function() {{
@@ -1159,7 +1197,7 @@ pub(super) fn build_preview_runtime_script() -> String {
     }}, true);
   }}
 }})();"#,
-        proxy_prefix = BROWSER_PREVIEW_PROXY_PREFIX
+        proxy_prefix = BROWSER_PREVIEW_PROXY_PREFIX,
     )
 }
 
@@ -1199,7 +1237,7 @@ pub(super) fn resolve_preview_request_target(
             parsed
                 .query()
                 .map(|value| format!("?{value}"))
-                .unwrap_or_default()
+                .unwrap_or_default(),
         );
 
         return Ok(PreviewRequestTarget {
@@ -1255,12 +1293,15 @@ pub(super) fn is_websocket_upgrade_request(method: &Method, headers: &HeaderMap)
     method == Method::GET
         && headers
             .get(CONNECTION)
-            .and_then(|value| value.to_str().ok())
-            .map(|value| value.to_ascii_lowercase().contains("upgrade"))
+            .map(HeaderValue::to_str)
+            .and_then(Result::ok)
+            .map(str::to_ascii_lowercase)
+            .map(|value| value.contains("upgrade"))
             .unwrap_or(false)
         && headers
             .get(UPGRADE)
-            .and_then(|value| value.to_str().ok())
+            .map(HeaderValue::to_str)
+            .and_then(Result::ok)
             .map(|value| value.eq_ignore_ascii_case("websocket"))
             .unwrap_or(false)
 }
@@ -1278,7 +1319,7 @@ pub(super) fn should_skip_preview_request_header(name: &str) -> bool {
             | "content-length"
             | "accept-encoding"
             | "transfer-encoding"
-            | "proxy-connection"
+            | "proxy-connection",
     )
 }
 
@@ -1293,7 +1334,7 @@ pub(super) fn should_skip_preview_websocket_request_header(name: &str) -> bool {
             | "sec-websocket-extensions"
             | "content-length"
             | "transfer-encoding"
-            | "proxy-connection"
+            | "proxy-connection",
     )
 }
 
@@ -1308,7 +1349,7 @@ pub(super) fn should_skip_preview_response_header(name: &str) -> bool {
             | "te"
             | "trailer"
             | "transfer-encoding"
-            | "upgrade"
+            | "upgrade",
     )
 }
 
@@ -1414,11 +1455,19 @@ pub(super) fn rewrite_preview_location_header(
         location_url
             .fragment()
             .map(|fragment| format!("#{fragment}"))
-            .unwrap_or_default()
+            .unwrap_or_default(),
     );
     HeaderValue::from_str(&rewritten).ok()
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::excessive_cognitive_complexity,
+        perfectionist::excessive_nesting,
+        reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+    )
+)]
 pub(super) fn rewrite_preview_set_cookie_header(
     value: &HeaderValue,
     proxy_path_prefix: Option<&str>,
@@ -1480,11 +1529,13 @@ pub(super) fn append_vary_header_value(headers: &mut HeaderMap, token: &str) {
 
     let existing = headers
         .get(VARY)
-        .and_then(|value| value.to_str().ok())
+        .map(HeaderValue::to_str)
+        .and_then(Result::ok)
         .unwrap_or_default();
     let has_token = existing
         .split(',')
-        .any(|segment| segment.trim().eq_ignore_ascii_case(normalized_token));
+        .map(str::trim)
+        .any(|segment| segment.eq_ignore_ascii_case(normalized_token));
     if has_token {
         return;
     }
@@ -1506,13 +1557,13 @@ pub(super) fn target_origin_string(target_url: &Url) -> String {
             "{}://{}:{}",
             target_url.scheme(),
             target_url.host_str().unwrap_or("127.0.0.1"),
-            explicit_port
+            explicit_port,
         )
     } else {
         format!(
             "{}://{}",
             target_url.scheme(),
-            target_url.host_str().unwrap_or("127.0.0.1")
+            target_url.host_str().unwrap_or("127.0.0.1"),
         )
     }
 }
@@ -1527,134 +1578,5 @@ pub(super) fn html_escape(value: &str) -> String {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-    use axum::body::to_bytes;
-
-    fn desktop_viewport() -> PreviewViewportConfig {
-        PreviewViewportConfig {
-            preset: PreviewViewportPreset::Desktop,
-            width: Some(1440),
-            height: Some(900),
-        }
-    }
-
-    async fn response_body(response: Response) -> String {
-        String::from_utf8(
-            to_bytes(response.into_body(), usize::MAX)
-                .await
-                .expect("preview shell response body should be readable")
-                .to_vec(),
-        )
-        .expect("preview shell response body should be UTF-8")
-    }
-
-    #[tokio::test]
-    async fn preview_shell_responses_share_headers_and_navigation_runtime() {
-        let responses = [
-            preview_desktop_shell_response("/workspace", desktop_viewport(), Some("session"), None),
-            preview_overview_shell_response(
-                "/workspace",
-                desktop_viewport(),
-                Some("session"),
-                None,
-            ),
-        ];
-
-        for response in responses {
-            assert_eq!(response.status(), StatusCode::OK);
-            assert_eq!(
-                response
-                    .headers()
-                    .get(CONTENT_TYPE)
-                    .and_then(|value| value.to_str().ok()),
-                Some("text/html; charset=utf-8")
-            );
-            assert_eq!(
-                response
-                    .headers()
-                    .get(CACHE_CONTROL)
-                    .and_then(|value| value.to_str().ok()),
-                Some("no-store, private")
-            );
-            assert_eq!(
-                response
-                    .headers()
-                    .get(REFERRER_POLICY)
-                    .and_then(|value| value.to_str().ok()),
-                Some("no-referrer")
-            );
-            assert_eq!(
-                response
-                    .headers()
-                    .get("x-content-type-options")
-                    .and_then(|value| value.to_str().ok()),
-                Some("nosniff")
-            );
-
-            let body = response_body(response).await;
-            for marker in [
-                "type: 'dappercodeDesktopFrameState'",
-                "function currentFrameWindow()",
-                "function currentFrameDocument()",
-                "function installFrameObservers()",
-                "new ResizeObserver",
-                "new MutationObserver",
-                "window.__dappercodeDesktopFrame =",
-                "goBack: function()",
-                "goForward: function()",
-                "reload: function()",
-            ] {
-                assert!(
-                    body.contains(marker),
-                    "missing shared runtime marker: {marker}"
-                );
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn preview_shell_responses_preserve_mode_layouts_and_sanitize_frame_source() {
-        let path = "/workspace?sid=query-session&st=query-token&shell=overview&frame=0&theme=dark";
-        let desktop = response_body(preview_desktop_shell_response(
-            path,
-            desktop_viewport(),
-            Some("request-key"),
-            Some("bootstrap-token"),
-        ))
-        .await;
-        let overview = response_body(preview_overview_shell_response(
-            path,
-            desktop_viewport(),
-            Some("request-key"),
-            Some("bootstrap-token"),
-        ))
-        .await;
-
-        for body in [&desktop, &overview] {
-            assert!(
-                body.contains("var frameSrc = \"/workspace?theme=dark&frame=1\";"),
-                "frame source should retain only safe query parameters"
-            );
-            assert!(!body.contains("sid=query-session"));
-            assert!(!body.contains("st=query-token"));
-            assert!(!body.contains("shell=overview"));
-            assert!(!body.contains("frame=0"));
-        }
-
-        assert!(desktop.contains("title=\"Desktop preview\""));
-        assert!(desktop.contains("background: #fff;"));
-        assert!(desktop.contains("overflow-x: auto;"));
-        assert!(desktop.contains("window.addEventListener('resize', queueMeasureFrameHeight"));
-        assert!(desktop.contains("shell.style.height = minimumDesktopHeight + 'px';"));
-        assert!(!desktop.contains("window.visualViewport"));
-
-        assert!(overview.contains("title=\"Overview preview\""));
-        assert!(overview.contains("background: #000;"));
-        assert!(overview.contains("overflow: visible;"));
-        assert!(overview.contains("window.visualViewport"));
-        assert!(overview.contains("html.style.overflow = 'hidden';"));
-        assert!(overview.contains("applyLayout(minimumDesktopHeight);"));
-        assert!(!overview.contains("window.addEventListener('resize', queueMeasureFrameHeight"));
-    }
-}
+#[path = "preview_proxy_tests.rs"]
+mod tests;

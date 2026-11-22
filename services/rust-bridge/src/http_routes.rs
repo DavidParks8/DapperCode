@@ -1,3 +1,17 @@
+#![cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_file,
+        reason = "existing bridge module predates perfectionist 500-line cap; keep ratcheted until split"
+    )
+)]
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use crate::*;
 
 pub(super) fn build_bridge_router(state: Arc<AppState>) -> Router {
@@ -52,6 +66,13 @@ pub(super) async fn status_handler(
     Json(state.bridge_status().await).into_response()
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_function,
+        reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+    )
+)]
 pub(super) async fn local_image_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -203,6 +224,15 @@ pub(super) fn preview_runtime_script_response() -> Response {
         .unwrap_or_else(|_| Response::new(Body::from(String::new())))
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::excessive_cognitive_complexity,
+        perfectionist::overly_long_function,
+        perfectionist::too_many_local_bindings,
+        reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+    )
+)]
 pub(super) async fn handle_preview_http_request(
     state: Arc<AppState>,
     parts: axum::http::request::Parts,
@@ -335,7 +365,8 @@ pub(super) async fn handle_preview_http_request(
     let request_host = parts
         .headers
         .get(HOST.as_str())
-        .and_then(|value| value.to_str().ok())
+        .map(HeaderValue::to_str)
+        .and_then(Result::ok)
         .map(str::to_string);
     let effective_viewport =
         requested_viewport.or_else(|| read_preview_viewport_preset(&parts.headers));
@@ -372,7 +403,7 @@ pub(super) async fn handle_preview_http_request(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 &format!(
                     "preview buffered response exceeds {} bytes",
-                    PREVIEW_BUFFERED_RESPONSE_MAX_BYTES
+                    PREVIEW_BUFFERED_RESPONSE_MAX_BYTES,
                 ),
             );
         }
@@ -394,7 +425,7 @@ pub(super) async fn handle_preview_http_request(
                     StatusCode::PAYLOAD_TOO_LARGE,
                     &format!(
                         "preview buffered response exceeds {} bytes",
-                        PREVIEW_BUFFERED_RESPONSE_MAX_BYTES
+                        PREVIEW_BUFFERED_RESPONSE_MAX_BYTES,
                     ),
                 );
             }
@@ -467,6 +498,15 @@ pub(super) async fn handle_preview_http_request(
     response
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::excessive_cognitive_complexity,
+        perfectionist::overly_long_function,
+        perfectionist::too_many_local_bindings,
+        reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+    )
+)]
 pub(super) async fn handle_preview_websocket_request(
     state: Arc<AppState>,
     parts: &mut axum::http::request::Parts,
@@ -561,7 +601,8 @@ pub(super) async fn handle_preview_websocket_request(
     let accepted_protocol = upstream_response
         .headers()
         .get("sec-websocket-protocol")
-        .and_then(|value| value.to_str().ok())
+        .map(HeaderValue::to_str)
+        .and_then(Result::ok)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);

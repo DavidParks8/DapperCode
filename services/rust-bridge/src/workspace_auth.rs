@@ -1,5 +1,20 @@
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use crate::*;
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_function,
+        perfectionist::too_many_local_bindings,
+        reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+    )
+)]
 pub(super) async fn list_workspace_roots(
     state: &Arc<AppState>,
     request: WorkspaceListRequest,
@@ -80,6 +95,15 @@ pub(super) async fn list_workspace_roots(
     })
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::excessive_cognitive_complexity,
+        perfectionist::overly_long_function,
+        perfectionist::too_many_local_bindings,
+        reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+    )
+)]
 pub(super) async fn list_filesystem_entries(
     state: &Arc<AppState>,
     request: FileSystemListRequest,
@@ -91,14 +115,14 @@ pub(super) async fn list_filesystem_entries(
 
     let mut read_dir = fs::read_dir(&current_path)
         .await
-        .map_err(|error| BridgeError::server(&format!("failed to read directory: {error}")))?;
+        .map_err(|error| BridgeError::server(format!("failed to read directory: {error}")))?;
     let mut entries = Vec::new();
     let mut total_entries = 0usize;
 
     while let Some(entry) = read_dir
         .next_entry()
         .await
-        .map_err(|error| BridgeError::server(&format!("failed to read directory entry: {error}")))?
+        .map_err(|error| BridgeError::server(format!("failed to read directory entry: {error}")))?
     {
         let name = entry.file_name().to_string_lossy().to_string();
         if name.is_empty() {

@@ -22,7 +22,8 @@ pub(crate) struct RpcRequest {
 
 pub(crate) fn parse_request(text: &str) -> Result<RpcRequest, RpcRequestParseError> {
     let parsed = serde_json::from_str::<Value>(text)
-        .map_err(|error| RpcRequestParseError::InvalidJson(error.to_string()))?;
+        .map_err(|error| error.to_string())
+        .map_err(RpcRequestParseError::InvalidJson)?;
     let object = parsed
         .as_object()
         .ok_or(RpcRequestParseError::InvalidPayload)?;
@@ -76,175 +77,11 @@ pub(crate) fn is_forwarded_method(method: &str) -> bool {
             | "thread/config/set"
             | "thread/start"
             | "turn/interrupt"
-            | "turn/start"
+            | "turn/start",
     )
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn parses_requests_with_all_id_and_params_shapes() {
-        let request =
-            parse_request(r#"{"id":7,"method":"thread/read","params":{"id":"t"}}"#).unwrap();
-        assert_eq!(request.id, json!(7));
-        assert_eq!(request.method, "thread/read");
-        assert_eq!(request.params, Some(json!({ "id": "t" })));
-
-        let request = parse_request(r#"{"id":null,"method":"account/read"}"#).unwrap();
-        assert_eq!(request.id, Value::Null);
-        assert!(request.params.is_none());
-    }
-
-    #[test]
-    fn classifies_each_parse_failure_without_losing_an_id() {
-        match parse_request("{").unwrap_err() {
-            RpcRequestParseError::InvalidJson(message) => assert!(!message.is_empty()),
-            _ => panic!("expected invalid JSON"),
-        }
-        assert!(matches!(
-            parse_request("[]"),
-            Err(RpcRequestParseError::InvalidPayload)
-        ));
-        match parse_request(r#"{"id":"client"}"#).unwrap_err() {
-            RpcRequestParseError::MissingMethod { id } => assert_eq!(id, json!("client")),
-            _ => panic!("expected missing method"),
-        }
-        match parse_request(r#"{"method":3}"#).unwrap_err() {
-            RpcRequestParseError::MissingMethod { id } => assert_eq!(id, Value::Null),
-            _ => panic!("expected missing method"),
-        }
-        match parse_request(r#"{"method":"event","params":{"foreground":false}}"#).unwrap_err() {
-            RpcRequestParseError::Notification { method, params } => {
-                assert_eq!(method, "event");
-                assert_eq!(params, Some(json!({ "foreground": false })));
-            }
-            _ => panic!("expected notification"),
-        }
-    }
-
-    #[test]
-    fn client_id_recovery_and_forwarding_are_conservative() {
-        assert_eq!(parse_client_request_id(r#"{"id":"abc"}"#), json!("abc"));
-        assert_eq!(parse_client_request_id(r#"{"method":"x"}"#), Value::Null);
-        assert_eq!(parse_client_request_id("not json"), Value::Null);
-        assert!(is_forwarded_method("thread/read"));
-        assert!(is_forwarded_method("thread/delete"));
-        assert!(is_forwarded_method("thread/approvalPolicy/set"));
-        assert!(is_forwarded_method("turn/start"));
-        assert!(!is_forwarded_method("bridge/capabilities/read"));
-        assert!(!is_forwarded_method("thread/read/extra"));
-    }
-
-    #[test]
-    fn contract_fixture_manifest() {
-        let manifest: Value = serde_json::from_str(include_str!(
-            "../../../contracts/bridge-rpc/v2/manifest.json"
-        ))
-        .expect("v2 contract fixture parses");
-        assert_eq!(manifest["protocolVersion"], crate::BRIDGE_PROTOCOL_VERSION);
-        for phase in ["approval", "held"] {
-            let surfaces =
-                manifest["fixtures"]["phoneCallSurfaceSnapshots"][phase]["surfaces"].clone();
-            let surfaces: Vec<crate::BridgeUiSurface> = serde_json::from_value(surfaces).unwrap();
-            for surface in surfaces {
-                crate::validate_bridge_ui_surface(&surface).unwrap();
-                assert_eq!(surface.kind.as_deref(), Some("phone-call"));
-            }
-        }
-        let missing = &manifest["fixtures"]["threadReadNotFound"];
-        let error = crate::thread_not_found_error(
-            missing["data"]["threadId"]
-                .as_str()
-                .expect("missing thread ID"),
-        );
-        assert_eq!(missing["code"], error.code);
-        assert_eq!(missing["message"], error.message);
-        assert_eq!(missing["data"], error.data.unwrap());
-        assert_eq!(manifest["fixtures"]["capabilities"]["agUiEvents"], true);
-        assert_eq!(
-            manifest["fixtures"]["capabilities"]["supports"]["phoneCalls"],
-            false
-        );
-        assert_eq!(
-            manifest["fixtures"]["capabilities"]["supportsByAgent"]["local-primary"]["phoneCalls"],
-            false
-        );
-        assert_eq!(
-            manifest["fixtures"]["capabilities"]["preferredAgentId"],
-            "local-primary"
-        );
-        let methods = manifest["mobileForwardedMethods"]
-            .as_array()
-            .expect("forwarded method inventory");
-        assert!(methods.iter().any(|method| method == "thread/start"));
-        assert!(methods.iter().any(|method| method == "turn/start"));
-        assert!(methods.iter().any(|method| method == "thread/delete"));
-        assert!(methods
-            .iter()
-            .filter_map(Value::as_str)
-            .all(is_forwarded_method));
-        let notifications = manifest["notifications"]
-            .as_array()
-            .expect("notification inventory");
-        assert!(notifications
-            .iter()
-            .any(|notification| notification == "thread/deleted"));
-        assert_eq!(
-            manifest["fixtures"]["capabilities"]["agents"][0]["capabilities"]["sessionDelete"],
-            true
-        );
-        let capability_cases = manifest["fixtures"]["capabilityCases"]
-            .as_array()
-            .expect("capability case inventory");
-        assert_eq!(capability_cases.len(), 3);
-        for case in capability_cases {
-            assert_eq!(
-                case["supportsByAgent"]["turnSteer"],
-                case["agentCapabilities"]["sessionSteer"]
-            );
-            assert_eq!(
-                case["supportsByAgent"]["threadFork"],
-                case["agentCapabilities"]["sessionFork"]
-            );
-            assert_eq!(
-                case["supportsByAgent"]["threadDelete"],
-                case["agentCapabilities"]["sessionDelete"]
-            );
-        }
-        use agent_client_protocol::v1::schema::ToolCallStatus;
-        // Tool-meta statuses are exactly ACP's: installed clients map anything else to `pending`.
-        let mut tool_statuses = [
-            ToolCallStatus::Pending,
-            ToolCallStatus::InProgress,
-            ToolCallStatus::Completed,
-            ToolCallStatus::Failed,
-        ]
-        .map(crate::agui::tool_status_wire)
-        .to_vec();
-        tool_statuses.sort();
-        assert_eq!(
-            manifest["fixtures"]["toolMetaStatuses"],
-            json!(tool_statuses)
-        );
-        let interrupted = &manifest["fixtures"]["interruptedToolMeta"];
-        assert_eq!(interrupted["name"], "dappercode.dev/tool-meta");
-        assert_eq!(interrupted["value"]["status"], "failed");
-        assert_eq!(
-            interrupted["value"][crate::agui::TOOL_META_INTERRUPTED_FIELD],
-            true
-        );
-        assert_eq!(manifest["fixtures"]["runtimeActivity"]["canRetire"], false);
-        assert_eq!(
-            manifest["fixtures"]["brokerPairing"]["type"],
-            "dappercode-bridge-pair"
-        );
-        assert_eq!(
-            manifest["fixtures"]["brokerPairing"]["brokerProtocolVersion"],
-            1
-        );
-    }
-}
+#[path = "rpc_tests.rs"]
+mod tests;
