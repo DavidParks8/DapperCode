@@ -371,38 +371,165 @@ and runs coding agents normally. Mobile **Settings > Integrations > Phone calls*
 with host setup guidance until both are configured. This is host-managed, not a mobile credential
 editor; every enabled call still requires mobile approval.
 
+After approval, **Dialing** includes preparing the local voice models before sending a SIP
+invitation. **Hang Up** remains available during preparation. Supported warm-up responses must
+finish completely; an actual preparation failure ends locally instead of ringing someone and
+leaving them waiting for inference. Recognition providers without the optional Ollama warm-up API
+are primed through their normal transcription endpoint with a generated silent clip. That clip
+is neither played nor added to the call transcript. Speech providers without the optional API
+are similarly primed with a short, discarded synthesis request with a 30-second deadline.
+Dialogue providers without the optional API must also complete an isolated structured chat
+request within 30 seconds. This catches missing dialogue models and incompatible response schemas
+before dialing. None of the preparation replies are spoken, executed as phone actions, or added
+to the call history. Preparation time is separate from connected-call duration.
+
 The voice assistant waits through incomplete replies and ordinary pauses. Single-word
 transcriptions are provisional and cannot authorize autonomous hang-up, even if the model invents a
 completed outcome. Otherwise a spoken closing and two-second quiet grace period are required. A
 short reply such as "Bye" or a noise burst after the closing still ends the call; a substantive
-reply or user steering cancels the hang-up and gives the assistant another turn. User hang-up and
-remote disconnect always work.
+reply or user steering cancels the hang-up and gives the assistant another turn, even when a
+later one-word fragment is queued behind the correction. User hang-up and remote disconnect
+always work.
+
+Ordinary mobile steering lets the sentence already being spoken finish, then discards subsequent
+superseded speech and actions. An explicit instruction such as "stop speaking" interrupts
+immediately, as do recipient barge-in and hang-up. Barge-in also clears queued in-band DTMF tones.
+A temporary synthesis gap does not turn ordinary
+steering into an immediate interruption. Interrupted history includes only fully played sentences;
+an unfinished sentence is represented as `[partially spoken sentence] [interrupted]`, not as if
+the recipient heard its complete text. Earlier completed answers remain in the history.
+
+Completed recipient utterances remain ordered while transcription runs; a later correction no
+longer replaces pending audio. The backlog is bounded, and an overflow fails explicitly rather
+than dropping words. End-of-speech detection also uses the elapsed quiet interval, so a caller
+whose endpoint suppresses silent RTP or sends sparse comfort noise can still finish a turn.
+Silence is never treated as consent, refusal, or task completion.
 
 When asked to hold, the assistant acknowledges and waits silently through music, silence, and
 recorded queue announcements until a live person returns. The mobile card shows **On hold** while
 keeping **Hang Up** available; `get_phone_call` reports `onHold: true` and `status: "in_progress"`.
 SIP hold/resume via in-dialog `INVITE` or `UPDATE` is also supported, including renegotiated RTP
 ports and offerless re-`INVITE`s answered in the `ACK`. Live steering remains available while held.
+Captured recipient audio and queued corrections survive SIP hold/resume and are transcribed in
+order; no assistant response starts while the remote transport is held. A SIP-interrupted reply
+is retried when the transport resumes instead of abandoning the captured recipient request.
+Ordinary steering during a hold acknowledgement preserves the hold transition. Pending private instructions remain
+available to the held-call classifier even if a later transcription is a queue announcement;
+only instructions processed by an accepted turn are acknowledged.
 Hold time counts toward the existing 15-minute maximum call duration; user hang-up, remote
 disconnect, and shutdown still end the call.
+
+Empty or incomplete synthesis is an explicit voice error, not a successful spoken closing.
+The same applies to all-zero PCM, nonzero samples that become silence after telephone encoding,
+and punctuation-only closings that contain no speakable words. An omitted structured hold decision
+is rejected rather than silently interpreted as ordinary listening.
+Likewise, a recognition response missing its required text field is an error, not silence.
+Already played speech stays in the failed call's transcript and report if a later sentence cannot
+be synthesized.
+
+Spoken turns pair the reply and its next action in one validated JSON `phone_turn` response.
+Only its `speech` field is synthesized; JSON, internal actions, and competing assistant content
+are never read aloud. Native `phone_turn` tool responses and legacy separate phone-tool responses
+remain supported. Structured responses and native `phone_turn` arguments must explicitly include
+the boolean `on_hold`; the older separate tool schemas retain their compatibility behavior.
+Hold-listening
+checks classify only the latest recipient speech or mobile instruction, without the booking
+objective or previous tool instructions competing with the decision to keep waiting or resume.
+
+Conversation guidance covers context-sensitive acknowledgement of distress, frustration and good
+news, short replies for rushed recipients, corrections and interruptions, and limits on payment
+or other commitments. These are behavioral instructions, not a guarantee: the dialogue model sees
+transcribed words, not vocal emotion. Real-call listening tests are still needed to assess prosody,
+noise, accents, and total response latency; no model is guaranteed to handle every situation or be
+indistinguishable from a person. Routine "Who's calling?" questions get the caller and purpose,
+not an automation announcement. Direct questions about being human, AI, or automated must still
+be answered truthfully and briefly.
+Model evaluation must check both acknowledgement and factual role correctness: a polite reply that
+speaks as the business instead of the caller is still a failure. Passing transport/audio tests does
+not qualify a model for arbitrary conversations; keep held-out dialogue failures visible rather
+than weakening them to promote a faster model.
+
+For local source validation, the ignored `local_full_audio_pipeline` regression runs the production
+call service against an isolated loopback telephone participant with real local recognition,
+dialogue, and synthesis. It measures recipient speech end to received audible RTP, not just
+text generation, and captures model residency, stage timings, controlled-noise recognition,
+live controls, and settled reports. Synthetic speech/noise is not an accents or human-listening
+evaluation. Warm pipeline runs may still include model loads when memory pressure evicts a model;
+do not substitute the faster dialogue-only figures for full-call latency.
+The regression also captures bounded, ordered received PCMU audio and independently transcribes
+its decoded 8 kHz waveform without expected-text or vocabulary hints. After call cleanup, it
+requires an exact normalized match to the intended assistant speech and checks the recognized
+readback for the correct hours and unsupported commitments. Missing/discontinuous RTP, empty
+recognition, ASR errors, or unrelated audible synthesis fail the run. Verification is offline and
+excluded from latency measurements and production HTTP-stage traces. Earlier energy/transcript-only
+runs do not establish this received-content gate.
+Call-action checks use only post-connection dialogue, never discarded readiness-probe decisions.
+
+Speech intelligibility is a separate offline gate, not a check added to live calls.
+`scripts/voice-intelligibility.mjs` requires an independent local recognizer's exact
+normalized transcription of each complete waveform. Nonzero PCM, generated text, and
+successful playback alone do not prove intelligibility. Transcribe the native waveform
+and its telephone-path version without giving ASR the expected text or vocabulary hints.
+The gate compares a fixed spoken reference against each transcription, preserves
+negation and meaningful numeric distinctions, and fails the whole batch on any mismatch,
+unverified completion, missing sample, empty recognition, or ASR error.
+
+Run `node scripts/voice-intelligibility.mjs /absolute/manifest.json`. The manifest must
+contain `expectedSamples` and exactly that many `samples`, each with a unique `id`,
+`reference`, `audioFile` (relative to the manifest), `completion: { verified, reason }`,
+and `recognition: { status: "ok", text, model, audioSha256, prompted: false }`.
+`audioSha256` must identify the exact WAV passed to ASR. Keep runtime/model revisions
+and the observed completion/drain evidence with the manifest; setting `verified` is
+not itself evidence of completion. No failed samples may be filtered out or retried
+to obtain a passing batch.
+
+Normalization ignores case, ordinary punctuation, and whitespace; it equates standalone
+digits zero through nineteen with their spoken words. Apostrophes, number signs, decimal
+and time notation, currency/percent signs, and leading zeros are not discarded.
+It does not equate synonyms, homophones, or alternative AM/PM expressions. Exact matching
+may therefore reject understandable speech because of ASR mistakes; report those as
+failed or inconclusive qualification, not automatically as unintelligible generation.
+An ASR pass means **ASR-verified; listening/naturalness unverified**.
+
+For production telephone conversion without a second codec implementation, place bounded
+mono PCM16 little-endian 24 kHz inputs in a scenario-owned directory and list their flat
+filenames in `intelligibility-inputs.json`. The ignored test below writes new
+`*-telephone.wav` files using the production FIR filter, headroom, PCMU encoding/decoding,
+and 20 ms frames. It does not place calls or exercise SIP transport:
+
+```bash
+DAPPERCODE_TEST_VOICE_AUDIO_DATA_DIR=/absolute/scenario-owned-data \
+  pnpm run cargo test --locked --package dappercode-bridge --features e2e-agent \
+  --manifest-path services/rust-bridge/Cargo.toml \
+  local_intelligibility_telephone_conversion -- --ignored --nocapture --test-threads=1
+node --test scripts/__tests__/voice-intelligibility.test.mjs
+```
 
 By default, speech-to-text, tool-calling voice turns, and 24 kHz streaming text-to-speech run
 against one local Ollama daemon (`>= v0.40.9`, `http://127.0.0.1:11434/v1`):
 
 ```bash
 ollama pull gemma4:e4b
+ollama pull gpt-oss:20b
 ollama pull phonon
 ```
 
-`gemma4:e4b` handles `/v1/audio/transcriptions` and low-latency `/v1/chat/completions` voice turns;
+`gemma4:e4b` handles `/v1/audio/transcriptions`; `gpt-oss:20b` handles `/v1/chat/completions`
+conversation turns with low reasoning effort and reduced sampling variability.
 `phonon` handles `/v1/audio/speech` 24 kHz PCM synthesis (`--tts-voice` defaults to `default`). To
 override narrowband 8 kHz transcription with a dedicated local server—for example `mlx_audio.server`
 serving `mlx-community/parakeet-tdt-0.6b-v2`—pass `--stt-base-url` and `--stt-model` (and optionally
 `--llm-base-url` / `--llm-model` or `--tts-base-url` / `--tts-model`).
 All three URLs, all three model IDs, and the TTS voice can be changed independently with
 `voice configure`; omitted flags preserve the existing values rather than resetting them to defaults.
-The local LLM endpoint must support streaming tool calls and OpenAI-compatible JSON-schema
-`response_format` for silent hold-listening decisions.
+Existing configurations keep their saved model. After pulling the new model, select it with
+`dappercode voice configure --llm-model gpt-oss:20b`; this preserves SIP settings, transcription,
+and the TTS voice. Existing workers keep the environment they started with; finish active calls
+before restarting the affected worker to pick up changed settings.
+The local LLM endpoint must support streaming OpenAI-compatible JSON-schema `response_format`
+for spoken turns and silent hold-listening decisions. The transcription request explicitly asks
+for `response_format=json`; a provider's default streaming/NDJSON format is not assumed to be a
+single JSON transcript.
 
 Configure, inspect, or remove voice settings through the operator CLI (`dappercode voice ...` or
 `pnpm run operator voice ...` from a source checkout), piping the SIP password over stdin so it
@@ -419,6 +546,114 @@ printf '%s\n' "$SIP_PASSWORD" | dappercode voice configure \
 dappercode voice status --human
 dappercode voice clear
 ```
+
+### Dedicated local recognition on Apple silicon
+
+For broader conversational quality, the evaluated local profile pairs `gemma4:12b` dialogue
+with `mlx-community/parakeet-tdt-0.6b-v2` recognition and the existing `phonon` voice. It avoids
+keeping a second large generative model resident just for transcription. This is an optional,
+host-managed profile, not an automatic change to saved settings or a guarantee of human likeness.
+
+The recognition provider used for validation is `mlx-audio[server,stt]==0.6.5` in a separate Python
+environment outside repositories (Python 3.10+ on Apple silicon). Start that provider on loopback:
+
+```bash
+python -m pip install 'mlx-audio[server,stt]==0.6.5'
+python -m uvicorn mlx_audio.server:app --host 127.0.0.1 --port 0
+```
+
+Set `STT_BASE_URL` to the server's printed loopback URL with `/v1` appended.
+Validation used separate loopback Ollama providers for dialogue and synthesis, both with
+`OLLAMA_CONTEXT_LENGTH=8192`, `OLLAMA_NUM_PARALLEL=1`, and `OLLAMA_NO_CLOUD=true`.
+The dialogue provider used `OLLAMA_MAX_LOADED_MODELS=1`, `OLLAMA_KEEP_ALIVE=15m`; synthesis
+used `OLLAMA_MAX_LOADED_MODELS=3`, `OLLAMA_KEEP_ALIVE=30m`. Set `LLM_BASE_URL` and
+`TTS_BASE_URL` to their respective loopback URLs with `/v1` appended. A shared Ollama provider
+is supported, but may evict models and is not the measured topology.
+
+Load the recognition model, ensure both Ollama providers have their selected models, then,
+after configuring SIP above, select the complete profile:
+
+```bash
+curl --fail --request POST \
+  "$STT_BASE_URL/models?model_name=mlx-community%2Fparakeet-tdt-0.6b-v2"
+OLLAMA_HOST="${LLM_BASE_URL%/v1}" ollama pull gemma4:12b
+OLLAMA_HOST="${TTS_BASE_URL%/v1}" ollama pull phonon
+dappercode voice configure \
+  --llm-base-url "$LLM_BASE_URL" \
+  --llm-model gemma4:12b \
+  --stt-base-url "$STT_BASE_URL" \
+  --stt-model mlx-community/parakeet-tdt-0.6b-v2 \
+  --tts-base-url "$TTS_BASE_URL" \
+  --tts-model phonon \
+  --tts-voice default
+```
+
+Model weights may download during host setup; inference remains local. Keep all providers
+running, and use stable, available host-service ports for ongoing use rather than a workspace's
+bridge port. Existing workers require an explicit restart after their active calls finish to
+pick up changed settings. No credentials need to be re-entered, and no secret belongs in a
+repository.
+
+Validate the complete audio path on the intended host. Larger models alone can worsen recognition
+or exhaust available memory; paging and other model workloads can introduce long pauses. Synthetic
+noise checks do not replace accent coverage, consented listening tests, or review of a real call.
+
+### Conversational female voice on Apple silicon
+
+The opt-in `conversational-female` voice profile uses
+`mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit` through a local MLX Audio
+server. It targets the warm, conversational US-English female delivery evaluated
+with the listening samples, rather than cloning the macOS system voice.
+It changes speech synthesis only: dialogue, private text steering, sentence-boundary
+ordinary steering, immediate stop, DTMF, holds, and hang-up remain bridge-controlled.
+Existing Phonon defaults and saved voice selections are unchanged.
+
+Use the same separate Python environment described above. The verified provider
+version is `mlx-audio[server,stt]==0.6.5`; keep it outside repositories:
+
+```bash
+python -m pip install 'mlx-audio[server,stt]==0.6.5'
+python -m uvicorn mlx_audio.server:app --host 127.0.0.1 --port 0
+```
+
+Set `TTS_BASE_URL` to the printed loopback URL with `/v1` appended. Choose a stable
+available service port for ongoing use; do not use a workspace bridge port.
+Load the speech model, then select the profile using the existing voice settings:
+
+```bash
+curl --fail --request POST \
+  "$TTS_BASE_URL/models?model_name=mlx-community%2FQwen3-TTS-12Hz-1.7B-VoiceDesign-8bit"
+dappercode voice configure \
+  --tts-base-url "$TTS_BASE_URL" \
+  --tts-model mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit \
+  --tts-voice conversational-female
+dappercode voice status --human
+```
+
+The alias requires that exact model ID; incompatible model/profile combinations
+are rejected instead of silently falling back to another voice. The bridge sends
+the female voice description, conversational style, English language, and the
+evaluated sampling parameters separately from the spoken text. No style instructions
+are inserted into the callee transcript or read aloud as part of the speech input.
+Providers other than this selected profile retain the original speech request shape.
+
+The provider is host-managed; the bridge does not install or supervise Python or
+download voice weights during a call. Model downloads may happen during setup,
+but inference remains local. Keep the provider running and finish active calls
+before explicitly restarting an affected worker to pick up changed settings.
+No SIP credentials need to be re-entered. Changing other settings without voice
+flags preserves the selected profile.
+
+Speech generation and memory use must be validated on the intended host. VoiceDesign
+does not guarantee an identical speaker across generations, and the approved short
+sample does not establish naturalness for every sentence. The earlier Phonon latency
+measurements do not apply to this profile. Use the independent waveform-ASR gate
+above for intelligibility; listening is still needed for accent, prosody, and
+context-sensitive delivery.
+
+To return to Phonon, explicitly select the original local Ollama endpoint,
+`--tts-model phonon`, and `--tts-voice default`. This profile does not adopt MiniCPM
+or remove the existing approval/authorization safeguards.
 
 Security and storage boundaries:
 
@@ -448,8 +683,9 @@ Security and storage boundaries:
   directly from ephemeral local ports—no public webhooks, tunnels, or inbound listeners are opened.
 - **Caller-identifying introductions and text-only transcripts**: the assistant's first sentence
   says who it is calling for and why (for example, "Hi, I'm calling for Your Name to book a table"),
-  without volunteering that it is an AI. It must not impersonate the user or claim to be human, and
-  must answer identity questions truthfully. Only bounded text transcripts (never raw call audio)
+  without volunteering that it is an AI. It must not impersonate the user or claim to be human.
+  Routine caller-identification answers use no automation labels; direct questions about being
+  human, AI, or automated get truthful answers. Only bounded text transcripts (never raw call audio)
   are shown in the live card or enqueued back to the owning ACP session when the call settles.
 
 ## Process Ownership

@@ -18,7 +18,7 @@ pub use config::{
 };
 pub use phone_call::{
     PhoneCallSettings, DEFAULT_SIP_TRANSPORT, DEFAULT_VOICE_BASE_URL, DEFAULT_VOICE_LLM_MODEL,
-    DEFAULT_VOICE_TTS_MODEL, DEFAULT_VOICE_TTS_VOICE,
+    DEFAULT_VOICE_STT_MODEL, DEFAULT_VOICE_TTS_MODEL, DEFAULT_VOICE_TTS_VOICE,
 };
 pub use platform::{
     process_start_identity, resolve_bridge_host, stop_child, wait_for_shutdown_signal, NetworkMode,

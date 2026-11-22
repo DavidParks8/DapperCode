@@ -3,7 +3,8 @@ use std::io::Read;
 use anyhow::{bail, Context, Result};
 use dappercode_desktop_core::{
     AppPaths, PhoneCallSettings, SecretStore, DEFAULT_SIP_TRANSPORT, DEFAULT_VOICE_BASE_URL,
-    DEFAULT_VOICE_LLM_MODEL, DEFAULT_VOICE_TTS_MODEL, DEFAULT_VOICE_TTS_VOICE,
+    DEFAULT_VOICE_LLM_MODEL, DEFAULT_VOICE_STT_MODEL, DEFAULT_VOICE_TTS_MODEL,
+    DEFAULT_VOICE_TTS_VOICE,
 };
 use serde::Serialize;
 
@@ -113,7 +114,7 @@ pub(super) fn configure_voice(
                     .unwrap_or_else(|| DEFAULT_VOICE_BASE_URL.to_string()),
                 stt_model: stt_model
                     .or_else(|| existing.map(|s| s.stt_model.clone()))
-                    .unwrap_or_else(|| DEFAULT_VOICE_LLM_MODEL.to_string()),
+                    .unwrap_or_else(|| DEFAULT_VOICE_STT_MODEL.to_string()),
                 llm_base_url: llm_base_url
                     .or_else(|| existing.map(|s| s.llm_base_url.clone()))
                     .unwrap_or_else(|| DEFAULT_VOICE_BASE_URL.to_string()),
