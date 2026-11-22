@@ -1,16 +1,8 @@
 #![cfg_attr(all(test, coverage_nightly), feature(coverage_attribute))]
+#![cfg_attr(dylint_lib = "perfectionist", feature(register_tool))]
+#![cfg_attr(dylint_lib = "perfectionist", register_tool(perfectionist))]
 
 //! Stable configuration, storage, platform, and lifecycle services for the desktop operator.
-
-mod broker_supervisor;
-mod config;
-mod phone_call;
-mod platform;
-mod secrets;
-mod setup;
-mod store;
-#[cfg(test)]
-mod test_env;
 
 pub use broker_supervisor::{BridgeSnapshot, BridgeState, BrokerLifecycleAction, BrokerSupervisor};
 pub use config::{
@@ -33,3 +25,13 @@ pub use store::{
     profile_id_for, AppConfig, AppPaths, BrokerEndpoint, BrokerSettings, FileLease, Profile,
     ProfileAgent,
 };
+
+mod broker_supervisor;
+mod config;
+mod phone_call;
+mod platform;
+mod secrets;
+mod setup;
+mod store;
+#[cfg(test)]
+mod test_env;

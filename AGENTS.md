@@ -94,6 +94,9 @@ Do not automatically restart a user bridge during debugging unless explicitly re
   by a single component as `useState`. Never store a thenable value in an atom — jotai suspends on it.
 - `testID` values referenced by `e2e/fixtures/selectors.ts` are test contracts; renaming one means
   updating that file. Add new handles there instead of inlining raw selector strings in specs.
+- Every Rust unit test lives in `{prod-file-name}_tests.rs` next to its production file (linked via
+  `#[cfg(test)] #[path = "{prod-file-name}_tests.rs"] mod tests;`), never inline inside production
+  files. Both Rust workspaces enforce `KSXGitHub/perfectionist` rules via Dylint (`dylint.toml`).
 - Do not edit generated/vendor paths such as `node_modules`, `.expo`, `target`, Pods, or `dist`.
 - The active iOS project is `apps/mobile/ios`, not the old root `ios` directory.
 - Version changes must keep both Rust lockfiles and mobile metadata synchronized.
@@ -120,6 +123,7 @@ Desktop changes:
 ```bash
 pnpm run cargo fmt --all --check --manifest-path apps/desktop/Cargo.toml
 pnpm run cargo clippy --locked --workspace --all-targets --manifest-path apps/desktop/Cargo.toml -- -D warnings
+pnpm run dylint --workspace apps/desktop
 pnpm run cargo test --locked --workspace --manifest-path apps/desktop/Cargo.toml -- --test-threads=1
 pnpm run desktop:build:macos
 ```
@@ -129,6 +133,7 @@ Bridge changes:
 ```bash
 pnpm run cargo fmt --all --check --manifest-path services/rust-bridge/Cargo.toml
 pnpm run cargo check --locked --workspace --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml
+pnpm run dylint --workspace services/rust-bridge
 pnpm run cargo test --locked --workspace --all-targets --all-features --manifest-path services/rust-bridge/Cargo.toml -- --test-threads=1
 ```
 

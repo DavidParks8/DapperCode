@@ -1,18 +1,19 @@
-use std::{collections::HashSet, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
-
-use dappercode_bridge_core::{resource_limits::GIT_COMMAND_MAX_OUTPUT_BYTES, BridgeError};
+use crate::GitCommandOutput;
+use dappercode_bridge_core::resource_limits::GIT_COMMAND_MAX_OUTPUT_BYTES;
+use dappercode_bridge_core::BridgeError;
 use dappercode_bridge_path_policy::{PathKind, PathPolicy};
 use dappercode_bridge_platform::{
     configure_git_command, git_global_config_path, kill_git_process_group,
 };
-use tokio::{
-    io::{AsyncRead, AsyncReadExt},
-    process::Command,
-    sync::Semaphore,
-    time::timeout,
-};
-
-use crate::GitCommandOutput;
+use std::collections::HashSet;
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::process::Command;
+use tokio::sync::Semaphore;
+use tokio::time::timeout;
 
 const MAX_CONCURRENT_GIT_COMMANDS: usize = 4;
 const OUTPUT_READ_CHUNK_SIZE: usize = 8 * 1024;
@@ -99,6 +100,14 @@ impl TerminalService {
         self
     }
 
+    #[cfg_attr(
+        dylint_lib = "perfectionist",
+        expect(
+            perfectionist::overly_long_function,
+            perfectionist::too_many_local_bindings,
+            reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+        )
+    )]
     pub(crate) async fn execute_git(
         &self,
         args: &[String],
@@ -140,7 +149,7 @@ impl TerminalService {
 
         let mut child = command
             .spawn()
-            .map_err(|error| BridgeError::server(&format!("failed to spawn git: {error}")))?;
+            .map_err(|error| BridgeError::server(format!("failed to spawn git: {error}")))?;
         let stdout = child
             .stdout
             .take()
@@ -162,8 +171,8 @@ impl TerminalService {
             Ok(Ok(status)) => status.code(),
             Ok(Err(error)) => {
                 let _ = child.kill().await;
-                return Err(BridgeError::server(&format!(
-                    "failed to wait for git: {error}"
+                return Err(BridgeError::server(format!(
+                    "failed to wait for git: {error}",
                 )));
             }
             Err(_) => {
@@ -184,9 +193,9 @@ impl TerminalService {
     }
 }
 
-async fn read_stream_limited<R>(mut reader: R, max_bytes: usize) -> (Vec<u8>, bool)
+async fn read_stream_limited<Reader>(mut reader: Reader, max_bytes: usize) -> (Vec<u8>, bool)
 where
-    R: AsyncRead + Unpin,
+    Reader: AsyncRead + Unpin,
 {
     let mut bytes = Vec::new();
     let mut buffer = [0_u8; OUTPUT_READ_CHUNK_SIZE];
@@ -222,65 +231,5 @@ fn finalize_output(bytes: Vec<u8>, truncated: bool) -> String {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::{
-        finalize_output, hardened_git_args, pinned_git_config_keys, read_stream_limited,
-        TerminalService,
-    };
-    use dappercode_bridge_path_policy::PathPolicy;
-    use std::sync::Arc;
-
-    #[test]
-    fn hardens_git_without_installing_a_credential_helper() {
-        let args = hardened_git_args(&["status".to_string()]);
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["-c", "credential.helper="]));
-        assert_eq!(args.last().map(String::as_str), Some("status"));
-        assert!(pinned_git_config_keys().contains("core.hookspath"));
-    }
-
-    #[test]
-    fn marks_truncated_output() {
-        assert_eq!(
-            finalize_output(b"partial\n".to_vec(), true),
-            "partial\n[output truncated]"
-        );
-        assert_eq!(finalize_output(Vec::new(), true), "[output truncated]");
-        assert_eq!(
-            finalize_output(b" complete \n".to_vec(), false),
-            " complete"
-        );
-    }
-
-    #[tokio::test]
-    async fn bounded_stream_reads_report_exact_truncation_state() {
-        assert_eq!(read_stream_limited(&b""[..], 3).await, (vec![], false));
-        assert_eq!(
-            read_stream_limited(&b"abc"[..], 3).await,
-            (b"abc".to_vec(), false)
-        );
-        assert_eq!(
-            read_stream_limited(&b"abcdef"[..], 3).await,
-            (b"abc".to_vec(), true)
-        );
-    }
-
-    #[tokio::test]
-    async fn executes_git_inside_the_allowed_root() {
-        let root = std::env::temp_dir().join(format!("dappercode-git-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&root).expect("create temp dir");
-        let policy = Arc::new(PathPolicy::new(root.clone(), false).expect("policy"));
-        let service = TerminalService::new(policy);
-        let result = service
-            .execute_git(
-                &["rev-parse".to_string(), "--is-inside-work-tree".to_string()],
-                root.clone(),
-                Some(5_000),
-            )
-            .await
-            .expect("git execution");
-        assert_ne!(result.code, Some(0));
-        std::fs::remove_dir_all(&root).expect("remove temp dir");
-    }
-}
+#[path = "terminal_tests.rs"]
+mod tests;

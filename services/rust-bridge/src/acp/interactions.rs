@@ -1,3 +1,15 @@
+#![cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_file,
+        reason = "existing bridge module predates perfectionist 500-line cap; keep ratcheted until split"
+    )
+)]
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[path = "interactions_tests.rs"]
+pub(crate) mod tests;
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
@@ -43,7 +55,7 @@ impl ApprovalPolicy {
             Self::Untrusted => false,
             Self::OnRequest => matches!(
                 request.tool_call.fields.kind,
-                Some(ToolKind::Read | ToolKind::Search | ToolKind::Think)
+                Some(ToolKind::Read | ToolKind::Search | ToolKind::Think),
             ),
             Self::Never => true,
         }
@@ -74,6 +86,13 @@ pub struct PermissionOptionSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::too_many_struct_fields,
+        reason = "existing protocol, configuration, or runtime state struct predates perfectionist field cap"
+    )
+)]
 pub struct PendingPermissionSummary {
     pub agent_id: String,
     pub request_id: String,
@@ -130,7 +149,7 @@ pub struct InteractionRegistry {
     max_global: usize,
     max_per_session: usize,
     #[cfg(test)]
-    permission_publication_barrier: Arc<Mutex<Option<PermissionPublicationBarrier>>>,
+    permission_publication_barrier: Arc<Mutex<Option<tests::PermissionPublicationBarrier>>>,
 }
 
 #[derive(Default)]
@@ -347,24 +366,6 @@ impl AbandonedInteractionCleanup {
     }
 }
 
-#[cfg(test)]
-#[derive(Clone)]
-pub(crate) struct PermissionPublicationBarrier {
-    reached: Arc<tokio::sync::Notify>,
-    release: Arc<tokio::sync::Notify>,
-}
-
-#[cfg(test)]
-impl PermissionPublicationBarrier {
-    pub(crate) async fn wait_until_reached(&self) {
-        self.reached.notified().await;
-    }
-
-    pub(crate) fn release(&self) {
-        self.release.notify_one();
-    }
-}
-
 impl InteractionRegistry {
     fn bump_epoch(state: &mut InteractionState, session_id: &SessionId) -> u64 {
         let epoch = state.session_epochs.entry(session_id.clone()).or_default();
@@ -401,8 +402,10 @@ impl InteractionRegistry {
     }
 
     #[cfg(test)]
-    pub(crate) async fn pause_next_permission_publication(&self) -> PermissionPublicationBarrier {
-        let barrier = PermissionPublicationBarrier {
+    pub(crate) async fn pause_next_permission_publication(
+        &self,
+    ) -> tests::PermissionPublicationBarrier {
+        let barrier = tests::PermissionPublicationBarrier {
             reached: Arc::new(tokio::sync::Notify::new()),
             release: Arc::new(tokio::sync::Notify::new()),
         };
@@ -455,6 +458,14 @@ impl InteractionRegistry {
         self.set_approval_policies_locked(locks, policy).await
     }
 
+    #[cfg_attr(
+        dylint_lib = "perfectionist",
+        expect(
+            perfectionist::excessive_cognitive_complexity,
+            perfectionist::overly_long_function,
+            reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+        )
+    )]
     pub(crate) async fn set_approval_policies_locked(
         &self,
         locks: PolicySessionLocks,
@@ -522,7 +533,7 @@ impl InteractionRegistry {
                     .map_err(response_error);
                 if let Err(error) = result {
                     eprintln!(
-                        "approval policy committed but abandoned permission response failed: {error}"
+                        "approval policy committed but abandoned permission response failed: {error}",
                     );
                 }
                 continue;
@@ -553,7 +564,7 @@ impl InteractionRegistry {
             .await;
             if let Err(error) = result {
                 eprintln!(
-                    "approval policy committed but automatic permission response failed: {error}"
+                    "approval policy committed but automatic permission response failed: {error}",
                 );
             }
         }
@@ -571,6 +582,14 @@ impl InteractionRegistry {
             .unwrap_or_default()
     }
 
+    #[cfg_attr(
+        dylint_lib = "perfectionist",
+        expect(
+            perfectionist::overly_long_function,
+            perfectionist::too_many_local_bindings,
+            reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+        )
+    )]
     pub async fn register_permission(
         &self,
         request: RequestPermissionRequest,
@@ -665,6 +684,14 @@ impl InteractionRegistry {
         Ok(())
     }
 
+    #[cfg_attr(
+        dylint_lib = "perfectionist",
+        expect(
+            perfectionist::overly_long_function,
+            perfectionist::too_many_local_bindings,
+            reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+        )
+    )]
     pub async fn register_elicitation(
         &self,
         request: CreateElicitationRequest,
@@ -945,6 +972,14 @@ impl InteractionRegistry {
         .await
     }
 
+    #[cfg_attr(
+        dylint_lib = "perfectionist",
+        expect(
+            perfectionist::excessive_cognitive_complexity,
+            perfectionist::overly_long_function,
+            reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+        )
+    )]
     pub async fn cancel_session(
         &self,
         session_id: &SessionId,
@@ -1155,6 +1190,16 @@ impl InteractionRegistry {
         Ok(())
     }
 
+    #[cfg_attr(
+        dylint_lib = "perfectionist",
+        expect(
+            perfectionist::excessive_cognitive_complexity,
+            perfectionist::excessive_nesting,
+            perfectionist::overly_long_function,
+            perfectionist::too_many_local_bindings,
+            reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+        )
+    )]
     pub async fn prepare_steer(&self, session_id: &SessionId) -> Result<u64, InteractionError> {
         let session_lease = self.sessions.stable_lease(session_id).await;
         let publication_guard = match &session_lease {
@@ -1303,7 +1348,10 @@ impl InteractionRegistry {
             }
         }
         blocked_session.clear().await;
-        first_error.map_or(Ok(epoch), Err)
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(epoch),
+        }
     }
 
     pub async fn current_steer_epoch(&self, session_id: &SessionId) -> u64 {
@@ -1334,12 +1382,12 @@ impl InteractionRegistry {
                 .any(|entry| &entry.session_id == session_id)
     }
 
-    pub async fn with_verified_steer_epoch<T>(
+    pub async fn with_verified_steer_epoch<Outcome>(
         &self,
         session_id: &SessionId,
         epoch: u64,
-        send: impl FnOnce() -> T,
-    ) -> Option<T> {
+        send: impl FnOnce() -> Outcome,
+    ) -> Option<Outcome> {
         let state = self.inner.lock().await;
         let valid = state
             .session_epochs
@@ -1358,6 +1406,13 @@ impl InteractionRegistry {
         valid.then(send)
     }
 
+    #[cfg_attr(
+        dylint_lib = "perfectionist",
+        expect(
+            perfectionist::overly_long_function,
+            reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+        )
+    )]
     pub async fn drain(&self) {
         let publications = {
             let mut state = self.inner.lock().await;
@@ -1653,14 +1708,14 @@ fn allocate(state: &mut InteractionState, agent_id: &str, thread_id: &str) -> (S
             "acp-interaction:{}:{}:{}",
             agent_id,
             thread_id,
-            Uuid::new_v4()
+            Uuid::new_v4(),
         ),
         state.next_order,
     )
 }
 
 fn permission_summary(
-    request_id: &str,
+    request_id: impl Into<String>,
     requested_order: u64,
     agent_id: String,
     thread_id: String,
@@ -1669,7 +1724,7 @@ fn permission_summary(
 ) -> PendingPermissionSummary {
     PendingPermissionSummary {
         agent_id,
-        request_id: request_id.to_string(),
+        request_id: request_id.into(),
         thread_id,
         turn_id,
         tool_call_id: request.tool_call.tool_call_id.to_string(),
@@ -1695,7 +1750,7 @@ fn permission_summary(
 }
 
 fn elicitation_summary(
-    request_id: &str,
+    request_id: impl Into<String>,
     requested_order: u64,
     agent_id: String,
     thread_id: String,
@@ -1717,7 +1772,7 @@ fn elicitation_summary(
     };
     PendingElicitationSummary {
         agent_id,
-        request_id: request_id.to_string(),
+        request_id: request_id.into(),
         thread_id,
         turn_id,
         tool_call_id,
@@ -1728,6 +1783,14 @@ fn elicitation_summary(
     }
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::excessive_nesting,
+        perfectionist::overly_long_function,
+        reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+    )
+)]
 fn field_summary(
     name: &str,
     property: &ElicitationPropertySchema,
@@ -1735,8 +1798,10 @@ fn field_summary(
 ) -> ElicitationFieldSummary {
     let required = schema
         .required
-        .as_ref()
-        .is_some_and(|required| required.iter().any(|field| field == name));
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .any(|field| field == name);
     let (title, description, kind, options, default, meta) = match property {
         ElicitationPropertySchema::String(value) => (
             value.title.clone(),
@@ -1844,7 +1909,11 @@ fn is_sensitive(
     if meta.is_some_and(|meta| {
         ["secret", "sensitive", "isSecret", "isSensitive"]
             .iter()
-            .any(|key| meta.get(*key).and_then(serde_json::Value::as_bool) == Some(true))
+            .any(|key| {
+                meta.get(*key)
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+            })
     }) {
         return true;
     }
@@ -1880,6 +1949,15 @@ fn validate_elicitation(
     Ok(())
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::excessive_cognitive_complexity,
+        perfectionist::excessive_nesting,
+        perfectionist::overly_long_function,
+        reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+    )
+)]
 fn validate_value(
     name: &str,
     property: &ElicitationPropertySchema,
@@ -1888,22 +1966,22 @@ fn validate_value(
     match (property, value) {
         (ElicitationPropertySchema::String(schema), ElicitationContentValue::String(value)) => {
             let length = u64::try_from(value.chars().count()).expect("string length fits in u64");
-            if schema.min_length.is_some_and(|min| length < u64::from(min))
-                || schema.max_length.is_some_and(|max| length > u64::from(max))
-                || schema
-                    .enum_values
-                    .as_ref()
-                    .is_some_and(|options| !options.contains(value))
-                || schema
-                    .one_of
-                    .as_ref()
-                    .is_some_and(|options| !options.iter().any(|option| option.value == *value))
-                || schema.pattern.as_ref().is_some_and(|pattern| {
+            let invalid_bounds_or_choices =
+                schema.min_length.is_some_and(|min| length < u64::from(min))
+                    || schema.max_length.is_some_and(|max| length > u64::from(max))
+                    || schema
+                        .enum_values
+                        .as_ref()
+                        .is_some_and(|options| !options.contains(value))
+                    || schema.one_of.as_ref().is_some_and(|options| {
+                        !options.iter().any(|option| option.value == *value)
+                    });
+            let invalid_pattern_or_format =
+                schema.pattern.as_ref().is_some_and(|pattern| {
                     regex::Regex::new(pattern)
                         .map(|pattern| !pattern.is_match(value))
                         .unwrap_or(true)
-                })
-                || schema.format.is_some_and(|format| match format {
+                }) || schema.format.is_some_and(|format| match format {
                     agent_client_protocol::v1::schema::StringFormat::Email => !valid_email(value),
                     agent_client_protocol::v1::schema::StringFormat::Uri => {
                         reqwest::Url::parse(value).is_err()
@@ -1915,8 +1993,8 @@ fn validate_value(
                         chrono::DateTime::parse_from_rfc3339(value).is_err()
                     }
                     _ => true,
-                })
-            {
+                });
+            if invalid_bounds_or_choices || invalid_pattern_or_format {
                 return invalid(format!("invalid string field {name}"));
             }
         }
@@ -1974,7 +2052,7 @@ fn valid_email(value: &str) -> bool {
     })
 }
 
-fn invalid<T>(message: String) -> Result<T, InteractionError> {
+fn invalid<Outcome>(message: String) -> Result<Outcome, InteractionError> {
     Err(InteractionError::InvalidElicitation(message))
 }
 
@@ -2051,515 +2129,4 @@ async fn emit_elicitation(
         }
     };
     session.emit(event).await;
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use serde_json::json;
-    use std::time::Duration;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn steer_epoch_verification_accepts_only_current_stable_epoch() {
-        let registry = InteractionRegistry::new(SessionRegistry::default());
-        let session_id = SessionId::new("epoch-session");
-        assert!(!registry.at_capacity(&InteractionState::default(), None));
-        let zero_capacity = InteractionRegistry::with_limits(SessionRegistry::default(), 0, 0);
-        assert!(zero_capacity.at_capacity(&InteractionState::default(), None));
-        let zero_session_capacity =
-            InteractionRegistry::with_limits(SessionRegistry::default(), 1, 0);
-        assert!(zero_session_capacity.at_capacity(&InteractionState::default(), Some(&session_id)));
-        assert!(registry.verify_steer_epoch(&session_id, 0).await);
-        assert_eq!(registry.current_steer_epoch(&session_id).await, 0);
-        {
-            let mut state = registry.inner.lock().await;
-            assert_eq!(InteractionRegistry::bump_epoch(&mut state, &session_id), 1);
-        }
-
-        assert!(registry.verify_steer_epoch(&session_id, 1).await);
-        assert_eq!(registry.current_steer_epoch(&session_id).await, 1);
-        assert!(!registry.verify_steer_epoch(&session_id, 0).await);
-        assert_eq!(
-            registry
-                .with_verified_steer_epoch(&session_id, 1, || "sent")
-                .await,
-            Some("sent")
-        );
-        assert_eq!(
-            registry
-                .with_verified_steer_epoch(&session_id, 0, || "not-sent")
-                .await,
-            None
-        );
-    }
-
-    #[tokio::test]
-    async fn publication_and_blocked_session_guards_cover_both_settlement_paths() {
-        let inner = Arc::new(Mutex::new(InteractionState::default()));
-        let session_id = SessionId::new("guarded");
-        inner
-            .lock()
-            .await
-            .blocked_sessions
-            .insert(session_id.clone());
-        BlockedSessionGuard::new(inner.clone(), session_id.clone())
-            .clear()
-            .await;
-        assert!(!inner.lock().await.blocked_sessions.contains(&session_id));
-
-        inner
-            .lock()
-            .await
-            .blocked_sessions
-            .insert(session_id.clone());
-        drop(BlockedSessionGuard::new(inner.clone(), session_id.clone()));
-        tokio::time::timeout(Duration::from_secs(1), async {
-            loop {
-                if !inner.lock().await.blocked_sessions.contains(&session_id) {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(1)).await;
-            }
-        })
-        .await
-        .expect("dropped guard clears the blocked session");
-        assert!(!inner.lock().await.blocked_sessions.contains(&session_id));
-
-        let cleanup = || AbandonedInteractionCleanup {
-            inner: inner.clone(),
-            request_id: "missing".to_string(),
-            kind: AbandonedInteractionKind::Permission,
-        };
-        let (published, publisher) = InteractionPublication::new(cleanup());
-        let published_wait = tokio::spawn({
-            let published = published.clone();
-            async move { published.wait().await }
-        });
-        publisher.publish();
-        assert!(published_wait.await.unwrap());
-        assert!(published.is_published());
-        assert!(!published.is_abandoned());
-
-        let (abandoned, publisher) = InteractionPublication::new(AbandonedInteractionCleanup {
-            inner: inner.clone(),
-            request_id: "missing".to_string(),
-            kind: AbandonedInteractionKind::Elicitation,
-        });
-        drop(publisher);
-        assert!(!abandoned.wait().await);
-        assert!(abandoned.is_abandoned());
-
-        let (abandoned_without_cleanup, mut no_cleanup) = InteractionPublication::new(cleanup());
-        no_cleanup.cleanup = None;
-        drop(no_cleanup);
-        assert!(!abandoned_without_cleanup.wait().await);
-    }
-
-    #[tokio::test]
-    async fn committed_session_eviction_removes_approval_policy_state() {
-        let sessions = SessionRegistry::with_capacity(1);
-        let registry = InteractionRegistry::new(sessions.clone());
-        let first_id = SessionId::new("first-policy-session");
-        sessions.register("agent", first_id.clone()).await.unwrap();
-        registry
-            .set_approval_policy(&first_id, ApprovalPolicy::Never)
-            .await
-            .unwrap();
-        assert_eq!(registry.inner.lock().await.approval_policies.len(), 1);
-
-        sessions
-            .register("agent", SessionId::new("second-policy-session"))
-            .await
-            .unwrap();
-
-        assert!(!registry
-            .inner
-            .lock()
-            .await
-            .approval_policies
-            .contains_key(&first_id));
-    }
-
-    #[tokio::test]
-    async fn policy_update_restores_a_tentative_eviction_before_applying_state() {
-        let sessions = SessionRegistry::with_capacity(1);
-        let registry = InteractionRegistry::new(sessions.clone());
-        let first_id = SessionId::new("tentatively-evicted");
-        sessions.register("agent", first_id.clone()).await.unwrap();
-        registry
-            .set_approval_policy(&first_id, ApprovalPolicy::Never)
-            .await
-            .unwrap();
-        let eviction = sessions.pause_next_eviction().await;
-        let replacement = {
-            let sessions = sessions.clone();
-            tokio::spawn(async move {
-                sessions
-                    .register("agent", SessionId::new("replacement"))
-                    .await
-            })
-        };
-        eviction.wait_until_reached().await;
-
-        registry
-            .set_approval_policy(&first_id, ApprovalPolicy::OnRequest)
-            .await
-            .expect("policy update restores the live session");
-        eviction.release();
-
-        assert!(replacement.await.expect("replacement task").is_err());
-        assert!(sessions.get(&first_id).await.is_some());
-        assert_eq!(
-            registry.approval_policy(&first_id).await,
-            ApprovalPolicy::OnRequest
-        );
-    }
-
-    #[tokio::test]
-    async fn policy_update_is_retained_while_a_session_is_registering() {
-        let sessions = SessionRegistry::default();
-        let registry = InteractionRegistry::new(sessions.clone());
-        let session_id = SessionId::new("registering-policy-session");
-        let barrier = sessions.pause_next_registration().await;
-        let registration = {
-            let sessions = sessions.clone();
-            let session_id = session_id.clone();
-            tokio::spawn(async move { sessions.register("agent", session_id).await })
-        };
-        barrier.wait_until_reached().await;
-
-        registry
-            .set_approval_policy(&session_id, ApprovalPolicy::Never)
-            .await
-            .expect("policy update succeeds during registration");
-        assert_eq!(
-            registry.approval_policy(&session_id).await,
-            ApprovalPolicy::Never
-        );
-
-        barrier.release();
-        registration
-            .await
-            .expect("registration task")
-            .expect("registration succeeds");
-        assert_eq!(
-            registry.approval_policy(&session_id).await,
-            ApprovalPolicy::Never
-        );
-    }
-
-    fn property(value: serde_json::Value) -> ElicitationPropertySchema {
-        serde_json::from_value(value).expect("valid elicitation property")
-    }
-
-    fn schema(properties: BTreeMap<String, ElicitationPropertySchema>) -> ElicitationSchema {
-        let mut schema = ElicitationSchema::new();
-        schema.properties = properties;
-        schema
-    }
-
-    fn assert_invalid(schema: &ElicitationSchema, name: &str, value: ElicitationContentValue) {
-        assert!(matches!(
-            validate_elicitation(schema, &BTreeMap::from([(name.to_string(), value)])),
-            Err(InteractionError::InvalidElicitation(_))
-        ));
-    }
-
-    #[test]
-    fn elicitation_validation_rejects_missing_unknown_and_wrong_type_fields() {
-        let mut requested = schema(BTreeMap::from([(
-            "name".to_string(),
-            property(json!({"type": "string"})),
-        )]));
-        requested.required = Some(vec!["name".to_string()]);
-        assert!(matches!(
-            validate_elicitation(&requested, &BTreeMap::new()),
-            Err(InteractionError::InvalidElicitation(message)) if message.contains("missing required")
-        ));
-        assert!(matches!(
-            validate_elicitation(
-                &requested,
-                &BTreeMap::from([
-                    (
-                        "name".to_string(),
-                        ElicitationContentValue::String("value".to_string()),
-                    ),
-                    (
-                        "other".to_string(),
-                        ElicitationContentValue::String("value".to_string()),
-                    ),
-                ]),
-            ),
-            Err(InteractionError::InvalidElicitation(message)) if message.contains("unknown field")
-        ));
-        assert_invalid(&requested, "name", ElicitationContentValue::Boolean(true));
-    }
-
-    #[test]
-    fn elicitation_validation_covers_string_constraints_and_formats() {
-        let constrained = schema(BTreeMap::from([(
-            "value".to_string(),
-            property(json!({
-                "type": "string",
-                "minLength": 2,
-                "maxLength": 4,
-                "enum": ["okay", "yes"],
-                "oneOf": [{"const": "okay", "title": "Okay"}],
-                "pattern": "^[a-z]+$"
-            })),
-        )]));
-        for value in ["x", "large", "yes", "NOPE"] {
-            assert_invalid(
-                &constrained,
-                "value",
-                ElicitationContentValue::String(value.to_string()),
-            );
-        }
-        assert!(validate_elicitation(
-            &constrained,
-            &BTreeMap::from([(
-                "value".to_string(),
-                ElicitationContentValue::String("okay".to_string()),
-            )]),
-        )
-        .is_ok());
-
-        let invalid_pattern = schema(BTreeMap::from([(
-            "value".to_string(),
-            property(json!({"type": "string", "pattern": "["})),
-        )]));
-        assert_invalid(
-            &invalid_pattern,
-            "value",
-            ElicitationContentValue::String("anything".to_string()),
-        );
-
-        for (format, invalid_value, valid_value) in [
-            ("email", "missing-at", "person@example.com"),
-            ("uri", "not a uri", "https://example.com/path"),
-            ("date", "2026-99-99", "2026-07-19"),
-            ("date-time", "yesterday", "2026-07-19T12:30:00Z"),
-        ] {
-            let formatted = schema(BTreeMap::from([(
-                "value".to_string(),
-                property(json!({"type": "string", "format": format})),
-            )]));
-            assert_invalid(
-                &formatted,
-                "value",
-                ElicitationContentValue::String(invalid_value.to_string()),
-            );
-            assert!(validate_elicitation(
-                &formatted,
-                &BTreeMap::from([(
-                    "value".to_string(),
-                    ElicitationContentValue::String(valid_value.to_string()),
-                )]),
-            )
-            .is_ok());
-        }
-        for invalid_email in ["@example.com", "person@example", "person@example."] {
-            assert!(!valid_email(invalid_email));
-        }
-        assert!(valid_email("person@example.com"));
-    }
-
-    #[test]
-    fn elicitation_validation_covers_numeric_boolean_and_array_constraints() {
-        let requested = schema(BTreeMap::from([
-            (
-                "integer".to_string(),
-                property(json!({"type": "integer", "minimum": 2, "maximum": 4})),
-            ),
-            (
-                "number".to_string(),
-                property(json!({"type": "number", "minimum": 1.5, "maximum": 2.5})),
-            ),
-            ("enabled".to_string(), property(json!({"type": "boolean"}))),
-            (
-                "plain".to_string(),
-                property(json!({
-                    "type": "array",
-                    "items": {"type": "string", "enum": ["one", "two"]},
-                    "minItems": 1,
-                    "maxItems": 2
-                })),
-            ),
-            (
-                "titled".to_string(),
-                property(json!({
-                    "type": "array",
-                    "items": {"anyOf": [{"const": "one", "title": "One"}]}
-                })),
-            ),
-            (
-                "future".to_string(),
-                property(json!({"type": "array", "items": {"type": "future"}})),
-            ),
-        ]));
-
-        for value in [1, 5] {
-            assert_invalid(
-                &requested,
-                "integer",
-                ElicitationContentValue::Integer(value),
-            );
-        }
-        for value in [1.0, 3.0, f64::NAN] {
-            assert_invalid(&requested, "number", ElicitationContentValue::Number(value));
-        }
-        assert_invalid(
-            &requested,
-            "plain",
-            ElicitationContentValue::StringArray(Vec::new()),
-        );
-        assert_invalid(
-            &requested,
-            "plain",
-            ElicitationContentValue::StringArray(vec!["one".to_string(); 3]),
-        );
-        assert_invalid(
-            &requested,
-            "plain",
-            ElicitationContentValue::StringArray(vec!["other".to_string()]),
-        );
-        assert_invalid(
-            &requested,
-            "titled",
-            ElicitationContentValue::StringArray(vec!["other".to_string()]),
-        );
-        assert_invalid(
-            &requested,
-            "future",
-            ElicitationContentValue::StringArray(vec!["one".to_string()]),
-        );
-
-        assert!(validate_elicitation(
-            &requested,
-            &BTreeMap::from([
-                ("integer".to_string(), ElicitationContentValue::Integer(3)),
-                ("number".to_string(), ElicitationContentValue::Number(2.0)),
-                (
-                    "enabled".to_string(),
-                    ElicitationContentValue::Boolean(true)
-                ),
-                (
-                    "plain".to_string(),
-                    ElicitationContentValue::StringArray(vec!["one".to_string()]),
-                ),
-                (
-                    "titled".to_string(),
-                    ElicitationContentValue::StringArray(vec!["one".to_string()]),
-                ),
-            ]),
-        )
-        .is_ok());
-    }
-
-    #[test]
-    fn elicitation_field_summaries_cover_all_kinds_options_defaults_and_secrets() {
-        let requested = schema(BTreeMap::from([
-            (
-                "choice".to_string(),
-                property(json!({
-                    "type": "string",
-                    "title": "Choice",
-                    "description": "Select one",
-                    "oneOf": [{"const": "a", "title": "Alpha"}],
-                    "default": "a"
-                })),
-            ),
-            (
-                "plain".to_string(),
-                property(json!({"type": "string", "enum": ["a"], "default": "a"})),
-            ),
-            (
-                "count".to_string(),
-                property(json!({"type": "integer", "default": 2})),
-            ),
-            (
-                "ratio".to_string(),
-                property(json!({"type": "number", "default": 1.5})),
-            ),
-            (
-                "enabled".to_string(),
-                property(json!({"type": "boolean", "default": true})),
-            ),
-            (
-                "tags".to_string(),
-                property(json!({
-                    "type": "array",
-                    "items": {"type": "string", "enum": ["a"]},
-                    "default": ["a"]
-                })),
-            ),
-            (
-                "labels".to_string(),
-                property(json!({
-                    "type": "array",
-                    "items": {"anyOf": [{"const": "a", "title": "Alpha"}]}
-                })),
-            ),
-            ("future".to_string(), property(json!({"type": "future"}))),
-            (
-                "password".to_string(),
-                property(json!({"type": "string", "default": "hidden"})),
-            ),
-            (
-                "metadata".to_string(),
-                property(json!({"type": "string", "_meta": {"isSensitive": true}})),
-            ),
-        ]));
-        let mut requested = requested;
-        requested.required = Some(vec!["choice".to_string()]);
-
-        let summaries = requested
-            .properties
-            .iter()
-            .map(|(name, property)| field_summary(name, property, &requested))
-            .collect::<Vec<_>>();
-        assert!(summaries.iter().any(|field| {
-            field.name == "choice"
-                && field.required
-                && field.options == vec![("a".to_string(), "Alpha".to_string())]
-                && field.default == Some(ElicitationContentValue::String("a".to_string()))
-        }));
-        assert!(summaries
-            .iter()
-            .any(|field| field.name == "plain" && field.options[0].0 == "a"));
-        assert!(summaries
-            .iter()
-            .any(|field| field.kind == ElicitationFieldKind::Integer));
-        assert!(summaries
-            .iter()
-            .any(|field| field.kind == ElicitationFieldKind::Number));
-        assert!(summaries
-            .iter()
-            .any(|field| field.kind == ElicitationFieldKind::Boolean));
-        assert_eq!(
-            summaries
-                .iter()
-                .filter(|field| field.kind == ElicitationFieldKind::StringArray)
-                .count(),
-            2
-        );
-        assert!(summaries
-            .iter()
-            .any(|field| field.kind == ElicitationFieldKind::Unsupported));
-        for name in ["password", "metadata"] {
-            let field = summaries.iter().find(|field| field.name == name).unwrap();
-            assert!(field.sensitive);
-            assert_eq!(field.default, None);
-        }
-        assert!(is_sensitive("field", Some("API Key"), None, None));
-        assert!(is_sensitive(
-            "field",
-            None,
-            Some("Access token used by the service"),
-            None,
-        ));
-        assert!(!is_sensitive("field", Some("Display name"), None, None));
-    }
 }

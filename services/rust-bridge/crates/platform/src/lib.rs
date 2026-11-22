@@ -1,8 +1,8 @@
 #![cfg_attr(all(test, coverage_nightly), feature(coverage_attribute))]
+#![cfg_attr(dylint_lib = "perfectionist", feature(register_tool))]
+#![cfg_attr(dylint_lib = "perfectionist", register_tool(perfectionist))]
 
 //! Native filesystem, process, and port-discovery services selected at compile time.
-
-mod platform;
 
 pub use platform::{
     atomic_write_private_blocking, configure_git_command, create_secure_file,
@@ -19,3 +19,5 @@ pub use platform::{
     test_observed_process_creation_time, test_process_creation_time,
     test_wait_for_owner_exit_with_identity,
 };
+
+mod platform;

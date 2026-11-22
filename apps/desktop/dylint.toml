@@ -1,0 +1,36 @@
+# Dylint configuration for DapperCode Rust workspaces.
+# Kept identical across `apps/desktop/dylint.toml` and `services/rust-bridge/dylint.toml`
+# (verified by `scripts/__tests__/rust-lint-policy.test.mjs`).
+[workspace.metadata.dylint]
+libraries = [
+    { git = "https://github.com/KSXGitHub/perfectionist", rev = "6292425546dfd7d94e903816559aa822ccb1fb19" },
+]
+
+[perfectionist]
+disable = [
+    { name = "thiserror_usage", reason = "this repository standardizes on thiserror for typed error enums" },
+]
+
+# Every unit test lives in `{prod-file-name}_tests.rs` instead of inline inside production files.
+["perfectionist::excessive_inline_tests"]
+inline_style = "external_only"
+
+# Keep size and complexity limits focused on production code while allowing comprehensive
+# scenario-driven unit tests in `*_tests.rs` files.
+["perfectionist::overly_long_file"]
+exempt_tests = true
+
+["perfectionist::overly_long_function"]
+exempt_tests = true
+
+["perfectionist::too_many_local_bindings"]
+exempt_tests = true
+
+["perfectionist::excessive_cognitive_complexity"]
+exempt_tests = true
+
+["perfectionist::excessive_nesting"]
+exempt_tests = true
+
+["perfectionist::too_many_struct_fields"]
+exempt_tests = true

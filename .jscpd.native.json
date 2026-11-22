@@ -9,6 +9,7 @@
     "**/target/**",
     "**/tests/**",
     "**/*_test.rs",
+    "**/*_tests.rs",
     "**/*generated.rs"
   ],
   "threshold": 0.5,

@@ -1,15 +1,20 @@
+#![cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_file,
+        reason = "Windows Credential Manager vault and SIP storage logic live together"
+    )
+)]
+
+use crate::secrets::{
+    generate_token, validate_sip_password, vault_file_get, vault_file_set, BridgeSecret,
+    SecretBackend, SecretStore, SecretVault, VAULT_VERSION,
+};
+use crate::store::{atomic_private_write, remove_file_if_exists, AppPaths, FileLease};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::Path;
-
-use crate::{
-    secrets::{
-        generate_token, validate_sip_password, vault_file_get, vault_file_set, BridgeSecret,
-        SecretBackend, SecretStore, SecretVault, VAULT_VERSION,
-    },
-    store::{atomic_private_write, remove_file_if_exists, AppPaths, FileLease},
-};
 
 pub(crate) const WINDOWS_TOKEN_ENTRY_PREFIX: &str = "bridge-auth-token:v2";
 pub(crate) const WINDOWS_LAYOUT_ENTRY_ACCOUNT: &str = "bridge-auth-vault:v2";
@@ -158,6 +163,13 @@ pub(crate) fn get(
     }))
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_function,
+        reason = "handles locked Windows Credential Manager lookup, creation, and fallback migration"
+    )
+)]
 pub(crate) fn get_or_create(
     store: &SecretStore,
     paths: &AppPaths,
@@ -252,6 +264,15 @@ pub(crate) fn get_or_create(
     }
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_function,
+        perfectionist::excessive_cognitive_complexity,
+        perfectionist::excessive_nesting,
+        reason = "synchronizes per-profile Windows Credential Manager entries with atomic fallback rollback"
+    )
+)]
 pub(crate) fn ensure_profiles(
     store: &SecretStore,
     paths: &AppPaths,
@@ -422,6 +443,13 @@ pub(crate) fn store_sip_password(
     }
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::excessive_nesting,
+        reason = "handles Windows Credential Manager UTF-16 size limits and atomic fallback rollback"
+    )
+)]
 fn store_sip_password_locked(
     store: &SecretStore,
     paths: &AppPaths,

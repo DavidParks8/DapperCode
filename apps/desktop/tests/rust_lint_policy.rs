@@ -1,8 +1,6 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn lint_section<'a>(manifest: &'a str, name: &str) -> &'a str {
     let heading = format!("[workspace.lints.{name}]\n");
@@ -65,7 +63,7 @@ fn workspace_lint_policies_reject_representative_unsafe_and_lossy_code() {
             clean.status.success(),
             "{} clean fixture failed: {}",
             workspace.display(),
-            String::from_utf8_lossy(&clean.stderr)
+            String::from_utf8_lossy(&clean.stderr),
         );
         let boundary = check_fixture(
             temporary.path(),
@@ -75,7 +73,7 @@ fn workspace_lint_policies_reject_representative_unsafe_and_lossy_code() {
         assert!(
             boundary.status.success(),
             "16 KiB stack array must remain permitted: {}",
-            String::from_utf8_lossy(&boundary.stderr)
+            String::from_utf8_lossy(&boundary.stderr),
         );
 
         let probes = [
@@ -159,7 +157,7 @@ fn workspace_lint_policies_reject_representative_unsafe_and_lossy_code() {
             assert!(
                 !output.status.success() && stderr.contains(expected),
                 "{} did not reject {expected}: {stderr}",
-                workspace.display()
+                workspace.display(),
             );
         }
     }

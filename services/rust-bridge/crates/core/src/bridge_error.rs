@@ -8,18 +8,18 @@ pub struct BridgeError {
 }
 
 impl BridgeError {
-    pub fn method_not_found(message: &str) -> Self {
+    pub fn method_not_found(message: impl Into<String>) -> Self {
         Self {
             code: -32601,
-            message: message.to_string(),
+            message: message.into(),
             data: None,
         }
     }
 
-    pub fn invalid_params(message: &str) -> Self {
+    pub fn invalid_params(message: impl Into<String>) -> Self {
         Self {
             code: -32602,
-            message: message.to_string(),
+            message: message.into(),
             data: None,
         }
     }
@@ -37,18 +37,18 @@ impl BridgeError {
         }
     }
 
-    pub fn server(message: &str) -> Self {
+    pub fn server(message: impl Into<String>) -> Self {
         Self {
             code: -32000,
-            message: message.to_string(),
+            message: message.into(),
             data: None,
         }
     }
 
-    pub fn forbidden(error: &str, message: &str) -> Self {
+    pub fn forbidden(error: &str, message: impl Into<String>) -> Self {
         Self {
             code: -32003,
-            message: message.to_string(),
+            message: message.into(),
             data: Some(json!({ "error": error })),
         }
     }

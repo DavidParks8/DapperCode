@@ -1,17 +1,13 @@
-use std::{
-    fs::{File, OpenOptions},
-    path::{Path, PathBuf},
-    process::Command,
-    time::Duration,
-};
-
-use anyhow::Result;
-use async_trait::async_trait;
-
 use super::{
     home_dir, unix_common, CredentialLayout, NetworkMode, PlatformStrategy, ProcessStopRequest,
     SetupPreflightError,
 };
+use anyhow::Result;
+use async_trait::async_trait;
+use std::fs::{File, OpenOptions};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::Duration;
 
 pub(super) static STRATEGY: UnixStrategy = UnixStrategy;
 
@@ -20,8 +16,8 @@ pub(super) struct UnixStrategy;
 #[async_trait]
 impl PlatformStrategy for UnixStrategy {
     #[cfg(test)]
-    fn kind(&self) -> super::PlatformKind {
-        super::PlatformKind::Unix
+    fn kind(&self) -> super::tests::PlatformKind {
+        super::tests::PlatformKind::Unix
     }
 
     fn data_dir(&self) -> Result<PathBuf> {

@@ -1,8 +1,29 @@
 mod full_audio_validation {
-    use super::*;
-    use crate::phone_call::audio::{decode_mulaw, mean_abs_pcm};
+    use super::super::sip;
+    use super::{
+        build_rtp_packet, lock_unpoisoned, parse_rtp_packet, spawn_mock_voice_http, voice_reply,
+        voice_tool, Arc, Body, ClientOutboxReceiver, Duration, HangupPhoneCallStatus, Instant,
+        Message, MockSipDialog, MockVoiceState, Ordering, PhoneCallService, PhoneCallSnapshot,
+        PhoneCallStatus, Response, Router, SocketAddr, State, StatusCode, TcpListener,
+        TranscriptSpeaker, TrunkCall, TrunkCallOptions, UdpSocket, Value, VoicePipelineConfig,
+        CONTENT_TYPE, INTERRUPTED_MARKER, PCMU_PAYLOAD_TYPE, RTP_FRAME_SAMPLES, STT_FAILURE_REPLY, TEST_TIMEOUT, TRUNK_OWNER,
+        VAD_DEFAULT_HANGOVER_FRAMES,
+    };
+    use axum::routing::post;
+    use crate::phone_call::audio::{
+        decode_mulaw, encode_mulaw_frame_with_headroom, encode_wav_8k_mono, mean_abs_pcm,
+        Downsampler24kTo8k,
+    };
+    use crate::phone_call::voice::VoicePipelineClient;
+    use dappercode_bridge_core::resource_limits::truncate_utf8_bytes;
     use futures_util::StreamExt;
-    use std::{fs, path::PathBuf};
+    use serde_json::json;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::Mutex as StdMutex;
+    use tokio::task::JoinHandle;
+    use tokio::time::timeout;
+    use tokio_util::sync::CancellationToken;
 
     const STIMULUS: &str = "Corner Bistro opens at nine and closes at five today.";
     const STIMULUS_FILE: &str = "full-audio-stimulus.pcm";
@@ -428,7 +449,8 @@ mod full_audio_validation {
             calls[index].expected_response_bytes = response.content_length();
             calls[index].content_type = headers
                 .get(CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok())
+                .map(reqwest::header::HeaderValue::to_str)
+                .and_then(Result::ok)
                 .map(diagnostic_text);
             if stage != "preload" && !status.is_success() {
                 calls[index].failure = Some("upstream-http-status");
@@ -702,7 +724,7 @@ mod full_audio_validation {
         let mut evidence = DialogueEvidence::default();
         for call in lock_unpoisoned(calls)
             .iter()
-            .filter(|call| call.stage == "dialogue" && call.request_started >= connected)
+            .filter(|call| call.stage == "dialogue").filter(|call| call.request_started >= connected)
         {
             let call = dialogue_call_evidence(call);
             evidence.structured_turn |= call.structured_turn;
@@ -935,7 +957,7 @@ mod full_audio_validation {
             action.is_some_and(|start| {
                 tokens[start + 1..]
                     .iter()
-                    .take_while(|word| !word.starts_with("open") && !word.starts_with("clos"))
+                    .take_while(|word| !matches!(*word, w if w.starts_with("open") || w.starts_with("clos")))
                     .any(|word| word == time)
             })
         };
@@ -1103,7 +1125,10 @@ mod full_audio_validation {
     fn card_has_hangup(params: &Value) -> bool {
         params["actions"]
             .as_array()
-            .is_some_and(|actions| actions.iter().any(|action| action["id"] == "hangup"))
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+            .iter()
+            .any(|action| action["id"] == "hangup")
     }
 
     fn card_contains(params: &Value, text: &str) -> bool {
@@ -1262,15 +1287,15 @@ mod full_audio_validation {
                     }
                 }
             }
-            if !hangup_pending
+            let call_settled = !hangup_pending
                 && call.service.live_work_count() == 0
-                && observed
-                    .final_snapshot
-                    .as_ref()
-                    .is_some_and(|snapshot| terminal_status(snapshot.status))
-                && observed.final_card.is_some()
-                && !report_pending
-            {
+                && !report_pending;
+            let final_ui_ready = observed
+                .final_snapshot
+                .as_ref()
+                .is_some_and(|snapshot| terminal_status(snapshot.status))
+                && observed.final_card.is_some();
+            if call_settled && final_ui_ready {
                 break;
             }
         }
@@ -1366,10 +1391,11 @@ mod full_audio_validation {
                     && !entry.text.trim().is_empty()
                     && !entry.text.contains(INTERRUPTED_MARKER)
             });
-            if guard_started.is_none()
-                && observed.first_speech_energy.is_some()
+            let dialogue_observed = observed.first_speech_energy.is_some()
                 && observed.callee_visible.is_some()
-                && observed.assistant_visible.is_some()
+                && observed.assistant_visible.is_some();
+            if guard_started.is_none()
+                && dialogue_observed
                 && assistant_drained
                 && quiet_frames >= 25
             {
@@ -1602,7 +1628,7 @@ mod full_audio_validation {
         let snr_db = std::env::var("DAPPERCODE_TEST_VOICE_AUDIO_SNR_DB")
             .ok()
             .filter(|value| !value.is_empty())
-            .map(|value| value.parse::<u32>().expect("numeric controlled SNR"));
+            .map(|value| value.parse::<u32>()).map(|parsed| parsed.expect("numeric controlled SNR"));
         let (pcm24k, cached_stimulus) = stimulus_pcm(&client, mode == "cold").await;
         let mut pcm8k = Vec::new();
         Downsampler24kTo8k::new().push_pcm24k_samples(&pcm24k, &mut pcm8k);

@@ -16,18 +16,64 @@ test('reads root and crate sources deterministically while skipping non-source c
   try {
     const bridge = path.join(root, 'services/rust-bridge');
     mkdirSync(path.join(bridge, 'src'), { recursive: true });
+    mkdirSync(path.join(bridge, 'src', 'bin'), { recursive: true });
     mkdirSync(path.join(bridge, 'crates', 'zeta', 'src'), { recursive: true });
     mkdirSync(path.join(bridge, 'crates', 'alpha', 'src'), { recursive: true });
     mkdirSync(path.join(bridge, 'crates', 'without-source'), { recursive: true });
-    writeFileSync(path.join(bridge, 'src', 'main.rs'), 'fn root() {}');
-    writeFileSync(path.join(bridge, 'src', 'source_policy.rs'), '#![cfg(test)]');
+    writeFileSync(
+      path.join(bridge, 'Cargo.toml'),
+      '[package]\nname = "fixture"\nversion = "0.1.0"\n[[bin]]\nname = "custom"\npath = "src/custom.rs" # comment\n',
+    );
+    writeFileSync(
+      path.join(bridge, 'src', 'main.rs'),
+      [
+        'mod prod_tests; // production',
+        '#[cfg(all(any(unix, test, windows)))]',
+        'mod nested_prod;',
+        '#[cfg(all(unix /* supported: linux, test, macOS */))]',
+        'mod commented_prod;',
+        '#[cfg(test)]',
+        '#[path = "bin/tool.rs"]',
+        'mod tool_under_test;',
+        '#[cfg(test)]',
+        '#[path = "custom.rs"]',
+        'mod custom_under_test;',
+        '#[cfg(test)]',
+        'mod shared;',
+        'const RAW: &str = r#"quote " then /* not a comment "#;',
+        "const CHARS: [char; 2] = ['\\'','\"'];",
+        'include /* note */ ! { "shared.rs" }',
+        '#[cfg(test)]',
+        '#[path = "main_tests.rs"]',
+        'mod tests;',
+        '#[cfg(test)]',
+        'mod source_policy;',
+        'fn root() {}',
+      ].join('\n'),
+    );
+    writeFileSync(path.join(bridge, 'src', 'main_tests.rs'), '#[test] fn t() {}\n');
+    writeFileSync(path.join(bridge, 'src', 'prod_tests.rs'), 'pub fn live() {}\n');
+    writeFileSync(path.join(bridge, 'src', 'nested_prod.rs'), 'pub fn nested() {}\n');
+    writeFileSync(path.join(bridge, 'src', 'commented_prod.rs'), 'pub fn commented() {}\n');
+    writeFileSync(path.join(bridge, 'src', 'bin', 'tool.rs'), 'fn main() {}\n');
+    writeFileSync(path.join(bridge, 'src', 'custom.rs'), 'fn main() {}\n');
+    writeFileSync(path.join(bridge, 'src', 'shared.rs'), 'include!("leaf.rs");\n');
+    writeFileSync(path.join(bridge, 'src', 'leaf.rs'), 'pub fn leaf() {}\n');
+    writeFileSync(path.join(bridge, 'src', 'source_policy.rs'), '#![cfg(test)]\n');
     writeFileSync(path.join(bridge, 'crates', 'zeta', 'src', 'lib.rs'), 'fn zeta() {}');
     writeFileSync(path.join(bridge, 'crates', 'alpha', 'src', 'lib.rs'), 'fn alpha() {}');
 
     assert.deepEqual(
       [...readRustBridgeProductionSources(root).keys()],
       [
+        'services/rust-bridge/src/bin/tool.rs',
+        'services/rust-bridge/src/commented_prod.rs',
+        'services/rust-bridge/src/custom.rs',
+        'services/rust-bridge/src/leaf.rs',
         'services/rust-bridge/src/main.rs',
+        'services/rust-bridge/src/nested_prod.rs',
+        'services/rust-bridge/src/prod_tests.rs',
+        'services/rust-bridge/src/shared.rs',
         'services/rust-bridge/crates/alpha/src/lib.rs',
         'services/rust-bridge/crates/zeta/src/lib.rs',
       ],

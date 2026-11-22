@@ -1,3 +1,17 @@
+#![cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_file,
+        reason = "existing bridge module predates perfectionist 500-line cap; keep ratcheted until split"
+    )
+)]
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::wildcard_imports,
+        reason = "flat sibling modules split from main.rs share crate-root symbols"
+    )
+)]
 use crate::*;
 
 fn failure_is_definitive(error: &str) -> bool {
@@ -54,6 +68,15 @@ pub(super) fn protected_request_error(
     None
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::excessive_cognitive_complexity,
+        perfectionist::overly_long_function,
+        perfectionist::too_many_local_bindings,
+        reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+    )
+)]
 pub(super) async fn handle_socket(
     socket: WebSocket,
     state: Arc<AppState>,
@@ -235,10 +258,17 @@ fn is_ordered_push_control(text: &str) -> bool {
     };
     matches!(
         method.as_str(),
-        "bridge/push/observed" | "bridge/push/presence"
+        "bridge/push/observed" | "bridge/push/presence",
     )
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_function,
+        reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+    )
+)]
 pub(super) async fn handle_client_message(
     client_id: u64,
     text: String,
@@ -280,7 +310,7 @@ pub(super) async fn handle_client_message(
         Err(RpcRequestParseError::Notification { method, params }) => {
             if matches!(
                 method.as_str(),
-                "bridge/push/observed" | "bridge/push/presence"
+                "bridge/push/observed" | "bridge/push/presence",
             ) {
                 let trace = state.metrics.start_request(&method, "bridge");
                 match Box::pin(handle_bridge_method(&method, params, state, client_id)).await {
@@ -358,6 +388,16 @@ pub(super) async fn handle_client_message(
     }
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::excessive_cognitive_complexity,
+        perfectionist::excessive_nesting,
+        perfectionist::overly_long_function,
+        perfectionist::too_many_local_bindings,
+        reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+    )
+)]
 pub(super) async fn handle_bridge_method(
     method: &str,
     params: Option<Value>,
@@ -366,16 +406,19 @@ pub(super) async fn handle_bridge_method(
 ) -> Result<Value, BridgeError> {
     match method {
         "bridge/health/read" => serde_json::to_value(state.bridge_status().await)
-            .map_err(|error| BridgeError::server(&error.to_string())),
+            .map_err(|error| error.to_string())
+            .map_err(BridgeError::server),
         "bridge/capabilities/read" => serde_json::to_value(state.bridge_capabilities())
-            .map_err(|error| BridgeError::server(&error.to_string())),
+            .map_err(|error| error.to_string())
+            .map_err(BridgeError::server),
         "bridge/phoneCall/surfaces/read" => Ok(json!({
             "surfaces": state.phone_calls.snapshot_surfaces(),
         })),
         "bridge/push/observed" => {
             let params = params.unwrap_or_else(|| json!({}));
             let candidate_id = read_string(params.get("candidateId"))
-                .and_then(|candidate_id| candidate_id.parse::<u64>().ok())
+                .map(|candidate_id| candidate_id.parse::<u64>())
+                .and_then(Result::ok)
                 .ok_or_else(|| {
                     BridgeError::invalid_params("candidateId must be an unsigned integer string")
                 })?;
@@ -492,17 +535,21 @@ pub(super) async fn handle_bridge_method(
         "bridge/browser/session/create" => {
             let request: BrowserPreviewCreateRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let session = state
                 .preview
                 .create_session(client_id, &request.target_url)
                 .await?;
-            serde_json::to_value(session).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(session)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/browser/session/close" => {
             let request: BrowserPreviewCloseRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let session_id = request.session_id.trim();
             if session_id.is_empty() {
                 return Err(BridgeError::invalid_params("sessionId must not be empty"));
@@ -513,12 +560,15 @@ pub(super) async fn handle_bridge_method(
         }
         "bridge/browser/targets/discover" => {
             let result = state.preview.discover_targets().await;
-            serde_json::to_value(result).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(result)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/events/replay" => {
             let request: EventReplayRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
 
             let limit = request
                 .limit
@@ -544,7 +594,8 @@ pub(super) async fn handle_bridge_method(
         "bridge/ui/present" | "bridge/ui/update" => {
             let surface: BridgeUiSurface =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             validate_bridge_ui_surface(&surface)?;
             let method = if method == "bridge/ui/present" {
                 "bridge/ui.present"
@@ -552,7 +603,8 @@ pub(super) async fn handle_bridge_method(
                 "bridge/ui.update"
             };
             let surface_value = serde_json::to_value(&surface)
-                .map_err(|error| BridgeError::server(&error.to_string()))?;
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)?;
             state
                 .hub
                 .broadcast_notification(method, surface_value.clone())
@@ -565,7 +617,8 @@ pub(super) async fn handle_bridge_method(
         "bridge/ui/dismiss" => {
             let request: DismissBridgeUiSurfaceRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             if request.id.trim().is_empty() {
                 return Err(BridgeError::invalid_params("id must not be empty"));
             }
@@ -589,7 +642,8 @@ pub(super) async fn handle_bridge_method(
         "bridge/ui/resolve" => {
             let request: ResolveBridgeUiSurfaceRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             if request.id.trim().is_empty() {
                 return Err(BridgeError::invalid_params("id must not be empty"));
             }
@@ -624,19 +678,22 @@ pub(super) async fn handle_bridge_method(
         "bridge/thread/list/stream/start" => {
             let request: ThreadListStreamStartRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             start_thread_list_stream(state, client_id, request).await
         }
         "bridge/thread/list/stream/cancel" => {
             let request: ThreadListStreamCancelRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             cancel_thread_list_stream(state, client_id, &request.stream_id).await
         }
         "bridge/thread/create" => {
             let mut request: BridgeThreadCreateRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             request.submission_id = request.submission_id.trim().to_string();
             if request.submission_id.is_empty() || request.submission_id.len() > PUSH_ID_MAX_BYTES {
                 return Err(BridgeError::invalid_params(
@@ -659,7 +716,8 @@ pub(super) async fn handle_bridge_method(
             if let Some(result) = cached {
                 state.persist_operation_dedupe().await?;
                 return serde_json::to_value(result)
-                    .map_err(|error| BridgeError::server(&error.to_string()));
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::server);
             }
             if pending {
                 return Err(BridgeError::server(
@@ -725,12 +783,15 @@ pub(super) async fn handle_bridge_method(
                     dedupe.release_thread_create(&response.submission_id);
                 })
                 .await?;
-            serde_json::to_value(response).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(response)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/thread/fork" => {
             let mut request: BridgeThreadForkRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             request.submission_id = request.submission_id.trim().to_string();
             request.thread_id = request.thread_id.trim().to_string();
             request.message_id = request.message_id.trim().to_string();
@@ -778,7 +839,8 @@ pub(super) async fn handle_bridge_method(
                 }
                 state.persist_operation_dedupe().await?;
                 return serde_json::to_value(cached.response)
-                    .map_err(|error| BridgeError::server(&error.to_string()));
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::server);
             }
             if let Some(pending) = pending {
                 #[expect(
@@ -875,26 +937,33 @@ pub(super) async fn handle_bridge_method(
                     dedupe.release_thread_fork(&response.submission_id);
                 })
                 .await?;
-            serde_json::to_value(response).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(response)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/thread/queue/read" => {
             let request: BridgeThreadQueueReadRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             serde_json::to_value(state.queue.read_queue(&request.thread_id).await)
-                .map_err(|error| BridgeError::server(&error.to_string()))
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/thread/schedules/read" => {
             let request: BridgeThreadSchedulesReadRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             serde_json::to_value(state.scheduler.read(&request.thread_id).await)
-                .map_err(|error| BridgeError::server(&error.to_string()))
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/thread/queue/send" => {
             let mut request: BridgeThreadQueueSendRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             request.turn_start =
                 normalize_forwarded_path_params(Some(request.turn_start), &state.path_policy)?
                     .ok_or_else(|| BridgeError::invalid_params("turnStart payload is required"))?;
@@ -922,112 +991,148 @@ pub(super) async fn handle_bridge_method(
                 .send_message(request)
                 .await
                 .map_err(queue_operation_error)?;
-            serde_json::to_value(result).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(result)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/thread/queue/steer" => {
             let request: BridgeThreadQueueSteerRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let result = state
                 .queue
                 .steer_message(request)
                 .await
                 .map_err(|error| BridgeError::server(&error))?;
-            serde_json::to_value(result).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(result)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/thread/queue/cancel" => {
             let request: BridgeThreadQueueCancelRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let result = state
                 .queue
                 .cancel_message(request)
                 .await
                 .map_err(|error| BridgeError::server(&error))?;
-            serde_json::to_value(result).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(result)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/thread/queue/edit/start" => {
             let request: BridgeThreadQueueEditRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let result = state
                 .queue
                 .start_message_edit(request)
                 .await
                 .map_err(|error| BridgeError::server(&error))?;
-            serde_json::to_value(result).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(result)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/thread/queue/edit/commit" => {
             let request: BridgeThreadQueueEditCommitRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let result = state
                 .queue
                 .commit_message_edit(request)
                 .await
                 .map_err(queue_operation_error)?;
-            serde_json::to_value(result).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(result)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/thread/queue/edit/cancel" => {
             let request: BridgeThreadQueueEditRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let result = state
                 .queue
                 .cancel_message_edit(request)
                 .await
                 .map_err(|error| BridgeError::server(&error))?;
-            serde_json::to_value(result).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(result)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/workspaces/list" => {
             let request: WorkspaceListRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let result = list_workspace_roots(state, request).await?;
-            serde_json::to_value(result).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(result)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/fs/list" => {
             let request: FileSystemListRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let result = list_filesystem_entries(state, request).await?;
-            serde_json::to_value(result).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(result)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/git/status" => {
             let request: GitQueryRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let status = state.git.get_status(request.cwd.as_deref()).await?;
-            serde_json::to_value(status).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(status)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/git/diff" => {
             let request: GitQueryRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let diff = state.git.get_diff(request.cwd.as_deref()).await?;
-            serde_json::to_value(diff).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(diff)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/git/history" => {
             let request: GitHistoryRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let history = state
                 .git
                 .get_history(request.cwd.as_deref(), request.limit)
                 .await?;
-            serde_json::to_value(history).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(history)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/git/branches" => {
             let request: GitQueryRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let branches = state.git.get_branches(request.cwd.as_deref()).await?;
-            serde_json::to_value(branches).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(branches)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/git/clone" => {
             let request: GitCloneRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let GitCloneRequest {
                 url,
                 parent_path,
@@ -1047,12 +1152,15 @@ pub(super) async fn handle_bridge_method(
                 .git
                 .clone_repo(&url, parent_path.as_deref(), &directory_name)
                 .await?;
-            serde_json::to_value(cloned).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(cloned)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/git/stage" => {
             let request: GitFileRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let GitFileRequest { path, cwd } = request;
             if path.trim().is_empty() {
                 return Err(BridgeError::invalid_params("path must not be empty"));
@@ -1060,12 +1168,14 @@ pub(super) async fn handle_bridge_method(
 
             let staged = state.git.stage_file(&path, cwd.as_deref()).await?;
             let staged_value = serde_json::to_value(&staged)
-                .map_err(|error| BridgeError::server(&error.to_string()))?;
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)?;
 
             if staged.staged {
                 if let Ok(status) = state.git.get_status(cwd.as_deref()).await {
                     let status_value = serde_json::to_value(status)
-                        .map_err(|error| BridgeError::server(&error.to_string()))?;
+                        .map_err(|error| error.to_string())
+                        .map_err(BridgeError::server)?;
                     state
                         .hub
                         .broadcast_notification("bridge/git/updated", status_value)
@@ -1078,16 +1188,19 @@ pub(super) async fn handle_bridge_method(
         "bridge/git/stageAll" => {
             let request: GitQueryRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
 
             let staged = state.git.stage_all(request.cwd.as_deref()).await?;
             let staged_value = serde_json::to_value(&staged)
-                .map_err(|error| BridgeError::server(&error.to_string()))?;
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)?;
 
             if staged.staged {
                 if let Ok(status) = state.git.get_status(request.cwd.as_deref()).await {
                     let status_value = serde_json::to_value(status)
-                        .map_err(|error| BridgeError::server(&error.to_string()))?;
+                        .map_err(|error| error.to_string())
+                        .map_err(BridgeError::server)?;
                     state
                         .hub
                         .broadcast_notification("bridge/git/updated", status_value)
@@ -1100,7 +1213,8 @@ pub(super) async fn handle_bridge_method(
         "bridge/git/unstage" => {
             let request: GitFileRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let GitFileRequest { path, cwd } = request;
             if path.trim().is_empty() {
                 return Err(BridgeError::invalid_params("path must not be empty"));
@@ -1108,12 +1222,14 @@ pub(super) async fn handle_bridge_method(
 
             let unstaged = state.git.unstage_file(&path, cwd.as_deref()).await?;
             let unstaged_value = serde_json::to_value(&unstaged)
-                .map_err(|error| BridgeError::server(&error.to_string()))?;
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)?;
 
             if unstaged.unstaged {
                 if let Ok(status) = state.git.get_status(cwd.as_deref()).await {
                     let status_value = serde_json::to_value(status)
-                        .map_err(|error| BridgeError::server(&error.to_string()))?;
+                        .map_err(|error| error.to_string())
+                        .map_err(BridgeError::server)?;
                     state
                         .hub
                         .broadcast_notification("bridge/git/updated", status_value)
@@ -1126,16 +1242,19 @@ pub(super) async fn handle_bridge_method(
         "bridge/git/unstageAll" => {
             let request: GitQueryRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
 
             let unstaged = state.git.unstage_all(request.cwd.as_deref()).await?;
             let unstaged_value = serde_json::to_value(&unstaged)
-                .map_err(|error| BridgeError::server(&error.to_string()))?;
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)?;
 
             if unstaged.unstaged {
                 if let Ok(status) = state.git.get_status(request.cwd.as_deref()).await {
                     let status_value = serde_json::to_value(status)
-                        .map_err(|error| BridgeError::server(&error.to_string()))?;
+                        .map_err(|error| error.to_string())
+                        .map_err(BridgeError::server)?;
                     state
                         .hub
                         .broadcast_notification("bridge/git/updated", status_value)
@@ -1148,7 +1267,8 @@ pub(super) async fn handle_bridge_method(
         "bridge/git/commit" => {
             let request: GitCommitRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let GitCommitRequest { message, cwd } = request;
 
             if message.trim().is_empty() {
@@ -1157,12 +1277,14 @@ pub(super) async fn handle_bridge_method(
 
             let commit = state.git.commit(message, cwd.as_deref()).await?;
             let commit_value = serde_json::to_value(&commit)
-                .map_err(|error| BridgeError::server(&error.to_string()))?;
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)?;
 
             if commit.committed {
                 if let Ok(status) = state.git.get_status(cwd.as_deref()).await {
                     let status_value = serde_json::to_value(status)
-                        .map_err(|error| BridgeError::server(&error.to_string()))?;
+                        .map_err(|error| error.to_string())
+                        .map_err(BridgeError::server)?;
                     state
                         .hub
                         .broadcast_notification("bridge/git/updated", status_value)
@@ -1175,7 +1297,8 @@ pub(super) async fn handle_bridge_method(
         "bridge/git/switch" => {
             let request: GitSwitchRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             let GitSwitchRequest { branch, cwd } = request;
 
             if branch.trim().is_empty() {
@@ -1184,12 +1307,14 @@ pub(super) async fn handle_bridge_method(
 
             let switched = state.git.switch_branch(branch, cwd.as_deref()).await?;
             let switched_value = serde_json::to_value(&switched)
-                .map_err(|error| BridgeError::server(&error.to_string()))?;
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)?;
 
             if switched.switched {
                 if let Ok(status) = state.git.get_status(cwd.as_deref()).await {
                     let status_value = serde_json::to_value(status)
-                        .map_err(|error| BridgeError::server(&error.to_string()))?;
+                        .map_err(|error| error.to_string())
+                        .map_err(BridgeError::server)?;
                     state
                         .hub
                         .broadcast_notification("bridge/git/updated", status_value)
@@ -1202,16 +1327,19 @@ pub(super) async fn handle_bridge_method(
         "bridge/git/push" => {
             let request: GitQueryRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
 
             let push = state.git.push(request.cwd.as_deref()).await?;
             let push_value = serde_json::to_value(&push)
-                .map_err(|error| BridgeError::server(&error.to_string()))?;
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)?;
 
             if push.pushed {
                 if let Ok(status) = state.git.get_status(request.cwd.as_deref()).await {
                     let status_value = serde_json::to_value(status)
-                        .map_err(|error| BridgeError::server(&error.to_string()))?;
+                        .map_err(|error| error.to_string())
+                        .map_err(BridgeError::server)?;
                     state
                         .hub
                         .broadcast_notification("bridge/git/updated", status_value)
@@ -1223,16 +1351,21 @@ pub(super) async fn handle_bridge_method(
         }
         "bridge/approvals/list" => {
             let list = state.backend.list_pending_approvals().await;
-            serde_json::to_value(list).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(list)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/userInput/list" => {
             let list = state.backend.list_pending_user_inputs().await;
-            serde_json::to_value(list).map_err(|error| BridgeError::server(&error.to_string()))
+            serde_json::to_value(list)
+                .map_err(|error| error.to_string())
+                .map_err(BridgeError::server)
         }
         "bridge/approvals/resolve" => {
             let mut request: ResolveApprovalRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
             request.resolution_id = request.resolution_id.trim().to_string();
             if request.resolution_id.is_empty() || request.resolution_id.len() > PUSH_ID_MAX_BYTES {
                 return Err(BridgeError::invalid_params(
@@ -1372,7 +1505,8 @@ pub(super) async fn handle_bridge_method(
         "bridge/userInput/resolve" => {
             let request: ResolveUserInputRequest =
                 serde_json::from_value(params.unwrap_or_else(|| json!({})))
-                    .map_err(|error| BridgeError::invalid_params(&error.to_string()))?;
+                    .map_err(|error| error.to_string())
+                    .map_err(BridgeError::invalid_params)?;
 
             if request.action.as_deref().unwrap_or("submit") == "submit"
                 && request.answers.is_empty()
@@ -1401,8 +1535,8 @@ pub(super) async fn handle_bridge_method(
                 "request": user_input_request,
             }))
         }
-        _ => Err(BridgeError::method_not_found(&format!(
-            "Unknown bridge method: {method}"
+        _ => Err(BridgeError::method_not_found(format!(
+            "Unknown bridge method: {method}",
         ))),
     }
 }
@@ -1520,6 +1654,14 @@ pub(super) struct ThreadListStreamTask {
     pub(super) cancellation: Arc<ThreadListStreamCancellation>,
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::overly_long_function,
+        perfectionist::too_many_local_bindings,
+        reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
+    )
+)]
 pub(super) async fn run_thread_list_stream(task: ThreadListStreamTask) {
     let ThreadListStreamTask {
         state,
@@ -1736,165 +1878,5 @@ fn normalize_forwarded_value_paths(
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-    use crate::config::{
-        WebSocketResourceLimits, DEFAULT_WS_GLOBAL_IN_FLIGHT, DEFAULT_WS_MAX_FRAME_BYTES,
-        DEFAULT_WS_MAX_MESSAGE_BYTES, DEFAULT_WS_PER_CLIENT_IN_FLIGHT,
-    };
-
-    #[test]
-    fn only_definitive_operation_failures_release_idempotency_keys() {
-        assert!(failure_is_definitive("invalid option"));
-        assert!(!failure_is_definitive(&format!(
-            "{INDETERMINATE_OPERATION_PREFIX}connection lost"
-        )));
-        assert!(!failure_is_definitive("client request cancelled"));
-        assert!(failure_is_definitive("client disconnected"));
-    }
-
-    #[test]
-    fn client_connection_heartbeat_has_a_bounded_expiry() {
-        assert!(WS_CLIENT_HEARTBEAT_TIMEOUT > WS_CLIENT_HEARTBEAT_INTERVAL);
-        let last_activity = tokio::time::Instant::now();
-        assert!(!client_heartbeat_expired(
-            last_activity,
-            last_activity + WS_CLIENT_HEARTBEAT_TIMEOUT - Duration::from_millis(1),
-        ));
-        assert!(client_heartbeat_expired(
-            last_activity,
-            last_activity + WS_CLIENT_HEARTBEAT_TIMEOUT,
-        ));
-    }
-
-    #[test]
-    fn push_controls_are_processed_in_socket_order_for_notifications_and_requests() {
-        assert!(is_ordered_push_control(
-            r#"{"method":"bridge/push/presence","params":{"foreground":false,"sequence":2}}"#
-        ));
-        assert!(is_ordered_push_control(
-            r#"{"method":"bridge/push/observed","params":{"candidateId":"7","presenceSequence":2}}"#
-        ));
-        assert!(is_ordered_push_control(
-            r#"{"id":1,"method":"bridge/push/presence","params":{"foreground":true,"sequence":1}}"#
-        ));
-        assert!(!is_ordered_push_control(
-            r#"{"method":"bridge/other","params":{}}"#
-        ));
-    }
-
-    #[tokio::test]
-    async fn a_full_or_closed_heartbeat_outbox_requires_disconnect() {
-        let (outbox, receiver) = client_outbox(1);
-        outbox
-            .try_send(Message::Text("busy".into()))
-            .expect("fill outbox");
-        assert!(heartbeat_send_requires_disconnect(
-            &outbox.try_send(Message::Ping(Vec::new().into()))
-        ));
-
-        drop(receiver);
-        assert!(heartbeat_send_requires_disconnect(
-            &outbox.try_send(Message::Ping(Vec::new().into()))
-        ));
-    }
-
-    fn protected_request_config() -> BridgeConfig {
-        BridgeConfig {
-            host: "127.0.0.1".to_string(),
-            port: 8787,
-            preview_host: "127.0.0.1".to_string(),
-            preview_port: 8788,
-            preview_enabled: true,
-            connect_url: None,
-            preview_connect_url: None,
-            workdir: PathBuf::from("/tmp"),
-            state_dir: PathBuf::from("/tmp/.dappercode"),
-            attachments_dir: PathBuf::from("/tmp/.dappercode-attachments"),
-            acp_manifest_path: PathBuf::from("/tmp/agents.json"),
-            acp_approved_executable_roots: vec![PathBuf::from("/tmp")],
-            acp_initialize_timeout: Duration::from_secs(15),
-            auth_token: Some("secret".to_string()),
-            auth_enabled: true,
-            allow_insecure_no_auth: false,
-            no_auth_allowed_origins: HashSet::new(),
-            allow_query_token_auth: true,
-            allow_outside_root_cwd: false,
-            show_pairing_qr: false,
-            ws_limits: WebSocketResourceLimits {
-                max_frame_bytes: DEFAULT_WS_MAX_FRAME_BYTES,
-                max_message_bytes: DEFAULT_WS_MAX_MESSAGE_BYTES,
-                per_client_in_flight: DEFAULT_WS_PER_CLIENT_IN_FLIGHT,
-                global_in_flight: DEFAULT_WS_GLOBAL_IN_FLIGHT,
-            },
-            phone_call: None,
-        }
-    }
-
-    #[test]
-    fn protected_requests_enforce_origin_before_credentials() {
-        let config = protected_request_config();
-        let headers = HeaderMap::new();
-
-        let unauthorized = protected_request_error(&config, &headers, None).unwrap();
-        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
-        assert!(protected_request_error(&config, &headers, Some("secret")).is_none());
-
-        let mut no_auth = config;
-        no_auth.auth_token = None;
-        no_auth.auth_enabled = false;
-        no_auth.allow_insecure_no_auth = true;
-        let mut foreign_origin = HeaderMap::new();
-        foreign_origin.insert(ORIGIN, "https://example.com".parse().unwrap());
-        let forbidden = protected_request_error(&no_auth, &foreign_origin, None).unwrap();
-        assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
-    }
-
-    #[tokio::test]
-    async fn disconnect_cancels_only_owned_streams_and_wakes_blocked_requests() {
-        let client_one_a = Arc::new(ThreadListStreamCancellation::default());
-        let client_one_b = Arc::new(ThreadListStreamCancellation::default());
-        let client_two = Arc::new(ThreadListStreamCancellation::default());
-        let mut streams = HashMap::from([
-            ("1:a".to_string(), client_one_a.clone()),
-            ("1:b".to_string(), client_one_b.clone()),
-            ("2:a".to_string(), client_two.clone()),
-        ]);
-        let waiting_cancellation = client_one_a.clone();
-        let blocked = waiting_cancellation.cancelled();
-        tokio::pin!(blocked);
-        assert!(futures_util::poll!(&mut blocked).is_pending());
-
-        let owned = take_client_thread_list_streams(&mut streams, 1);
-        assert_eq!(owned.len(), 2);
-        for cancellation in owned {
-            cancellation.cancel();
-        }
-        tokio::time::timeout(Duration::from_secs(1), blocked)
-            .await
-            .expect("blocked request wakes");
-        assert!(client_one_a.is_cancelled());
-        assert!(client_one_b.is_cancelled());
-        assert!(!client_two.is_cancelled());
-        assert_eq!(streams.len(), 1);
-        assert!(streams.contains_key("2:a"));
-        tokio::time::timeout(Duration::from_secs(1), client_one_b.cancelled())
-            .await
-            .expect("cancellation is visible to a later waiter");
-
-        let remaining = take_client_thread_list_streams(&mut streams, 2);
-        assert_eq!(remaining.len(), 1);
-        remaining[0].cancel();
-        assert!(streams.is_empty());
-        assert!(take_client_thread_list_streams(&mut streams, 99).is_empty());
-
-        assert_eq!(
-            normalize_thread_list_stream_limits(Some(vec![0, 1, usize::MAX, 1])),
-            vec![1, THREAD_LIST_STREAM_MAX_LIMIT]
-        );
-        assert_eq!(
-            normalize_thread_list_stream_limits(Some(Vec::new())),
-            THREAD_LIST_STREAM_DEFAULT_LIMITS
-        );
-    }
-}
+#[path = "websocket_transport_tests.rs"]
+mod tests;

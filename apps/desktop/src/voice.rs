@@ -52,6 +52,116 @@ pub(super) fn run(
     }
 }
 
+fn read_sip_password_from_stdin(stdin: impl Read) -> Result<String> {
+    let mut raw = String::new();
+    stdin
+        .take(MAX_SIP_PASSWORD_STDIN_BYTES)
+        .read_to_string(&mut raw)
+        .context("failed to read SIP password from stdin")?;
+    let password = raw.trim_end_matches(['\r', '\n']);
+    if password.trim().is_empty() {
+        bail!("SIP password read from stdin must not be empty");
+    }
+    if password.contains(['\r', '\n', '\0']) {
+        bail!("SIP password must be a single line without control characters");
+    }
+    Ok(password.to_string())
+}
+
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::too_many_struct_fields,
+        reason = "mirrors the 12 PhoneCallSettings CLI flags"
+    )
+)]
+struct VoiceOverrides {
+    sip_server: Option<String>,
+    sip_transport: Option<String>,
+    sip_username: Option<String>,
+    caller_id: Option<String>,
+    display_name: Option<String>,
+    stt_base_url: Option<String>,
+    stt_model: Option<String>,
+    llm_base_url: Option<String>,
+    llm_model: Option<String>,
+    tts_base_url: Option<String>,
+    tts_model: Option<String>,
+    tts_voice: Option<String>,
+}
+
+impl VoiceOverrides {
+    fn from_args(args: &mut Vec<String>) -> Self {
+        Self {
+            sip_server: option(args, "--sip-server"),
+            sip_transport: option(args, "--sip-transport"),
+            sip_username: option(args, "--sip-username"),
+            caller_id: option(args, "--caller-id"),
+            display_name: option(args, "--display-name"),
+            stt_base_url: option(args, "--stt-base-url"),
+            stt_model: option(args, "--stt-model"),
+            llm_base_url: option(args, "--llm-base-url"),
+            llm_model: option(args, "--llm-model"),
+            tts_base_url: option(args, "--tts-base-url"),
+            tts_model: option(args, "--tts-model"),
+            tts_voice: option(args, "--tts-voice"),
+        }
+    }
+
+    fn merge(self, existing: Option<&PhoneCallSettings>) -> Result<PhoneCallSettings> {
+        Ok(PhoneCallSettings {
+            sip_server: self
+                .sip_server
+                .or_else(|| existing.map(|settings| settings.sip_server.clone()))
+                .context("--sip-server is required")?,
+            sip_transport: self
+                .sip_transport
+                .or_else(|| existing.map(|settings| settings.sip_transport.clone()))
+                .unwrap_or_else(|| DEFAULT_SIP_TRANSPORT.to_string()),
+            sip_username: self
+                .sip_username
+                .or_else(|| existing.map(|settings| settings.sip_username.clone()))
+                .context("--sip-username is required")?,
+            caller_id: self
+                .caller_id
+                .or_else(|| existing.map(|settings| settings.caller_id.clone()))
+                .context("--caller-id is required")?,
+            user_display_name: self
+                .display_name
+                .or_else(|| existing.map(|settings| settings.user_display_name.clone()))
+                .context("--display-name is required")?,
+            stt_base_url: self
+                .stt_base_url
+                .or_else(|| existing.map(|settings| settings.stt_base_url.clone()))
+                .unwrap_or_else(|| DEFAULT_VOICE_BASE_URL.to_string()),
+            stt_model: self
+                .stt_model
+                .or_else(|| existing.map(|settings| settings.stt_model.clone()))
+                .unwrap_or_else(|| DEFAULT_VOICE_STT_MODEL.to_string()),
+            llm_base_url: self
+                .llm_base_url
+                .or_else(|| existing.map(|settings| settings.llm_base_url.clone()))
+                .unwrap_or_else(|| DEFAULT_VOICE_BASE_URL.to_string()),
+            llm_model: self
+                .llm_model
+                .or_else(|| existing.map(|settings| settings.llm_model.clone()))
+                .unwrap_or_else(|| DEFAULT_VOICE_LLM_MODEL.to_string()),
+            tts_base_url: self
+                .tts_base_url
+                .or_else(|| existing.map(|settings| settings.tts_base_url.clone()))
+                .unwrap_or_else(|| DEFAULT_VOICE_BASE_URL.to_string()),
+            tts_model: self
+                .tts_model
+                .or_else(|| existing.map(|settings| settings.tts_model.clone()))
+                .unwrap_or_else(|| DEFAULT_VOICE_TTS_MODEL.to_string()),
+            tts_voice: self
+                .tts_voice
+                .or_else(|| existing.map(|settings| settings.tts_voice.clone()))
+                .unwrap_or_else(|| DEFAULT_VOICE_TTS_VOICE.to_string()),
+        })
+    }
+}
+
 pub(super) fn configure_voice(
     mut args: Vec<String>,
     stdin: impl Read,
@@ -59,78 +169,18 @@ pub(super) fn configure_voice(
     secrets: &SecretStore,
 ) -> Result<VoiceStatus> {
     let sip_password_stdin = take_flag(&mut args, "--sip-password-stdin");
-    let sip_server = option(&mut args, "--sip-server");
-    let sip_transport = option(&mut args, "--sip-transport");
-    let sip_username = option(&mut args, "--sip-username");
-    let caller_id = option(&mut args, "--caller-id");
-    let display_name = option(&mut args, "--display-name");
-    let stt_base_url = option(&mut args, "--stt-base-url");
-    let stt_model = option(&mut args, "--stt-model");
-    let llm_base_url = option(&mut args, "--llm-base-url");
-    let llm_model = option(&mut args, "--llm-model");
-    let tts_base_url = option(&mut args, "--tts-base-url");
-    let tts_model = option(&mut args, "--tts-model");
-    let tts_voice = option(&mut args, "--tts-voice");
+    let overrides = VoiceOverrides::from_args(&mut args);
     ensure_no_args(&args)?;
 
     let new_password = if sip_password_stdin {
-        let mut raw = String::new();
-        stdin
-            .take(MAX_SIP_PASSWORD_STDIN_BYTES)
-            .read_to_string(&mut raw)
-            .context("failed to read SIP password from stdin")?;
-        let password = raw.trim_end_matches(['\r', '\n']);
-        if password.trim().is_empty() {
-            bail!("SIP password read from stdin must not be empty");
-        }
-        if password.contains(['\r', '\n', '\0']) {
-            bail!("SIP password must be a single line without control characters");
-        }
-        Some(password.to_string())
+        Some(read_sip_password_from_stdin(stdin)?)
     } else {
         None
     };
 
     let (settings, backend) =
         paths.configure_phone_call(secrets, new_password.as_deref(), |existing| {
-            Ok(PhoneCallSettings {
-                sip_server: sip_server
-                    .or_else(|| existing.map(|s| s.sip_server.clone()))
-                    .context("--sip-server is required")?,
-                sip_transport: sip_transport
-                    .or_else(|| existing.map(|s| s.sip_transport.clone()))
-                    .unwrap_or_else(|| DEFAULT_SIP_TRANSPORT.to_string()),
-                sip_username: sip_username
-                    .or_else(|| existing.map(|s| s.sip_username.clone()))
-                    .context("--sip-username is required")?,
-                caller_id: caller_id
-                    .or_else(|| existing.map(|s| s.caller_id.clone()))
-                    .context("--caller-id is required")?,
-                user_display_name: display_name
-                    .or_else(|| existing.map(|s| s.user_display_name.clone()))
-                    .context("--display-name is required")?,
-                stt_base_url: stt_base_url
-                    .or_else(|| existing.map(|s| s.stt_base_url.clone()))
-                    .unwrap_or_else(|| DEFAULT_VOICE_BASE_URL.to_string()),
-                stt_model: stt_model
-                    .or_else(|| existing.map(|s| s.stt_model.clone()))
-                    .unwrap_or_else(|| DEFAULT_VOICE_STT_MODEL.to_string()),
-                llm_base_url: llm_base_url
-                    .or_else(|| existing.map(|s| s.llm_base_url.clone()))
-                    .unwrap_or_else(|| DEFAULT_VOICE_BASE_URL.to_string()),
-                llm_model: llm_model
-                    .or_else(|| existing.map(|s| s.llm_model.clone()))
-                    .unwrap_or_else(|| DEFAULT_VOICE_LLM_MODEL.to_string()),
-                tts_base_url: tts_base_url
-                    .or_else(|| existing.map(|s| s.tts_base_url.clone()))
-                    .unwrap_or_else(|| DEFAULT_VOICE_BASE_URL.to_string()),
-                tts_model: tts_model
-                    .or_else(|| existing.map(|s| s.tts_model.clone()))
-                    .unwrap_or_else(|| DEFAULT_VOICE_TTS_MODEL.to_string()),
-                tts_voice: tts_voice
-                    .or_else(|| existing.map(|s| s.tts_voice.clone()))
-                    .unwrap_or_else(|| DEFAULT_VOICE_TTS_VOICE.to_string()),
-            })
+            overrides.merge(existing)
         })?;
     Ok(VoiceStatus {
         configured: true,

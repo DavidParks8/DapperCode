@@ -3,20 +3,18 @@
 //! Production modules use this facade instead of branching on an operating system. The selected
 //! strategy owns native handles, syscalls, process semantics, and platform-specific discovery.
 
-use std::{
-    ffi::OsStr,
-    fmt::Debug,
-    fs::{File, Metadata},
-    future::Future,
-    io,
-    path::{Path, PathBuf},
-    pin::Pin,
-    time::Duration,
-};
-
-use tokio::process::{Child, Command};
+pub(crate) use current::CurrentPlatform;
 
 use dappercode_bridge_core::BridgeError;
+use std::ffi::OsStr;
+use std::fmt::Debug;
+use std::fs::{File, Metadata};
+use std::future::Future;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::time::Duration;
+use tokio::process::{Child, Command};
 
 #[cfg(unix)]
 #[path = "platform/unix.rs"]
@@ -28,9 +26,7 @@ mod current;
 #[path = "platform/unsupported.rs"]
 mod current;
 
-pub(crate) use current::CurrentPlatform;
-
-pub(crate) type PlatformFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
+pub(crate) type PlatformFuture<Output> = Pin<Box<dyn Future<Output = Output> + Send + 'static>>;
 
 #[derive(Debug)]
 pub(crate) struct PlatformSecureRoots<Handle> {
@@ -145,8 +141,8 @@ pub(crate) trait PlatformStrategy:
 {
 }
 
-impl<T> PlatformStrategy for T where
-    T: SecureFilesystemStrategy + PrivateStorageStrategy + ProcessStrategy + PreviewStrategy
+impl<Strategy> PlatformStrategy for Strategy where
+    Strategy: SecureFilesystemStrategy + PrivateStorageStrategy + ProcessStrategy + PreviewStrategy
 {
 }
 
@@ -159,7 +155,7 @@ pub struct SecureDirectoryHandle(<CurrentPlatform as SecureFilesystemStrategy>::
 static PLATFORM: CurrentPlatform = CurrentPlatform;
 
 fn current_platform() -> &'static CurrentPlatform {
-    fn require_complete_strategy<T: PlatformStrategy>(strategy: &T) -> &T {
+    fn require_complete_strategy<Strategy: PlatformStrategy>(strategy: &Strategy) -> &Strategy {
         strategy
     }
     require_complete_strategy(&PLATFORM)
@@ -355,7 +351,8 @@ pub(crate) fn collect_ports_from_lsof(output: &str, ports: &mut std::collections
         if let Some(port) = line
             .split(" TCP ")
             .nth(1)
-            .and_then(|rest| rest.split_whitespace().next())
+            .map(str::split_whitespace)
+            .and_then(|mut parts| parts.next())
             .and_then(parse_listening_socket_port)
         {
             ports.insert(port);
@@ -377,83 +374,11 @@ pub(crate) fn parse_listening_socket_port(value: &str) -> Option<u16> {
 fn is_loopback_listen_host(host: &str) -> bool {
     matches!(
         host,
-        "*" | "127.0.0.1" | "0.0.0.0" | "::1" | "::" | "localhost"
+        "*" | "127.0.0.1" | "0.0.0.0" | "::1" | "::" | "localhost",
     )
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::*;
-    use std::collections::HashSet;
-
-    #[test]
-    fn platform_strategy_is_complete() {
-        fn assert_strategy<T: PlatformStrategy>() {}
-        assert_strategy::<CurrentPlatform>();
-    }
-
-    #[test]
-    fn socket_parser_rejects_non_loopback_and_malformed_addresses() {
-        for (value, expected) in [
-            ("*:3000", Some(3000)),
-            ("127.0.0.1:5173", Some(5173)),
-            ("0.0.0.0:8080", Some(8080)),
-            ("localhost:4200", Some(4200)),
-            ("[::1]:4321", Some(4321)),
-            ("[::]:8000", Some(8000)),
-            ("10.0.0.1:3000", None),
-            ("[2001:db8::1]:3000", None),
-            ("[::1]3000", None),
-            ("localhost:not-a-port", None),
-            ("missing-port", None),
-        ] {
-            assert_eq!(parse_listening_socket_port(value), expected, "{value}");
-        }
-    }
-
-    #[test]
-    fn lsof_parser_collects_only_loopback_listeners() {
-        let mut ports = HashSet::new();
-        collect_ports_from_lsof(
-            "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n\
-             node 1 user 1u IPv4 0 0t0 TCP 127.0.0.1:3000 (LISTEN)\n\
-             node 2 user 1u IPv4 0 0t0 UDP 127.0.0.1:4000\n\
-             node 3 user 1u IPv4 0 0t0 TCP 10.0.0.1:5000 (LISTEN)\n\
-             malformed TCP missing (LISTEN)",
-            &mut ports,
-        );
-        assert_eq!(ports, HashSet::from([3000]));
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn command_reader_distinguishes_success_failure_and_missing_program() {
-        assert_eq!(
-            read_command_stdout("/bin/sh", &["-c", "printf success"])
-                .await
-                .as_deref(),
-            Some("success")
-        );
-        assert!(read_command_stdout("/bin/sh", &["-c", "exit 1"])
-            .await
-            .is_none());
-        assert!(read_command_stdout("/definitely/missing/program", &[])
-            .await
-            .is_none());
-    }
-
-    #[test]
-    fn process_identity_and_bounded_wait_results_fail_closed() {
-        assert!(owner_identity_matches(Some(42), 42));
-        assert!(!owner_identity_matches(Some(41), 42));
-        assert!(!owner_identity_matches(None, 42));
-
-        const WAIT_OBJECT_0: u32 = 0;
-        const WAIT_TIMEOUT: u32 = 258;
-        const WAIT_FAILED: u32 = u32::MAX;
-        assert!(zero_timeout_wait_means_alive(WAIT_TIMEOUT, WAIT_TIMEOUT));
-        assert!(!zero_timeout_wait_means_alive(WAIT_OBJECT_0, WAIT_TIMEOUT));
-        assert!(!zero_timeout_wait_means_alive(WAIT_FAILED, WAIT_TIMEOUT));
-    }
-}
+#[path = "platform_tests.rs"]
+mod tests;

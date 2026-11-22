@@ -643,3 +643,98 @@ jobs:
             apps/desktop/target/llvm-cov/coverage.json
             apps/desktop/target/llvm-cov/html
           if-no-files-found: warn
+
+  rust-dylint:
+    name: Rust Dylint (${{ matrix.os_label }})
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            os_label: Linux
+            target: x86_64-unknown-linux-gnu
+            cargo_dylint_sha256: 11a75eb2b0f57a7240a08deb95898cf7b54d5d57e0a08f8328e4ce6b6263ef4f
+            dylint_link_sha256: 06cf85d33132e54daef748a6b9a98939a8f8e4119cafd27c675e56c7c7a86a38
+          - os: macos-26
+            os_label: macOS
+            target: aarch64-apple-darwin
+            cargo_dylint_sha256: a85d12f7c9b3ff943cbb76012a0510711fce0a3847332cee5885c957139cb46d
+            dylint_link_sha256: b9a767942f58137c291a6181750d18e7a74db0784a46d093882dfa077c9478f3
+          - os: windows-latest
+            os_label: Windows
+            target: x86_64-pc-windows-msvc
+            cargo_dylint_sha256: 859ee7d262cf25f9fe5b2da6e6af5897d54b8a1e26cf38a1806493189f3d483d
+            dylint_link_sha256: c00e983739e4dc7151a83d0047a4d40e44d460f61f9c2575733b2cc63582c412
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+
+      - name: Setup pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@1.97.1
+
+      - name: Setup perfectionist nightly toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-07-09
+          components: llvm-tools-preview,rustc-dev,rust-src
+
+      - name: Cache dylint drivers and libraries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.dylint_drivers
+            services/rust-bridge/target/dylint
+            apps/desktop/target/dylint
+          key: >-
+            rust-dylint-v1-${{ runner.os }}-${{ hashFiles('services/rust-bridge/dylint.toml',
+            'apps/desktop/dylint.toml') }}
+
+      - name: Install pinned cargo-dylint and dylint-link
+        shell: bash
+        env:
+          DYLINT_VERSION: '6.4.0'
+          DYLINT_TARGET: ${{ matrix.target }}
+          CARGO_DYLINT_SHA256: ${{ matrix.cargo_dylint_sha256 }}
+          DYLINT_LINK_SHA256: ${{ matrix.dylint_link_sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.cargo/bin"
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+          verify_sha256() {
+            local file="$1"
+            local expected="$2"
+            local actual
+            if command -v sha256sum >/dev/null 2>&1; then
+              actual="$(sha256sum "$file" | awk '{print $1}')"
+            else
+              actual="$(shasum -a 256 "$file" | awk '{print $1}')"
+            fi
+            if [ "$actual" != "$expected" ]; then
+              echo "SHA-256 mismatch for $file: expected $expected, got $actual" >&2
+              exit 1
+            fi
+          }
+          for entry in "cargo-dylint:$CARGO_DYLINT_SHA256" "dylint-link:$DYLINT_LINK_SHA256"; do
+            name="${entry%%:*}"
+            expected="${entry#*:}"
+            archive="$tmpdir/${name}-${DYLINT_TARGET}-v${DYLINT_VERSION}.tar.gz"
+            curl -fsSL "https://github.com/trailofbits/dylint/releases/download/v${DYLINT_VERSION}/${name}-${DYLINT_TARGET}-v${DYLINT_VERSION}.tar.gz" -o "$archive"
+            verify_sha256 "$archive" "$expected"
+            tar -xzf "$archive" --strip-components=1 -C "$HOME/.cargo/bin"
+          done
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          PATH="$HOME/.cargo/bin:$PATH"
+          cargo dylint --version
+          command -v dylint-link
+
+      - name: Run perfectionist Dylint rules
+        run: node ./scripts/run-dylint.mjs
