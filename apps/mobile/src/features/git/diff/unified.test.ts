@@ -202,12 +202,15 @@ describe('parseUnifiedGitDiff', () => {
     });
   });
 
-  it('decodes quoted escaped paths and handles incomplete diff headers', () => {
+  it('decodes quoted escaped paths without double-unescaping backslashes', () => {
     const parsed = parseUnifiedGitDiff(
       [
         'diff --git "a/src/a\\tname.ts" "b/src/b\\nname.ts"',
         'rename from "src/a\\tname.ts"',
         'rename to "src/b\\nname.ts"',
+        'diff --git "a/src/literal\\\\t\\\\n\\\\\\"quote.ts" "b/src/literal\\\\t\\\\n\\\\\\"quote.ts"',
+        '--- "a/src/literal\\\\t\\\\n\\\\\\"quote.ts"',
+        '+++ "b/src/literal\\\\t\\\\n\\\\\\"quote.ts"',
         'diff --git  ',
       ].join('\n'),
     );
@@ -216,7 +219,11 @@ describe('parseUnifiedGitDiff', () => {
       newPath: 'src/b\nname.ts',
       status: 'renamed',
     });
-    expect(parsed.files[1]).toMatchObject({ oldPath: null, newPath: null, displayPath: 'unknown' });
+    expect(parsed.files[1]).toMatchObject({
+      oldPath: 'src/literal\\t\\n\\"quote.ts',
+      newPath: 'src/literal\\t\\n\\"quote.ts',
+    });
+    expect(parsed.files[2]).toMatchObject({ oldPath: null, newPath: null, displayPath: 'unknown' });
   });
 
   it('infers added, deleted, and renamed states from patch paths', () => {

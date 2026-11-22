@@ -1736,10 +1736,16 @@ async fn concurrent_subagent_adoption_keeps_the_canonical_parent_policy() {
         .find(|entry| entry.acp_session_id == child.acp_session_id)
         .cloned()
         .expect("child remains indexed");
-    let expected_policy = match indexed_child.parent_acp_session_id.as_deref() {
-        Some(parent) if parent == first_parent.acp_session_id => ApprovalPolicy::Never,
-        Some(parent) if parent == second_parent.acp_session_id => ApprovalPolicy::Untrusted,
-        parent => panic!("unexpected canonical parent: {parent:?}"),
+    let expected_policy = if indexed_child.parent_acp_session_id.as_deref()
+        == Some(first_parent.acp_session_id.as_str())
+    {
+        ApprovalPolicy::Never
+    } else if indexed_child.parent_acp_session_id.as_deref()
+        == Some(second_parent.acp_session_id.as_str())
+    {
+        ApprovalPolicy::Untrusted
+    } else {
+        panic!("unexpected canonical parent");
     };
     assert_eq!(indexed_child.approval_policy, expected_policy);
     assert_eq!(

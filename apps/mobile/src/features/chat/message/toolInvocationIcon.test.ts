@@ -37,12 +37,18 @@ describe('classifyExecutionCommand', () => {
     ['shell', 'pnpm add test'],
     ['shell', 'cargo run -- test'],
     ['shell', 'node script.js'],
+    ['git', 'ENV="a\\"b" git status'],
   ] satisfies Array<[ExecutionIconCategory, string]>)(
     'classifies %s commands: %s',
     (category, command) => {
       expect(classifyExecutionCommand(command)).toBe(category);
     },
   );
+
+  it('handles unclosed quotes with repeated backslash escapes in linear time', () => {
+    const adversarial = `"${'\\!'.repeat(5000)}`;
+    expect(classifyExecutionCommand(adversarial)).toBe('shell');
+  });
 });
 
 describe('resolveToolInvocationIcon', () => {

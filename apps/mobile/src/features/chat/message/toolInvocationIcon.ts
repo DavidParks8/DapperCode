@@ -90,7 +90,7 @@ const TEST_RUNNERS = new Set(['jest', 'pytest', 'vitest']);
 const ACTION_DRIVERS = new Set(['cargo', 'go']);
 const GRADLE_EXECUTABLES = new Set(['gradle', 'gradlew']);
 const DIRECT_BUILD_TOOLS = new Set(['cmake', 'make', 'ninja', 'xcodebuild']);
-const SHELL_WORD_PATTERN = /(?:"(?:\\.|[^"])*"|'[^']*'|\\.|[^\s&|;\n"'])+/g;
+const SHELL_WORD_PATTERN = /(?:"(?:\\[\s\S]|[^"\\])*"|'[^']*'|\\[^\n]|[^\s&|;\n"'\\]|\\(?=\n|$))+/g;
 const SHELL_OPERATOR_PATTERN = /[&|;\n]/;
 
 export function classifyExecutionCommand(command: string): ExecutionIconCategory {
@@ -271,7 +271,7 @@ function shellWords(value: string): string[] {
 
 function decodeShellWord(value: string): string {
   return value.replace(
-    /"((?:\\.|[^"])*)"|'([^']*)'|\\([\\'" \t&|;])/g,
+    /"((?:\\[\s\S]|[^"\\])*)"|'([^']*)'|\\([\\'" \t&|;])/g,
     (
       _match,
       doubleQuoted: string | undefined,

@@ -61,7 +61,7 @@ See [product setup and limitations](../../../../docs/on-device.md).
   The source archive is SHA-256 verified. HTTPS uses SecureTransport; SSH, the CLI, and tests are
   excluded from the app library. Unmodified upstream notices (including bundled dependency
   licenses, llama.rn, and llama.cpp/ggml) are copied into the `OnDeviceAgentNotices` app resource bundle.
-- Inference uses pinned `llama.rn` 0.13.0-rc.11 (llama.cpp b12292), loaded only by the on-device feature.
+- Inference uses pinned `llama.rn` 0.13.0-rc.12 (llama.cpp b12445), loaded only by the on-device feature.
   This maintained pre-release supports LFM3's architecture/tool template and the upstream Hadamard
   runtime needed by Bonsai 2 Q2_0 weights. Its install script
   verifies the downloaded native artifacts. Android autolinking is disabled for this iOS-only

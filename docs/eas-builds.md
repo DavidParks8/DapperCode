@@ -42,8 +42,9 @@ the latest version of each native package:
 
 - React, React DOM, and React Test Renderer stay at **19.3.0** instead of 19.3.1 so their renderer
   versions match the SDK's supported React version.
-- Gesture Handler stays on **~3.3.0** rather than 3.5.0; SVG stays at **15.16.0** rather than
-  15.16.1; Worklets stays at **0.13.0** rather than 0.13.1. These are SDK 58's recommended versions.
+- Gesture Handler stays on **~3.3.0** rather than 3.5.0; Reanimated stays on **4.7.1** rather than
+  4.8.0; SVG stays at **15.16.0** rather than 15.16.1; Worklets stays at **0.13.0** rather than
+  0.14.0. These are SDK 58's recommended versions.
   Application gestures use Gesture Handler 3's hook API, including its renamed activation and
   deactivation callbacks.
 - TypeScript stays on **~6.0.3**, not 7.0.2. On-device code intelligence packages the JavaScript
