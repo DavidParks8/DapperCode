@@ -237,7 +237,7 @@ where
     BeforeFinalOpen: FnOnce(),
 {
     let mut handles = vec![base_handle.0.try_clone().map_err(|error| {
-        BridgeError::server(&format!("failed to duplicate root handle: {error}"))
+        BridgeError::server(format!("failed to duplicate root handle: {error}"))
     })?];
     let mut components = relative.components().peekable();
     let mut final_name = None;
@@ -258,7 +258,7 @@ where
             name,
         )
         .map_err(|error| {
-            BridgeError::invalid_params(&format!(
+            BridgeError::invalid_params(format!(
                 "path component is unsafe or inaccessible: {error}",
             ))
         })?;
@@ -274,7 +274,7 @@ where
         &final_name,
     )
     .map_err(|error| {
-        BridgeError::invalid_params(&format!("file is unsafe or inaccessible: {error}"))
+        BridgeError::invalid_params(format!("file is unsafe or inaccessible: {error}"))
     })?;
     Ok((file, base_root.join(relative)))
 }
@@ -284,7 +284,7 @@ pub(super) fn create_windows_directory_beneath(
     relative: &Path,
 ) -> Result<DirectoryHandle, BridgeError> {
     let mut handles = vec![base_handle.0.try_clone().map_err(|error| {
-        BridgeError::server(&format!("failed to duplicate root handle: {error}"))
+        BridgeError::server(format!("failed to duplicate root handle: {error}"))
     })?];
     for component in relative.components() {
         let Component::Normal(name) = component else {
@@ -297,7 +297,7 @@ pub(super) fn create_windows_directory_beneath(
             name,
         )
         .map_err(|error| {
-            BridgeError::invalid_params(&format!(
+            BridgeError::invalid_params(format!(
                 "directory component is unsafe or inaccessible: {error}",
             ))
         })?;
@@ -311,7 +311,7 @@ pub(super) fn create_windows_secure_file(
     name: &str,
 ) -> Result<File, BridgeError> {
     create_file(directory.final_handle(), name)
-        .map_err(|error| BridgeError::server(&format!("failed to create secure file: {error}")))
+        .map_err(|error| BridgeError::server(format!("failed to create secure file: {error}")))
 }
 
 pub(super) fn rename_windows_secure_file(
@@ -327,7 +327,7 @@ pub(super) fn rename_windows_secure_file(
         target_name,
         false,
     )
-    .map_err(|error| BridgeError::server(&format!("failed to finalize secure file: {error}")))
+    .map_err(|error| BridgeError::server(format!("failed to finalize secure file: {error}")))
 }
 
 pub(super) fn remove_windows_secure_file(directory: &DirectoryHandle, name: &str) {
