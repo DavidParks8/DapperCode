@@ -52,12 +52,27 @@ describe('selectableOutputProtocol', () => {
     );
     expect(html).toContain('a &amp; &lt;b&gt; &quot;x&quot;');
     expect(html).toContain('&lt;/pre&gt;&lt;/script&gt;');
-    expect(html).toMatch(/<script>/gu);
-    expect(html.match(/<script>/gu)).toHaveLength(1);
-    expect(html.match(/<\/script>/gu)).toHaveLength(1);
+    const lowerHtml = html.toLowerCase();
+    expect(html).toContain('<script>');
+    expect(lowerHtml.split('<script')).toHaveLength(2);
+    expect(lowerHtml.split('</script')).toHaveLength(2);
     expect(html).toContain('content.textContent = raw;');
     expect(html).toContain('window.ReactNativeWebView.postMessage');
     expect(html).toContain("window.parent.postMessage(raw, '*')");
+  });
+
+  it('escapes uppercase script tags so injected output cannot add script elements', () => {
+    const html = createSelectableOutputHtml('<SCRIPT>alert(1)</SCRIPT>', {
+      fontFamily: 'Menlo',
+      fontSize: 13,
+      lineHeight: 18,
+      color: '#D0D5DF',
+    });
+
+    expect(html).toContain('&lt;SCRIPT&gt;alert(1)&lt;/SCRIPT&gt;');
+    const lowerHtml = html.toLowerCase();
+    expect(lowerHtml.split('<script')).toHaveLength(2);
+    expect(lowerHtml.split('</script')).toHaveLength(2);
   });
 
   it('round-trips the imperative setText command', () => {

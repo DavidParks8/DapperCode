@@ -324,18 +324,23 @@ function parsePatchPath(rawPath: string): string | null {
   return decoded;
 }
 
+const GIT_PATH_ESCAPES: Record<string, string> = {
+  '\\': '\\',
+  '"': '"',
+  t: '\t',
+  n: '\n',
+  r: '\r',
+};
+
 function decodeGitPath(rawPath: string): string {
   if (!rawPath.startsWith('"') || !rawPath.endsWith('"') || rawPath.length < 2) {
     return rawPath;
   }
 
   const inner = rawPath.slice(1, -1);
-  return inner
-    .replace(/\\\\/g, '\\')
-    .replace(/\\"/g, '"')
-    .replace(/\\t/g, '\t')
-    .replace(/\\n/g, '\n')
-    .replace(/\\r/g, '\r');
+  return inner.replace(/\\([\\"tnr])/g, (_match, escaped: string) => {
+    return GIT_PATH_ESCAPES[escaped] ?? escaped;
+  });
 }
 
 function formatDisplayPath(oldPath: string | null, newPath: string | null): string {
