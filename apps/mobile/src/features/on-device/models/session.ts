@@ -20,6 +20,7 @@ import type {
   LocalModelReply,
 } from './engine';
 import {
+  awaitStartedCompletion,
   completionParams,
   decodeFailed,
   EMPTY_MODEL_SESSION as EMPTY,
@@ -334,7 +335,7 @@ export class LocalModelSession {
     options?: LocalGenerationOptions,
   ): Promise<LocalModelReply> {
     try {
-      this.requireExecutionMemory();
+      requireExecutionMemory(this.native.getMemoryInfo());
       this.publish({ phase: 'running', promptProgress: null, error: null });
       const thinking = roundThinks(generation.model.definition, options?.outputTokens);
       const prompt = await this.preparePrompt(
@@ -356,6 +357,7 @@ export class LocalModelSession {
         completionParams(prompt.formatted, budget, thinking),
         (value) => this.partial(generation, value, update),
         (percent) => this.promptProgress(generation, percent),
+        options?.onStart,
       );
     } finally {
       if (this.generation === generation) {
@@ -406,7 +408,7 @@ export class LocalModelSession {
           if (error instanceof LocalModelInterrupted) {
             throw error;
           }
-          this.requireExecutionMemory();
+          requireExecutionMemory(this.native.getMemoryInfo());
           this.failedCheckpoint = checkpoint.key;
         },
       });
@@ -468,7 +470,7 @@ export class LocalModelSession {
     prompt: PreparedPrompt,
     outputTokens: number,
   ): Promise<LocalModelReply> {
-    this.requireExecutionMemory();
+    requireExecutionMemory(this.native.getMemoryInfo());
     this.checkGeneration(generation);
     return this.complete(generation, completionParams(prompt.formatted, outputTokens));
   }
@@ -483,14 +485,18 @@ export class LocalModelSession {
     params: CompletionParams,
     callback?: (value: TokenData) => void,
     onPromptProgress?: (percent: number) => void,
+    onStart?: () => void,
   ): Promise<LocalModelReply> {
     for (let recoveries = 0; ; recoveries += 1) {
       if (generation.model.failed || generation.model.backend !== this.backend()) {
         await this.relocate(generation);
       }
-      const reply = await generation.model.context.completion(params, callback, onPromptProgress);
-      if (this.generation === generation && this.value.promptProgress !== null) {
-        this.publish({ promptProgress: null });
+      const pending = generation.model.context.completion(params, callback, onPromptProgress);
+      const reply = await awaitStartedCompletion(pending, onStart, generation, () =>
+        generation.model.context.stopCompletion(),
+      );
+      if (this.generation === generation) {
+        this.setPromptProgress(null);
       }
       if (generation.stopFailure) {
         throw generation.stopFailure;
@@ -515,9 +521,7 @@ export class LocalModelSession {
     if (this.current !== previous) {
       throw new LocalModelInterrupted();
     }
-    if (this.value.promptProgress !== null) {
-      this.publish({ promptProgress: null });
-    }
+    this.setPromptProgress(null);
     generation.relocating = true;
     try {
       await this.releaseCurrent();
@@ -555,14 +559,16 @@ export class LocalModelSession {
     return this.simulator || this.placement === 'background' ? 'cpu' : 'gpu';
   }
 
-  private promptProgress(generation: Generation, value: number): void {
-    const active = this.generation === generation && !this.disposed && !generation.interrupted;
-    if (!active || !Number.isFinite(value)) {
-      return;
-    }
-    const next = normalizePromptProgress(value);
+  private setPromptProgress(next: number | null): void {
     if (this.value.promptProgress !== next) {
       this.publish({ promptProgress: next });
+    }
+  }
+
+  private promptProgress(generation: Generation, value: number): void {
+    const active = this.generation === generation && !this.disposed && !generation.interrupted;
+    if (active && Number.isFinite(value)) {
+      this.setPromptProgress(normalizePromptProgress(value));
     }
   }
 
@@ -586,16 +592,10 @@ export class LocalModelSession {
       }
       return;
     }
-    if (this.value.promptProgress !== null) {
-      this.publish({ promptProgress: null });
-    }
+    this.setPromptProgress(null);
     if (value.accumulated_text !== undefined) {
       update({ content: value.content ?? '', reasoning: value.reasoning_content ?? '' });
     }
-  }
-
-  private requireExecutionMemory(): void {
-    requireExecutionMemory(this.native.getMemoryInfo());
   }
 
   private async releaseCurrent(): Promise<void> {

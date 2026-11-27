@@ -23,6 +23,8 @@ export interface LocalModelUpdate {
 export interface LocalGenerationOptions {
   checkpoint?: LocalSummaryCheckpoint;
   outputTokens?: number;
+  /** Called synchronously right after native `completion()` is invoked (after initial PP progress). */
+  onStart?: () => void;
 }
 
 /** Where the app is running; iOS refuses GPU work from background apps. */
@@ -76,6 +78,34 @@ export function roundPredictBudget(
     availableBudget,
     outputTokens === undefined ? Infinity : Math.max(1, Math.min(512, outputTokens)),
   );
+}
+
+/**
+ * Runs `onStart` after launching native completion, reissuing `stopCompletion` if the generation
+ * was interrupted synchronously during launch (before native `rewind()`) or if `onStart` throws.
+ */
+export async function awaitStartedCompletion(
+  pending: Promise<LocalModelReply>,
+  onStart: (() => void) | undefined,
+  generation: { interrupted: boolean },
+  stopCompletion: () => Promise<void>,
+): Promise<LocalModelReply> {
+  const abort = () => {
+    generation.interrupted = true;
+    return Promise.resolve().then(stopCompletion);
+  };
+  if (!generation.interrupted) {
+    try {
+      onStart?.();
+    } catch (error) {
+      await Promise.allSettled([abort(), pending]);
+      throw error;
+    }
+  }
+  if (generation.interrupted) {
+    await Promise.allSettled([abort(), pending]);
+  }
+  return pending;
 }
 
 /**

@@ -242,3 +242,45 @@ test('Lock Screen subtitles name the phase and tool but never approval or questi
     'Waiting for your answers',
   );
 });
+
+test('throttled progress ticks rate-limit Lock Screen updates while phase changes apply immediately', async () => {
+  const fake = native();
+  let subtitle = 'Preparing';
+  const value = new LocalRunActivities(
+    fake as unknown as ConstructorParameters<typeof LocalRunActivities>[0],
+    { subtitle: () => subtitle, expired: jest.fn(), settled: () => null },
+  );
+  await value.begin();
+
+  // Phase change (Preparing -> Processing prompt · 0%) is reported immediately even when throttled.
+  subtitle = 'Processing prompt · 0%';
+  value.changed(true);
+  expect(fake.updateLocalRunActivity.mock.calls).toEqual([['run-1', 'Processing prompt · 0%']]);
+
+  // Rapid intra-phase percentage ticks within the interval are skipped.
+  jest.advanceTimersByTime(200);
+  subtitle = 'Processing prompt · 25%';
+  value.changed(true);
+  jest.advanceTimersByTime(300);
+  subtitle = 'Processing prompt · 50%';
+  value.changed(true);
+  expect(fake.updateLocalRunActivity).toHaveBeenCalledTimes(1);
+
+  // Once the progress interval elapses, the next progress tick is reported.
+  jest.advanceTimersByTime(500);
+  subtitle = 'Processing prompt · 75%';
+  value.changed(true);
+  expect(fake.updateLocalRunActivity).toHaveBeenLastCalledWith('run-1', 'Processing prompt · 75%');
+  expect(fake.updateLocalRunActivity).toHaveBeenCalledTimes(2);
+
+  // Phase transition (Processing prompt -> Generating) flushes immediately even inside the interval.
+  jest.advanceTimersByTime(100);
+  subtitle = 'Generating on this iPhone';
+  value.changed(true);
+  expect(fake.updateLocalRunActivity).toHaveBeenLastCalledWith(
+    'run-1',
+    'Generating on this iPhone',
+  );
+  expect(fake.updateLocalRunActivity).toHaveBeenCalledTimes(3);
+  value.dispose();
+});

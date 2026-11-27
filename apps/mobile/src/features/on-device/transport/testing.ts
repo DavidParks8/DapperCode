@@ -522,6 +522,7 @@ export class FakeAgentPort implements LocalAgentPort {
   }
 
   finishTool(threadId: string, callId: string, content: string, status: 'completed' | 'failed') {
+    this.runValue = { ...this.runValue, phase: 'preparing', toolName: null };
     this.change(threadId, (thread) => ({
       ...thread,
       messages: thread.messages.map((message) =>

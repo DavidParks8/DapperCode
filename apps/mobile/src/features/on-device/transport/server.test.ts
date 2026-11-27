@@ -267,6 +267,8 @@ describe('LocalBridgeServer', () => {
       EventType.CUSTOM,
       EventType.TOOL_CALL_END,
       EventType.TOOL_CALL_RESULT,
+      // "Preparing": tool finished and loop prepares for the next round.
+      EventType.CUSTOM,
       // "Saving": the loop persists the turn before it settles, as the real runtime does.
       EventType.CUSTOM,
       EventType.RUN_FINISHED,
@@ -326,6 +328,7 @@ describe('LocalBridgeServer', () => {
       { title: 'Preparing' },
       { title: 'Generating' },
       { title: 'Reading src/app.ts' },
+      { title: 'Preparing' },
       { title: 'Generating' },
       { title: 'Saving' },
     ]);

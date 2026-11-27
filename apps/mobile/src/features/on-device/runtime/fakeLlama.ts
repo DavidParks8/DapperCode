@@ -48,6 +48,8 @@ export class FakeLlama {
   charactersPerToken = 4;
   holdLoads = false;
   holdCompletions = false;
+  /** Emits synchronous 0% prompt progress when completion starts, mirroring patched llama.rn. */
+  emitInitialPromptProgress = false;
   /** Keeps `stopCompletion` pending until `finishStop`, so the stopping phase is observable. */
   holdStops = false;
   holdReleases = false;
@@ -199,6 +201,9 @@ export class FakeLlama {
         const emit = (text: string) =>
           callback?.({ token: text, content: text, accumulated_text: text });
         const reportPromptProgress = (percent: number) => onPromptProgress?.(percent);
+        if (this.emitInitialPromptProgress) {
+          reportPromptProgress(0);
+        }
         this.tokenCallbacks.push(emit);
         if (this.holdCompletions) {
           await new Promise<void>((resolve, reject) => {

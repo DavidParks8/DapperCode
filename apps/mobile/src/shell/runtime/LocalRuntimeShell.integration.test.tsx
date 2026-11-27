@@ -1946,20 +1946,23 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
   it('shows prompt processing percentage while prompt processing runs, then switches to Generating', async () => {
     const { tree, root, runtime } = await renderShell({ localRunActivity: 'continued' });
     mockLlama.holdCompletions = true;
+    mockLlama.emitInitialPromptProgress = true;
     mockLlama.reply({ content: 'Prompt processed cleanly.' });
     await submit(root, 'Summarize this repository');
-    await drive(() => mockLlama.promptProgress(0));
     expect(hasText(root, 'Processing prompt')).toBe(true);
     expect(hasText(root, ' · 0%')).toBe(true);
     expect(hasText(root, 'Generating')).toBe(false);
     expect(drawerStatus(root)).toBe('Processing prompt · 0%');
+    expect([...mockNative.localRuns.values()][0]?.subtitles).not.toContain(
+      'Generating on this iPhone',
+    );
 
     await drive(() => mockLlama.promptProgress(42));
     expect(hasText(root, 'Processing prompt')).toBe(true);
     expect(hasText(root, ' · 42%')).toBe(true);
     expect(hasText(root, 'Generating')).toBe(false);
     expect(drawerStatus(root)).toBe('Processing prompt · 42%');
-    expect([...mockNative.localRuns.values()][0]?.subtitles).toContain('Processing prompt · 42%');
+    expect([...mockNative.localRuns.values()][0]?.subtitles).toContain('Processing prompt · 0%');
 
     await drive(() => mockLlama.promptProgress(100));
     expect(hasText(root, 'Generating')).toBe(true);

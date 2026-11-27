@@ -41,6 +41,12 @@ export const EXPLORE_TOOLS = new Set([
   'todo_write',
 ]);
 
+export function childAllowsTool(agent: LocalChild['agent'], name: string): boolean {
+  return (
+    name !== 'task' && name !== 'read_child' && (agent !== 'explore' || EXPLORE_TOOLS.has(name))
+  );
+}
+
 export function localChildInteractions(
   snapshots: readonly LocalRunSnapshot[],
   previous: LocalRunSnapshot,

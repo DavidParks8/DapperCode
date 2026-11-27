@@ -130,7 +130,7 @@ export class OnDeviceRuntime {
     this.drafts = new LegacyDraftReader(native);
     this.models = new LocalModelSession(native, loadNativeModelContext, () => {
       this.emitter.coalesce('models');
-      this.runActivity.changed();
+      this.runActivity.changed(true);
     });
     this.downloads = new ModelDownloadController(LOCAL_MODEL_CATALOG, native, () =>
       this.emitter.coalesce('downloads'),

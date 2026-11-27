@@ -264,10 +264,27 @@ async function exerciseInference() {
       'fullProductionToolBudget',
       `${promptTokens} prompt tokens do not leave the generation reserve in ${contextTokens}`,
     );
-    const first = await context.completion({
-      ...completionParams(fullPrompt, 128 + extraTokens, enable_thinking),
-      temperature: 0,
-    });
+    const firstPromptProgress: number[] = [];
+    const first = await context.completion(
+      {
+        ...completionParams(fullPrompt, 128 + extraTokens, enable_thinking),
+        temperature: 0,
+      },
+      undefined,
+      (percent) => {
+        firstPromptProgress.push(percent);
+      },
+    );
+    const monotonic = (values: number[]) =>
+      values.length >= 2 &&
+      values[0] === 0 &&
+      values.at(-1) === 100 &&
+      values.every((v, i) => v >= 0 && v <= 100 && (i === 0 || v >= (values[i - 1] ?? 0)));
+    check(
+      monotonic(firstPromptProgress),
+      'promptProgressCold',
+      JSON.stringify({ firstPromptProgress, promptTokens }),
+    );
     const calls = first.tool_calls ?? [];
     check(
       calls.length === 1,
@@ -319,11 +336,20 @@ async function exerciseInference() {
     });
     check(formatted.prompt.includes('OFFLINE_TOOL_OK'), 'toolResultInPrompt');
     let chunks = 0;
+    const secondPromptProgress: number[] = [];
     const second = await context.completion(
       { ...completionParams(formatted, 128 + extraTokens, enable_thinking), temperature: 0 },
       () => {
         chunks += 1;
       },
+      (percent) => {
+        secondPromptProgress.push(percent);
+      },
+    );
+    check(
+      monotonic(secondPromptProgress),
+      'promptProgressWarm',
+      JSON.stringify({ secondPromptProgress }),
     );
     check(
       second.content.includes('OFFLINE_TOOL_OK'),

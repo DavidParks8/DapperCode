@@ -213,6 +213,7 @@ describe('the local transport over the real on-device runtime', () => {
       'Preparing',
       'Generating',
       'Reading README.md',
+      'Preparing',
       'Generating',
       'Saving',
     ]);
@@ -276,6 +277,36 @@ describe('the local transport over the real on-device runtime', () => {
 
     expect(phases(fake)).toEqual(phases(real.events()));
     expect(lifecycle(fake)).toEqual(lifecycle(real.events()));
+  });
+
+  it('transitions directly from Preparing to Processing prompt without flashing Generating', async () => {
+    const { runtime, activities, createChat, send } = await setup();
+    const threadId = await createChat();
+    mockLlama.holdCompletions = true;
+    mockLlama.emitInitialPromptProgress = true;
+    mockLlama.reply({ content: 'Processed cleanly.' });
+    const sent = send(threadId, 'Summarize this');
+    await until(() => mockLlama.completionPending, 'completion start');
+    await tick();
+
+    mockLlama.promptProgress(50);
+    await tick();
+    mockLlama.promptProgress(100);
+    await tick();
+    mockLlama.finishCompletion();
+    await sent;
+    await until(() => runtime.threads.get(threadId).status === 'complete', 'turn completion');
+
+    expect(activities()).toEqual([
+      'Preparing',
+      'Loading Qwen3 1.7B · 0%',
+      'Loading Qwen3 1.7B · 100%',
+      'Preparing',
+      'Processing prompt · 0%',
+      'Processing prompt · 50%',
+      'Generating',
+      'Saving',
+    ]);
   });
 
   it('stops a turn while the model loads without recording it, and releases the late context', async () => {

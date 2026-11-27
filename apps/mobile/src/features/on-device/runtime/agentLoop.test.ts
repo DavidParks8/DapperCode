@@ -275,10 +275,34 @@ test('real run ordering persists user input and tool intent before executing and
     'preparing',
     'generating',
     'tool',
+    'preparing',
     'generating',
     'persisting',
     'idle',
   ]);
+});
+
+test('round 2 and compaction exit transition to preparing before completion starts', async () => {
+  const h = await harness();
+  const secondRound = deferred<LocalModelReply>();
+  h.model.generate
+    .mockResolvedValueOnce(response('', ['read_file']))
+    .mockImplementationOnce((_messages, _tools, _update, options) => {
+      // Tool finished and next round is preparing (not stuck on 'tool') before onStart fires.
+      expect(h.loop.snapshot().phase).toBe('preparing');
+      options?.checkpoint?.started();
+      expect(h.loop.snapshot().phase).toBe('compacting');
+      options?.checkpoint?.failed();
+      // Compaction failure returns to 'preparing' (not stuck on 'compacting' or flashing 'generating').
+      expect(h.loop.snapshot().phase).toBe('preparing');
+      options?.onStart?.();
+      expect(h.loop.snapshot().phase).toBe('generating');
+      return secondRound.promise;
+    });
+  const pending = h.loop.send(h.thread.id, 'Inspect main.txt.', 'phase-cleanup');
+  secondRound.resolve(response('Done.'));
+  await pending;
+  expect(h.loop.snapshot().phase).toBe('idle');
 });
 
 test('stopping an in-flight edit waits for its result, preserves the completed edit, and starts no next model round', async () => {

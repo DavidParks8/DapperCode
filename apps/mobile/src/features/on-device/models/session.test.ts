@@ -987,6 +987,60 @@ test('prompt processing progress updates while decoding and clears on completion
   await stopping;
   expect(await op3).toBeInstanceOf(LocalModelInterrupted);
   expect(h.session.snapshot()).toMatchObject({ phase: 'ready', promptProgress: null });
+
+  // If onStart throws, the in-flight native completion is stopped and awaited before rejecting,
+  // even when stopCompletion throws synchronously.
+  const fourth = deferred<LocalModelReply>();
+  h.initial.completion.mockImplementationOnce((_params, _onToken, onPromptProgress) => {
+    onPromptProgress?.(0);
+    return fourth.promise;
+  });
+  h.initial.stopCompletion.mockImplementationOnce(() => {
+    setTimeout(() => fourth.resolve({ ...reply, interrupted: true }), 0);
+    throw new Error('sync stop failure');
+  });
+  await expect(
+    h.session.generate(messages, [], jest.fn(), {
+      onStart: () => {
+        throw new Error('start hook failed');
+      },
+    }),
+  ).rejects.toThrow('start hook failed');
+  expect(h.initial.stopCompletion).toHaveBeenCalledTimes(2);
+  expect(h.session.snapshot()).toMatchObject({ phase: 'ready', promptProgress: null });
+
+  // Stopping synchronously from a 0% progress listener reissues native stopCompletion after launch.
+  const fifth = deferred<LocalModelReply>();
+  let nativeInterrupted = false;
+  let stopPromise: Promise<void> | undefined;
+  let stopCalls = 0;
+  h.initial.stopCompletion.mockImplementation(async () => {
+    stopCalls += 1;
+    nativeInterrupted = true;
+    // Only the reissued stop after rewind() can settle the native completion.
+    if (stopCalls >= 2) {
+      fifth.resolve({ ...reply, interrupted: true });
+    }
+  });
+  h.initial.completion.mockImplementationOnce((_params, _onToken, onPromptProgress) => {
+    // Emit 0% BEFORE native rewind() clears is_interrupted, matching LlamaContext.completion().
+    onPromptProgress?.(0);
+    // Simulate a subscriber synchronously calling stop() on the 0% callback.
+    stopPromise = h.session.stop();
+    // Simulate native rewind() clearing the earlier stop flag.
+    nativeInterrupted = false;
+    return fifth.promise;
+  });
+  const onStartAfterSyncStop = jest.fn();
+  const op5 = h.session
+    .generate(messages, [], jest.fn(), { onStart: onStartAfterSyncStop })
+    .catch((error: unknown) => error);
+  expect(await op5).toBeInstanceOf(LocalModelInterrupted);
+  await stopPromise;
+  expect(stopCalls).toBe(2);
+  expect(nativeInterrupted).toBe(true);
+  expect(onStartAfterSyncStop).not.toHaveBeenCalled();
+  expect(h.session.snapshot()).toMatchObject({ phase: 'ready', promptProgress: null });
 });
 
 test('recreating a context re-admits its window against fresh memory headroom', async () => {

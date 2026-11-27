@@ -23,7 +23,7 @@ import { LocalInferenceScheduler } from './inferenceScheduler';
 import {
   CHILD_OUTPUT_TOKENS,
   CHILD_ROUNDS,
-  EXPLORE_TOOLS,
+  childAllowsTool,
   localRunSnapshot,
   delegateLocalChildren,
   delegationRequests,
@@ -329,28 +329,40 @@ export class LocalAgentLoop {
       tool: (call, repeated) => this.tool(run, call, repeated),
       approval: this.skills.policy(this.approval, run),
       generate: async (assistantId) => {
-        this.publish(run, 'generating');
+        if (this.value.phase !== 'preparing') {
+          this.publish(run, 'preparing');
+        }
         const contextTokens = this.contextTokens();
         const web = localToolAdvertised('web_search', contextTokens);
         const context = await interruptLocalRun(run, this.modelContext(run, assistantId, web));
-        const definitions = this.skills.tools(this.definitions, run.workspaceId);
-        const tools = advertisedLocalTools(definitions, contextTokens);
-        return this.scheduler.generate(
+        const tools = advertisedLocalTools(
+          this.skills.tools(this.definitions, run.workspaceId),
+          contextTokens,
+        );
+        let announced = false;
+        const enterGenerating = () => {
+          if (!announced && this.active === run && !run.stopped) {
+            announced = true;
+            this.publish(run, 'generating');
+          }
+        };
+        const reply = await this.scheduler.generate(
           run.controller.signal,
           context.messages,
           tools,
-          (update) => {
-            if (this.active !== run || run.stopped) {
-              return;
+          ({ content, reasoning }) => {
+            if (this.active === run && !run.stopped) {
+              this.message(run.threadId, assistantId, (m) => ({ ...m, content, reasoning }));
             }
-            this.message(run.threadId, assistantId, (message) => ({
-              ...message,
-              content: update.content,
-              reasoning: update.reasoning,
-            }));
           },
-          { ...context.options, ...(this.childAgent ? { outputTokens: CHILD_OUTPUT_TOKENS } : {}) },
+          {
+            ...context.options,
+            ...(this.childAgent ? { outputTokens: CHILD_OUTPUT_TOKENS } : {}),
+            onStart: enterGenerating,
+          },
         );
+        enterGenerating();
+        return reply;
       },
     });
   }
@@ -366,12 +378,7 @@ export class LocalAgentLoop {
           check: () => this.checkStopped(run),
         }),
       validate: (name) => {
-        if (
-          this.childAgent &&
-          (name === 'task' ||
-            name === 'read_child' ||
-            (this.childAgent === 'explore' && !EXPLORE_TOOLS.has(name)))
-        ) {
+        if (this.childAgent && !childAllowsTool(this.childAgent, name)) {
           throw new Error('Not run: this child is read-only or requested recursive delegation.');
         }
       },
@@ -474,7 +481,7 @@ export class LocalAgentLoop {
       (memory) =>
         localAgentSystemPrompt(run.modelId, today, this.childAgent, context + memory, web),
       () => this.checkStopped(run),
-      (phase) => this.publish(run, phase),
+      (phase) => this.publish(run, phase === 'compacting' ? 'compacting' : 'preparing'),
     );
   }
 
@@ -544,14 +551,9 @@ export class LocalAgentLoop {
       messageId,
       requests,
       async (child, prompt, port) => {
-        const definitions = this.definitions.filter((definition) => {
-          const name = toolDefinitionName(definition);
-          return (
-            name !== 'task' &&
-            name !== 'read_child' &&
-            (child.agent !== 'explore' || EXPLORE_TOOLS.has(name))
-          );
-        });
+        const definitions = this.definitions.filter((definition) =>
+          childAllowsTool(child.agent, toolDefinitionName(definition)),
+        );
         const loop = new LocalAgentLoop(
           port,
           this.model,
