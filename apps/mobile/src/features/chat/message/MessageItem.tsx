@@ -58,9 +58,7 @@ function ChatMessageComponent({
   );
   const localPreviewUrls = useMemo(
     () =>
-      ['assistant', 'system', 'developer'].includes(message.role)
-        ? extractLocalPreviewUrls(messageText)
-        : [],
+      ['assistant', 'developer'].includes(message.role) ? extractLocalPreviewUrls(messageText) : [],
     [message.role, messageText],
   );
   const copyText = useMemo(

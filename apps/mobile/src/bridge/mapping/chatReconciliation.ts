@@ -255,19 +255,39 @@ function preserveLocalTranscript(previous: Chat, next: Chat): Chat {
     return next;
   }
 
-  const nextMessagesById = new Map(next.messages.map((message) => [message.id, message]));
-  const preserved = next.historyAuthoritative
-    ? previous.messages.filter(isLocalTranscriptMessage)
-    : previous.messages;
-  const messages = preserved.map((message) => nextMessagesById.get(message.id) ?? message);
+  const messages = [...next.messages];
   const mergedMessageIds = new Set(messages.map((message) => message.id));
+  let cursor = 0;
 
-  for (const message of next.messages) {
-    if (mergedMessageIds.has(message.id)) {
+  // Snapshot messages carry synthetic timestamps derived from thread creation time, while
+  // client-only entries carry wall-clock timestamps. Anchor local entries by neighbouring
+  // messages and turn boundaries instead of timestamps so later turns never slide ahead of them.
+  for (let index = 0; index < previous.messages.length; index += 1) {
+    const message = previous.messages[index];
+    if (!message) {
       continue;
     }
-    insertMessageByTimestamp(messages, message);
+    const represented = messages.findIndex(
+      (candidate, candidateIndex) =>
+        candidateIndex >= cursor && messagesShareTranscriptIdentity(message, candidate),
+    );
+    if (represented >= 0) {
+      cursor = represented + 1;
+      continue;
+    }
+    if (!isLocalTranscriptMessage(message) || mergedMessageIds.has(message.id)) {
+      continue;
+    }
+    const insertionIndex = isLocalSystemMessage(message)
+      ? findLocalSystemInsertionIndex(
+          messages,
+          cursor,
+          findNextMatchedIndex(previous.messages, index + 1, messages, cursor),
+        )
+      : cursor;
+    messages.splice(insertionIndex, 0, message);
     mergedMessageIds.add(message.id);
+    cursor = insertionIndex + 1;
   }
 
   const lastMessage = messages[messages.length - 1];
@@ -286,20 +306,42 @@ export function isLocalTranscriptMessage(message: ChatMessage | undefined): bool
   );
 }
 
-function insertMessageByTimestamp(messages: ChatMessage[], message: ChatMessage): void {
-  const createdAtMs = Date.parse(message.createdAt);
-  if (!Number.isFinite(createdAtMs)) {
-    messages.push(message);
-    return;
-  }
+export function isLocalSystemMessage(message: ChatMessage | undefined): boolean {
+  return Boolean(message?.id.startsWith('local-system-'));
+}
 
-  const insertionIndex = messages.findIndex((candidate) => {
-    const candidateCreatedAtMs = Date.parse(candidate.createdAt);
-    return Number.isFinite(candidateCreatedAtMs) && candidateCreatedAtMs > createdAtMs;
-  });
-  if (insertionIndex < 0) {
-    messages.push(message);
-  } else {
-    messages.splice(insertionIndex, 0, message);
+function findNextMatchedIndex(
+  previousMessages: ChatMessage[],
+  fromPreviousIndex: number,
+  targetMessages: ChatMessage[],
+  fromTargetIndex: number,
+): number {
+  for (let index = fromPreviousIndex; index < previousMessages.length; index += 1) {
+    const candidate = previousMessages[index];
+    if (!candidate || isLocalTranscriptMessage(candidate)) {
+      continue;
+    }
+    const matched = targetMessages.findIndex(
+      (target, targetIndex) =>
+        targetIndex >= fromTargetIndex && messagesShareTranscriptIdentity(candidate, target),
+    );
+    if (matched >= 0) {
+      return matched;
+    }
   }
+  return -1;
+}
+
+function findLocalSystemInsertionIndex(
+  messages: ChatMessage[],
+  cursor: number,
+  nextMatchedIndex: number,
+): number {
+  const limit = nextMatchedIndex >= 0 ? nextMatchedIndex : messages.length;
+  for (let index = cursor; index < limit; index += 1) {
+    if (messages[index]?.role === 'user') {
+      return index;
+    }
+  }
+  return limit;
 }

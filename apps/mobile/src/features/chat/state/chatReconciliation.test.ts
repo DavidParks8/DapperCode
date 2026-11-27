@@ -553,6 +553,124 @@ describe('resolveEquivalentChat with an authoritative on-device history', () => 
     expect(resolveEquivalentChat(reconciled, complete)).toBe(reconciled);
   });
 
+  it('keeps a wall-clock stop notice before a later turn with synthetic snapshot timestamps', () => {
+    // `mapMessagesFromAcpSnapshot` timestamps each timeline entry at `thread.createdAt + index * 1000`,
+    // whereas `appendLocalSystemMessage` uses wall-clock `Date.now()`. When a turn is stopped
+    // minutes into a chat, the stop notice's `createdAt` is far later than the next turn's
+    // synthetic snapshot timestamps.
+    const note = {
+      id: 'local-system-stopped',
+      role: 'system' as const,
+      content: 'Turn stopped by user.',
+      createdAt: '2026-07-25T00:05:30.000Z',
+    };
+    const nextUser = {
+      id: 'user-2',
+      role: 'user' as const,
+      content: 'Continue after stopping',
+      createdAt: '2026-07-25T00:00:02.000Z',
+    };
+    const nextAnswer = {
+      id: 'assistant-2',
+      role: 'assistant' as const,
+      content: 'Latest response after the stopped turn',
+      createdAt: '2026-07-25T00:00:03.000Z',
+    };
+
+    for (const historyAuthoritative of [true, false]) {
+      const previousWithPending = chat({
+        status: 'running',
+        messages: [
+          ask,
+          tool,
+          note,
+          {
+            id: 'msg-optimistic-2',
+            role: 'user',
+            content: nextUser.content,
+            createdAt: '2026-07-25T00:05:40.000Z',
+          },
+        ],
+      });
+      const previousWithoutPending = chat({
+        status: 'complete',
+        messages: [ask, tool, note],
+      });
+      const snapshot = chat({
+        status: 'complete',
+        lastMessagePreview: nextAnswer.content,
+        messages: [ask, tool, nextUser, nextAnswer],
+        historyAuthoritative,
+      });
+
+      const fromPending = resolveEquivalentChat(previousWithPending, snapshot);
+      expect(fromPending.messages).toEqual([ask, tool, note, nextUser, nextAnswer]);
+      expect(fromPending.lastMessagePreview).toBe(nextAnswer.content);
+      expect(resolveEquivalentChat(fromPending, snapshot)).toBe(fromPending);
+
+      const fromSettled = resolveEquivalentChat(previousWithoutPending, snapshot);
+      expect(fromSettled.messages).toEqual([ask, tool, note, nextUser, nextAnswer]);
+      expect(fromSettled.lastMessagePreview).toBe(nextAnswer.content);
+      expect(resolveEquivalentChat(fromSettled, snapshot)).toBe(fromSettled);
+    }
+  });
+
+  it('keeps a stop notice after its own settled turn output and before the following turn', () => {
+    const note = {
+      id: 'local-system-stopped',
+      role: 'system' as const,
+      content: 'Turn stopped by user.',
+      createdAt: '2026-07-25T00:05:30.000Z',
+    };
+    const partialAnswer = {
+      id: 'assistant-1-partial',
+      role: 'assistant' as const,
+      content: 'Partial answer before stop',
+      createdAt: '2026-07-25T00:00:02.000Z',
+    };
+    const nextUser = {
+      id: 'user-2',
+      role: 'user' as const,
+      content: 'Next turn prompt',
+      createdAt: '2026-07-25T00:00:03.000Z',
+    };
+    const nextAnswer = {
+      id: 'assistant-2',
+      role: 'assistant' as const,
+      content: 'Next turn answer',
+      createdAt: '2026-07-25T00:00:04.000Z',
+    };
+
+    // Immediately after Stop, the client may only have the user message + local stop note
+    // before the authoritative reload brings back the stopped turn's tools and partial reply.
+    const beforeReload = chat({ status: 'complete', messages: [ask, note] });
+    const afterStoppedTurnReload = chat({
+      status: 'idle',
+      messages: [ask, tool, partialAnswer],
+      historyAuthoritative: true,
+    });
+    const settledStoppedTurn = resolveEquivalentChat(beforeReload, afterStoppedTurnReload);
+    expect(settledStoppedTurn.messages).toEqual([ask, tool, partialAnswer, note]);
+
+    // When the next turn finishes, the stop note stays between Turn 1 and Turn 2.
+    const afterNextTurn = chat({
+      status: 'idle',
+      lastMessagePreview: nextAnswer.content,
+      messages: [ask, tool, partialAnswer, nextUser, nextAnswer],
+      historyAuthoritative: true,
+    });
+    const settledNextTurn = resolveEquivalentChat(settledStoppedTurn, afterNextTurn);
+    expect(settledNextTurn.messages).toEqual([
+      ask,
+      tool,
+      partialAnswer,
+      note,
+      nextUser,
+      nextAnswer,
+    ]);
+    expect(resolveEquivalentChat(settledNextTurn, afterNextTurn)).toBe(settledNextTurn);
+  });
+
   it('keeps unconfirmed sends, client-only entries, and history against a summary-only read', () => {
     const pending = {
       id: 'local-user-2',
