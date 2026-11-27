@@ -209,12 +209,17 @@ export function useMainScreenUiActionHandlers(context: MainScreenUiActionHandler
 
   // Resolves false on failure so a surface can show the outcome where the user acted.
   const handleBridgeUiAction = useCallback(
-    async (surface: BridgeUiSurface, action: BridgeUiAction): Promise<boolean> => {
+    async (
+      surface: BridgeUiSurface,
+      action: BridgeUiAction,
+      payload?: Record<string, unknown>,
+    ): Promise<boolean> => {
       try {
         await api.resolveBridgeUiSurface(surface.id, {
           threadId: surface.threadId,
           turnId: surface.turnId ?? null,
           actionId: action.id,
+          ...(payload !== undefined ? { payload } : {}),
         });
         if (action.dismissesSurface !== false) {
           removeThreadBridgeUiSurface(surface.id, surface.threadId);

@@ -12,8 +12,20 @@ export const createMainScreenShellStyles = (theme: AppTheme) =>
       flex: 1,
       position: 'relative',
     },
+    bodySplitRow: {
+      flexDirection: 'row',
+    },
+    bodyLeadingPane: {
+      flex: 1,
+      minWidth: 0,
+      position: 'relative',
+    },
     bodyShell: {
       flex: 1,
+    },
+    phoneCallSplitPane: {
+      flexShrink: 0,
+      backgroundColor: theme.colors.bgMain,
     },
     topChromeOverlay: {
       position: 'absolute',

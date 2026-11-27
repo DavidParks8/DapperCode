@@ -280,7 +280,21 @@ export const selectors = {
   composer: (page: Page): Locator => page.getByTestId('chat-composer'),
   phoneCallDock: (page: Page): Locator => page.getByTestId('phone-call-dock'),
   phoneCallDockToggle: (page: Page): Locator => page.getByTestId('phone-call-dock-toggle'),
-  phoneCallDockDetails: (page: Page): Locator => page.getByTestId('phone-call-dock-details'),
+  phoneCallStage: (page: Page): Locator => page.getByTestId('phone-call-stage'),
+  phoneCallStageSplitPane: (page: Page): Locator => page.getByTestId('phone-call-stage-split-pane'),
+  phoneCallStageClose: (page: Page): Locator => page.getByTestId('phone-call-stage-close'),
+  phoneCallWhisperInput: (page: Page): Locator => page.getByTestId('phone-call-whisper-input'),
+  phoneCallWhisperSend: (page: Page): Locator => page.getByTestId('phone-call-whisper-send'),
+  phoneCallApprovalSheet: (page: Page): Locator => page.getByTestId('phone-call-approval-sheet'),
+  phoneCallApprovalEdit: (page: Page): Locator =>
+    page.getByTestId('phone-call-approval-edit-toggle'),
+  phoneCallApprovalObjectiveInput: (page: Page): Locator =>
+    page.getByTestId('phone-call-approval-objective-input'),
+  phoneCallApprovalApprove: (page: Page): Locator =>
+    page.getByTestId('phone-call-approval-approve'),
+  phoneCallRecordCard: (page: Page): Locator => page.getByTestId('phone-call-record-card'),
+  phoneCallRecordToggle: (page: Page): Locator => page.getByTestId('phone-call-record-toggle'),
+  phoneCallRecordTimeline: (page: Page): Locator => page.getByTestId('phone-call-record-timeline'),
   composerControls: (page: Page): Locator => page.getByTestId('composer-control-groups'),
   composerInputSurface: (page: Page): Locator => page.getByTestId('composer-input-glass-surface'),
   composerInput: (page: Page): Locator =>

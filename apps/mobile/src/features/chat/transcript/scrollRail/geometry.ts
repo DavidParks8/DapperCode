@@ -1,5 +1,6 @@
 import type { ChatMessage } from '@bridge/types/types';
-import { getToolCallDisplayLines } from '@bridge/messages';
+import { getMessageText, getToolCallDisplayLines } from '@bridge/messages';
+import { isPhoneCallReportText } from '../../phoneCall/phoneCallReport';
 
 export const CHAT_SCROLL_RAIL_ACTIVATION_DELAY_MS = 200;
 export const CHAT_SCROLL_RAIL_BAR_HEIGHT = 4;
@@ -47,7 +48,8 @@ export function collectUserMessageAnchors(messages: readonly ChatMessage[]): Use
     if (
       message.role === 'user' &&
       !message.toolMeta &&
-      getToolCallDisplayLines(message).length === 0
+      getToolCallDisplayLines(message).length === 0 &&
+      !isPhoneCallReportText(getMessageText(message))
     ) {
       anchors.push({ messageId: message.id, transcriptIndex });
     }

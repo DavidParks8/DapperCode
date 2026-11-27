@@ -28,6 +28,7 @@ pub const UI_SURFACE_MAX_BLOCKS: usize = 50;
 pub const UI_SURFACE_MAX_ACTIONS: usize = 20;
 pub const UI_SURFACE_MAX_ITEMS_PER_BLOCK: usize = 100;
 pub const UI_SURFACE_MAX_TEXT_BYTES: usize = 64 * 1024;
+pub const UI_SURFACE_ACTION_PAYLOAD_MAX_BYTES: usize = 16 * 1024;
 
 pub const NOTIFICATION_MAX_BYTES: usize = 256 * 1024;
 pub const REPLAY_MAX_BYTES: usize = 16 * 1024 * 1024;

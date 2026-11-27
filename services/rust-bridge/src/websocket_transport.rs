@@ -653,8 +653,9 @@ pub(super) async fn handle_bridge_method(
             if request.action_id.trim().is_empty() {
                 return Err(BridgeError::invalid_params("actionId must not be empty"));
             }
+            validate_bridge_ui_action_payload(request.payload.as_ref())?;
 
-            state.phone_calls.resolve_ui_action(&request).await;
+            state.phone_calls.resolve_ui_action(&request).await?;
             state
                 .hub
                 .broadcast_notification(

@@ -855,8 +855,10 @@ async fn mcp_e2e_partial_reply_hold_music_resume_and_interrupted_hangup() {
             thread_id: owner.clone(),
             turn_id: None,
             action_id: "approve".to_string(),
+            payload: None,
         })
-        .await;
+        .await
+        .unwrap();
     let started = timeout(TEST_TIMEOUT, start).await.unwrap().unwrap();
     let call_id = started["callId"].as_str().unwrap();
     let dialog = connected_rx.await.unwrap();
@@ -1173,8 +1175,10 @@ impl ClosingTestCall {
                 thread_id: CLOSING_OWNER.to_string(),
                 turn_id: None,
                 action_id: "approve".to_string(),
+                payload: None,
             })
-            .await;
+            .await
+            .unwrap();
         let started = timeout(TEST_TIMEOUT, start)
             .await
             .unwrap()
@@ -1408,8 +1412,10 @@ async fn held_call_preserves_mobile_hangup_and_maximum_duration() {
                 thread_id: "held-owner".to_string(),
                 turn_id: None,
                 action_id: "approve".to_string(),
+                payload: None,
             })
-            .await;
+            .await
+            .unwrap();
         let started = timeout(TEST_TIMEOUT, start)
             .await
             .unwrap()
@@ -1435,8 +1441,10 @@ async fn held_call_preserves_mobile_hangup_and_maximum_duration() {
                     thread_id: "held-owner".to_string(),
                     turn_id: None,
                     action_id: "hangup".to_string(),
+                    payload: None,
                 })
-                .await;
+                .await
+                .unwrap();
         }
         timeout(TEST_TIMEOUT, trunk).await.unwrap().unwrap();
         let settled = recv_matching_notification(&mut notifications, |method, params| {
@@ -1621,8 +1629,10 @@ async fn validation_decline_timeout_and_concurrent_call_slot_guard_behave_determ
             thread_id: "thread-a".to_string(),
             turn_id: None,
             action_id: "cancel".to_string(),
+            payload: None,
         })
-        .await;
+        .await
+        .unwrap();
 
     let dismiss = recv_matching_notification(&mut rx, |method, params| {
         method == "bridge/ui.dismiss" && params["id"] == approval_id
@@ -1821,8 +1831,10 @@ async fn full_duplex_call_lifecycle_covers_barge_in_steer_dtmf_end_call_isolatio
             thread_id: "owner-thread".to_string(),
             turn_id: None,
             action_id: "approve".to_string(),
+            payload: None,
         })
-        .await;
+        .await
+        .unwrap();
 
     let started = timeout(TEST_TIMEOUT, start_handle)
         .await
@@ -2008,6 +2020,7 @@ fn rolling_transcript_and_post_call_report_stay_bounded_and_sanitize_reserved_ma
             title_override: Some("Phone call ended"),
             subtitle: "Duration 5:12",
             status_value: "Ended",
+            activity_label: None,
             tone: BridgeUiTone::Neutral,
             in_call_actions: false,
             dismissible: true,
@@ -2131,8 +2144,10 @@ async fn ringing_mobile_hangup_sends_cancel_and_thread_retirement_skips_post_cal
             thread_id: "thread-ring".to_string(),
             turn_id: None,
             action_id: "approve".to_string(),
+            payload: None,
         })
-        .await;
+        .await
+        .unwrap();
 
     let ringing_card = recv_matching_notification(&mut rx, |method, params| {
         method == "bridge/ui.update" && params["subtitle"] == "Ringing…"
@@ -2146,8 +2161,10 @@ async fn ringing_mobile_hangup_sends_cancel_and_thread_retirement_skips_post_cal
             thread_id: "thread-ring".to_string(),
             turn_id: None,
             action_id: "hangup".to_string(),
+            payload: None,
         })
-        .await;
+        .await
+        .unwrap();
 
     timeout(TEST_TIMEOUT, cancel_seen_rx)
         .await
@@ -2230,8 +2247,10 @@ async fn ringing_mobile_hangup_sends_cancel_and_thread_retirement_skips_post_cal
             thread_id: "retiring-thread".to_string(),
             turn_id: None,
             action_id: "approve".to_string(),
+            payload: None,
         })
-        .await;
+        .await
+        .unwrap();
 
     let started_ret = ret_start.await.expect("join").expect("connected");
     assert_eq!(started_ret.status, PhoneCallStatus::InProgress);
@@ -2402,8 +2421,10 @@ async fn mcp_e2e_happy_path_covers_approval_ringing_callee_speech_tts_rtp_steer_
             thread_id: owner_thread.clone(),
             turn_id: None,
             action_id: "approve".to_string(),
+            payload: None,
         })
-        .await;
+        .await
+        .unwrap();
 
     let _ = recv_matching_notification(&mut rx, |method, params| {
         method == "bridge/ui.dismiss" && params["id"] == approval_id
@@ -2662,8 +2683,10 @@ async fn mcp_e2e_decline_zero_sip_packets_mobile_mid_call_hangup_and_cross_sessi
             thread_id: owner_thread.clone(),
             turn_id: None,
             action_id: "cancel".to_string(),
+            payload: None,
         })
-        .await;
+        .await
+        .unwrap();
 
     let decline_rpc = timeout(TEST_TIMEOUT, decline_call_task)
         .await
@@ -2761,8 +2784,10 @@ async fn mcp_e2e_decline_zero_sip_packets_mobile_mid_call_hangup_and_cross_sessi
             thread_id: owner_thread.clone(),
             turn_id: None,
             action_id: "approve".to_string(),
+            payload: None,
         })
-        .await;
+        .await
+        .unwrap();
 
     let live_card = recv_matching_notification(&mut rx, |method, params| {
         method == "bridge/ui.present"
@@ -2811,8 +2836,10 @@ async fn mcp_e2e_decline_zero_sip_packets_mobile_mid_call_hangup_and_cross_sessi
             thread_id: owner_thread.clone(),
             turn_id: None,
             action_id: "hangup".to_string(),
+            payload: None,
         })
-        .await;
+        .await
+        .unwrap();
 
     timeout(TEST_TIMEOUT, bye_seen_rx)
         .await
@@ -2880,6 +2907,22 @@ fn ui_action(id: &str, thread_id: &str, action_id: &str) -> ResolveBridgeUiSurfa
         thread_id: thread_id.to_string(),
         turn_id: None,
         action_id: action_id.to_string(),
+        payload: None,
+    }
+}
+
+fn ui_action_with_payload(
+    id: &str,
+    thread_id: &str,
+    action_id: &str,
+    payload: serde_json::Value,
+) -> ResolveBridgeUiSurfaceRequest {
+    ResolveBridgeUiSurfaceRequest {
+        id: id.to_string(),
+        thread_id: thread_id.to_string(),
+        turn_id: None,
+        action_id: action_id.to_string(),
+        payload: Some(payload),
     }
 }
 
@@ -3070,7 +3113,8 @@ impl TrunkCall {
                 TRUNK_OWNER,
                 "approve",
             ))
-            .await;
+            .await
+            .unwrap();
         let started = timeout(connect_timeout, start)
             .await
             .unwrap()
@@ -3383,6 +3427,7 @@ fn cards_transcripts_and_reports_bound_blank_oversized_and_interrupted_content()
             title_override: None,
             subtitle: "Dialing…",
             status_value: "  ",
+            activity_label: None,
             tone: BridgeUiTone::Info,
             in_call_actions: true,
             dismissible: false,
@@ -3560,7 +3605,8 @@ async fn snapshot_surfaces_restores_pending_approval_without_republishing_it() {
     );
     service
         .resolve_ui_action(&ui_action(&surfaces[0].id, "snapshot-owner", "cancel"))
-        .await;
+        .await
+        .unwrap();
     timeout(TEST_TIMEOUT, start)
         .await
         .unwrap()
@@ -3750,7 +3796,8 @@ async fn ownership_ui_actions_and_retirement_only_affect_the_owning_active_call(
     // Without an active call, UI actions and retirements are no-ops.
     service
         .resolve_ui_action(&ui_action("phone-call-live:ghost", "owner-a", "hangup"))
-        .await;
+        .await
+        .unwrap();
     service
         .cancel_for_retiring_threads(&["owner-a".to_string()])
         .await;
@@ -3813,7 +3860,8 @@ async fn ownership_ui_actions_and_retirement_only_affect_the_owning_active_call(
     ] {
         service
             .resolve_ui_action(&ui_action(surface_id, thread_id, action_id))
-            .await;
+            .await
+            .unwrap();
     }
     service
         .cancel_for_retiring_threads(&["owner-b".to_string()])
@@ -3834,10 +3882,12 @@ async fn ownership_ui_actions_and_retirement_only_affect_the_owning_active_call(
 
     service
         .resolve_ui_action(&ui_action(&approval_id, "owner-a", "cancel"))
-        .await;
+        .await
+        .unwrap();
     service
         .resolve_ui_action(&ui_action(&approval_id, "owner-a", "approve"))
-        .await;
+        .await
+        .unwrap();
     assert_eq!(
         declined.await.unwrap().unwrap_err().to_string(),
         "Phone call was declined by the user",
@@ -4017,7 +4067,8 @@ async fn dropping_a_pending_start_cancels_the_call_and_dismisses_its_surfaces() 
                     "drop-owner",
                     "approve",
                 ))
-                .await;
+                .await
+                .unwrap();
             let live_id = live_surface_id(&call_id);
             recv_matching_notification(&mut rx, |method, params| {
                 method == "bridge/ui.update"
@@ -4930,8 +4981,10 @@ async fn busy_line_settles_the_card_in_plain_words_with_the_sip_detail_secondary
             thread_id: "busy-owner".to_string(),
             turn_id: None,
             action_id: "approve".to_string(),
+            payload: None,
         })
-        .await;
+        .await
+        .unwrap();
     let failed = recv_matching_notification(&mut notifications, |method, params| {
         method == "bridge/ui.update" && params["title"] == "Phone call failed"
     })
@@ -5387,7 +5440,8 @@ async fn voice_preparation_finishes_before_sip_and_preserves_cancel_and_failure_
                 TRUNK_OWNER,
                 "approve",
             ))
-            .await;
+            .await
+            .unwrap();
         timeout(TEST_TIMEOUT, async {
             while voice.preload_requests.load(Ordering::SeqCst) == 0 {
                 tokio::task::yield_now().await;
@@ -5642,4 +5696,282 @@ async fn transcription_and_assistant_turn_failures_fail_the_call() {
         );
         assert!(report.contains("Status: failed"), "{report}");
     }
+}
+
+#[tokio::test]
+async fn approval_edits_apply_before_dialing_and_reject_empty_objective() {
+    let voice = MockVoiceState::new(
+        vec![voice_reply("Hello, checking pickup time.", json!({}))],
+        Vec::new(),
+        2_400,
+    );
+    let voice_url = spawn_mock_voice_http(Arc::clone(&voice)).await;
+    let sip = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let rtp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let hub = Arc::new(ClientHub::new());
+    let (outbox, mut notifications) = client_outbox(256);
+    hub.add_client_with_metadata(outbox, ClientConnectionMetadata::default())
+        .await;
+    let service = PhoneCallService::with_options(
+        Some(sample_runtime_config(
+            sip.local_addr().unwrap().port(),
+            &voice_url,
+        )),
+        Arc::clone(&hub),
+        Weak::new(),
+        PhoneCallTimeouts {
+            approval_timeout: Duration::from_secs(10),
+            max_call_duration: Duration::from_secs(30),
+            opening_greeting_wait: Duration::from_secs(10),
+        },
+        None,
+    );
+
+    let start_service = Arc::clone(&service);
+    let start = tokio::spawn(async move {
+        start_service
+            .start_phone_call(TRUNK_OWNER, parking_request())
+            .await
+    });
+    let call_id = await_approval_call_id(&mut notifications).await;
+    let approval_id = approval_surface_id(&call_id);
+
+    let blank_err = service
+        .resolve_ui_action(&ui_action_with_payload(
+            &approval_id,
+            TRUNK_OWNER,
+            "approve",
+            json!({ "objective": "   " }),
+        ))
+        .await
+        .expect_err("blank objective edit must be rejected");
+    assert!(blank_err.message.contains("objective"));
+
+    service
+        .resolve_ui_action(&ui_action_with_payload(
+            &approval_id,
+            TRUNK_OWNER,
+            "approve",
+            json!({
+                "objective": "Confirm Friday 2 PM pickup window.",
+                "firstMessage": "Hi, calling to confirm pickup.",
+                "context": "Order number is 4821.",
+            }),
+        ))
+        .await
+        .unwrap();
+
+    let dialog = timeout(
+        TEST_TIMEOUT,
+        MockSipDialog::accept_invite(&sip, rtp.local_addr().unwrap().port(), false, true),
+    )
+    .await
+    .unwrap();
+    assert!(timeout(TEST_TIMEOUT, start).await.unwrap().unwrap().is_ok());
+
+    let snapshot = service.get_phone_call(TRUNK_OWNER, &call_id).unwrap();
+    assert_eq!(
+        snapshot.objective.as_deref(),
+        Some("Confirm Friday 2 PM pickup window."),
+    );
+
+    let surfaces = service.snapshot_surfaces();
+    let BridgeUiBlock::KeyValue { items } = &surfaces[0].blocks[0] else {
+        panic!("expected keyValue block");
+    };
+    assert!(items.iter().any(
+        |item| item.label == "Objective" && item.value == "Confirm Friday 2 PM pickup window."
+    ));
+    assert!(items.iter().any(|item| item.label == "Activity"));
+
+    let hangup_future = service.hangup_phone_call(TRUNK_OWNER, &call_id);
+    let bye_future = dialog.expect_bye_and_reply_ok(&sip);
+    let (hangup, ()) = tokio::join!(hangup_future, bye_future);
+    assert_eq!(hangup.unwrap().status, HangupPhoneCallStatus::HungUp);
+}
+
+#[tokio::test]
+async fn live_ui_steer_delivers_whisper_and_rejects_after_call_ends() {
+    let voice = MockVoiceState::new(
+        vec![voice_reply(
+            "Sure, could you also validate parking?",
+            json!([]),
+        )],
+        Vec::new(),
+        2_400,
+    );
+    let mut call = TrunkCall::connect(
+        &voice,
+        TrunkCallOptions::new(Duration::from_secs(20), Duration::from_secs(60)),
+    )
+    .await;
+    let live_id = live_surface_id(&call.call_id);
+
+    let empty_err = call
+        .service
+        .resolve_ui_action(&ui_action_with_payload(
+            &live_id,
+            TRUNK_OWNER,
+            "steer",
+            json!({ "instruction": "   " }),
+        ))
+        .await
+        .expect_err("empty whisper must be rejected");
+    assert!(empty_err.message.contains("instruction"));
+
+    call.service
+        .resolve_ui_action(&ui_action_with_payload(
+            &live_id,
+            TRUNK_OWNER,
+            "steer",
+            json!({ "instruction": "Ask if they validate parking." }),
+        ))
+        .await
+        .unwrap();
+    call.card_shows("Ask if they validate parking.").await;
+
+    let hangup_future = call.service.hangup_phone_call(TRUNK_OWNER, &call.call_id);
+    let bye_future = call.dialog.expect_bye_and_reply_ok(&call.sip);
+    let (hangup, ()) = tokio::join!(hangup_future, bye_future);
+    assert_eq!(hangup.unwrap().status, HangupPhoneCallStatus::HungUp);
+    let _ = call.settled().await;
+
+    let ended_err = call
+        .service
+        .resolve_ui_action(&ui_action_with_payload(
+            &live_id,
+            TRUNK_OWNER,
+            "steer",
+            json!({ "instruction": "Too late" }),
+        ))
+        .await
+        .expect_err("steering an ended call must fail");
+    assert!(ended_err.message.contains("already ended"));
+}
+
+#[test]
+fn live_card_and_report_serialize_event_and_tool_transcript_entries() {
+    let cfg = sample_runtime_config(5060, "http://127.0.0.1:11434/v1");
+    let validated = ValidatedStartRequest {
+        phone_number: "+15551234567".to_string(),
+        callee_name: Some("Pharmacy".to_string()),
+        objective: "Check refill status".to_string(),
+        first_message: None,
+        context: None,
+    };
+    let entries = vec![TranscriptEntry {
+        speaker: TranscriptSpeaker::Event,
+        text: "Pressed 2".to_string(),
+        interrupted: false,
+    }];
+    let card = build_live_workflow_card(
+        "phone-call-live:ev-1",
+        "thread-1",
+        &cfg,
+        &validated,
+        "2026-11-26T18:00:00Z",
+        LiveCardParams {
+            title_override: None,
+            subtitle: "In call",
+            status_value: "In call",
+            activity_label: Some("Recipient speaking"),
+            tone: BridgeUiTone::Success,
+            in_call_actions: true,
+            dismissible: false,
+            duration_seconds: Some(42),
+            detail_label_value: None,
+            technical_detail: None,
+            transcript: &entries,
+        },
+    );
+    let BridgeUiBlock::KeyValue { items } = &card.blocks[0] else {
+        panic!("expected keyValue block");
+    };
+    assert!(items
+        .iter()
+        .any(|item| item.label == "Activity" && item.value == "Recipient speaking"));
+    let BridgeUiBlock::Markdown { markdown } = &card.blocks[1] else {
+        panic!("expected markdown block");
+    };
+    assert!(markdown.contains("**Event:** Pressed 2"), "{markdown}");
+    let report = build_post_call_report_content(
+        "ev-1",
+        PhoneCallStatus::Completed,
+        &validated,
+        42,
+        "completed",
+        Some("Refill ready"),
+        &entries,
+    );
+    assert!(report.contains("Event: Pressed 2"), "{report}");
+}
+
+#[tokio::test]
+async fn ordinary_callee_speech_and_assistant_turn_publish_speaking_and_listening_activities() {
+    let voice = MockVoiceState::new(
+        vec![voice_reply(
+            "Hello, checking pickup availability.",
+            json!([]),
+        )],
+        vec!["Sure, let me look that up."],
+        2_400,
+    );
+    voice.stt_delay_ms.store(60, Ordering::SeqCst);
+    voice.tts_chunk_delay_ms.store(80, Ordering::SeqCst);
+    let mut call = TrunkCall::connect(
+        &voice,
+        TrunkCallOptions::new(Duration::from_secs(20), Duration::from_secs(60)),
+    )
+    .await;
+
+    call.callee_speaks(VAD_DEFAULT_HANGOVER_FRAMES + 2).await;
+
+    let recipient_speaking = call
+        .update_matching(|params| {
+            params["blocks"][0]["items"]
+                .as_array()
+                .is_some_and(|items| {
+                    items.iter().any(|item| {
+                        item["label"] == "Activity" && item["value"] == "Recipient speaking"
+                    })
+                })
+        })
+        .await;
+    assert_eq!(recipient_speaking["kind"], "phone-call");
+
+    let speaking_card = call
+        .update_matching(|params| {
+            params["blocks"][0]["items"]
+                .as_array()
+                .is_some_and(|items| {
+                    items.iter().any(|item| {
+                        item["label"] == "Activity" && item["value"] == "Agent speaking"
+                    })
+                })
+        })
+        .await;
+    assert_eq!(speaking_card["kind"], "phone-call");
+
+    let listening_card = call
+        .update_matching(|params| {
+            let items = params["blocks"][0]["items"].as_array();
+            let listening = items.is_some_and(|items| {
+                items
+                    .iter()
+                    .any(|item| item["label"] == "Activity" && item["value"] == "Listening")
+            });
+            let spoken = params["blocks"]
+                .as_array()
+                .and_then(|blocks| blocks.get(1))
+                .and_then(|block| block["markdown"].as_str())
+                .is_some_and(|md| md.contains("Hello, checking pickup availability."));
+            listening && spoken
+        })
+        .await;
+    assert_eq!(listening_card["kind"], "phone-call");
+
+    let hangup_future = call.service.hangup_phone_call(TRUNK_OWNER, &call.call_id);
+    let bye_future = call.dialog.expect_bye_and_reply_ok(&call.sip);
+    let (hangup, ()) = tokio::join!(hangup_future, bye_future);
+    assert_eq!(hangup.unwrap().status, HangupPhoneCallStatus::HungUp);
 }

@@ -3623,8 +3623,26 @@ describe('HostBridgeApiClient', () => {
       await client.resolveApproval('a', 'accept', 'resolution');
       await client.resolveUserInput('u', { answers: { q: 'a' }, action: 'submit' });
       await client.resolveBridgeUiSurface('surface', { threadId: 'thread', actionId: 'ok' });
+      await client.resolveBridgeUiSurface('phone-call-live:c1', {
+        threadId: 'thread',
+        actionId: 'steer',
+        payload: { instruction: 'Ask for callback' },
+      });
       await client.dismissBridgeUiSurface('surface');
       expect(ws.request).toHaveBeenCalledWith('bridge/capabilities/read');
+      expect(ws.request).toHaveBeenCalledWith('bridge/ui/resolve', {
+        id: 'surface',
+        threadId: 'thread',
+        turnId: null,
+        actionId: 'ok',
+      });
+      expect(ws.request).toHaveBeenCalledWith('bridge/ui/resolve', {
+        id: 'phone-call-live:c1',
+        threadId: 'thread',
+        turnId: null,
+        actionId: 'steer',
+        payload: { instruction: 'Ask for callback' },
+      });
       expect(ws.request).toHaveBeenCalledWith('bridge/ui/dismiss', {
         id: 'surface',
         threadId: null,

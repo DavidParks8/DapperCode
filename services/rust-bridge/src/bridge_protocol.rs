@@ -641,6 +641,8 @@ pub(super) struct ResolveBridgeUiSurfaceRequest {
     pub(super) thread_id: String,
     pub(super) turn_id: Option<String>,
     pub(super) action_id: String,
+    #[serde(default)]
+    pub(super) payload: Option<Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

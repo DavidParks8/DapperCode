@@ -1,12 +1,12 @@
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
-import { Text } from 'react-native';
+import { ActivityIndicator, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import type { BridgeUiSurface } from '@bridge/types/types';
 import { feedback } from '@shared/feedback';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { toBridgeUiSurface, upsertBridgeUiSurfaceList } from '../helpers/bridgeUi';
-import { PhoneCallDock, phoneCallDetailsMaxHeight } from './PhoneCallDock';
+import { PhoneCallDock } from './PhoneCallDock';
 
 jest.mock('@shared/feedback', () => ({
   feedback: {
@@ -15,12 +15,6 @@ jest.mock('@shared/feedback', () => ({
   },
 }));
 jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
-jest.mock('react-native-markdown-display', () => {
-  const React = jest.requireActual('react');
-  const reactNative = jest.requireActual('react-native');
-  return ({ children }: { children: string }) =>
-    React.createElement(reactNative.Text, null, children);
-});
 
 const theme = createAppTheme('dark');
 const safeAreaMetrics = {
@@ -32,7 +26,16 @@ function liveCall(
   status = 'In call',
   updatedAt = new Date().toISOString(),
   duration = '0:13',
+  activity?: string,
 ): BridgeUiSurface {
+  const items = [
+    { label: 'Status', value: status },
+    { label: 'To', value: '+15551234567' },
+    { label: 'From', value: '+15550000001' },
+    ...(activity ? [{ label: 'Activity', value: activity }] : []),
+    { label: 'Duration', value: duration },
+    { label: 'Objective', value: 'Request a prescription refill for pickup.' },
+  ];
   const surface = toBridgeUiSurface({
     id: 'phone-call-live:call-1',
     threadId: 'thread-1',
@@ -42,16 +45,7 @@ function liveCall(
     title: 'Phone call · +15551234567',
     subtitle: status,
     blocks: [
-      {
-        type: 'keyValue',
-        items: [
-          { label: 'Status', value: status },
-          { label: 'To', value: '+15551234567' },
-          { label: 'From', value: '+15550000001' },
-          { label: 'Duration', value: duration },
-          { label: 'Objective', value: 'Request a prescription refill for pickup.' },
-        ],
-      },
+      { type: 'keyValue', items },
       { type: 'markdown', markdown: '**Live transcript**\n\n**Recipient:** One moment please.' },
     ],
     actions: [{ id: 'hangup', label: 'Hang Up', style: 'destructive', dismissesSurface: false }],
@@ -88,14 +82,15 @@ const mounted: ReactTestRenderer[] = [];
 
 function render(
   surface: BridgeUiSurface,
-  handlers = { onAction: jest.fn(), onDismiss: jest.fn() },
+  handlers = { onOpenStage: jest.fn(), onAction: jest.fn(), onDismiss: jest.fn() },
+  stageOpen = false,
 ) {
   let tree: ReactTestRenderer | undefined;
   act(() => {
     tree = renderer.create(
       <SafeAreaProvider initialMetrics={safeAreaMetrics}>
         <AppThemeProvider theme={theme}>
-          <PhoneCallDock surface={surface} detailsMaxHeight={240} {...handlers} />
+          <PhoneCallDock surface={surface} stageOpen={stageOpen} {...handlers} />
         </AppThemeProvider>
       </SafeAreaProvider>,
     );
@@ -162,24 +157,25 @@ describe('PhoneCallDock', () => {
     jest.useRealTimers();
   });
 
-  it('rests as one glanceable row and reveals details only on request', () => {
-    const { tree } = render(liveCall());
+  it('rests as a strictly 1-row ambient pill with formatted number and opens the Live Call Stage on tap', () => {
+    const surface = liveCall('In call', new Date().toISOString(), '0:13', 'Agent speaking');
+    const { tree, onOpenStage } = render(surface);
 
-    expect(texts(tree)).toEqual(['+15551234567', 'In call · 0:13']);
+    expect(texts(tree)).toEqual(['(555) 123-4567', 'Agent speaking · 0:13']);
     expect(shows(tree, 'phone-call-dock-details')).toBe(false);
 
     press(tree, 'phone-call-dock-toggle');
     expect(feedback.selection).toHaveBeenCalled();
-    expect(shows(tree, 'phone-call-dock-details')).toBe(true);
-    expect(texts(tree)).toEqual(
-      expect.arrayContaining([
-        'Request a prescription refill for pickup.',
-        '**Recipient:** One moment please.',
-      ]),
-    );
-
-    press(tree, 'phone-call-dock-toggle');
+    expect(onOpenStage).toHaveBeenCalledWith(surface);
     expect(shows(tree, 'phone-call-dock-details')).toBe(false);
+  });
+
+  it('shows a live spinner badge when an async voice tool is running mid-call', () => {
+    const surface = liveCall('In call', new Date().toISOString(), '0:42', 'Checking calendar…');
+    const { tree } = render(surface);
+
+    expect(texts(tree)).toEqual(['(555) 123-4567', 'Checking calendar… · 0:42']);
+    expect(rootOf(tree).findAll((node) => node.type === ActivityIndicator)).toHaveLength(1);
   });
 
   it('keeps the call timer moving between bridge updates', () => {
@@ -192,64 +188,6 @@ describe('PhoneCallDock', () => {
     });
     expect(texts(tree)).toContain('On hold · 0:15');
   });
-
-  it.each([
-    ['ended', endedCall, 'Ended · Refill ready Friday.'],
-    [
-      'failed',
-      {
-        ...endedCall,
-        tone: 'error',
-        blocks: [
-          {
-            type: 'keyValue',
-            items: [
-              { label: 'Status', value: 'Failed' },
-              { label: 'To', value: '+15551234567' },
-              { label: 'Duration', value: '1:05' },
-              { label: 'Reason', value: 'The voice assistant hit an error' },
-            ],
-          },
-        ],
-      } satisfies BridgeUiSurface,
-      'Failed · The voice assistant hit an error',
-    ],
-  ] as const)(
-    'collapses expanded live details when the same call becomes %s',
-    (_, surface, status) => {
-      jest.useFakeTimers();
-      const { tree, onAction, onDismiss } = render(liveCall());
-      press(tree, 'phone-call-dock-toggle');
-      expect(shows(tree, 'phone-call-dock-details')).toBe(true);
-      expect(shows(tree, 'phone-call-dock-hangup')).toBe(true);
-      act(() => {
-        tree.update(
-          <SafeAreaProvider initialMetrics={safeAreaMetrics}>
-            <AppThemeProvider theme={theme}>
-              <PhoneCallDock
-                surface={surface}
-                detailsMaxHeight={240}
-                onAction={onAction}
-                onDismiss={onDismiss}
-              />
-            </AppThemeProvider>
-          </SafeAreaProvider>,
-        );
-      });
-      expect(shows(tree, 'phone-call-dock-details')).toBe(false);
-      expect(shows(tree, 'phone-call-dock-hangup')).toBe(false);
-      expect(shows(tree, 'phone-call-dock-dismiss')).toBe(true);
-      expect(texts(tree)).toContain(status);
-      expect(onAction).not.toHaveBeenCalled();
-      press(tree, 'phone-call-dock-toggle');
-      expect(shows(tree, 'phone-call-dock-details')).toBe(true);
-      const settledText = texts(tree);
-      act(() => jest.advanceTimersByTime(10_000));
-      expect(texts(tree)).toEqual(settledText);
-      press(tree, 'phone-call-dock-dismiss');
-      expect(onDismiss).toHaveBeenCalledWith(surface);
-    },
-  );
 
   it.each([-60_000, 60_000])(
     'ticks from local receipt, not bridge time, with %d ms of phone clock skew',
@@ -274,7 +212,7 @@ describe('PhoneCallDock', () => {
   it('reanchors fresh duration updates and preserves receipt time through cached dock remounts', () => {
     jest.useFakeTimers({ now: new Date('2026-11-14T08:01:00.000Z') });
     let snapshots = upsertBridgeUiSurfaceList([], liveCall('In call', '2026-11-14T08:00:00.000Z'));
-    const { tree, onAction, onDismiss } = render(snapshots[0]!);
+    const { tree, onOpenStage, onAction, onDismiss } = render(snapshots[0]!);
     expect(texts(tree)).toContain('In call · 0:13');
     act(() => {
       jest.advanceTimersByTime(2_500);
@@ -289,7 +227,7 @@ describe('PhoneCallDock', () => {
           <AppThemeProvider theme={theme}>
             <PhoneCallDock
               surface={snapshots[0]!}
-              detailsMaxHeight={240}
+              onOpenStage={onOpenStage}
               onAction={onAction}
               onDismiss={onDismiss}
             />
@@ -316,7 +254,7 @@ describe('PhoneCallDock', () => {
   });
 
   it('hangs up once and acknowledges the request until the call settles', () => {
-    const { tree, onAction } = render(liveCall());
+    const { tree, onAction, onOpenStage } = render(liveCall());
     press(tree, 'phone-call-dock-hangup');
     expect(feedback.destructive).toHaveBeenCalled();
     expect(onAction).toHaveBeenCalledTimes(1);
@@ -330,7 +268,7 @@ describe('PhoneCallDock', () => {
           <AppThemeProvider theme={theme}>
             <PhoneCallDock
               surface={endedCall}
-              detailsMaxHeight={240}
+              onOpenStage={onOpenStage}
               onAction={onAction}
               onDismiss={jest.fn()}
             />
@@ -339,12 +277,16 @@ describe('PhoneCallDock', () => {
       );
     });
     expect(shows(tree, 'phone-call-dock-hangup')).toBe(false);
-    expect(texts(tree)).toEqual(['+15551234567', 'Ended · Refill ready Friday.']);
+    expect(texts(tree)).toEqual(['(555) 123-4567', 'Ended · Refill ready Friday.']);
   });
 
   it('reports a failed hang-up in place and lets the user retry', async () => {
     const onAction = jest.fn().mockResolvedValue(false);
-    const { tree } = render(liveCall(), { onAction, onDismiss: jest.fn() });
+    const { tree } = render(liveCall(), {
+      onOpenStage: jest.fn(),
+      onAction,
+      onDismiss: jest.fn(),
+    });
 
     await pressAndSettle(tree, 'phone-call-dock-hangup');
 
@@ -354,50 +296,10 @@ describe('PhoneCallDock', () => {
     expect(onAction).toHaveBeenCalledTimes(2);
   });
 
-  it('lets a settled call be dismissed and shows its outcome first', () => {
+  it('lets an unreported settled call be dismissed cleanly', () => {
     const { tree, onDismiss } = render(endedCall);
-
-    press(tree, 'phone-call-dock-toggle');
-    expect(texts(tree).slice(2, 4)).toEqual(['Summary', 'Refill ready Friday.']);
-    expect(texts(tree)).toContain('Nothing was said on this call.');
-
+    expect(shows(tree, 'phone-call-dock-dismiss')).toBe(true);
     press(tree, 'phone-call-dock-dismiss');
     expect(onDismiss).toHaveBeenCalledWith(endedCall);
-  });
-});
-
-describe('phoneCallDetailsMaxHeight', () => {
-  it('leaves the chat as much room as the details on a laptop-pose Duo with the keyboard up', () => {
-    // Measured laptop pose: 951pt portrait window, 162pt chrome, composer ends 503pt above the
-    // bottom, and the dock header plus composer row take 114pt.
-    const layout = { windowHeight: 951, topChromeHeight: 162, bottomInset: 503 };
-    const details = phoneCallDetailsMaxHeight(layout);
-    const chat = layout.windowHeight - layout.topChromeHeight - layout.bottomInset - 114 - details;
-
-    expect(details).toBeGreaterThanOrEqual(72);
-    expect(chat).toBeGreaterThanOrEqual(details);
-  });
-
-  it('caps tall screens, shares space across multiple live docks, and never goes negative', () => {
-    expect(
-      phoneCallDetailsMaxHeight({ windowHeight: 1366, topChromeHeight: 110, bottomInset: 34 }),
-    ).toBe(300);
-    const single = phoneCallDetailsMaxHeight({
-      windowHeight: 678,
-      topChromeHeight: 110,
-      bottomInset: 34,
-      dockCount: 1,
-    });
-    const dual = phoneCallDetailsMaxHeight({
-      windowHeight: 678,
-      topChromeHeight: 110,
-      bottomInset: 34,
-      dockCount: 2,
-    });
-    expect(dual).toBeGreaterThan(0);
-    expect(dual * 2 + 60).toBeLessThanOrEqual(single + 60);
-    expect(
-      phoneCallDetailsMaxHeight({ windowHeight: 400, topChromeHeight: 110, bottomInset: 260 }),
-    ).toBe(0);
   });
 });

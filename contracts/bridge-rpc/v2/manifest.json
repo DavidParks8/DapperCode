@@ -146,6 +146,7 @@
                 "items": [
                   { "label": "Status", "value": "On hold" },
                   { "label": "To", "value": "+15551234567" },
+                  { "label": "Activity", "value": "On hold" },
                   { "label": "Duration", "value": "1:05" },
                   { "label": "Objective", "value": "Ask for opening hours" }
                 ]

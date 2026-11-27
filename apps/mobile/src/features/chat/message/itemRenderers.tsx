@@ -8,6 +8,7 @@ import {
   AGENT_MESSAGE_ACTIVITY_TYPE,
   COMPACTION_ACTIVITY_TYPE,
   getAgentMessageMeta,
+  getMessageText,
   getSubAgentMeta,
   getSubAgentThreadId,
   SUBAGENT_ACTIVITY_TYPE,
@@ -25,6 +26,8 @@ import { createStyles } from './styles';
 import { ChatMessageUserBubble } from './UserBubble';
 import { ReasoningEntryCard } from './ReasoningCard';
 import { SubAgentCard } from '../agents/Card';
+import { PhoneCallRecordCard } from '../phoneCall/PhoneCallRecordCard';
+import { isPhoneCallReportText, parsePhoneCallReportMessage } from '../phoneCall/phoneCallReport';
 import {
   entriesAreComputerUseTimeline,
   formatCompactionLabel,
@@ -118,6 +121,7 @@ export interface ChatMessageRenderContext {
 
 type ChatMessageKind =
   | 'user'
+  | 'phoneCallRecord'
   | 'assistantLike'
   | 'compaction'
   | 'reasoning'
@@ -131,7 +135,7 @@ export function classifyChatMessageKind(
   hasTimelineEntries: boolean,
 ): ChatMessageKind {
   if (message.role === 'user') {
-    return 'user';
+    return isPhoneCallReportText(getMessageText(message)) ? 'phoneCallRecord' : 'user';
   }
   if (['assistant', 'developer', 'system'].includes(message.role)) {
     return 'assistantLike';
@@ -156,6 +160,24 @@ export function classifyChatMessageKind(
 
 function renderUserChatMessage(ctx: ChatMessageRenderContext) {
   return <ChatMessageUserBubble messageId={ctx.message.id} blocks={ctx.messageBlocks} />;
+}
+
+function renderPhoneCallRecordChatMessage(ctx: ChatMessageRenderContext) {
+  const record = parsePhoneCallReportMessage(ctx.messageText);
+  if (!record) {
+    return renderUserChatMessage(ctx);
+  }
+  return (
+    <View
+      style={[
+        ctx.styles.messageWrapper,
+        ctx.styles.messageWrapperAssistant,
+        ctx.styles.messageWrapperFullWidth,
+      ]}
+    >
+      <PhoneCallRecordCard record={record} />
+    </View>
+  );
 }
 
 function renderAssistantLikeChatMessage(ctx: ChatMessageRenderContext) {
@@ -492,6 +514,7 @@ export const CHAT_MESSAGE_RENDERERS: Record<
   (ctx: ChatMessageRenderContext) => ReactElement
 > = {
   user: renderUserChatMessage,
+  phoneCallRecord: renderPhoneCallRecordChatMessage,
   assistantLike: renderAssistantLikeChatMessage,
   compaction: renderCompactionChatMessage,
   reasoning: renderReasoningChatMessage,

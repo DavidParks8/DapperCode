@@ -43,6 +43,7 @@ import {
 export type BridgeUiActionHandler = (
   surface: BridgeUiSurface,
   action: BridgeUiAction,
+  payload?: Record<string, unknown>,
 ) => void | Promise<boolean>;
 
 interface BridgeUiSurfaceProps {
@@ -63,11 +64,12 @@ export function BridgeUiWorkflowCard({
 }: BridgeUiSurfaceProps) {
   const theme = useAppTheme();
   const styles = useMemo(() => createBridgeUiSurfaceStyles(theme), [theme]);
-  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const [collapsedOverride, setCollapsedOverride] = useState<boolean | null>(null);
+  const collapsed = collapsedOverride ?? defaultCollapsed;
 
   const handleToggleCollapse = useCallback(() => {
-    setCollapsed((value) => !value);
-  }, []);
+    setCollapsedOverride((value) => !(value ?? defaultCollapsed));
+  }, [defaultCollapsed]);
 
   return (
     <Animated.View

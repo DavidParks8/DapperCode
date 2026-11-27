@@ -1,8 +1,9 @@
 use super::{
     json, normalize_path, parse_internal_id, read_bool, read_string, required_push_id,
-    validate_bridge_ui_block, validate_bridge_ui_surface, BridgeUiAction, BridgeUiBlock,
-    BridgeUiChecklistItem, BridgeUiKeyValueItem, BridgeUiPresentation, BridgeUiSurface, Path,
-    PathBuf, Value, PUSH_ID_MAX_BYTES, UI_SURFACE_MAX_ACTIONS, UI_SURFACE_MAX_BLOCKS,
+    validate_bridge_ui_action_payload, validate_bridge_ui_block, validate_bridge_ui_surface,
+    BridgeUiAction, BridgeUiBlock, BridgeUiChecklistItem, BridgeUiKeyValueItem,
+    BridgeUiPresentation, BridgeUiSurface, Path, PathBuf, Value, PUSH_ID_MAX_BYTES,
+    UI_SURFACE_ACTION_PAYLOAD_MAX_BYTES, UI_SURFACE_MAX_ACTIONS, UI_SURFACE_MAX_BLOCKS,
     UI_SURFACE_MAX_BYTES, UI_SURFACE_MAX_ITEMS_PER_BLOCK, UI_SURFACE_MAX_TEXT_BYTES,
 };
 
@@ -55,6 +56,26 @@ fn scalar_readers_accept_supported_shapes_and_reject_others() {
     let oversized = "x".repeat(PUSH_ID_MAX_BYTES + 1);
     let error = required_push_id(&json!({"profileId": oversized}), "profileId").unwrap_err();
     assert_eq!(error.data.unwrap()["resource"], "push_identity_bytes");
+}
+
+#[test]
+fn ui_surface_action_payload_validation_requires_bounded_object() {
+    validate_bridge_ui_action_payload(None).unwrap();
+    validate_bridge_ui_action_payload(Some(&json!({ "instruction": "Ask for callback" }))).unwrap();
+    assert_eq!(
+        validate_bridge_ui_action_payload(Some(&json!("not-an-object")))
+            .unwrap_err()
+            .code,
+        -32602,
+    );
+    let oversized = json!({ "instruction": "x".repeat(UI_SURFACE_ACTION_PAYLOAD_MAX_BYTES + 1) });
+    assert_eq!(
+        validate_bridge_ui_action_payload(Some(&oversized))
+            .unwrap_err()
+            .data
+            .unwrap()["resource"],
+        "ui_surface_action_payload_bytes",
+    );
 }
 
 #[test]
