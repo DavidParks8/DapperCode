@@ -153,6 +153,7 @@ export abstract class HostBridgeApiClientBridgeActionsLayer extends HostBridgeAp
       threadId: body.threadId,
       turnId: body.turnId ?? null,
       actionId: body.actionId,
+      ...(body.payload !== undefined ? { payload: body.payload } : {}),
     });
   }
   dismissBridgeUiSurface(

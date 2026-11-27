@@ -35,8 +35,9 @@ use crate::phone_call::voice::{
 };
 use chrono::Utc;
 use dappercode_bridge_core::resource_limits::{truncate_utf8_bytes, QUEUE_MAX_CONTENT_BYTES};
+use dappercode_bridge_core::BridgeError;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
@@ -210,10 +211,40 @@ impl PhoneCallSnapshot {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ApprovalEdits {
+    objective: Option<String>,
+    first_message: Option<Option<String>>,
+    context: Option<Option<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ApprovalDecision {
-    Approve,
+    Approve(ApprovalEdits),
     Decline,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CallActivity {
+    Dialing,
+    Ringing,
+    Listening,
+    AgentSpeaking,
+    RecipientSpeaking,
+    OnHold,
+}
+
+impl CallActivity {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Dialing => "Dialing",
+            Self::Ringing => "Ringing",
+            Self::Listening => "Listening",
+            Self::AgentSpeaking => "Agent speaking",
+            Self::RecipientSpeaking => "Recipient speaking",
+            Self::OnHold => "On hold",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,7 +285,9 @@ impl Drop for LiveWorkGuard {
 )]
 struct SharedCallState {
     status: PhoneCallStatus,
+    activity: CallActivity,
     on_hold: bool,
+    validated: ValidatedStartRequest,
     started_at_iso: String,
     connected_at_iso: Option<String>,
     connected_instant: Option<Instant>,
@@ -276,17 +309,9 @@ impl SharedCallState {
 }
 
 #[derive(Debug)]
-#[cfg_attr(
-    dylint_lib = "perfectionist",
-    expect(
-        perfectionist::too_many_struct_fields,
-        reason = "existing protocol, configuration, or runtime state struct predates perfectionist field cap"
-    )
-)]
 struct ActiveCallSlot {
     call_id: String,
     owner_thread_id: String,
-    validated: ValidatedStartRequest,
     approval_tx: StdMutex<Option<oneshot::Sender<ApprovalDecision>>>,
     steer_tx: mpsc::UnboundedSender<String>,
     cancel: CancellationToken,
@@ -312,9 +337,9 @@ impl ActiveCallSlot {
             call_id: self.call_id.clone(),
             status: guard.status,
             on_hold: guard.on_hold,
-            phone_number: Some(self.validated.phone_number.clone()),
-            callee_name: self.validated.callee_name.clone(),
-            objective: Some(self.validated.objective.clone()),
+            phone_number: Some(guard.validated.phone_number.clone()),
+            callee_name: guard.validated.callee_name.clone(),
+            objective: Some(guard.validated.objective.clone()),
             started_at: Some(guard.started_at_iso.clone()),
             connected_at: guard.connected_at_iso.clone(),
             ended_at: guard.ended_at_iso.clone(),
@@ -413,53 +438,13 @@ impl PhoneCallService {
         let Some(config) = self.config.as_ref() else {
             return Vec::new();
         };
-        let active = lock_unpoisoned(&self.registry).active.clone();
-        let Some(slot) = active else {
+        let Some(slot) = lock_unpoisoned(&self.registry).active.clone() else {
             return Vec::new();
         };
         if slot.skip_post_call_report.load(Ordering::Acquire) {
             return Vec::new();
         }
-        let shared = lock_unpoisoned(&slot.shared);
-        let (status, subtitle, tone) = match shared.status {
-            PhoneCallStatus::AwaitingApproval => {
-                if slot.cancel.is_cancelled() || lock_unpoisoned(&slot.approval_tx).is_none() {
-                    return Vec::new();
-                }
-                return vec![build_approval_modal_surface(
-                    approval_surface_id(&slot.call_id),
-                    &slot.owner_thread_id,
-                    config,
-                    &slot.validated,
-                )];
-            }
-            PhoneCallStatus::Dialing => ("Dialing", "Dialing…", BridgeUiTone::Info),
-            PhoneCallStatus::Ringing => ("Ringing", "Ringing…", BridgeUiTone::Info),
-            PhoneCallStatus::InProgress => {
-                let status = if shared.on_hold { "On hold" } else { "In call" };
-                (status, status, BridgeUiTone::Success)
-            }
-            _ => return Vec::new(),
-        };
-        vec![build_live_workflow_card(
-            live_surface_id(&slot.call_id),
-            &slot.owner_thread_id,
-            config,
-            &slot.validated,
-            &shared.started_at_iso,
-            LiveCardParams {
-                title_override: None,
-                subtitle,
-                status_value: status,
-                tone,
-                in_call_actions: true,
-                dismissible: false,
-                duration_seconds: shared.elapsed_seconds(),
-                detail_label_value: None,
-                technical_detail: None,
-                transcript: &shared.transcript,
-            },
-        )]
+        snapshot_slot_surface(&slot, config).into_iter().collect()
     }
 
     pub(crate) fn start_phone_call<'a>(
@@ -492,7 +477,7 @@ impl PhoneCallService {
             ));
         }
 
-        let validated = validate_start_request(request)?;
+        let mut validated = validate_start_request(request)?;
 
         let runtime_config = self.config.clone().ok_or_else(|| {
             PhoneCallError::Invalid(
@@ -532,7 +517,6 @@ impl PhoneCallService {
         let slot = Arc::new(ActiveCallSlot {
             call_id: call_id.clone(),
             owner_thread_id: owner_thread_id.to_string(),
-            validated: validated.clone(),
             approval_tx: StdMutex::new(Some(approval_tx)),
             steer_tx,
             cancel: call_cancel.clone(),
@@ -542,7 +526,9 @@ impl PhoneCallService {
             settled_rx,
             shared: StdMutex::new(SharedCallState {
                 status: PhoneCallStatus::AwaitingApproval,
+                activity: CallActivity::Dialing,
                 on_hold: false,
+                validated: validated.clone(),
                 started_at_iso: now_iso(),
                 connected_at_iso: None,
                 connected_instant: None,
@@ -601,7 +587,7 @@ impl PhoneCallService {
             biased;
             () = call_cancel.cancelled() => Err("cancelled"),
             res = approval_rx => match res {
-                Ok(ApprovalDecision::Approve) => Ok(()),
+                Ok(ApprovalDecision::Approve(edits)) => Ok(edits),
                 Ok(ApprovalDecision::Decline) | Err(_) => Err("declined"),
             },
             () = tokio::time::sleep(self.timeouts.approval_timeout) => Err("timeout"),
@@ -615,31 +601,37 @@ impl PhoneCallService {
             .await;
         abort_guard.approval_dismissed = true;
 
-        if let Err(reason_tag) = approval_outcome {
-            let (final_status, reason_str, err_msg) = match reason_tag {
-                "declined" => (
-                    PhoneCallStatus::Cancelled,
-                    "declined_by_user",
-                    "Phone call was declined by the user",
-                ),
-                "timeout" => (
-                    PhoneCallStatus::Cancelled,
-                    "approval_timeout",
-                    "Timed out waiting for phone call approval",
-                ),
-                _ => (
-                    PhoneCallStatus::Cancelled,
-                    "cancelled_before_dial",
-                    "Phone call was cancelled before dialing",
-                ),
-            };
-            abort_guard.disarm_and_finish_cancelled(final_status, reason_str, None);
-            return Err(PhoneCallError::Rejected(err_msg.to_string()));
-        }
+        let approval_edits = match approval_outcome {
+            Ok(edits) => edits,
+            Err(reason_tag) => {
+                let (final_status, reason_str, err_msg) = match reason_tag {
+                    "declined" => (
+                        PhoneCallStatus::Cancelled,
+                        "declined_by_user",
+                        "Phone call was declined by the user",
+                    ),
+                    "timeout" => (
+                        PhoneCallStatus::Cancelled,
+                        "approval_timeout",
+                        "Timed out waiting for phone call approval",
+                    ),
+                    _ => (
+                        PhoneCallStatus::Cancelled,
+                        "cancelled_before_dial",
+                        "Phone call was cancelled before dialing",
+                    ),
+                };
+                abort_guard.disarm_and_finish_cancelled(final_status, reason_str, None);
+                return Err(PhoneCallError::Rejected(err_msg.to_string()));
+            }
+        };
 
+        apply_approval_edits(&mut validated, approval_edits);
         {
             let mut shared = lock_unpoisoned(&slot.shared);
+            shared.validated = validated.clone();
             shared.status = PhoneCallStatus::Dialing;
+            shared.activity = CallActivity::Dialing;
         }
 
         let created_at = now_iso();
@@ -653,6 +645,7 @@ impl PhoneCallService {
                 title_override: None,
                 subtitle: "Dialing…",
                 status_value: "Dialing",
+                activity_label: Some("Dialing"),
                 tone: BridgeUiTone::Info,
                 in_call_actions: true,
                 dismissible: false,
@@ -736,6 +729,7 @@ impl PhoneCallService {
                     {
                         let mut shared = lock_unpoisoned(&slot.shared);
                         shared.status = PhoneCallStatus::Ringing;
+                        shared.activity = CallActivity::Ringing;
                     }
                     let ringing_card = build_live_workflow_card(
                         &live_surface_id,
@@ -747,6 +741,7 @@ impl PhoneCallService {
                             title_override: None,
                             subtitle: "Ringing…",
                             status_value: "Ringing",
+                            activity_label: Some("Ringing"),
                             tone: BridgeUiTone::Info,
                             in_call_actions: true,
                             dismissible: false,
@@ -795,6 +790,7 @@ impl PhoneCallService {
         let initial_steers = {
             let mut shared = lock_unpoisoned(&slot.shared);
             shared.status = PhoneCallStatus::InProgress;
+            shared.activity = CallActivity::Listening;
             shared.connected_instant = Some(connected_instant);
             shared.connected_at_iso = Some(connected_iso);
             std::mem::take(&mut shared.pre_connect_steers)
@@ -810,6 +806,7 @@ impl PhoneCallService {
                 title_override: None,
                 subtitle: "In call",
                 status_value: "In call",
+                activity_label: Some("Listening"),
                 tone: BridgeUiTone::Success,
                 in_call_actions: true,
                 dismissible: false,
@@ -1057,7 +1054,10 @@ impl PhoneCallService {
         })
     }
 
-    pub(crate) async fn resolve_ui_action(&self, request: &ResolveBridgeUiSurfaceRequest) {
+    pub(crate) async fn resolve_ui_action(
+        &self,
+        request: &ResolveBridgeUiSurfaceRequest,
+    ) -> Result<(), BridgeError> {
         let surface_id = request.id.trim();
         let thread_id = request.thread_id.trim();
         let action_id = request.action_id.trim();
@@ -1065,38 +1065,93 @@ impl PhoneCallService {
         let is_approval = surface_id.starts_with("phone-call-approval:");
         let is_live = surface_id.starts_with("phone-call-live:");
         if !is_approval && !is_live {
-            return;
+            return Ok(());
         }
 
-        let active_slot = {
-            let registry = lock_unpoisoned(&self.registry);
-            registry.active.clone()
+        let Some(slot) = self.active_slot_for_thread(thread_id) else {
+            return missing_call_action_result(is_live, action_id);
         };
-        let Some(slot) = active_slot else {
-            return;
-        };
-        if slot.owner_thread_id != thread_id {
-            return;
-        }
-
         if is_approval && surface_id == approval_surface_id(&slot.call_id) {
-            let decision = match action_id {
-                "approve" => Some(ApprovalDecision::Approve),
-                "cancel" => Some(ApprovalDecision::Decline),
-                _ => None,
+            return self.resolve_approval_surface_action(
+                &slot,
+                action_id,
+                request.payload.as_ref(),
+            );
+        }
+        if is_live && surface_id == live_surface_id(&slot.call_id) {
+            return self
+                .resolve_live_surface_action(&slot, action_id, request.payload.as_ref())
+                .await;
+        }
+        Ok(())
+    }
+
+    fn active_slot_for_thread(&self, thread_id: &str) -> Option<Arc<ActiveCallSlot>> {
+        let slot = lock_unpoisoned(&self.registry).active.clone()?;
+        (slot.owner_thread_id == thread_id).then_some(slot)
+    }
+
+    fn resolve_approval_surface_action(
+        &self,
+        slot: &Arc<ActiveCallSlot>,
+        action_id: &str,
+        payload: Option<&Value>,
+    ) -> Result<(), BridgeError> {
+        let decision = match action_id {
+            "approve" => Some(ApprovalDecision::Approve(parse_approval_edits(payload)?)),
+            "cancel" => Some(ApprovalDecision::Decline),
+            _ => None,
+        };
+        if let Some(decision) = decision {
+            let sender = {
+                let mut tx_guard = lock_unpoisoned(&slot.approval_tx);
+                tx_guard.take()
             };
-            if let Some(decision) = decision {
-                let sender = {
-                    let mut tx_guard = lock_unpoisoned(&slot.approval_tx);
-                    tx_guard.take()
-                };
-                if let Some(tx) = sender {
-                    let _ = tx.send(decision);
+            if let Some(tx) = sender {
+                let _ = tx.send(decision);
+            }
+        }
+        Ok(())
+    }
+
+    async fn resolve_live_surface_action(
+        &self,
+        slot: &Arc<ActiveCallSlot>,
+        action_id: &str,
+        payload: Option<&Value>,
+    ) -> Result<(), BridgeError> {
+        if action_id == "hangup" {
+            slot.request_hangup(EndTrigger::MobileHangup);
+            return Ok(());
+        }
+        if action_id != "steer" {
+            return Ok(());
+        }
+        let instruction = parse_steer_instruction_payload(payload)?;
+        let result = self
+            .steer_phone_call(&slot.owner_thread_id, &slot.call_id, &instruction)
+            .map_err(|err| err.to_string())
+            .map_err(BridgeError::invalid_params)?;
+        if result.status != SteerPhoneCallStatus::Steered {
+            return Err(BridgeError::invalid_params(
+                "This phone call has already ended.",
+            ));
+        }
+        let pre_connect_update = {
+            let shared = lock_unpoisoned(&slot.shared);
+            matches!(
+                shared.status,
+                PhoneCallStatus::Dialing | PhoneCallStatus::Ringing,
+            )
+        };
+        if pre_connect_update {
+            for surface in self.snapshot_surfaces() {
+                if surface.id == live_surface_id(&slot.call_id) {
+                    let _ = self.publish_surface("bridge/ui.update", &surface).await;
                 }
             }
-        } else if is_live && surface_id == live_surface_id(&slot.call_id) && action_id == "hangup" {
-            slot.request_hangup(EndTrigger::MobileHangup);
         }
+        Ok(())
     }
 
     pub(crate) async fn cancel_for_retiring_threads(&self, thread_ids: &[String]) {
@@ -1208,6 +1263,7 @@ impl PhoneCallService {
                 title_override: title,
                 subtitle,
                 status_value: status_val,
+                activity_label: None,
                 tone,
                 in_call_actions: false,
                 dismissible: true,
@@ -1536,6 +1592,147 @@ fn validate_steer_instruction(raw: &str) -> Result<String, PhoneCallError> {
     Ok(trimmed.to_string())
 }
 
+fn validate_optional_approval_text(
+    raw: &str,
+    field: &str,
+    max_bytes: usize,
+) -> Result<Option<String>, BridgeError> {
+    if raw.len() > max_bytes || raw.contains('\0') {
+        return Err(BridgeError::invalid_params(format!(
+            "{field} must be at most {max_bytes} bytes and free of NUL characters",
+        )));
+    }
+    let trimmed = raw.trim();
+    Ok((!trimmed.is_empty()).then(|| trimmed.to_string()))
+}
+
+fn parse_approval_edits(payload: Option<&Value>) -> Result<ApprovalEdits, BridgeError> {
+    let Some(map) = payload.and_then(Value::as_object) else {
+        return Ok(ApprovalEdits::default());
+    };
+    let objective = match map.get("objective") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(raw)) => {
+            let Some(valid) =
+                validate_optional_approval_text(raw, "objective", MAX_OBJECTIVE_BYTES)?
+            else {
+                return Err(BridgeError::invalid_params("objective must not be empty"));
+            };
+            Some(valid)
+        }
+        Some(_) => return Err(BridgeError::invalid_params("objective must be a string")),
+    };
+    let first_message = match map.get("firstMessage") {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(Value::String(raw)) => Some(validate_optional_approval_text(
+            raw,
+            "firstMessage",
+            MAX_FIRST_MESSAGE_BYTES,
+        )?),
+        Some(_) => return Err(BridgeError::invalid_params("firstMessage must be a string")),
+    };
+    let context = match map.get("context") {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(Value::String(raw)) => Some(validate_optional_approval_text(
+            raw,
+            "context",
+            MAX_CONTEXT_BYTES,
+        )?),
+        Some(_) => return Err(BridgeError::invalid_params("context must be a string")),
+    };
+    Ok(ApprovalEdits {
+        objective,
+        first_message,
+        context,
+    })
+}
+
+fn apply_approval_edits(validated: &mut ValidatedStartRequest, edits: ApprovalEdits) {
+    if let Some(objective) = edits.objective {
+        validated.objective = objective;
+    }
+    if let Some(first_message) = edits.first_message {
+        validated.first_message = first_message;
+    }
+    if let Some(context) = edits.context {
+        validated.context = context;
+    }
+}
+
+fn parse_steer_instruction_payload(payload: Option<&Value>) -> Result<String, BridgeError> {
+    let Some(raw) = payload
+        .and_then(Value::as_object)
+        .and_then(|map| map.get("instruction"))
+        .and_then(Value::as_str)
+    else {
+        return Err(BridgeError::invalid_params(
+            "instruction must be a non-empty string",
+        ));
+    };
+    validate_steer_instruction(raw)
+        .map_err(|err| err.to_string())
+        .map_err(BridgeError::invalid_params)
+}
+
+fn missing_call_action_result(is_live: bool, action_id: &str) -> Result<(), BridgeError> {
+    if is_live && action_id == "steer" {
+        return Err(BridgeError::invalid_params(
+            "This phone call has already ended.",
+        ));
+    }
+    Ok(())
+}
+
+fn snapshot_slot_surface(
+    slot: &ActiveCallSlot,
+    config: &PhoneCallRuntimeConfig,
+) -> Option<BridgeUiSurface> {
+    let shared = lock_unpoisoned(&slot.shared);
+    let (status, subtitle, tone) = match shared.status {
+        PhoneCallStatus::AwaitingApproval => {
+            if slot.cancel.is_cancelled() || lock_unpoisoned(&slot.approval_tx).is_none() {
+                return None;
+            }
+            return Some(build_approval_modal_surface(
+                approval_surface_id(&slot.call_id),
+                &slot.owner_thread_id,
+                config,
+                &shared.validated,
+            ));
+        }
+        PhoneCallStatus::Dialing => ("Dialing", "Dialing…", BridgeUiTone::Info),
+        PhoneCallStatus::Ringing => ("Ringing", "Ringing…", BridgeUiTone::Info),
+        PhoneCallStatus::InProgress => {
+            let status = if shared.on_hold { "On hold" } else { "In call" };
+            (status, status, BridgeUiTone::Success)
+        }
+        _ => return None,
+    };
+    let activity_label = shared.activity.label();
+    Some(build_live_workflow_card(
+        live_surface_id(&slot.call_id),
+        &slot.owner_thread_id,
+        config,
+        &shared.validated,
+        &shared.started_at_iso,
+        LiveCardParams {
+            title_override: None,
+            subtitle,
+            status_value: status,
+            activity_label: Some(activity_label),
+            tone,
+            in_call_actions: true,
+            dismissible: false,
+            duration_seconds: shared.elapsed_seconds(),
+            detail_label_value: None,
+            technical_detail: None,
+            transcript: &shared.transcript,
+        },
+    ))
+}
+
 // ============================================================================
 // Connected Full-Duplex Voice Call Runner
 // ============================================================================
@@ -1710,24 +1907,48 @@ async fn wait_for_pending_end(pending: &Option<PendingCallEnd>) {
 }
 
 // Every assistant turn starts here so an accepted hang-up never outlives a newer turn.
-fn start_assistant_turn(
+async fn start_assistant_turn(
     ctx: &ConnectedCallContext,
     conversation: &VoiceConversation,
     sip_handle: &SipCallHandle,
     pending_end: &mut Option<PendingCallEnd>,
 ) -> ActiveAssistantTurn {
     *pending_end = None;
-    spawn_assistant_turn(
+    let activity = if conversation.is_on_hold() {
+        CallActivity::OnHold
+    } else {
+        CallActivity::AgentSpeaking
+    };
+    let turn = spawn_assistant_turn(
         &ctx.voice_client,
         conversation,
         sip_handle,
         &ctx.slot.cancel,
-    )
+    );
+    if set_call_activity(&ctx.slot, activity) {
+        publish_in_call_card_update(ctx, conversation.transcript()).await;
+    }
+    turn
+}
+
+fn set_call_activity(slot: &ActiveCallSlot, activity: CallActivity) -> bool {
+    let mut shared = lock_unpoisoned(&slot.shared);
+    if shared.activity == activity {
+        return false;
+    }
+    shared.activity = activity;
+    true
 }
 
 fn set_call_hold(slot: &ActiveCallSlot, conversation: &mut VoiceConversation, on_hold: bool) {
     conversation.set_on_hold(on_hold);
-    lock_unpoisoned(&slot.shared).on_hold = on_hold;
+    let mut shared = lock_unpoisoned(&slot.shared);
+    shared.on_hold = on_hold;
+    shared.activity = if on_hold {
+        CallActivity::OnHold
+    } else {
+        CallActivity::Listening
+    };
 }
 
 #[cfg_attr(
@@ -1778,12 +1999,8 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
         opening_greeting_pending = false;
         opening_window_elapsed = true;
         steer_pending_turn = false;
-        active_turn = Some(start_assistant_turn(
-            &ctx,
-            &conversation,
-            &sip_handle,
-            &mut pending_end,
-        ));
+        active_turn =
+            Some(start_assistant_turn(&ctx, &conversation, &sip_handle, &mut pending_end).await);
     }
 
     let exit = loop {
@@ -1901,12 +2118,10 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                     opening_greeting_pending = false;
                     opening_window_elapsed = true;
                     steer_pending_turn = false;
-                    active_turn = Some(start_assistant_turn(
-                        &ctx,
-                        &conversation,
-                        &sip_handle,
-                        &mut pending_end,
-                    ));
+                    active_turn = Some(
+                        start_assistant_turn(&ctx, &conversation, &sip_handle, &mut pending_end)
+                            .await,
+                    );
                 } else {
                     steer_pending_turn = true;
                 }
@@ -1920,8 +2135,16 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                 if mulaw_frame_mean_abs(&frame.inbound_pcmu)
                     >= vad.speech_threshold(frame.outbound_playing, outbound_mean)
                 {
+                    let speech_started = speech_quiet_deadline.is_none();
                     let hangover = u32::try_from(vad.hangover_frames()).expect("VAD hangover is bounded");
                     speech_quiet_deadline = Some(tokio::time::Instant::now() + Duration::from_millis(20) * hangover);
+                    if speech_started
+                        && !conversation.is_on_hold()
+                        && active_turn.is_none()
+                        && set_call_activity(&ctx.slot, CallActivity::RecipientSpeaking)
+                    {
+                        publish_in_call_card_update(&ctx, conversation.transcript()).await;
+                    }
                 }
                 match vad.process_mulaw_frame(
                     &frame.inbound_pcmu,
@@ -1929,6 +2152,9 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                     outbound_mean,
                 ) {
                     Some(VadEvent::BargeIn) => {
+                        if !conversation.is_on_hold() {
+                            set_call_activity(&ctx.slot, CallActivity::RecipientSpeaking);
+                        }
                         match active_turn.take() {
                             Some(turn) => {
                                 let spoken = turn.abort_and_extract_spoken(&sip_handle);
@@ -1938,6 +2164,7 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                             }
                             None => {
                                 sip_handle.clear_outbound_audio();
+                                publish_in_call_card_update(&ctx, conversation.transcript()).await;
                             }
                         }
                     }
@@ -1990,12 +2217,15 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                         publish_in_call_card_update(&ctx, conversation.transcript()).await;
                         if !transport_on_hold && active_stt.is_none() && !vad.has_pending_speech() {
                             steer_pending_turn = false;
-                            active_turn = Some(start_assistant_turn(
-                                &ctx,
-                                &conversation,
-                                &sip_handle,
-                                &mut pending_end,
-                            ));
+                            active_turn = Some(
+                                start_assistant_turn(
+                                    &ctx,
+                                    &conversation,
+                                    &sip_handle,
+                                    &mut pending_end,
+                                )
+                                .await,
+                            );
                         }
                     }
                     Ok(Ok(None)) => {
@@ -2010,12 +2240,24 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                             opening_greeting_pending = false;
                             opening_window_elapsed = true;
                             steer_pending_turn = false;
-                            active_turn = Some(start_assistant_turn(
-                                &ctx,
-                                &conversation,
-                                &sip_handle,
-                                &mut pending_end,
-                            ));
+                            active_turn = Some(
+                                start_assistant_turn(
+                                    &ctx,
+                                    &conversation,
+                                    &sip_handle,
+                                    &mut pending_end,
+                                )
+                                .await,
+                            );
+                        } else if set_call_activity(
+                            &ctx.slot,
+                            if conversation.is_on_hold() {
+                                CallActivity::OnHold
+                            } else {
+                                CallActivity::Listening
+                            },
+                        ) {
+                            publish_in_call_card_update(&ctx, conversation.transcript()).await;
                         }
                     }
                     Ok(Err(err)) if err.is_cancelled() => {}
@@ -2054,6 +2296,14 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                             turn_output.clauses.clear();
                         }
                         conversation.record_assistant_turn(&turn_output);
+                        set_call_activity(
+                            &ctx.slot,
+                            if was_on_hold {
+                                CallActivity::OnHold
+                            } else {
+                                CallActivity::Listening
+                            },
+                        );
                         sync_shared_transcript(&ctx.slot, conversation.transcript());
                         publish_in_call_card_update(&ctx, conversation.transcript()).await;
 
@@ -2080,6 +2330,7 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                                         dtmf_error = Some(err);
                                         break;
                                     }
+                                    conversation.record_event(&format!("Pressed {digits}"));
                                     conversation.record_tool_result(
                                         tc_id,
                                         &format!("Sent DTMF digits: {digits}"),
@@ -2147,16 +2398,20 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                             break CallLoopExit::Failed { error: err };
                         }
 
+                        sync_shared_transcript(&ctx.slot, conversation.transcript());
                         publish_in_call_card_update(&ctx, conversation.transcript()).await;
 
                         if !transport_on_hold && steer_pending_turn && active_stt.is_none() && !vad.has_pending_speech() {
                             steer_pending_turn = false;
-                            active_turn = Some(start_assistant_turn(
-                                &ctx,
-                                &conversation,
-                                &sip_handle,
-                                &mut pending_end,
-                            ));
+                            active_turn = Some(
+                                start_assistant_turn(
+                                    &ctx,
+                                    &conversation,
+                                    &sip_handle,
+                                    &mut pending_end,
+                                )
+                                .await,
+                            );
                         }
                     }
                     Ok(Err(err)) if err.is_cancelled() => {}
@@ -2205,16 +2460,19 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                 if !transport_on_hold && !vad.has_pending_speech() && active_stt.is_none() {
                     opening_greeting_pending = false;
                     steer_pending_turn = false;
-                    active_turn = Some(start_assistant_turn(
-                        &ctx,
-                        &conversation,
-                        &sip_handle,
-                        &mut pending_end,
-                    ));
+                    active_turn = Some(
+                        start_assistant_turn(&ctx, &conversation, &sip_handle, &mut pending_end)
+                            .await,
+                    );
                 }
             }
         }
         if let Some(samples) = new_utterance {
+            if !conversation.is_on_hold()
+                && set_call_activity(&ctx.slot, CallActivity::RecipientSpeaking)
+            {
+                publish_in_call_card_update(&ctx, conversation.transcript()).await;
+            }
             if active_stt.is_some() {
                 let queued_samples: usize = pending_utterances.iter().map(Vec::len).sum();
                 if queued_samples.saturating_add(samples.len()) > VAD_MAX_UTTERANCE_SAMPLES {
@@ -2243,12 +2501,9 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
         if call_idle && ready_to_speak {
             steer_pending_turn = false;
             opening_greeting_pending = false;
-            active_turn = Some(start_assistant_turn(
-                &ctx,
-                &conversation,
-                &sip_handle,
-                &mut pending_end,
-            ));
+            active_turn = Some(
+                start_assistant_turn(&ctx, &conversation, &sip_handle, &mut pending_end).await,
+            );
         }
     };
 
@@ -2321,6 +2576,7 @@ async fn settle_connected_call(
             title_override: Some(card_title),
             subtitle: &card_subtitle,
             status_value: status_label,
+            activity_label: None,
             tone,
             in_call_actions: false,
             dismissible: true,
@@ -2382,7 +2638,10 @@ async fn publish_in_call_card_update(ctx: &ConnectedCallContext, transcript: &[T
     let elapsed_secs = Instant::now()
         .saturating_duration_since(ctx.connected_instant)
         .as_secs();
-    let on_hold = lock_unpoisoned(&ctx.slot.shared).on_hold;
+    let (on_hold, activity_label) = {
+        let shared = lock_unpoisoned(&ctx.slot.shared);
+        (shared.on_hold, shared.activity.label())
+    };
     let status = if on_hold { "On hold" } else { "In call" };
     let card = build_live_workflow_card(
         &ctx.live_surface_id,
@@ -2394,6 +2653,7 @@ async fn publish_in_call_card_update(ctx: &ConnectedCallContext, transcript: &[T
             title_override: None,
             subtitle: status,
             status_value: status,
+            activity_label: Some(activity_label),
             tone: BridgeUiTone::Success,
             in_call_actions: true,
             dismissible: false,
@@ -2878,10 +3138,18 @@ fn build_approval_modal_surface(
     }
 }
 
+#[cfg_attr(
+    dylint_lib = "perfectionist",
+    expect(
+        perfectionist::too_many_struct_fields,
+        reason = "existing UI card builder parameter bundle predates perfectionist field cap"
+    )
+)]
 struct LiveCardParams<'a> {
     title_override: Option<&'a str>,
     subtitle: &'a str,
     status_value: &'a str,
+    activity_label: Option<&'a str>,
     tone: BridgeUiTone,
     in_call_actions: bool,
     dismissible: bool,
@@ -2937,6 +3205,17 @@ fn build_live_workflow_card(
             value: non_empty_kv_value(&runtime_config.caller_id, "+unknown"),
         },
     ];
+
+    if let Some(activity) = params
+        .activity_label
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        kv_items.push(BridgeUiKeyValueItem {
+            label: "Activity".to_string(),
+            value: non_empty_kv_value(activity, params.status_value),
+        });
+    }
 
     if let Some(secs) = params.duration_seconds {
         kv_items.push(BridgeUiKeyValueItem {
@@ -3035,6 +3314,7 @@ fn format_transcript_line(entry: &TranscriptEntry, markdown: bool, recipient: &s
         TranscriptSpeaker::Assistant => "Agent",
         TranscriptSpeaker::Callee => recipient,
         TranscriptSpeaker::Steer => "Instruction (not spoken)",
+        TranscriptSpeaker::Event => "Event",
     };
     if markdown {
         format!("**{label}:** {text_with_marker}")

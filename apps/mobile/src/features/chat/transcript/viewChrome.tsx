@@ -257,6 +257,18 @@ export function renderJumpToLatestButton(params: {
 }
 
 /**
+ * Side padding inside `bodyShell` that keeps messages in the readable column and clear of a pinned
+ * scroll rail on wide windows. Shared by top workflow cards so they align with messages.
+ */
+export function resolveTranscriptHorizontalPadding(
+  gutter: number,
+  readable: number,
+  railPinnable: boolean,
+): number {
+  return Math.max(gutter + readable, railPinnable ? CHAT_SCROLL_RAIL_CONTENT_CLEARANCE : 0);
+}
+
+/**
  * Inverted padding: bottom clears the top chrome plus a gutter; top clears the composer. The sides
  * keep messages in a readable column on wide windows, clear of the rail pinned there.
  */
@@ -267,10 +279,7 @@ export function useTranscriptContentLayout(
   railPinnable: boolean,
 ): { messageListContentStyle: StyleProp<ViewStyle>; foldLeadingInset: number } {
   const { readable, foldLeading } = useSceneContentInsets();
-  const horizontal = Math.max(
-    gutter + readable,
-    railPinnable ? CHAT_SCROLL_RAIL_CONTENT_CLEARANCE : 0,
-  );
+  const horizontal = resolveTranscriptHorizontalPadding(gutter, readable, railPinnable);
   const messageListContentStyle = useMemo(
     () => [
       baseStyle,

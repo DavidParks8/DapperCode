@@ -21,7 +21,8 @@ interface WorkflowCardProps {
   mode: 'plan' | 'approval' | 'execution';
   plan: ActivePlanState | null;
   collapsed: boolean;
-  scrollMaxHeight: number;
+  /** Maximum height of the card's internal scroll view, or `null` when an outer scroll container owns scrolling. */
+  scrollMaxHeight: number | null;
   actionDisabled: boolean;
   onToggleCollapse: () => void;
   onImplement: () => void;
@@ -351,7 +352,7 @@ function WorkflowCardBody({
 }: {
   collapsed: boolean;
   isCollapsible: boolean;
-  scrollMaxHeight: number;
+  scrollMaxHeight: number | null;
   mode: WorkflowCardMode;
   planSections: ReactNode;
   actionDisabled: boolean;
@@ -366,15 +367,21 @@ function WorkflowCardBody({
   return (
     <>
       {planSections ? (
-        <ScrollView
-          nestedScrollEnabled
-          bounces={false}
-          style={[styles.workflowScrollViewport, { maxHeight: scrollMaxHeight }]}
-          contentContainerStyle={styles.workflowScrollContent}
-          showsVerticalScrollIndicator
-        >
-          {planSections}
-        </ScrollView>
+        scrollMaxHeight === null ? (
+          <View style={[styles.workflowScrollViewport, styles.workflowScrollContent]}>
+            {planSections}
+          </View>
+        ) : (
+          <ScrollView
+            nestedScrollEnabled
+            bounces={false}
+            style={[styles.workflowScrollViewport, { maxHeight: scrollMaxHeight }]}
+            contentContainerStyle={styles.workflowScrollContent}
+            showsVerticalScrollIndicator
+          >
+            {planSections}
+          </ScrollView>
+        )
       ) : null}
       {mode === 'approval' ? (
         <WorkflowApprovalActions

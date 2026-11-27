@@ -15,6 +15,9 @@ import { ChatTranscriptView, type ChatTranscriptViewProps } from './ChatTranscri
 import { ComposeView } from '../screen/Presentation';
 import { useNewChatReadiness } from '../screen/newChatReadiness';
 import { ChatOpeningView } from '../screen/Presentation';
+import { PhoneCallStageContent } from '../phoneCall/PhoneCallStageContent';
+import { PhoneCallStageSheet } from '../phoneCall/PhoneCallStageSheet';
+import { usePhoneCallStageHost } from '../phoneCall/usePhoneCallStageHost';
 import type {
   MainScreenPanelCollapseCoordinatorContext,
   MainScreenPanelCollapseCoordinatorResult,
@@ -225,6 +228,117 @@ function MainScreenSelectionSheets({
   );
 }
 
+function SplitPaneCallStage({
+  callStage,
+  contentTopInset,
+  handleBridgeUiAction,
+  styles,
+}: {
+  callStage: ReturnType<typeof usePhoneCallStageHost>;
+  contentTopInset: number;
+  handleBridgeUiAction?: Context['handleBridgeUiAction'];
+  styles: ReturnType<typeof useMainScreenStyles>['styles'];
+}) {
+  if (
+    !callStage.showSplitPane ||
+    callStage.stageLayout.mode !== 'split-pane' ||
+    !callStage.openSurface ||
+    !handleBridgeUiAction
+  ) {
+    return null;
+  }
+  return (
+    <View
+      style={[
+        styles.phoneCallSplitPane,
+        {
+          width: callStage.stageLayout.paneWidth,
+          marginLeft: callStage.stageLayout.dividerWidth,
+          paddingTop: contentTopInset,
+          paddingBottom: callStage.safeAreaBottom,
+        },
+      ]}
+      testID="phone-call-stage-split-pane"
+    >
+      <PhoneCallStageContent
+        surface={callStage.openSurface}
+        host="split-pane"
+        whisperDraft={callStage.whisperDraft}
+        onChangeWhisperDraft={callStage.changeWhisperDraft}
+        onClose={callStage.closeStage}
+        onAction={handleBridgeUiAction}
+        onDismiss={callStage.dismissStage}
+      />
+    </View>
+  );
+}
+
+function SheetCallStage({
+  callStage,
+  hasPendingChatAttention,
+  handleBridgeUiAction,
+}: {
+  callStage: ReturnType<typeof usePhoneCallStageHost>;
+  hasPendingChatAttention: boolean;
+  handleBridgeUiAction?: Context['handleBridgeUiAction'];
+}) {
+  if (!handleBridgeUiAction) {
+    return null;
+  }
+  const sheetVisible = callStage.stageLayout.mode === 'sheet' && callStage.openSurface !== null;
+  return (
+    <PhoneCallStageSheet
+      visible={sheetVisible}
+      surface={sheetVisible ? callStage.openSurface : null}
+      whisperDraft={callStage.whisperDraft}
+      onChangeWhisperDraft={callStage.changeWhisperDraft}
+      onClose={callStage.closeStage}
+      onAction={handleBridgeUiAction}
+      onDismiss={callStage.dismissStage}
+      hasPendingChatAttention={hasPendingChatAttention}
+      onJumpToChatAttention={callStage.closeStage}
+    />
+  );
+}
+
+function ChatBodyLeadingPane({
+  contentProps,
+  keyboardVisible,
+  contentBottomInset,
+  usesOverlayComposer,
+  shouldShowComposer,
+  renderComposer,
+  styles,
+}: {
+  contentProps: BodyContentProps;
+  keyboardVisible: boolean;
+  contentBottomInset: number;
+  usesOverlayComposer: boolean;
+  shouldShowComposer: boolean;
+  renderComposer: Context['renderComposer'];
+  styles: ReturnType<typeof useMainScreenStyles>['styles'];
+}) {
+  return (
+    <View style={styles.bodyLeadingPane}>
+      {/* No KeyboardAvoidingView here on purpose. The overlay composer already floats on the
+          measured keyboard inset and `composerReservedInset` feeds that same inset to the
+          transcript, so padding this container would push the messages up by a second keyboard
+          height and shove short transcripts off screen. Keeping the shell at full height makes
+          the keyboard slide the content by exactly one keyboard height, like iMessage. */}
+      <View style={styles.bodyShell}>
+        <TranscriptOrComposerContent
+          {...contentProps}
+          keyboardVisible={Platform.OS === 'android' ? keyboardVisible : false}
+          bottomInset={contentBottomInset}
+        />
+        {Platform.OS === 'ios' && shouldShowComposer ? renderComposer(true) : null}
+        {!usesOverlayComposer && shouldShowComposer ? renderComposer(false) : null}
+      </View>
+      {Platform.OS === 'android' && shouldShowComposer ? renderComposer(true) : null}
+    </View>
+  );
+}
+
 export function MainScreenTranscriptAndSheets({ context }: { context: Context }) {
   const {
     selectedChat,
@@ -263,6 +377,10 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
     collaborationModeOptions,
     agentPickerOptions,
     closeAgentModal,
+    callBridgeUiSurfaces = [],
+    supersededCallBridgeUiSurfaces = [],
+    handleBridgeUiAction,
+    dismissBridgeUiSurface,
   } = context;
   const { styles } = useMainScreenStyles();
   const pendingApproval = useAtomValue(pendingApprovalAtom);
@@ -278,6 +396,12 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
   const setCollaborationModeMenuVisible = useSetAtom(collaborationModeMenuVisibleAtom);
   const usesOverlayComposer = Platform.OS === 'android' || Platform.OS === 'ios';
   const sceneInsets = useSceneHorizontalInsets();
+  const callStage = usePhoneCallStageHost({
+    callBridgeUiSurfaces,
+    supersededCallBridgeUiSurfaces,
+    dismissBridgeUiSurface,
+  });
+  const hasPendingChatAttention = Boolean(pendingApproval || pendingUserInputRequest);
   const contentTopInset = topChromeHeight;
   const contentBottomInset = usesOverlayComposer ? composerReservedInset : 0;
   const contentProps: BodyContentProps = {
@@ -315,23 +439,31 @@ export function MainScreenTranscriptAndSheets({ context }: { context: Context })
 
   return (
     <>
-      <View style={[styles.bodyContainer, sceneInsets]} testID="chat-body">
-        {/* No KeyboardAvoidingView here on purpose. The overlay composer already floats on the
-            measured keyboard inset and `composerReservedInset` feeds that same inset to the
-            transcript, so padding this container would push the messages up by a second keyboard
-            height and shove short transcripts off screen. Keeping the shell at full height makes
-            the keyboard slide the content by exactly one keyboard height, like iMessage. */}
-        <View style={styles.bodyShell}>
-          <TranscriptOrComposerContent
-            {...contentProps}
-            keyboardVisible={Platform.OS === 'android' ? keyboardVisible : false}
-            bottomInset={contentBottomInset}
-          />
-          {Platform.OS === 'ios' && shouldShowComposer ? renderComposer(true) : null}
-          {!usesOverlayComposer && shouldShowComposer ? renderComposer(false) : null}
-        </View>
-        {Platform.OS === 'android' && shouldShowComposer ? renderComposer(true) : null}
+      <View
+        style={[styles.bodyContainer, sceneInsets, callStage.showSplitPane && styles.bodySplitRow]}
+        testID="chat-body"
+      >
+        <ChatBodyLeadingPane
+          contentProps={contentProps}
+          keyboardVisible={keyboardVisible}
+          contentBottomInset={contentBottomInset}
+          usesOverlayComposer={usesOverlayComposer}
+          shouldShowComposer={shouldShowComposer}
+          renderComposer={renderComposer}
+          styles={styles}
+        />
+        <SplitPaneCallStage
+          callStage={callStage}
+          contentTopInset={contentTopInset}
+          handleBridgeUiAction={handleBridgeUiAction}
+          styles={styles}
+        />
       </View>
+      <SheetCallStage
+        callStage={callStage}
+        hasPendingChatAttention={hasPendingChatAttention}
+        handleBridgeUiAction={handleBridgeUiAction}
+      />
       <MainScreenSelectionSheets
         attachmentMenuVisible={attachmentMenuVisible}
         attachmentMenuOptions={attachmentMenuOptions}

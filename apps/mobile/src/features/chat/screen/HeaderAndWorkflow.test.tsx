@@ -1,14 +1,17 @@
 import React from 'react';
 import { Menu } from '@expo/ui/swift-ui';
 import { Provider, createStore } from 'jotai';
-import { Dimensions, StyleSheet } from 'react-native';
+import { Dimensions, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
-import type { Chat } from '@bridge/types/types';
+import type { BridgeUiSurface, Chat } from '@bridge/types/types';
 import { AppThemeProvider, createAppTheme } from '@shared/theme';
 import { CircularToolbarButton } from '@shared/ui/CircularToolbarButton';
-import { LAPTOP_RAIL_WIDTH } from '@shell/layout/windowLayout';
+import { CLOSED_DUO_SAFE_AREA, CLOSED_DUO_TRAITS } from '@shared/testing/foldableLayout';
+import { LAPTOP_RAIL_WIDTH, resolveReadableColumnInset } from '@shell/layout/windowLayout';
+import { sidebarHiddenAtom } from '@shell/state/appState/settings';
+import { createTestStore } from '@shell/state/testing';
 import { windowTraitsAtom } from '@shell/state/layout/atoms';
 import { requireTestValue } from '@shared/testing/requireTestValue';
 import {
@@ -17,9 +20,11 @@ import {
   setMockLiquidGlassAvailable,
 } from '@shared/testing/glassEffectMock';
 import { formatCompactTokenCount, MainScreenHeaderAndWorkflow } from './HeaderAndWorkflow';
+import { computeTopCardsViewportBudget } from './TopCardsRow';
 import { ChatSceneToolbar } from './chatToolbar';
+import { resolveTranscriptHorizontalPadding } from '../transcript/viewChrome';
 import { SESSION_META_CHIP_HEIGHT } from '../styles/sessionMetaChip';
-import { keyboardVisibleAtom } from '../state/composer';
+import { composerHeightAtom, keyboardInsetAtom, keyboardVisibleAtom } from '../state/composer';
 import type {
   MainScreenPanelCollapseCoordinatorContext,
   MainScreenPanelCollapseCoordinatorResult,
@@ -478,6 +483,271 @@ describe('MainScreenHeaderAndWorkflow session meta chips', () => {
     });
     expect(fastIcon?.props['color']).toBe(theme.colors.textPrimary);
     act(() => tree.unmount());
+  });
+});
+
+describe('MainScreenHeaderAndWorkflow top workflow cards', () => {
+  afterEach(() => {
+    act(() => {
+      Dimensions.set({
+        window: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+        screen: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+      });
+    });
+  });
+
+  function workflowSurface(id: string, title: string): BridgeUiSurface {
+    return {
+      id,
+      threadId: 'thread',
+      turnId: null,
+      kind: 'goal',
+      presentation: 'workflowCard',
+      tone: 'neutral',
+      title,
+      subtitle: 'Details',
+      bodyMarkdown: null,
+      blocks: [
+        {
+          type: 'keyValue',
+          items: [
+            { label: 'Status', value: 'Ended' },
+            {
+              label: 'Objective',
+              value:
+                'Long workflow objective text that would fill the viewport if stacked without a height cap.',
+            },
+          ],
+        },
+      ],
+      actions: [],
+      dismissible: true,
+    };
+  }
+
+  it('clears the closed iPhone Duo side rail, aligns with messages, and caps height for page scrolling', () => {
+    act(() => {
+      Dimensions.set({
+        window: { width: 466, height: 678, scale: 3, fontScale: 1 },
+        screen: { width: 466, height: 678, scale: 3, fontScale: 1 },
+      });
+    });
+    const store = createStore();
+    store.set(windowTraitsAtom, CLOSED_DUO_TRAITS);
+    store.set(composerHeightAtom, 84);
+    const surfaces = [
+      workflowSurface('wf-1', 'First card'),
+      workflowSurface('wf-2', 'Second card'),
+      workflowSurface('wf-3', 'Third card'),
+    ];
+    const context = baseContext({
+      showTopCardsRow: true,
+      workflowBridgeUiSurfaces: surfaces,
+      windowHeight: 678,
+    });
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <SafeAreaProvider initialMetrics={CLOSED_DUO_SAFE_AREA}>
+          <Provider store={store}>
+            <AppThemeProvider theme={theme}>
+              <MainScreenHeaderAndWorkflow context={context} />
+            </AppThemeProvider>
+          </Provider>
+        </SafeAreaProvider>,
+      );
+    });
+    const root = queryRoot(tree);
+    const glass = root.findAll(
+      (node) =>
+        node.props['testID'] === 'chat-top-chrome-glass-surface' &&
+        typeof node.props['onLayout'] === 'function',
+    )[0];
+    act(() => {
+      (glass!.props['onLayout'] as (event: unknown) => void)({
+        nativeEvent: { layout: { height: 105 } },
+      });
+    });
+
+    const container = root.findAll(
+      (node) =>
+        node.props['testID'] === 'chat-top-cards-container' && typeof node.type !== 'string',
+    )[0];
+    expect(StyleSheet.flatten(container?.props['style'] as never)).toMatchObject({
+      paddingLeft: 0,
+      paddingRight: 84,
+    });
+
+    const scroll = root.findAll(
+      (node) => node.props['testID'] === 'chat-top-cards' && node.type === ScrollView,
+    )[0];
+    expect(scroll).toBeDefined();
+    const scrollStyle = StyleSheet.flatten(scroll?.props['style'] as never) as {
+      maxHeight?: number;
+      flexGrow?: number;
+    };
+    const contentStyle = StyleSheet.flatten(scroll?.props['contentContainerStyle'] as never) as {
+      paddingHorizontal?: number;
+    };
+    expect(contentStyle.paddingHorizontal).toBe(theme.spacing.lg);
+    expect(scrollStyle.flexGrow).toBe(0);
+    // 678 - 105 header - (84 + 8) composer = 481 reading space; 45% leaves > 50% for the transcript.
+    expect(scrollStyle.maxHeight).toBe(Math.floor(481 * 0.45));
+    expect(481 - (scrollStyle.maxHeight ?? 0)).toBeGreaterThan(240);
+
+    // Earlier stacked cards start collapsed, newest starts expanded, with no competing nested scroll views.
+    const toggles = root.findAll(
+      (node) =>
+        typeof node.props['onPress'] === 'function' &&
+        (node.props['accessibilityLabel'] === 'Expand surface' ||
+          node.props['accessibilityLabel'] === 'Collapse surface'),
+    );
+    expect(toggles.map((toggle) => toggle.props['accessibilityLabel'])).toEqual([
+      'Expand surface',
+      'Expand surface',
+      'Collapse surface',
+    ]);
+    const nestedScrollViews = scroll!.findAll((node) => node.type === ScrollView);
+    expect(nestedScrollViews).toHaveLength(1);
+    act(() => tree.unmount());
+  });
+
+  it('clears the laptop-pose rail and shrinks the top-card budget when the keyboard is open', () => {
+    act(() => {
+      Dimensions.set({
+        window: { width: 669, height: 951, scale: 3, fontScale: 1 },
+        screen: { width: 669, height: 951, scale: 3, fontScale: 1 },
+      });
+    });
+    const store = createStore();
+    store.set(windowTraitsAtom, {
+      horizontalSizeClass: 'regular',
+      verticalSizeClass: 'regular',
+      divisions: [{ x: 0, y: 455.5, width: 669, height: 40 }],
+    });
+    store.set(composerHeightAtom, 84);
+    store.set(keyboardVisibleAtom, true);
+    store.set(keyboardInsetAtom, 492);
+    const context = baseContext({
+      showTopCardsRow: true,
+      workflowBridgeUiSurfaces: [workflowSurface('wf-laptop', 'Laptop card')],
+      windowHeight: 951,
+    });
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 669, height: 951 },
+            insets: { top: 82, left: 0, right: 0, bottom: 20 },
+          }}
+        >
+          <Provider store={store}>
+            <AppThemeProvider theme={theme}>
+              <MainScreenHeaderAndWorkflow context={context} />
+            </AppThemeProvider>
+          </Provider>
+        </SafeAreaProvider>,
+      );
+    });
+    const root = queryRoot(tree);
+    const container = root.findAll(
+      (node) =>
+        node.props['testID'] === 'chat-top-cards-container' && typeof node.type !== 'string',
+    )[0];
+    expect(StyleSheet.flatten(container?.props['style'] as never)).toMatchObject({
+      paddingLeft: 0,
+      paddingRight: LAPTOP_RAIL_WIDTH,
+    });
+    const scroll = root.findAll(
+      (node) => node.props['testID'] === 'chat-top-cards' && node.type === ScrollView,
+    )[0];
+    const maxHeight = (
+      StyleSheet.flatten(scroll?.props['style'] as never) as { maxHeight?: number }
+    ).maxHeight;
+    // 951 - 112 default header - (84 + 492 + 8) composer/keyboard = 255 reading space.
+    expect(maxHeight).toBe(Math.floor(255 * 0.45));
+    act(() => tree.unmount());
+  });
+
+  it('aligns top workflow cards with the readable message column on wide windows with a side rail', () => {
+    act(() => {
+      Dimensions.set({
+        window: { width: 951, height: 669, scale: 3, fontScale: 1 },
+        screen: { width: 951, height: 669, scale: 3, fontScale: 1 },
+      });
+    });
+    const store = createTestStore();
+    store.set(sidebarHiddenAtom, true);
+    const context = baseContext({
+      showTopCardsRow: true,
+      workflowBridgeUiSurfaces: [workflowSurface('wf-wide', 'Wide card')],
+      windowHeight: 669,
+    });
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 951, height: 669 },
+            insets: { top: 0, left: 0, right: 84, bottom: 20 },
+          }}
+        >
+          <Provider store={store}>
+            <AppThemeProvider theme={theme}>
+              <MainScreenHeaderAndWorkflow context={context} />
+            </AppThemeProvider>
+          </Provider>
+        </SafeAreaProvider>,
+      );
+    });
+    const root = queryRoot(tree);
+    const container = root.findAll(
+      (node) =>
+        node.props['testID'] === 'chat-top-cards-container' && typeof node.type !== 'string',
+    )[0];
+    const scroll = root.findAll(
+      (node) => node.props['testID'] === 'chat-top-cards' && node.type === ScrollView,
+    )[0];
+    const readable = resolveReadableColumnInset(951 - 84);
+    const expectedMessageInset = resolveTranscriptHorizontalPadding(
+      theme.spacing.lg,
+      readable,
+      true,
+    );
+
+    expect(StyleSheet.flatten(container?.props['style'] as never)).toMatchObject({
+      paddingLeft: 0,
+      paddingRight: 84,
+    });
+    expect(StyleSheet.flatten(scroll?.props['contentContainerStyle'] as never)).toMatchObject({
+      paddingHorizontal: expectedMessageInset,
+    });
+    act(() => tree.unmount());
+  });
+
+  it('computes viewport budgets that disable inner card scrolling when multiple cards stack', () => {
+    const single = computeTopCardsViewportBudget({
+      windowHeight: 844,
+      headerChromeHeight: 112,
+      bottomReservedHeight: 92,
+      workflowCardMode: 'plan',
+      cardCount: 1,
+    });
+    expect(single.topCardsMaxHeight).toBe(Math.floor(640 * 0.45));
+    expect(single.bridgeSurfaceScrollMaxHeight).toBe(single.topCardsMaxHeight - 84);
+    expect(single.workflowCardScrollMaxHeight).toBe(single.topCardsMaxHeight - 84);
+
+    const multi = computeTopCardsViewportBudget({
+      windowHeight: 844,
+      headerChromeHeight: 112,
+      bottomReservedHeight: 92,
+      workflowCardMode: 'plan',
+      cardCount: 3,
+    });
+    expect(multi.topCardsMaxHeight).toBe(single.topCardsMaxHeight);
+    expect(multi.bridgeSurfaceScrollMaxHeight).toBeNull();
+    expect(multi.workflowCardScrollMaxHeight).toBeNull();
   });
 
   it('renders the header and flat selectors on one full-width glass plane', () => {

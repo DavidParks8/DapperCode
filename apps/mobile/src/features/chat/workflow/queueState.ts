@@ -47,6 +47,7 @@ import {
 } from '../state/modals';
 import { resolveQueuedMessageSteerDisabledReason } from './queuePresentation';
 import { isPhoneCallSurface, selectDockedPhoneCalls } from '../approvals/phoneCallModel';
+import { collectReportedPhoneCallIds } from '../phoneCall/phoneCallReport';
 
 export type MainScreenWorkflowQueueStateContext = MainScreenHeaderActivityViewModelContext &
   MainScreenHeaderActivityViewModelResult;
@@ -62,7 +63,7 @@ function resolveSelectedThreadRuntimeSnapshot(
 }
 
 export function resolveBridgeUiSurfaceBuckets(
-  selectedChat: ChatSummary | null,
+  selectedChat: (ChatSummary & { messages?: Chat['messages'] }) | null,
   activeBridgeUiSurfaces: BridgeUiSurface[],
 ) {
   const buckets = {
@@ -100,7 +101,13 @@ export function resolveBridgeUiSurfaceBuckets(
     }
   }
 
-  const { docked, superseded } = selectDockedPhoneCalls(buckets.callBridgeUiSurfaces);
+  const reportedCallIds = selectedChat.messages
+    ? collectReportedPhoneCallIds(selectedChat.messages)
+    : undefined;
+  const { docked, superseded } = selectDockedPhoneCalls(
+    buckets.callBridgeUiSurfaces,
+    reportedCallIds,
+  );
   buckets.callBridgeUiSurfaces = docked;
   buckets.supersededCallBridgeUiSurfaces = superseded;
   return buckets;

@@ -1,15 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
-} from 'react-native';
-import Markdown from 'react-native-markdown-display';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { BridgeUiSurface } from '@bridge/types/types';
 import { feedback } from '@shared/feedback';
@@ -20,73 +11,51 @@ import {
   decorativeAccessibilityProps,
   useAccessibilityAnnouncement,
 } from '@shared/accessibility';
-import { createWorkflowMarkdownStyles } from '../styles/styles';
 import { getBridgeUiSurfaceReceivedAt } from '../helpers/bridgeUi';
-import type { BridgeUiActionHandler } from './SurfaceRenderers';
 import {
-  formatCallElapsed,
-  phoneCallModel,
-  phoneCallStatusLine,
-  type HangupState,
-  type PhoneCallModel,
-  type PhoneCallPhase,
-} from './phoneCallModel';
+  activityBackground,
+  activityColor,
+  activityIconName,
+  useCallElapsedSeconds,
+} from '../phoneCall/phoneCallVisuals';
+import type { BridgeUiActionHandler } from './SurfaceRenderers';
+import { phoneCallModel, phoneCallStatusLine, type HangupState } from './phoneCallModel';
 
 interface PhoneCallDockProps {
   surface: BridgeUiSurface;
-  /** Tallest the expanded details may grow without reaching the top chrome. */
-  detailsMaxHeight: number;
+  stageOpen?: boolean;
+  onOpenStage?: (surface: BridgeUiSurface) => void;
   onAction: BridgeUiActionHandler;
   onDismiss: (surface: BridgeUiSurface) => void;
 }
 
-const FOLLOW_LATEST_SLOP = 24;
-// The dock's header row, the gap below it, and a one-line composer stay on screen when expanded.
-const EXPANDED_FIXED_CONTROLS_HEIGHT = 114;
-
 /**
- * Expanded details share the reading space left between the top chrome, the fixed call and
- * composer controls, and the keyboard or safe area evenly with the chat transcript, so neither
- * shrinks to a sliver on a laptop-pose Duo's short upper display.
- */
-export function phoneCallDetailsMaxHeight(options: {
-  windowHeight: number;
-  topChromeHeight: number;
-  bottomInset: number;
-}): number {
-  const reading =
-    options.windowHeight -
-    options.topChromeHeight -
-    options.bottomInset -
-    EXPANDED_FIXED_CONTROLS_HEIGHT;
-  return Math.max(0, Math.min(Math.floor(reading / 2), 300));
-}
-
-/**
- * A live call is ambient context while the user keeps chatting, so it rests as one glanceable row
- * above the composer — who, what state, how long, and Hang Up — and reveals the transcript only on
- * request.
+ * Ambient 1-row Live Call Pill docked cleanly above the composer inside the message column.
+ * Never expands inline over the transcript; tapping opens the dedicated Live Call Stage
+ * (sheet on compact/laptop poses, trailing side pane on iPhone Duo Book / Open wide poses).
  */
 export function PhoneCallDock({
   surface,
-  detailsMaxHeight,
+  stageOpen = false,
+  onOpenStage,
   onAction,
   onDismiss,
 }: PhoneCallDockProps) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const model = useMemo(() => phoneCallModel(surface), [surface]);
-  const [expanded, setExpanded] = useState(false);
   const [hangup, setHangup] = useState<HangupState>('idle');
   const elapsed = useCallElapsedSeconds(model, getBridgeUiSurfaceReceivedAt(surface));
   const statusLine = phoneCallStatusLine(model, elapsed, hangup);
-  const accent = phaseColor(theme, model.phase);
+  const accent = activityColor(theme, model.phase, model.activityKind);
+  const badgeBg = activityBackground(theme, model.phase, model.activityKind);
+  const iconName = activityIconName(model.phase, model.activityKind);
   const hangupAction = model.hangupAction;
   const settled = model.phase === 'ended' || model.phase === 'failed';
 
   // Announce state changes and the outcome, never each tick of the timer.
   useAccessibilityAnnouncement(
-    `${model.callee}: ${settled || hangup !== 'idle' ? statusLine : model.status}`,
+    `${model.calleeDisplay.displayName}: ${settled || hangup !== 'idle' ? statusLine : (model.activityLabel ?? model.status)}`,
   );
 
   useEffect(() => {
@@ -95,42 +64,40 @@ export function PhoneCallDock({
     }
   }, [hangupAction]);
 
-  useEffect(() => {
-    if (settled) {
-      setExpanded(false);
-    }
-  }, [settled]);
-
   return (
-    <View style={styles.card} testID="phone-call-dock">
+    <View style={[styles.card, stageOpen && styles.cardActive]} testID="phone-call-dock">
       <View style={styles.row}>
         <Pressable
           onPress={() => {
             void feedback.selection();
-            setExpanded((value) => !value);
+            onOpenStage?.(surface);
           }}
           style={({ pressed }) => [styles.summary, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel={`Phone call with ${model.callee}, ${statusLine}`}
+          accessibilityLabel={`Phone call with ${model.calleeDisplay.displayName}, ${statusLine}`}
           accessibilityHint={
-            expanded ? 'Hides the call details' : 'Shows the live transcript and call details'
+            stageOpen
+              ? 'Minimizes the live call view'
+              : 'Opens the live call transcript and controls'
           }
-          accessibilityState={controlAccessibilityState({ expanded })}
+          accessibilityState={controlAccessibilityState({ expanded: stageOpen })}
           testID="phone-call-dock-toggle"
         >
-          <View
-            style={[styles.indicator, { backgroundColor: phaseBackground(theme, model.phase) }]}
-          >
-            <Ionicons
-              {...decorativeAccessibilityProps}
-              name={model.phase === 'held' ? 'pause' : 'call'}
-              size={15}
-              color={accent}
-            />
+          <View style={[styles.indicator, { backgroundColor: badgeBg }]}>
+            {model.activityKind === 'running_tool' ? (
+              <ActivityIndicator size="small" color={accent} />
+            ) : (
+              <Ionicons
+                {...decorativeAccessibilityProps}
+                name={iconName}
+                size={15}
+                color={accent}
+              />
+            )}
           </View>
           <View style={styles.copy}>
             <Text style={styles.callee} numberOfLines={1} ellipsizeMode="middle">
-              {model.callee}
+              {model.calleeDisplay.displayName}
             </Text>
             <Text
               style={[styles.status, hangup === 'failed' && styles.statusError]}
@@ -142,7 +109,7 @@ export function PhoneCallDock({
           </View>
           <Ionicons
             {...decorativeAccessibilityProps}
-            name={expanded ? 'chevron-down' : 'chevron-up'}
+            name={stageOpen ? 'chevron-down' : 'chevron-forward'}
             size={16}
             color={theme.colors.textMuted}
           />
@@ -201,169 +168,8 @@ export function PhoneCallDock({
           </Pressable>
         ) : null}
       </View>
-      {expanded ? (
-        <PhoneCallDetails
-          model={model}
-          maxHeight={detailsMaxHeight}
-          styles={styles}
-          theme={theme}
-        />
-      ) : null}
     </View>
   );
-}
-
-function PhoneCallDetails({
-  model,
-  maxHeight,
-  styles,
-  theme,
-}: {
-  model: PhoneCallModel;
-  maxHeight: number;
-  styles: ReturnType<typeof createStyles>;
-  theme: AppTheme;
-}) {
-  const markdownStyles = useMemo(() => createWorkflowMarkdownStyles(theme), [theme]);
-  const scrollRef = useRef<ScrollView>(null);
-  const followingLatest = useRef(true);
-  // Live calls read like a chat: keep the newest line in view unless the user scrolls back.
-  const followLatest = model.hangupAction !== null;
-  const settled = model.phase === 'ended' || model.phase === 'failed';
-
-  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    followingLatest.current =
-      contentSize.height - contentOffset.y - layoutMeasurement.height < FOLLOW_LATEST_SLOP;
-  };
-
-  return (
-    <ScrollView
-      ref={scrollRef}
-      nestedScrollEnabled
-      bounces={false}
-      style={{ maxHeight }}
-      contentContainerStyle={styles.details}
-      onScroll={handleScroll}
-      scrollEventThrottle={64}
-      onContentSizeChange={() => {
-        if (followLatest && followingLatest.current) {
-          scrollRef.current?.scrollToEnd({ animated: false });
-        }
-      }}
-      testID="phone-call-dock-details"
-    >
-      {model.outcome ? (
-        <DetailField label={model.outcome.label} value={model.outcome.value} styles={styles} />
-      ) : null}
-      {model.details ? (
-        <DetailField label="Details" value={model.details} styles={styles} muted />
-      ) : null}
-      {settled && model.durationSeconds !== null ? (
-        <DetailField
-          label="Duration"
-          value={formatCallElapsed(model.durationSeconds)}
-          styles={styles}
-        />
-      ) : null}
-      {model.objective ? (
-        <DetailField label="Objective" value={model.objective} styles={styles} />
-      ) : null}
-      <View style={styles.divider} />
-      {model.transcriptMarkdown ? (
-        <Markdown style={markdownStyles}>{model.transcriptMarkdown}</Markdown>
-      ) : (
-        <Text style={styles.meta}>{emptyTranscriptText(model.phase)}</Text>
-      )}
-    </ScrollView>
-  );
-}
-
-function emptyTranscriptText(phase: PhoneCallPhase): string {
-  switch (phase) {
-    case 'connecting':
-      return 'The transcript starts when the call connects.';
-    case 'live':
-    case 'held':
-      return 'Nothing has been said yet.';
-    case 'ended':
-    case 'failed':
-      return 'Nothing was said on this call.';
-  }
-}
-
-function DetailField({
-  label,
-  value,
-  styles,
-  muted = false,
-}: {
-  label: string;
-  value: string;
-  styles: ReturnType<typeof createStyles>;
-  muted?: boolean;
-}) {
-  return (
-    <View style={styles.field} accessible accessibilityLabel={`${label}: ${value}`}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <Text style={muted ? styles.meta : styles.fieldValue} selectable={muted}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-/** Ticks locally between bridge updates; the bridge's duration stays the source of truth. */
-function useCallElapsedSeconds(
-  model: PhoneCallModel,
-  receivedAt: number | undefined,
-): number | null {
-  const running = model.phase === 'live' || model.phase === 'held';
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (!running) {
-      return undefined;
-    }
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [running, receivedAt]);
-
-  if (model.durationSeconds === null || !running) {
-    return model.durationSeconds;
-  }
-  const sinceReceived = receivedAt === undefined ? 0 : Math.max(0, now - receivedAt);
-  return model.durationSeconds + Math.floor(sinceReceived / 1000);
-}
-
-function phaseColor(theme: AppTheme, phase: PhoneCallPhase): string {
-  switch (phase) {
-    case 'live':
-      return theme.colors.success;
-    case 'held':
-      return theme.colors.warning;
-    case 'failed':
-      return theme.colors.error;
-    case 'connecting':
-      return theme.colors.textSecondary;
-    case 'ended':
-      return theme.colors.textMuted;
-  }
-}
-
-function phaseBackground(theme: AppTheme, phase: PhoneCallPhase): string {
-  switch (phase) {
-    case 'live':
-      return theme.colors.successBg;
-    case 'held':
-      return theme.colors.warningBg;
-    case 'failed':
-      return theme.colors.errorBg;
-    case 'connecting':
-    case 'ended':
-      return theme.colors.bgMain;
-  }
 }
 
 const createStyles = (theme: AppTheme) =>
@@ -371,13 +177,17 @@ const createStyles = (theme: AppTheme) =>
     card: {
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.borderLight,
-      borderRadius: theme.radius.md,
+      borderRadius: theme.radius.full,
+      borderCurve: 'continuous',
       backgroundColor: theme.colors.bgItem,
       // Same inset as the composer input and queued-message dock, so the stack shares one column.
       marginHorizontal: theme.spacing.lg,
       marginBottom: theme.spacing.sm,
       boxShadow: '0px 4px 10px rgba(0, 0, 0, 0.16)',
       overflow: 'hidden',
+    },
+    cardActive: {
+      borderColor: theme.colors.borderHighlight,
     },
     row: {
       flexDirection: 'row',
@@ -392,7 +202,7 @@ const createStyles = (theme: AppTheme) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: theme.spacing.sm,
-      paddingLeft: theme.spacing.md,
+      paddingLeft: theme.spacing.sm + 2,
       paddingRight: theme.spacing.xs,
       paddingVertical: theme.spacing.xs,
     },
@@ -445,29 +255,5 @@ const createStyles = (theme: AppTheme) =>
     },
     pressed: {
       opacity: 0.72,
-    },
-    details: {
-      gap: theme.spacing.sm,
-      paddingHorizontal: theme.spacing.md,
-      paddingBottom: theme.spacing.md,
-    },
-    field: {
-      gap: 2,
-    },
-    fieldLabel: {
-      ...theme.typography.metadata,
-      color: theme.colors.textMuted,
-    },
-    fieldValue: {
-      ...theme.typography.caption,
-      color: theme.colors.textPrimary,
-    },
-    meta: {
-      ...theme.typography.metadata,
-      color: theme.colors.textMuted,
-    },
-    divider: {
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: theme.colors.borderLight,
     },
   });

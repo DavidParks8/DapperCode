@@ -345,6 +345,7 @@ pub enum TranscriptSpeaker {
     Assistant,
     Callee,
     Steer,
+    Event,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -613,6 +614,18 @@ impl VoiceConversation {
                 result_text.trim(),
             )));
         }
+    }
+
+    pub fn record_event(&mut self, description: &str) {
+        let trimmed = description.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        self.transcript.push(TranscriptEntry {
+            speaker: TranscriptSpeaker::Event,
+            text: trimmed.to_string(),
+            interrupted: false,
+        });
     }
 
     pub fn inject_steer(&mut self, instruction: &str) {

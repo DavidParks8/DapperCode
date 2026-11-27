@@ -123,6 +123,10 @@ const StableTranscriptAndSheets = memoizeContextSurface(MainScreenTranscriptAndS
   'collaborationModeOptions',
   'agentPickerOptions',
   'closeAgentModal',
+  'callBridgeUiSurfaces',
+  'supersededCallBridgeUiSurfaces',
+  'handleBridgeUiAction',
+  'dismissBridgeUiSurface',
 ]);
 
 const StableModelAndEffortSheets = memoizeContextSurface(MainScreenModelAndEffortSheets, [

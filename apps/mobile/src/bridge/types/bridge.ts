@@ -85,6 +85,7 @@ export interface ResolveBridgeUiSurfaceRequest {
   threadId: string;
   turnId?: string | null;
   actionId: string;
+  payload?: Record<string, unknown>;
 }
 
 export interface ResolveBridgeUiSurfaceResponse {

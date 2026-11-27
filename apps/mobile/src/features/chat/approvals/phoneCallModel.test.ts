@@ -146,8 +146,10 @@ describe('phoneCallModel', () => {
 
   it('only docks phone-call workflow cards', () => {
     expect(isPhoneCallSurface(callSurface())).toBe(true);
+    expect(isPhoneCallSurface(callSurface({ kind: null }))).toBe(true);
     expect(isPhoneCallSurface(callSurface({ presentation: 'modal' }))).toBe(false);
     expect(isPhoneCallSurface(callSurface({ kind: 'goal' }))).toBe(false);
+    expect(isPhoneCallSurface(callSurface({ id: 'goal-1', kind: null }))).toBe(false);
     expect(formatCallElapsed(-4)).toBe('0:00');
   });
 });

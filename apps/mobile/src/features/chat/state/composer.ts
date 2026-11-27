@@ -57,3 +57,11 @@ export const planPanelCollapsedByThreadAtom = screenAtom<Record<string, boolean>
 export const pendingPlanImplementationPromptsAtom = screenAtom(
   (): Record<string, PendingPlanImplementationPrompt> => ({}),
 );
+
+/** Surface ID currently open in the Live Call Stage (sheet or Duo trailing side pane), or null. */
+export const openPhoneCallSurfaceIdAtom = screenAtom<string | null>(null);
+
+/** Preserves in-progress whisper drafts per call surface across Duo pose switches and minimize/reopen. */
+export const phoneCallWhisperDraftByIdAtom = screenAtom<Record<string, string>>(
+  (): Record<string, string> => ({}),
+);

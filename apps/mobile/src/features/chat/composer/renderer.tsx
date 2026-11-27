@@ -2,15 +2,16 @@ import { pendingApprovalAtom, stoppingTurnAtom } from '../state/turn';
 import {
   composerHeightAtom,
   keyboardVisibleAtom,
-  topChromeHeightAtom,
+  openPhoneCallSurfaceIdAtom,
   queueActionItemIdAtom,
   queueActionKindAtom,
 } from '../state/composer';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useMemo, type ComponentProps } from 'react';
 import {
   useSceneContentInsets,
   useSceneHorizontalInsets,
+  useShellLayout,
   useTrailingActionRail,
 } from '@shell/layout/useShellLayout';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,7 +19,8 @@ import { Pressable, Text, View, useWindowDimensions, type LayoutChangeEvent } fr
 import Animated, { FadeIn, FadeOut, ReduceMotion } from 'react-native-reanimated';
 import { ApprovalBanner } from '../approvals/ApprovalBanner';
 import { BridgeUiBanner } from '../approvals/BridgeUiSurface';
-import { PhoneCallDock, phoneCallDetailsMaxHeight } from '../approvals/PhoneCallDock';
+import { PhoneCallDock } from '../approvals/PhoneCallDock';
+import { resolvePhoneCallStageLayout } from '../phoneCall/stageLayout';
 import { ChatInput } from './ChatInput';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { computeHitSlop } from '@shared/ui/touchTarget';
@@ -38,6 +40,42 @@ export type MainScreenComposerRendererContext = MainScreenWorkflowQueueStateCont
 
 type ComposerPendingApproval = ComponentProps<typeof ApprovalBanner>['approval'];
 type BridgeRecoveryBannerButtonHitSlop = NonNullable<ComponentProps<typeof Pressable>['hitSlop']>;
+
+function resolveComposerMargins(options: {
+  callSplitPaneActive: boolean;
+  contentInsets: ReturnType<typeof useSceneContentInsets>;
+  sceneInsets: ReturnType<typeof useSceneHorizontalInsets>;
+}) {
+  if (options.callSplitPaneActive) {
+    return { marginLeft: 0, marginRight: 0 };
+  }
+  if (options.contentInsets.foldLeading > 0) {
+    return { marginLeft: options.contentInsets.foldLeading, marginRight: 0 };
+  }
+  const centeringOffset = Math.max(
+    -options.contentInsets.readable,
+    Math.min(
+      options.contentInsets.readable,
+      (options.sceneInsets.paddingRight - options.sceneInsets.paddingLeft) / 2,
+    ),
+  );
+  return {
+    marginLeft: options.contentInsets.readable + centeringOffset,
+    marginRight: options.contentInsets.readable - centeringOffset,
+  };
+}
+
+function isCallSplitPaneOpen(options: {
+  stageMode: ReturnType<typeof resolvePhoneCallStageLayout>['mode'];
+  openSurfaceId: string | null;
+  surfaces: readonly { id: string }[];
+}): boolean {
+  return (
+    options.stageMode === 'split-pane' &&
+    options.openSurfaceId !== null &&
+    options.surfaces.some((surface) => surface.id === options.openSurfaceId)
+  );
+}
 
 export function useMainScreenComposerRenderer(context: MainScreenComposerRendererContext) {
   const {
@@ -95,30 +133,28 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
   const queueActionItemId = useAtomValue(queueActionItemIdAtom);
   const queueActionKind = useAtomValue(queueActionKindAtom);
   const setComposerHeight = useSetAtom(composerHeightAtom);
+  const [openPhoneCallSurfaceId, setOpenPhoneCallSurfaceId] = useAtom(openPhoneCallSurfaceIdAtom);
   const contentInsets = useSceneContentInsets();
   const sceneInsets = useSceneHorizontalInsets();
-  // Use spare readable-column gutters to center below side rails without crossing safe areas.
-  const centeringOffset = Math.max(
-    -contentInsets.readable,
-    Math.min(contentInsets.readable, (sceneInsets.paddingRight - sceneInsets.paddingLeft) / 2),
-  );
-  // A fold still moves the controls onto the trailing page, clear of the hinge.
-  const composerMargins =
-    contentInsets.foldLeading > 0
-      ? { marginLeft: contentInsets.foldLeading, marginRight: 0 }
-      : {
-          marginLeft: contentInsets.readable + centeringOffset,
-          marginRight: contentInsets.readable - centeringOffset,
-        };
+  const shellLayout = useShellLayout();
+  const { width: windowWidth } = useWindowDimensions();
+  const stageLayout = resolvePhoneCallStageLayout({
+    windowWidth,
+    layout: shellLayout,
+    sceneInsets,
+  });
+  const callSplitPaneActive = isCallSplitPaneOpen({
+    stageMode: stageLayout.mode,
+    openSurfaceId: openPhoneCallSurfaceId,
+    surfaces: callBridgeUiSurfaces,
+  });
+  const composerMargins = resolveComposerMargins({
+    callSplitPaneActive,
+    contentInsets,
+    sceneInsets,
+  });
   // Send moves onto a trailing bar, lined up with the bar's buttons. The scene ends at the window's
   // trailing edge, so the composer ends where the scene's padding and its own margin begin.
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const topChromeHeight = useAtomValue(topChromeHeightAtom);
-  const callDetailsMaxHeight = phoneCallDetailsMaxHeight({
-    windowHeight,
-    topChromeHeight,
-    bottomInset: composerOverlayInset + composerSafeAreaBottomInset,
-  });
   const actionRail = useTrailingActionRail();
   const actionColumn = actionRail
     ? {
@@ -170,9 +206,15 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
         <PhoneCallDock
           key={surface.id}
           surface={surface}
-          detailsMaxHeight={callDetailsMaxHeight}
+          stageOpen={openPhoneCallSurfaceId === surface.id}
+          onOpenStage={(nextSurface) => {
+            setOpenPhoneCallSurfaceId((current) =>
+              current === nextSurface.id ? null : nextSurface.id,
+            );
+          }}
           onAction={handleBridgeUiAction}
           onDismiss={(nextSurface) => {
+            setOpenPhoneCallSurfaceId((current) => (current === nextSurface.id ? null : current));
             // Older results are superseded by this one; retire them together so none resurfaces.
             for (const retired of [nextSurface, ...supersededCallBridgeUiSurfaces]) {
               void dismissBridgeUiSurface(retired);

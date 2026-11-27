@@ -12,8 +12,20 @@ export const createMainScreenShellStyles = (theme: AppTheme) =>
       flex: 1,
       position: 'relative',
     },
+    bodySplitRow: {
+      flexDirection: 'row',
+    },
+    bodyLeadingPane: {
+      flex: 1,
+      minWidth: 0,
+      position: 'relative',
+    },
     bodyShell: {
       flex: 1,
+    },
+    phoneCallSplitPane: {
+      flexShrink: 0,
+      backgroundColor: theme.colors.bgMain,
     },
     topChromeOverlay: {
       position: 'absolute',
@@ -62,9 +74,13 @@ export const createMainScreenShellStyles = (theme: AppTheme) =>
     },
     topCardsRow: {
       backgroundColor: theme.colors.bgMain,
-      paddingHorizontal: theme.spacing.lg,
+      zIndex: 2,
+    },
+    topCardsScroll: {
+      flexGrow: 0,
+    },
+    topCardsRowContent: {
       paddingBottom: theme.spacing.sm,
       gap: theme.spacing.sm,
-      zIndex: 2,
     },
   }) as const;

@@ -1,11 +1,20 @@
-import { KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
+import { Dimensions, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Provider, createStore } from 'jotai';
 import { createRef } from 'react';
 import renderer, { act, type ReactTestInstance } from 'react-test-renderer';
 
 import { createAgUiThreadMessageState } from '@bridge/agui/agUiMessagesState';
-import { keyboardInsetAtom, keyboardVisibleAtom, topChromeHeightAtom } from '../state/composer';
+import type { BridgeUiSurface } from '@bridge/types/types';
+import { AppThemeProvider, createAppTheme } from '@shared/theme';
+import { CLOSED_DUO_TRAITS } from '@shared/testing/foldableLayout';
+import {
+  keyboardInsetAtom,
+  keyboardVisibleAtom,
+  openPhoneCallSurfaceIdAtom,
+  phoneCallWhisperDraftByIdAtom,
+  topChromeHeightAtom,
+} from '../state/composer';
 import { liveAssistantByThreadAtom } from '../state/turn';
 import { windowTraitsAtom } from '@shell/state/layout/atoms';
 import { MainScreenTranscriptAndSheets } from './TranscriptAndSheets';
@@ -25,11 +34,22 @@ jest.mock('./ChatTranscriptView', () => ({
     return null;
   },
 }));
+jest.mock('@expo/vector-icons', () => ({ Ionicons: () => null }));
+jest.mock('@shared/feedback', () => ({
+  feedback: {
+    selection: jest.fn().mockResolvedValue(undefined),
+    destructive: jest.fn().mockResolvedValue(undefined),
+  },
+}));
+jest.mock('react-native-reanimated', () => jest.requireActual('@shared/testing/reanimatedMock'));
 jest.mock('../styles/useStyles', () => ({
   useMainScreenStyles: () => ({
     styles: {
       bodyContainer: {},
+      bodySplitRow: { flexDirection: 'row' },
+      bodyLeadingPane: { flex: 1 },
       bodyShell: {},
+      phoneCallSplitPane: {},
     },
   }),
 }));
@@ -398,5 +418,130 @@ describe('MainScreenTranscriptAndSheets', () => {
     });
     expect(mockTranscriptProps.at(-1)).toMatchObject({ topInset: 80, bottomInset: 584 });
     act(() => tree?.unmount());
+  });
+
+  it('hosts the Live Call Stage across the Book-pose hinge and preserves whisper drafts when folded closed', () => {
+    Object.defineProperty(Platform, 'OS', { configurable: true, value: 'ios' });
+    const theme = createAppTheme('dark');
+    const liveCall: BridgeUiSurface = {
+      id: 'phone-call-live:duo-1',
+      threadId: 'thread-1',
+      kind: 'phone-call',
+      presentation: 'workflowCard',
+      tone: 'success',
+      title: 'Phone call · Pharmacy',
+      subtitle: 'In call',
+      blocks: [
+        {
+          type: 'keyValue',
+          items: [
+            { label: 'Status', value: 'In call' },
+            { label: 'To', value: 'Pharmacy (+15551234567)' },
+            { label: 'Duration', value: '0:30' },
+          ],
+        },
+      ],
+      actions: [{ id: 'hangup', label: 'Hang Up', style: 'destructive', dismissesSurface: false }],
+      dismissible: false,
+    };
+    const store = createStore();
+    store.set(topChromeHeightAtom, 96);
+    store.set(openPhoneCallSurfaceIdAtom, liveCall.id);
+    store.set(phoneCallWhisperDraftByIdAtom, { [liveCall.id]: 'Ask about Friday pickup' });
+    store.set(windowTraitsAtom, {
+      horizontalSizeClass: 'regular',
+      verticalSizeClass: 'compact',
+      divisions: [{ x: 455, y: 0, width: 41, height: 669 }],
+    });
+    act(() => {
+      Dimensions.set({
+        window: { width: 951, height: 669, scale: 3, fontScale: 1 },
+        screen: { width: 951, height: 669, scale: 3, fontScale: 1 },
+      });
+    });
+
+    const context = createContext({
+      callBridgeUiSurfaces: [liveCall],
+      supersededCallBridgeUiSurfaces: [],
+      handleBridgeUiAction: jest.fn().mockResolvedValue(true),
+      dismissBridgeUiSurface: jest.fn(),
+    });
+    let tree: ReturnType<typeof renderer.create> | undefined;
+    try {
+      act(() => {
+        tree = renderer.create(
+          <SafeAreaProvider
+            initialMetrics={{
+              frame: { x: 0, y: 0, width: 951, height: 669 },
+              insets: { top: 0, left: 0, right: 84, bottom: 20 },
+            }}
+          >
+            <Provider store={store}>
+              <AppThemeProvider theme={theme}>
+                <MainScreenTranscriptAndSheets context={context as never} />
+              </AppThemeProvider>
+            </Provider>
+          </SafeAreaProvider>,
+        );
+      });
+      const root = tree!.root as Queryable;
+      const splitPane = root.findAll(
+        (node) =>
+          node.props['testID'] === 'phone-call-stage-split-pane' && typeof node.type !== 'string',
+      );
+      expect(splitPane).toHaveLength(1);
+      expect(StyleSheet.flatten(splitPane[0]!.props['style'] as never)).toMatchObject({
+        width: 951 - 455 - 41 - 84,
+        marginLeft: 41,
+        paddingTop: 96,
+      });
+
+      // Fold closed -> split pane retires to sheet host while keeping open state & whisper draft.
+      act(() => {
+        Dimensions.set({
+          window: { width: 466, height: 678, scale: 3, fontScale: 1 },
+          screen: { width: 466, height: 678, scale: 3, fontScale: 1 },
+        });
+        store.set(windowTraitsAtom, CLOSED_DUO_TRAITS);
+      });
+      expect(
+        root.findAll(
+          (node) =>
+            node.props['testID'] === 'phone-call-stage-split-pane' && typeof node.type !== 'string',
+        ),
+      ).toHaveLength(0);
+      expect(store.get(openPhoneCallSurfaceIdAtom)).toBe(liveCall.id);
+      expect(store.get(phoneCallWhisperDraftByIdAtom)[liveCall.id]).toBe('Ask about Friday pickup');
+
+      // When the live call retires, both the open stage ID and stale whisper draft are pruned.
+      act(() => {
+        tree!.update(
+          <SafeAreaProvider
+            initialMetrics={{
+              frame: { x: 0, y: 0, width: 466, height: 678 },
+              insets: { top: 0, left: 0, right: 84, bottom: 20 },
+            }}
+          >
+            <Provider store={store}>
+              <AppThemeProvider theme={theme}>
+                <MainScreenTranscriptAndSheets
+                  context={{ ...context, callBridgeUiSurfaces: [] } as never}
+                />
+              </AppThemeProvider>
+            </Provider>
+          </SafeAreaProvider>,
+        );
+      });
+      expect(store.get(openPhoneCallSurfaceIdAtom)).toBeNull();
+      expect(store.get(phoneCallWhisperDraftByIdAtom)).toEqual({});
+    } finally {
+      act(() => tree?.unmount());
+      act(() => {
+        Dimensions.set({
+          window: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+          screen: { width: 750, height: 1334, scale: 2, fontScale: 1 },
+        });
+      });
+    }
   });
 });

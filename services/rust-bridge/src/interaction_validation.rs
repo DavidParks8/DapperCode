@@ -48,6 +48,28 @@ pub(super) fn read_bool(value: Option<&Value>) -> Option<bool> {
     value.and_then(Value::as_bool)
 }
 
+pub(super) fn validate_bridge_ui_action_payload(
+    payload: Option<&Value>,
+) -> Result<(), BridgeError> {
+    let Some(value) = payload else {
+        return Ok(());
+    };
+    if !value.is_object() {
+        return Err(BridgeError::invalid_params("payload must be a JSON object"));
+    }
+    let encoded_bytes = serde_json::to_vec(value)
+        .map_err(|error| BridgeError::invalid_params(format!("invalid action payload: {error}")))?
+        .len();
+    if encoded_bytes > UI_SURFACE_ACTION_PAYLOAD_MAX_BYTES {
+        return Err(BridgeError::resource_limit(
+            "ui_surface_action_payload_bytes",
+            UI_SURFACE_ACTION_PAYLOAD_MAX_BYTES,
+            encoded_bytes,
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn validate_bridge_ui_surface(surface: &BridgeUiSurface) -> Result<(), BridgeError> {
     let encoded_bytes = serde_json::to_vec(surface)
         .map_err(|error| BridgeError::invalid_params(format!("invalid UI surface: {error}")))?

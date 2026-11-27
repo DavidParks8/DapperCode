@@ -26,7 +26,9 @@ The bridge also exposes RPC helpers. These are useful for bridge-internal adapte
 - `bridge/ui/dismiss`
 - `bridge/ui/resolve`
 
-`bridge/ui/present` and `bridge/ui/update` accept a full `BridgeUiSurface`. `bridge/ui/dismiss` accepts `{ "id": "...", "threadId": "..." }`. `bridge/ui/resolve` accepts `{ "id": "...", "threadId": "...", "turnId": "...", "actionId": "..." }`.
+`bridge/ui/present` and `bridge/ui/update` accept a full `BridgeUiSurface`. `bridge/ui/dismiss` accepts `{ "id": "...", "threadId": "..." }`. `bridge/ui/resolve` accepts `{ "id": "...", "threadId": "...", "turnId": "...", "actionId": "...", "payload"?: { ... } }`, where `payload` is an optional JSON object (bounded to 16 KiB) carrying action-specific input — for example, editable approval fields (`objective`, `firstMessage`, `context`) on `phone-call-approval:*` `approve`, or `{ "instruction": "..." }` on `phone-call-live:*` `steer`.
+
+Phone-call live surfaces (`kind: "phone-call"`, `presentation: "workflowCard"`) also carry an `Activity` key-value entry (`Dialing`, `Ringing`, `Listening`, `Agent speaking`, `Recipient speaking`, or `On hold`) and may emit `**Event:**` lines (such as DTMF presses) alongside speaker turns (`**Agent:**`, `**<Recipient>:**`, `**Instruction (not spoken):**`). Mobile also renders custom `Activity` strings and `**Tool:**` transcript lines as inline tool-activity indicators for future voice tool runs.
 
 ## Surface Schema
 

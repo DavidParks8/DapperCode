@@ -2,17 +2,17 @@ import { useMainScreenStyles } from '../styles/useStyles';
 import { creatingAtom, sendingAtom, stoppingTurnAtom } from '../state/turn';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { Ionicons } from '@expo/vector-icons';
-import { type ComponentProps, useMemo, useState } from 'react';
+import { type ComponentProps, useCallback, useMemo, useState } from 'react';
 import {
   Pressable,
   ScrollView,
   Text,
   View,
+  type LayoutChangeEvent,
   type StyleProp,
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
-import { BridgeUiWorkflowCard } from '../approvals/BridgeUiSurface';
 import { ChatHeader } from './ChatHeader';
 import { decorativeAccessibilityProps } from '@shared/accessibility';
 import { feedback } from '@shared/feedback';
@@ -24,7 +24,7 @@ import { GlassSurface } from '@shared/ui/glass/GlassSurface';
 import { activeProfileFeaturesAtom } from '@shell/state/bridge/atoms';
 import { startNewChatAtom } from '@shell/navigation/actions';
 import { AppSheet } from '@shared/ui/AppSheet';
-import { WorkflowCard } from '../workflow/Workflow';
+import { TopCardsRow } from './TopCardsRow';
 import { SESSION_META_CHIP_HEIGHT } from '../styles/sessionMetaChip';
 import type { SessionTokenTotals } from '../state/runtime';
 import type {
@@ -66,17 +66,6 @@ const SESSION_META_CHIP_HIT_SLOP_OPTIONS = { maxHorizontal: 3, maxVertical: 8 };
 function handleSessionMetaChipPress(action: () => void | Promise<void>): void {
   void feedback.selection();
   void action();
-}
-
-function computeWorkflowCardScrollMaxHeight(
-  windowHeight: number,
-  workflowCardMode: Context['workflowCardMode'],
-) {
-  if (workflowCardMode === 'approval') {
-    return Math.max(176, Math.min(Math.floor(windowHeight * 0.34), 280));
-  }
-
-  return Math.max(176, Math.min(Math.floor(windowHeight * 0.4), 360));
 }
 
 function formatScaledTokenValue(scaled: number): string {
@@ -311,62 +300,6 @@ function SessionMetaRow(props: {
   );
 }
 
-function TopCardsRow(props: {
-  context: Context;
-  styles: MainScreenStyles;
-  sending: boolean;
-  creating: boolean;
-  stoppingTurn: boolean;
-}) {
-  const { context, styles, sending, creating, stoppingTurn } = props;
-  const {
-    workflowBridgeUiSurfaces,
-    windowHeight,
-    handleBridgeUiAction,
-    dismissBridgeUiSurface,
-    workflowCardMode,
-    selectedThreadPlan,
-    planPanelCollapsed,
-    toggleSelectedPlanPanel,
-    implementPlan,
-    stayInPlanMode,
-  } = context;
-  const workflowCardScrollMaxHeight = computeWorkflowCardScrollMaxHeight(
-    windowHeight,
-    workflowCardMode,
-  );
-
-  return (
-    <View style={styles.topCardsRow}>
-      {workflowBridgeUiSurfaces.map((surface) => (
-        <BridgeUiWorkflowCard
-          key={surface.id}
-          surface={surface}
-          scrollMaxHeight={Math.max(176, Math.min(Math.floor(windowHeight * 0.4), 360))}
-          onAction={(nextSurface, action) => {
-            void handleBridgeUiAction(nextSurface, action);
-          }}
-          onDismiss={(nextSurface) => {
-            void dismissBridgeUiSurface(nextSurface);
-          }}
-        />
-      ))}
-      {workflowCardMode ? (
-        <WorkflowCard
-          mode={workflowCardMode}
-          plan={selectedThreadPlan}
-          collapsed={planPanelCollapsed}
-          scrollMaxHeight={workflowCardScrollMaxHeight}
-          actionDisabled={sending || creating || stoppingTurn}
-          onToggleCollapse={toggleSelectedPlanPanel}
-          onImplement={() => void implementPlan()}
-          onStayInPlanMode={stayInPlanMode}
-        />
-      ) : null}
-    </View>
-  );
-}
-
 function TokenSheetGroup(props: {
   title: string;
   subtitle: string;
@@ -472,6 +405,11 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
   const creating = useAtomValue(creatingAtom);
   const stoppingTurn = useAtomValue(stoppingTurnAtom);
   const [tokenSheetVisible, setTokenSheetVisible] = useState(false);
+  const [headerChromeHeight, setHeaderChromeHeight] = useState(0);
+  const handleHeaderChromeLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+    setHeaderChromeHeight((current) => (current === nextHeight ? current : nextHeight));
+  }, []);
   const sessionMetaChipHitSlop = useMemo(
     () => computeHitSlop(SESSION_META_CHIP_VISIBLE_SIZE, SESSION_META_CHIP_HIT_SLOP_OPTIONS),
     [],
@@ -486,6 +424,7 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
     <>
       <GlassSurface
         role="chrome"
+        onLayout={handleHeaderChromeLayout}
         style={styles.topChromeGlass}
         testID="chat-top-chrome-glass-surface"
       >
@@ -525,6 +464,8 @@ export function MainScreenHeaderAndWorkflow({ context }: { context: Context }) {
         <TopCardsRow
           context={context}
           styles={styles}
+          theme={theme}
+          headerChromeHeight={headerChromeHeight}
           sending={sending}
           creating={creating}
           stoppingTurn={stoppingTurn}
