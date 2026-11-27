@@ -1,6 +1,6 @@
 import type { AgUiThreadMessageState } from '@bridge/agui/agUiMessages';
 import { partsMatchMessageContent } from '@bridge/agui/agUiContent';
-import { isLocalTranscriptMessage } from '@bridge/mapping/chatReconciliation';
+import { isLocalSystemMessage, isLocalTranscriptMessage } from '@bridge/mapping/chatReconciliation';
 import { getMessageText, isTransientUserMessage } from '@bridge/messages';
 import type { Chat, ChatMessage } from '@bridge/types/types';
 
@@ -106,12 +106,22 @@ export function applyAuthoritativeSnapshot(
     lastCovered < 0
       ? []
       : messages.slice(lastCovered + 1).filter((message) => !liveIds.has(message.id));
-  const covered = preserveLocalRows(
-    messages.slice(Math.max(0, firstCovered), lastCovered + 1),
-    projected,
-    replacedMessageIds,
-  );
-  return { messages: [...leading, ...covered, ...trailing], aliases };
+  const coveredPrevious = messages.slice(Math.max(0, firstCovered), lastCovered + 1);
+  const covered = preserveLocalRows(coveredPrevious, projected, replacedMessageIds);
+  const trailingLocalCount = countLeadingLocalMessages(trailing);
+  const mergedCovered =
+    trailingLocalCount > 0 && lastCovered >= 0
+      ? placeTrailingLocalRows(
+          covered,
+          coveredPrevious,
+          trailing.slice(0, trailingLocalCount),
+          replacedMessageIds,
+        )
+      : covered;
+  return {
+    messages: [...leading, ...mergedCovered, ...trailing.slice(trailingLocalCount)],
+    aliases,
+  };
 }
 
 function resolveAnchoredAliases(
@@ -210,6 +220,49 @@ function preserveLocalRows(
     }
   }
   return messages;
+}
+
+function countLeadingLocalMessages(messages: ChatMessage[]): number {
+  let count = 0;
+  while (count < messages.length && isLocalTranscriptMessage(messages[count])) {
+    count += 1;
+  }
+  return count;
+}
+
+function placeTrailingLocalRows(
+  covered: ChatMessage[],
+  coveredPrevious: ChatMessage[],
+  trailingLocal: ChatMessage[],
+  replacedMessageIds: ReadonlySet<string>,
+): ChatMessage[] {
+  const previousIds = new Set(coveredPrevious.map((message) => message.id));
+  const lastMatchedIndex = covered.reduce(
+    (last, message, index) => (previousIds.has(message.id) ? index : last),
+    -1,
+  );
+  const messages = [...covered];
+  let cursor = lastMatchedIndex >= 0 ? lastMatchedIndex + 1 : messages.length;
+  for (const message of trailingLocal) {
+    if (replacedMessageIds.has(message.id)) {
+      continue;
+    }
+    const insertionIndex = isLocalSystemMessage(message)
+      ? findNextUserIndex(messages, cursor)
+      : cursor;
+    messages.splice(insertionIndex, 0, message);
+    cursor = insertionIndex + 1;
+  }
+  return messages;
+}
+
+function findNextUserIndex(messages: ChatMessage[], fromIndex: number): number {
+  for (let index = fromIndex; index < messages.length; index += 1) {
+    if (messages[index]?.role === 'user') {
+      return index;
+    }
+  }
+  return messages.length;
 }
 
 function mergeUnanchoredSnapshot(

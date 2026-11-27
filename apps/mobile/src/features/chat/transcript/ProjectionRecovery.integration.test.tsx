@@ -232,6 +232,22 @@ describe('real transcript recovery during cache hydration', () => {
     expectRows(tree, [...expected, 'user:Second prompt']);
   });
 
+  it('keeps a trailing local stop notice before a newer turn in a subsequent snapshot', () => {
+    const local = message('local-system-1', 'system', 'Turn stopped by user.');
+    const state = snapshot(first);
+    const tree = render(chat([...first, local], 'complete'), state);
+    expectRows(tree, [...firstLabels, 'system:Turn stopped by user.']);
+
+    apply(state, { type: EventType.MESSAGES_SNAPSHOT, messages: [...first, nextUser, output] });
+    update(tree, chat([...first, local], 'complete'), state);
+    expectRows(tree, [
+      ...firstLabels,
+      'system:Turn stopped by user.',
+      'user:Second prompt',
+      'assistant:Second answer',
+    ]);
+  });
+
   it('retains every unrelated row when the cache swaps a draft for its explicit replacement', () => {
     const draft = message('draft', 'assistant', 'Draft');
     const corrected = message('corrected', 'assistant', 'Corrected');

@@ -119,6 +119,7 @@ export interface ChatMessageRenderContext {
 type ChatMessageKind =
   | 'user'
   | 'assistantLike'
+  | 'system'
   | 'compaction'
   | 'reasoning'
   | 'subAgent'
@@ -133,7 +134,10 @@ export function classifyChatMessageKind(
   if (message.role === 'user') {
     return 'user';
   }
-  if (['assistant', 'developer', 'system'].includes(message.role)) {
+  if (message.role === 'system') {
+    return 'system';
+  }
+  if (['assistant', 'developer'].includes(message.role)) {
     return 'assistantLike';
   }
   if (message.role === 'activity' && message.activityType === COMPACTION_ACTIVITY_TYPE) {
@@ -228,6 +232,35 @@ function renderAssistantLikeChatMessage(ctx: ChatMessageRenderContext) {
           testID={`chat-message-select-text-${message.id}`}
         />
       ) : null}
+    </View>
+  );
+}
+
+function renderSystemChatMessage(ctx: ChatMessageRenderContext) {
+  const { message, styles, messageText } = ctx;
+  const noticeText = messageText.trim();
+  if (!noticeText) {
+    return <></>;
+  }
+  return (
+    <View
+      testID={`chat-system-notice-${message.id}`}
+      accessible
+      accessibilityRole="text"
+      accessibilityLabel={noticeText}
+      style={[
+        styles.messageWrapper,
+        styles.messageWrapperAssistant,
+        styles.messageWrapperFullWidth,
+      ]}
+    >
+      <View style={styles.systemNoticeRow}>
+        <View style={styles.systemNoticeLine} />
+        <View style={styles.systemNoticeBadge}>
+          <Text style={styles.systemNoticeText}>{noticeText}</Text>
+        </View>
+        <View style={styles.systemNoticeLine} />
+      </View>
     </View>
   );
 }
@@ -493,6 +526,7 @@ export const CHAT_MESSAGE_RENDERERS: Record<
 > = {
   user: renderUserChatMessage,
   assistantLike: renderAssistantLikeChatMessage,
+  system: renderSystemChatMessage,
   compaction: renderCompactionChatMessage,
   reasoning: renderReasoningChatMessage,
   subAgent: renderSubAgentChatMessage,

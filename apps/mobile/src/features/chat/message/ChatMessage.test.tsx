@@ -1499,6 +1499,54 @@ describe('ChatMessage role and part matrices', () => {
     act(() => tree.unmount());
   });
 
+  it('renders plain system notices as non-model status dividers without message actions', () => {
+    const onOpenLocalPreview = jest.fn();
+    const tree = renderMessage(
+      {
+        id: 'local-system-stop',
+        role: 'system',
+        content: 'Turn stopped by user.',
+        createdAt: '2026-04-17T00:00:00.000Z',
+      },
+      { onOpenLocalPreview },
+    );
+    const root = tree.root;
+    const notice = root.findByProps({ testID: 'chat-system-notice-local-system-stop' });
+    expect(notice.props['accessibilityRole']).toBe('text');
+    expect(notice.props['accessibilityLabel']).toBe('Turn stopped by user.');
+    expect(hasRenderedText(root, 'Turn stopped by user.')).toBe(true);
+    expect(root.findAllByProps({ testID: 'chat-message-copy-local-system-stop' })).toHaveLength(0);
+    expect(
+      root.findAllByProps({ testID: 'chat-message-copy-local-system-stop-select' }),
+    ).toHaveLength(0);
+    expect(
+      root.findAllByProps({ testID: 'chat-message-select-target-local-system-stop' }),
+    ).toHaveLength(0);
+    expect(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Copy message'),
+    ).toHaveLength(0);
+    expect(
+      root.findAll((node) => node.props['accessibilityLabel'] === 'Select message text'),
+    ).toHaveLength(0);
+    act(() => tree.unmount());
+
+    const previewUrlTree = renderMessage(
+      {
+        id: 'system-truncated',
+        role: 'system',
+        content: 'Snapshot truncated (http://127.0.0.1:3000)',
+        createdAt: '2026-04-17T00:00:00.000Z',
+      },
+      { onOpenLocalPreview },
+    );
+    expect(
+      previewUrlTree.root.findAll(
+        (node) => node.props['accessibilityLabel'] === 'Open http://127.0.0.1:3000 in Browser',
+      ),
+    ).toHaveLength(0);
+    act(() => previewUrlTree.unmount());
+  });
+
   it('renders structured data images and omits empty text and resource bodies', () => {
     const tree = renderMessage({
       id: 'part-fallbacks',

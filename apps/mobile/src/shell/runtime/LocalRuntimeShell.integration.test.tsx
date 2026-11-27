@@ -2338,6 +2338,15 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     expect(composerText(root)).toBe('');
     const next = transcript(root).indexOf(request);
     expect(transcript(root).slice(0, next)).not.toContain('Turn stopped by user.');
+    expect(transcript(root).slice(next + 1)).toContain('Turn stopped by user.');
+    const rows = timeline(root);
+    expect(rows.indexOf('system: Turn stopped by user.')).toBeGreaterThan(-1);
+    expect(rows.indexOf('system: Turn stopped by user.')).toBeLessThan(
+      rows.indexOf(`user: ${request}`),
+    );
+    expect(rows.indexOf(`user: ${request}`)).toBeLessThan(
+      rows.indexOf('assistant: The current file contains fixture.'),
+    );
     const skillConfig = /\["ws-one","(?:\.opencode\/)?opencode\.jsonc?"\]$/u;
     expect(
       mockNative.calls.filter(
@@ -2357,6 +2366,40 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
       'readWorkspaceFile:["ws-one",".opencode/opencode.json"]',
       'readWorkspaceFile:["ws-one",".opencode/opencode.jsonc"]',
     ]);
+    act(() => tree.unmount());
+  });
+
+  it('keeps the stop notice before a follow-up response even minutes after thread creation', async () => {
+    const { tree, root, runtime } = await renderShell({
+      files: { 'ws-one:seed.txt': 'fixture\n' },
+    });
+    mockLlama.reply({ content: 'Initial answer.' });
+    await submit(root, 'Initial question');
+    const threadId = runtime.threads.list()[0]!.id;
+    const olderCreatedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    runtime.threads.change(threadId, (current) => ({
+      ...current,
+      createdAt: olderCreatedAt,
+    }));
+
+    mockLlama.reply({ toolCalls: [{ name: 'git_push', arguments: {} }] });
+    await submit(root, 'Stop this turn');
+    expect(labeled(root, 'Allow')).toBeTruthy();
+    await press(root, 'Stop agent');
+    expect(runtime.threads.get(threadId).status).toBe('interrupted');
+
+    mockLlama.reply({ content: 'Fresh response on the next turn.' });
+    await submit(root, 'Follow-up turn');
+    expect(runtime.threads.get(threadId).status).toBe('complete');
+
+    const rows = timeline(root);
+    const stoppedIndex = rows.indexOf('system: Turn stopped by user.');
+    const followUpUserIndex = rows.indexOf('user: Follow-up turn');
+    const followUpAnswerIndex = rows.indexOf('assistant: Fresh response on the next turn.');
+    expect(stoppedIndex).toBeGreaterThan(-1);
+    expect(followUpUserIndex).toBeGreaterThan(stoppedIndex);
+    expect(followUpAnswerIndex).toBeGreaterThan(followUpUserIndex);
+    expect(rows.at(-1)).toBe('assistant: Fresh response on the next turn.');
     act(() => tree.unmount());
   });
 
