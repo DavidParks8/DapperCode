@@ -43,6 +43,7 @@
     "dylint": "node ./scripts/run-dylint.mjs",
     "bridge": "BRIDGE_WORKDIR=$(pwd) pnpm run cargo run --manifest-path services/rust-bridge/Cargo.toml",
     "bridge:ui:demo": "node ./scripts/send-bridge-ui-demo.js",
+    "phone:test-call": "node ./.agents/skills/local-phone-call-test/scripts/run-call.mjs",
     "release:latest": "node --experimental-strip-types ./scripts/release-latest.mts",
     "release:testflight": "node --experimental-strip-types ./scripts/release-testflight.mts",
     "operator": "pnpm run cargo run --manifest-path apps/desktop/Cargo.toml --",
