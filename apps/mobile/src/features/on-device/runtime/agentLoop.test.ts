@@ -123,6 +123,7 @@ async function harness(
       phase: 'ready' as const,
       modelId: thread.modelId,
       progress: 100,
+      promptProgress: null,
       error: null,
       contextTokens: 8192,
     })),

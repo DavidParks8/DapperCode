@@ -45,6 +45,7 @@ export class FakeSettingsRuntime {
     phase: 'empty',
     modelId: null,
     progress: 0,
+    promptProgress: null,
     error: null,
     contextTokens: null,
   };

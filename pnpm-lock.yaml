@@ -21,6 +21,9 @@ overrides:
   source-map-js: 1.2.4
   zod: 4.6.7
 
+patchedDependencies:
+  llama.rn@0.13.0-rc.12: 3034419aebbb844c5da0e3c2fa4a9838de2b15d39cd8dd755d399e5496c1b46a
+
 importers:
 
   .:
@@ -147,7 +150,7 @@ importers:
         version: 3.0.2(@types/react@19.3.0)(react@19.3.0)
       llama.rn:
         specifier: 0.13.0-rc.12
-        version: 0.13.0-rc.12(react-native@0.88.1(@babel/core@7.29.13)(@react-native/metro-config@0.88.1(@babel/core@7.29.13))(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
+        version: 0.13.0-rc.12(patch_hash=3034419aebbb844c5da0e3c2fa4a9838de2b15d39cd8dd755d399e5496c1b46a)(react-native@0.88.1(@babel/core@7.29.13)(@react-native/metro-config@0.88.1(@babel/core@7.29.13))(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
       mermaid:
         specifier: 12.3.0
         version: 12.3.0
@@ -10156,7 +10159,7 @@ snapshots:
     dependencies:
       uc.micro: 2.1.0
 
-  llama.rn@0.13.0-rc.12(react-native@0.88.1(@babel/core@7.29.13)(@react-native/metro-config@0.88.1(@babel/core@7.29.13))(@types/react@19.3.0)(react@19.3.0))(react@19.3.0):
+  llama.rn@0.13.0-rc.12(patch_hash=3034419aebbb844c5da0e3c2fa4a9838de2b15d39cd8dd755d399e5496c1b46a)(react-native@0.88.1(@babel/core@7.29.13)(@react-native/metro-config@0.88.1(@babel/core@7.29.13))(@types/react@19.3.0)(react@19.3.0))(react@19.3.0):
     dependencies:
       react: 19.3.0
       react-native: 0.88.1(@babel/core@7.29.13)(@react-native/metro-config@0.88.1(@babel/core@7.29.13))(@types/react@19.3.0)(react@19.3.0)

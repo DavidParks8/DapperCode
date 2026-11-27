@@ -214,6 +214,12 @@ test('Lock Screen subtitles name the phase and tool but never approval or questi
   expect(localRunActivitySubtitle({ ...run, phase: 'generating' })).toBe(
     'Generating on this iPhone',
   );
+  expect(localRunActivitySubtitle({ ...run, phase: 'generating' }, { promptProgress: 42.9 })).toBe(
+    'Processing prompt · 42%',
+  );
+  expect(localRunActivitySubtitle({ ...run, phase: 'generating' }, { promptProgress: null })).toBe(
+    'Generating on this iPhone',
+  );
   expect(localRunActivitySubtitle({ ...run, phase: 'tool', toolName: 'read_file' })).toBe(
     'Running read_file',
   );

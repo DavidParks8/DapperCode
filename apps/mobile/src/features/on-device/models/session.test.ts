@@ -135,7 +135,7 @@ function context() {
     })),
     completion: jest.fn<
       Promise<LocalModelReply>,
-      [CompletionParams, ((value: TokenData) => void)?]
+      [CompletionParams, ((value: TokenData) => void)?, ((percent: number) => void)?]
     >(async () => reply),
     stopCompletion: jest.fn(async () => undefined),
     release: jest.fn(async () => undefined),
@@ -183,6 +183,7 @@ test.each(LOCAL_MODEL_CATALOG.filter((model) => !model.runtimeIssue))(
     });
     expect(h.initial.completion).toHaveBeenCalledWith(
       expect.objectContaining({ prompt: formatted.prompt, n_predict: 32768 - 20000 - 32 }),
+      expect.any(Function),
       expect.any(Function),
     );
     await h.session.unload();
@@ -845,6 +846,7 @@ test('a GPU decode refused after backgrounding mid-completion is evaluated again
   expect(h.contexts[1]!.completion).toHaveBeenCalledWith(
     h.initial.completion.mock.calls[0]![0],
     expect.any(Function),
+    expect.any(Function),
   );
   // The model stays running while its context moves; nothing reports it unloaded or loading.
   expect(h.events.slice(settled).map((state) => state.phase)).toEqual(['ready']);
@@ -920,6 +922,71 @@ test('a context that cannot be recreated fails the turn and leaves the model to 
   expect(h.session.snapshot()).toMatchObject({ phase: 'ready', modelId: small.id });
   // A load while the app is in the background goes straight to the CPU.
   expect(h.backends()).toEqual(['gpu', 'cpu', 'cpu']);
+});
+
+test('prompt processing progress updates while decoding and clears on completion, tokens, or stop', async () => {
+  const h = harness();
+  await h.session.load(small.id);
+
+  // Full 0 -> 42 -> 100 -> ready lifecycle (with clamping and dedupe).
+  const first = deferred<LocalModelReply>();
+  const firstStarted = deferred<void>();
+  let reportPrompt: ((percent: number) => void) | undefined;
+  let reportToken: ((value: TokenData) => void) | undefined;
+  h.initial.completion.mockImplementationOnce((_params, onToken, onPromptProgress) => {
+    reportToken = onToken;
+    reportPrompt = onPromptProgress;
+    firstStarted.resolve();
+    return first.promise;
+  });
+  const op1 = h.session.generate(messages, [], jest.fn());
+  await firstStarted.promise;
+  const afterStart = h.events.length;
+  reportPrompt?.(0);
+  reportPrompt?.(42.9);
+  reportPrompt?.(42.1);
+  reportPrompt?.(Number.NaN);
+  reportPrompt?.(100);
+  expect(h.events.slice(afterStart).map((state) => state.promptProgress)).toEqual([0, 42, null]);
+  reportToken?.({ token: 'Hi', accumulated_text: 'Hi', content: 'Hi' });
+  first.resolve(reply);
+  await op1;
+  expect(h.session.snapshot()).toMatchObject({ phase: 'ready', promptProgress: null });
+
+  // First token clears promptProgress even if 100% was not sent.
+  const second = deferred<LocalModelReply>();
+  h.initial.completion.mockImplementationOnce((_params, onToken, onPromptProgress) => {
+    onPromptProgress?.(35);
+    expect(h.session.snapshot().promptProgress).toBe(35);
+    onToken?.({ token: 'A', accumulated_text: 'A', content: 'A' });
+    expect(h.session.snapshot().promptProgress).toBeNull();
+    return second.promise;
+  });
+  const op2 = h.session.generate(messages, [], jest.fn());
+  second.resolve(reply);
+  await op2;
+
+  // Stopping during prompt processing clears promptProgress immediately and ignores late ticks.
+  const third = deferred<LocalModelReply>();
+  const thirdStarted = deferred<void>();
+  let latePrompt: ((percent: number) => void) | undefined;
+  h.initial.completion.mockImplementationOnce((_params, _onToken, onPromptProgress) => {
+    latePrompt = onPromptProgress;
+    onPromptProgress?.(25);
+    thirdStarted.resolve();
+    return third.promise;
+  });
+  const op3 = h.session.generate(messages, [], jest.fn()).catch((error: unknown) => error);
+  await thirdStarted.promise;
+  expect(h.session.snapshot().promptProgress).toBe(25);
+  const stopping = h.session.stop();
+  expect(h.session.snapshot()).toMatchObject({ phase: 'stopping', promptProgress: null });
+  latePrompt?.(60);
+  expect(h.session.snapshot().promptProgress).toBeNull();
+  third.resolve({ ...reply, interrupted: true });
+  await stopping;
+  expect(await op3).toBeInstanceOf(LocalModelInterrupted);
+  expect(h.session.snapshot()).toMatchObject({ phase: 'ready', promptProgress: null });
 });
 
 test('recreating a context re-admits its window against fresh memory headroom', async () => {

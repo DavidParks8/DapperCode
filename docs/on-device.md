@@ -905,8 +905,9 @@ Each send or retry asks iOS for background time before the turn is admitted
 - On iOS 26 and later, the turn runs as a user-initiated continued-processing task
   (`BGContinuedProcessingTask`, identifiers `<bundle id>.localrun.<n>`, permitted by the
   `withOnDeviceAgentNative` config plugin). iOS shows its progress as **Local agent** with a
-  generic phase subtitle (**Generating on this iPhone**, **Running read_file**, **Waiting for your
-  approval**…). Conversation text, approval summaries, and questions never appear on the Lock
+  generic phase subtitle (**Processing prompt · N%**, **Generating on this iPhone**, **Running
+  read_file**, **Waiting for your approval**…). Conversation text, approval summaries, and questions
+  never appear on the Lock
   Screen. Progress is reported every 5 seconds in every phase, including approval and question
   waits, so you can unlock and answer.
 - Earlier iOS versions, or a continued-processing request iOS refuses, fall back to ordinary
@@ -1132,7 +1133,8 @@ model when the composer sends none or a desktop path.
   The loop loads the model before it records the message, so load progress is sent for the turn
   the loop is starting before `RUN_STARTED`; a failed or stopped load stays a rejected send (the
   draft is kept) rather than a run. Phases:
-  `Preparing`, `Loading <model> · N%`, `Generating`, the running tool's action (for example
+  `Preparing`, `Loading <model> · N%`, `Processing prompt · N%`, `Generating`, the running tool's
+  action (for example
   `Reading README.md`, from `describeLocalTool`), `Stopping`, and `Saving`. The shell shows the
   title (and detail) in the transcript activity row instead of a rotating working phrase; a later
   generic "Working" from the shell does not replace a reported phase. VoiceOver hears reported

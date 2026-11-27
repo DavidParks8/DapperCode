@@ -3,7 +3,7 @@ import type { LocalModelDefinition } from '../models/types';
 import type { ApprovalPolicy } from '@bridge/types/types';
 import { localModelDefinition } from '../models/catalog';
 import { localConversationTitle, type LocalRunSnapshot } from '../runtime/agentLoop';
-import type { LocalMessage, LocalThread } from '../runtime/types';
+import { IDLE_LOCAL_RUN as IDLE, type LocalMessage, type LocalThread } from '../runtime/types';
 import { OnDeviceNativeError } from '../native/services.errors';
 import type { LocalWorkspace, LocalWorkspaceSize } from '../workspaces/types';
 import type { LocalAgentPort, LocalFilesPort, LocalGitPort, LocalWorkspaceAdminPort } from './port';
@@ -15,14 +15,6 @@ export function fakeNativeError(
 ): Error {
   return new OnDeviceNativeError(code, message);
 }
-
-const IDLE: LocalRunSnapshot = {
-  phase: 'idle',
-  threadId: null,
-  turnId: null,
-  toolName: null,
-  approval: null,
-};
 
 /**
  * Scripted, in-memory `LocalAgentPort` for transport and shell tests. Tests drive a run step by
@@ -54,6 +46,7 @@ export class FakeAgentPort implements LocalAgentPort {
     phase: 'empty',
     modelId: null,
     progress: 0,
+    promptProgress: null,
     error: null,
   };
   sendError: Error | null = null;

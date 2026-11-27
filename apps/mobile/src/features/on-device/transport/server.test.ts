@@ -332,6 +332,39 @@ describe('LocalBridgeServer', () => {
     expect(events().at(-1)?.type).toBe(EventType.RUN_FINISHED);
   });
 
+  it('streams prompt processing percentages during generation before switching to Generating', async () => {
+    const { server, port, events } = setup();
+    const threadId = await createChat(server);
+    await server.request('bridge/thread/queue/send', {
+      threadId,
+      submissionId: 'submit-pp',
+      content: 'Hello',
+      turnStart: {},
+    });
+    port.runValue = { ...port.runValue, phase: 'generating' };
+    port.setModel({ phase: 'running', modelId: 'qwen3-1.7b-q4-k-m', promptProgress: 0 });
+    port.setModel({ promptProgress: 38.9 });
+    port.setModel({ promptProgress: 38.1 });
+    port.setModel({ promptProgress: 76 });
+    port.setModel({ promptProgress: null });
+    port.streamAssistant(threadId, 'assistant-1', 'Done.');
+    port.settle(threadId, 'complete');
+
+    const activity = events().flatMap((event) =>
+      event.type === EventType.CUSTOM && event.name === RUN_ACTIVITY_EVENT_NAME
+        ? [event.value as RunActivity]
+        : [],
+    );
+    expect(activity).toEqual([
+      { title: 'Preparing' },
+      { title: 'Processing prompt', detail: '0%' },
+      { title: 'Processing prompt', detail: '38%' },
+      { title: 'Processing prompt', detail: '76%' },
+      { title: 'Generating' },
+      { title: 'Saving' },
+    ]);
+  });
+
   it('reports a failed or stopped model load without starting or ending a run', async () => {
     const { server, port, events } = setup();
     const threadId = await createChat(server);

@@ -26,6 +26,9 @@ overrides:
   source-map-js: 1.2.4
   zod: 4.6.7
 
+patchedDependencies:
+  llama.rn@0.13.0-rc.12: patches/llama.rn@0.13.0-rc.12.patch
+
 peerDependencyRules:
   allowedVersions:
     '@gorhom/bottom-sheet>react-native-reanimated': 4.7.1

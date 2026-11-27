@@ -1,5 +1,82 @@
 import type { CompletionParams, FormattedChatResult, JinjaFormattedChatResult } from 'llama.rn';
 import type { LocalModelReply } from './engine';
+import type { LocalSummaryCheckpoint } from './summary';
+import type { LocalModelDefinition } from './types';
+
+export interface LocalModelSessionSnapshot {
+  phase: 'empty' | 'loading' | 'ready' | 'running' | 'stopping' | 'error';
+  modelId: string | null;
+  progress: number;
+  /** 0–99 while prompt processing is running, otherwise null. */
+  promptProgress: number | null;
+  /** A model-level failure (load or native stop). Turn failures belong to the conversation. */
+  error: string | null;
+  /** The context size of the resident model, chosen from fresh memory headroom at load. */
+  contextTokens: number | null;
+}
+
+export interface LocalModelUpdate {
+  content: string;
+  reasoning: string;
+}
+
+export interface LocalGenerationOptions {
+  checkpoint?: LocalSummaryCheckpoint;
+  outputTokens?: number;
+}
+
+/** Where the app is running; iOS refuses GPU work from background apps. */
+export type LocalModelPlacement = 'foreground' | 'background';
+
+export const EMPTY_MODEL_SESSION: LocalModelSessionSnapshot = {
+  phase: 'empty',
+  modelId: null,
+  progress: 0,
+  promptProgress: null,
+  error: null,
+  contextTokens: null,
+};
+
+export function readyModelSession(
+  modelId: string,
+  contextTokens: number,
+): LocalModelSessionSnapshot {
+  return {
+    phase: 'ready',
+    modelId,
+    progress: 100,
+    promptProgress: null,
+    error: null,
+    contextTokens,
+  };
+}
+
+export class LocalModelInterrupted extends Error {
+  constructor() {
+    super('Local model work was interrupted.');
+    this.name = 'LocalModelInterrupted';
+  }
+}
+
+/** Capped rounds (child agents) cannot spare output tokens for reasoning. */
+export function roundThinks(model: LocalModelDefinition, outputTokens?: number): boolean {
+  return model.thinking === true && outputTokens === undefined;
+}
+
+/** Clamps a prompt-processing percentage into 0–99, or null once prompt processing finishes. */
+export function normalizePromptProgress(value: number): number | null {
+  return value >= 100 ? null : Math.max(0, Math.min(99, Math.floor(value)));
+}
+
+export function roundPredictBudget(
+  availableBudget: number,
+  outputTokens: number | undefined,
+): number {
+  return Math.min(
+    availableBudget,
+    outputTokens === undefined ? Infinity : Math.max(1, Math.min(512, outputTokens)),
+  );
+}
 
 /**
  * llama.rn ends a completion without any stop reason when a native decode fails, for example when

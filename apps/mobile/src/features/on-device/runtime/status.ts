@@ -25,7 +25,7 @@ export interface LocalAgentStatus {
   label: string;
   /** `busy` shows activity, `ready` is usable, `attention` needs a user step, `error` failed. */
   kind: 'busy' | 'ready' | 'attention' | 'error';
-  /** 0–100 while a model loads or downloads, otherwise null. */
+  /** 0–100 while a model loads, downloads, or processes a prompt, otherwise null. */
   progress: number | null;
   /** A longer explanation, such as the model or turn failure, to show beside the label. */
   detail: string | null;
@@ -107,7 +107,7 @@ function runStatus(run: LocalRunSnapshot, model: LocalModelSessionSnapshot): Loc
     case 'preparing':
       return preparingStatus(model);
     case 'generating':
-      return status('Generating on this iPhone', 'busy');
+      return generatingStatus(model);
     case 'tool':
       return status(`Running ${run.toolName ?? 'local tool'}`, 'busy');
     case 'persisting':
@@ -142,6 +142,14 @@ function loading(model: LocalModelSessionSnapshot): LocalAgentStatus {
   });
 }
 
+function generatingStatus(model: LocalModelSessionSnapshot): LocalAgentStatus {
+  if (model.promptProgress !== null) {
+    const progress = percent(model.promptProgress);
+    return status(`Processing prompt · ${progress}%`, 'busy', { progress });
+  }
+  return status('Generating on this iPhone', 'busy');
+}
+
 function residentModelStatus(
   model: LocalModelSessionSnapshot,
   modelId: string | null,
@@ -152,7 +160,7 @@ function residentModelStatus(
     case 'stopping':
       return status('Unloading model…', 'busy');
     case 'running':
-      return status('Generating on this iPhone', 'busy');
+      return generatingStatus(model);
     case 'error':
       return model.modelId === null || model.modelId === modelId
         ? status(

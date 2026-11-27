@@ -1,3 +1,4 @@
+import type { LocalModelSessionSnapshot } from '../models/session';
 import { LOCAL_RUN_EXPIRED_EVENT, type OnDeviceNativeServices } from '../native/services.types';
 import type { LocalRunSnapshot, LocalThread } from './types';
 
@@ -16,12 +17,19 @@ type ActivityNative = Pick<
  * The run's description in the system progress UI, which can appear on the Lock Screen, so it
  * names the phase and tool but never conversation content or approval details.
  */
-export function localRunActivitySubtitle(run: LocalRunSnapshot): string {
+export function localRunActivitySubtitle(
+  run: LocalRunSnapshot,
+  model?: Pick<LocalModelSessionSnapshot, 'promptProgress'>,
+): string {
   switch (run.phase) {
     case 'idle':
     case 'preparing':
       return 'Preparing';
     case 'generating':
+      if (model?.promptProgress != null) {
+        const progress = Math.max(0, Math.min(100, Math.floor(model.promptProgress)));
+        return `Processing prompt · ${String(progress)}%`;
+      }
       return 'Generating on this iPhone';
     case 'compacting':
       return 'Summarizing the conversation';

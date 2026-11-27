@@ -90,7 +90,7 @@ export class OnDeviceRuntime {
     this.runActivity = new LocalRunActivities(
       native,
       {
-        subtitle: () => localRunActivitySubtitle(this.loop.snapshot()),
+        subtitle: () => localRunActivitySubtitle(this.loop.snapshot(), this.models.snapshot()),
         expired: () => this.expireRun(),
         // A turn that settles in the background releases the model before giving the time back.
         settled: () =>
@@ -128,9 +128,10 @@ export class OnDeviceRuntime {
       options.threadProgressDelayMs,
     );
     this.drafts = new LegacyDraftReader(native);
-    this.models = new LocalModelSession(native, loadNativeModelContext, () =>
-      this.emitter.coalesce('models'),
-    );
+    this.models = new LocalModelSession(native, loadNativeModelContext, () => {
+      this.emitter.coalesce('models');
+      this.runActivity.changed();
+    });
     this.downloads = new ModelDownloadController(LOCAL_MODEL_CATALOG, native, () =>
       this.emitter.coalesce('downloads'),
     );
