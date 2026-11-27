@@ -14,6 +14,7 @@ const empty: LocalModelSessionSnapshot = {
   phase: 'empty',
   modelId: null,
   progress: 0,
+  promptProgress: null,
   error: null,
   contextTokens: null,
 };
@@ -21,6 +22,7 @@ const ready: LocalModelSessionSnapshot = {
   phase: 'ready',
   modelId,
   progress: 100,
+  promptProgress: null,
   error: null,
   contextTokens: 8192,
 };
@@ -99,6 +101,17 @@ test('every run and model phase has a user-facing label, including load progress
   });
   expect(label({ run: run('preparing'), model: ready }).label).toBe('Preparing local turn');
   expect(label({ run: run('generating'), model: ready }).label).toBe('Generating on this iPhone');
+  const processing = { ...ready, phase: 'running' as const, promptProgress: 42.7 };
+  expect(label({ run: run('generating'), model: processing })).toMatchObject({
+    label: 'Processing prompt · 42%',
+    progress: 42,
+    kind: 'busy',
+  });
+  expect(label({ model: processing })).toMatchObject({
+    label: 'Processing prompt · 42%',
+    progress: 42,
+    kind: 'busy',
+  });
   expect(label({ run: run('compacting'), model: ready })).toMatchObject({
     label: 'Summarizing conversation on this iPhone',
     kind: 'busy',

@@ -33,6 +33,7 @@ function session(patch: Partial<LocalModelSessionSnapshot>): LocalModelSessionSn
     phase: 'empty',
     modelId: null,
     progress: 0,
+    promptProgress: null,
     error: null,
     contextTokens: null,
     ...patch,

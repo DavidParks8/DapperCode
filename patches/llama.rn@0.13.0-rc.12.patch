@@ -1,0 +1,257 @@
+diff --git a/cpp/jsi/RNLlamaJSI.cpp b/cpp/jsi/RNLlamaJSI.cpp
+index 4699569ed018d8439551b33dd3686f9145c405ab..bb4d94071fd538573301847d28cff912a6fe473e 100644
+--- a/cpp/jsi/RNLlamaJSI.cpp
++++ b/cpp/jsi/RNLlamaJSI.cpp
+@@ -1103,7 +1103,7 @@ namespace rnllama_jsi {
+ 
+         auto completion = jsi::Function::createFromHostFunction(runtime,
+             jsi::PropNameID::forAscii(runtime, "llamaCompletion"),
+-            3,
++            4,
+             [callInvoker](jsi::Runtime& runtime, const jsi::Value& thisValue, const jsi::Value* arguments, size_t count) -> jsi::Value {
+                 int contextId = (int)arguments[0].asNumber();
+                 // Convert the params object once; every lookup below and the parser
+@@ -1117,10 +1117,14 @@ namespace rnllama_jsi {
+                 const bool hasLogitBiasTable = readFloat32Array(
+                     runtime, arguments[1].asObject(runtime).getProperty(runtime, "logit_bias"), logitBiasTable);
+                 std::shared_ptr<jsi::Function> onToken;
++                std::shared_ptr<jsi::Function> onPromptProgress;
+ 
+                 if (count > 2 && arguments[2].isObject() && arguments[2].asObject(runtime).isFunction(runtime)) {
+                     onToken = makeJsiFunction(runtime, arguments[2], callInvoker);
+                 }
++                if (count > 3 && arguments[3].isObject() && arguments[3].asObject(runtime).isFunction(runtime)) {
++                    onPromptProgress = makeJsiFunction(runtime, arguments[3], callInvoker);
++                }
+ 
+                 bool emitPartial = getPropertyAsBool(params, "emit_partial_completion", false);
+ 
+@@ -1157,7 +1161,7 @@ namespace rnllama_jsi {
+                 std::string chat_parser = getPropertyAsString(params, "chat_parser");
+                 std::string prefill_text = getPropertyAsString(params, "prefill_text");
+ 
+-                jsi::Value promise = createPromiseTask(runtime, callInvoker, [runtimePtr = std::shared_ptr<jsi::Runtime>(&runtime, [](jsi::Runtime*){}), contextId, onToken, emitPartial, mediaPaths, chat_format, reasoning_format, generation_prompt, chat_parser, prefill_text, callInvoker]() -> PromiseResultGenerator {
++                jsi::Value promise = createPromiseTask(runtime, callInvoker, [runtimePtr = std::shared_ptr<jsi::Runtime>(&runtime, [](jsi::Runtime*){}), contextId, onToken, onPromptProgress, emitPartial, mediaPaths, chat_format, reasoning_format, generation_prompt, chat_parser, prefill_text, callInvoker]() -> PromiseResultGenerator {
+                     auto ctx = getContextOrThrow(contextId);
+                     auto claim = ContextClaim::adopt(ctx);
+ 
+@@ -1192,6 +1196,107 @@ namespace rnllama_jsi {
+                             throw std::runtime_error("Context is full");
+                         }
+ 
++                        if (ctx->completion->is_interrupted) {
++                            ctx->completion->embd.resize(std::max<llama_pos>(0, ctx->completion->n_past));
++                            ctx->completion->has_next_token = false;
++                        }
++
++                        if (onPromptProgress &&
++                            ctx->completion->has_next_token &&
++                            !ctx->completion->is_interrupted) {
++                            auto& c = *ctx->completion;
++                            int last_percent = 0;
++                            auto emit_prompt_progress = [&](int percent) {
++                                const int clamped = std::clamp(percent, 0, 100);
++                                if (clamped == last_percent) {
++                                    return;
++                                }
++                                last_percent = clamped;
++                                auto runtime = runtimePtr;
++                                if (runtime) {
++                                    callInvoker->invokeAsync([onPromptProgress, clamped, contextId, runtime]() {
++                                        if (!g_llamaContexts.get(contextId)) {
++                                            return;
++                                        }
++                                        auto& rt = *runtime;
++                                        onPromptProgress->call(rt, jsi::Value((double) clamped));
++                                    });
++                                }
++                            };
++
++                            const bool canPrefill =
++                                ctx->model != nullptr &&
++                                !llama_model_has_encoder(ctx->model) &&
++                                !c.shouldUseMTP() &&
++                                !ctx->isVocoderEnabled();
++                            if (canPrefill && c.n_past >= 0 && (size_t) c.n_past < c.embd.size()) {
++                                const llama_pos start_past = c.n_past;
++                                const size_t total = c.embd.size();
++                                const size_t total_to_eval = total - (size_t) start_past;
++                                const llama_pos prefill_interval =
++                                    (c.state_cache_enabled && c.prompt_checkpoint_pending && c.boundary_ckpts.empty())
++                                        ? (llama_pos) c.state_ckpt_prefill_interval
++                                        : 0;
++                                const int32_t step_limit = std::max<int32_t>(
++                                    1,
++                                    ctx->params.n_ubatch > 0
++                                        ? std::min(ctx->params.n_batch, ctx->params.n_ubatch)
++                                        : ctx->params.n_batch
++                                );
++
++                                while ((size_t) c.n_past < total && !c.is_interrupted) {
++                                    llama_pos decode_to = (llama_pos) total;
++                                    if (c.prompt_checkpoint_pending) {
++                                        const auto next_boundary = std::upper_bound(
++                                            c.boundary_ckpts.begin(), c.boundary_ckpts.end(), c.n_past);
++                                        if (next_boundary != c.boundary_ckpts.end()) {
++                                            decode_to = std::min(decode_to, *next_boundary);
++                                        }
++                                    }
++                                    if (prefill_interval > 0) {
++                                        const llama_pos next_ckpt = (c.n_past / prefill_interval + 1) * prefill_interval;
++                                        if (next_ckpt < (llama_pos) c.num_prompt_tokens) {
++                                            decode_to = std::min(decode_to, next_ckpt);
++                                        }
++                                    }
++                                    int n_eval = (int) (decode_to - c.n_past);
++                                    if (n_eval > step_limit) {
++                                        n_eval = step_limit;
++                                    }
++                                    if (llama_decode(ctx->ctx, llama_batch_get_one(&c.embd[c.n_past], n_eval))) {
++                                        c.embd.resize(c.n_past);
++                                        c.has_next_token = false;
++                                        break;
++                                    }
++                                    c.n_past += n_eval;
++                                    if (c.is_interrupted) {
++                                        c.embd.resize(c.n_past);
++                                        c.has_next_token = false;
++                                        break;
++                                    }
++                                    if (c.prompt_checkpoint_pending &&
++                                        std::binary_search(c.boundary_ckpts.begin(), c.boundary_ckpts.end(), c.n_past)) {
++                                        c.captureStateCheckpoint();
++                                    } else if (prefill_interval > 0 &&
++                                               c.n_past < (llama_pos) c.num_prompt_tokens &&
++                                               c.n_past % prefill_interval == 0) {
++                                        c.captureStateCheckpoint();
++                                    }
++                                    const int percent = (int) (((size_t) (c.n_past - start_past) * 100) / total_to_eval);
++                                    emit_prompt_progress(percent);
++                                }
++                            }
++                            if (c.is_interrupted) {
++                                c.embd.resize(std::max<llama_pos>(0, c.n_past));
++                                c.has_next_token = false;
++                            } else if (c.has_next_token) {
++                                if (canPrefill && c.prompt_checkpoint_pending && c.n_past >= (llama_pos) c.num_prompt_tokens) {
++                                    c.prompt_checkpoint_pending = false;
++                                }
++                                emit_prompt_progress(100);
++                            }
++                        }
++
+                         size_t sent_count = 0;
+ 
+                         while (ctx->completion->has_next_token && !ctx->completion->is_interrupted) {
+diff --git a/lib/commonjs/index.js b/lib/commonjs/index.js
+index d5f93b61454062ce81a56c6fef82db4b5d0b9861..4a648be26283877bc487c7375ac3b96a5918d6fb 100644
+--- a/lib/commonjs/index.js
++++ b/lib/commonjs/index.js
+@@ -481,7 +481,7 @@ class LlamaContext {
+   // `speaker` (with a vocoder): the voice that fills the prompt's voice
+   // markers — a LlamaSpeaker or a builtin voice name; the model's default
+   // when omitted.
+-  params, callback) {
++  params, callback, onPromptProgress) {
+     const {
+       speaker,
+       ...rest
+@@ -558,7 +558,10 @@ class LlamaContext {
+     const {
+       llamaCompletion
+     } = getJsi();
+-    return llamaCompletion(this.id, nativeParams, callback);
++    if (onPromptProgress && llamaCompletion.length >= 4) {
++      onPromptProgress(0);
++    }
++    return llamaCompletion(this.id, nativeParams, callback, onPromptProgress);
+   }
+   stopCompletion() {
+     const {
+diff --git a/lib/module/index.js b/lib/module/index.js
+index c4aaa5e530e2f7196b941281668eed950dfc9bc6..8fb0382a93b87927d4b8f5ff94da3fa18b3e3b03 100644
+--- a/lib/module/index.js
++++ b/lib/module/index.js
+@@ -466,7 +466,7 @@ export class LlamaContext {
+   // `speaker` (with a vocoder): the voice that fills the prompt's voice
+   // markers — a LlamaSpeaker or a builtin voice name; the model's default
+   // when omitted.
+-  params, callback) {
++  params, callback, onPromptProgress) {
+     const {
+       speaker,
+       ...rest
+@@ -543,7 +543,10 @@ export class LlamaContext {
+     const {
+       llamaCompletion
+     } = getJsi();
+-    return llamaCompletion(this.id, nativeParams, callback);
++    if (onPromptProgress && llamaCompletion.length >= 4) {
++      onPromptProgress(0);
++    }
++    return llamaCompletion(this.id, nativeParams, callback, onPromptProgress);
+   }
+   stopCompletion() {
+     const {
+diff --git a/lib/typescript/index.d.ts b/lib/typescript/index.d.ts
+index 2e79fd16bbf292232bb41d651993440b7b1279ac..42f4804e37393aaafd386c2e5894f17fbda05ec2 100644
+--- a/lib/typescript/index.d.ts
++++ b/lib/typescript/index.d.ts
+@@ -232,7 +232,7 @@ export declare class LlamaContext {
+     }): Promise<FormattedChatResult | JinjaFormattedChatResult>;
+     completion(params: CompletionParams & {
+         speaker?: string | LlamaSpeaker;
+-    }, callback?: (data: TokenData) => void): Promise<NativeCompletionResult>;
++    }, callback?: (data: TokenData) => void, onPromptProgress?: (progress: number) => void): Promise<NativeCompletionResult>;
+     stopCompletion(): Promise<void>;
+     tokenize(text: string, { media_paths: mediaPaths, }?: {
+         media_paths?: string[];
+diff --git a/lib/typescript/jsi.d.ts b/lib/typescript/jsi.d.ts
+index 31f7e39f9adc38563369f2a151e0c8f6d56d5d1c..e96d6ac70e9b0511b05216aabbbe755806f3c0c8 100644
+--- a/lib/typescript/jsi.d.ts
++++ b/lib/typescript/jsi.d.ts
+@@ -31,7 +31,7 @@ declare global {
+     var llamaBench: (contextId: number, pp: number, tg: number, pl: number, nr: number) => Promise<NativeBenchResult>;
+     var llamaToggleNativeLog: (enabled: boolean, onLog?: (level: string, text: string) => void) => Promise<void>;
+     var llamaSetContextLimit: (limit: number) => Promise<void>;
+-    var llamaCompletion: (contextId: number, params: NativeCompletionParams, onToken?: (token: any) => void) => Promise<NativeCompletionResult>;
++    var llamaCompletion: (contextId: number, params: NativeCompletionParams, onToken?: (token: any) => void, onPromptProgress?: (progress: number) => void) => Promise<NativeCompletionResult>;
+     var llamaStopCompletion: (contextId: number) => Promise<void>;
+     var llamaApplyLoraAdapters: (contextId: number, adapters: Array<{
+         path: string;
+diff --git a/src/index.ts b/src/index.ts
+index c49adbcb005776cad5e2ccb05ed2921a3e5ca7e4..689fa7a8e5c961f70bc662dd4aee0d523a05c49f 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -911,6 +911,7 @@ export class LlamaContext {
+     // when omitted.
+     params: CompletionParams & { speaker?: string | LlamaSpeaker },
+     callback?: (data: TokenData) => void,
++    onPromptProgress?: (progress: number) => void,
+   ): Promise<NativeCompletionResult> {
+     const { speaker, ...rest } = params
+     const nativeParams: NativeCompletionRequestParams & {
+@@ -1001,7 +1002,10 @@ export class LlamaContext {
+       throw new Error('Prompt is required')
+ 
+     const { llamaCompletion } = getJsi()
+-    return llamaCompletion(this.id, nativeParams, callback)
++    if (onPromptProgress && llamaCompletion.length >= 4) {
++      onPromptProgress(0)
++    }
++    return llamaCompletion(this.id, nativeParams, callback, onPromptProgress)
+   }
+ 
+   stopCompletion(): Promise<void> {
+diff --git a/src/jsi.ts b/src/jsi.ts
+index a4755514dfcf5c9d8d3704d81cc6a4c1340661ab..9ac5e0cb978c2128909d91f68d90e4d6cc24825d 100644
+--- a/src/jsi.ts
++++ b/src/jsi.ts
+@@ -93,6 +93,7 @@ declare global {
+     contextId: number,
+     params: NativeCompletionParams,
+     onToken?: (token: any) => void,
++    onPromptProgress?: (progress: number) => void,
+   ) => Promise<NativeCompletionResult>
+   var llamaStopCompletion: (contextId: number) => Promise<void>
+   var llamaApplyLoraAdapters: (

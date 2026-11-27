@@ -48,6 +48,8 @@ export class FakeLlama {
   charactersPerToken = 4;
   holdLoads = false;
   holdCompletions = false;
+  /** Emits synchronous 0% prompt progress when completion starts, mirroring patched llama.rn. */
+  emitInitialPromptProgress = false;
   /** Keeps `stopCompletion` pending until `finishStop`, so the stopping phase is observable. */
   holdStops = false;
   holdReleases = false;
@@ -64,7 +66,9 @@ export class FakeLlama {
   private stopStep: (() => void) | null = null;
   private replies: ScriptedReply[] = [];
   private loadStep: (HeldStep & { progress: (value: number) => void }) | null = null;
-  private completionStep: (HeldStep & { stream: (text: string) => void }) | null = null;
+  private completionStep:
+    | (HeldStep & { stream: (text: string) => void; promptProgress: (percent: number) => void })
+    | null = null;
   releases = 0;
 
   /** Queues replies; once empty, every completion answers "Done.". */
@@ -98,6 +102,11 @@ export class FakeLlama {
     const step = this.loadStep;
     this.loadStep = null;
     step?.reject(new Error(message));
+  }
+
+  /** Reports prompt processing progress (0–100) for a held completion. */
+  promptProgress(percent: number): void {
+    this.completionStep?.promptProgress(percent);
   }
 
   /** Streams accumulated text into a held completion. */
@@ -179,7 +188,11 @@ export class FakeLlama {
       tokenize: async (text: string) => ({
         tokens: new Array<number>(Math.ceil(text.length / this.charactersPerToken)).fill(1),
       }),
-      completion: async (params: CompletionParams, callback?: (value: TokenData) => void) => {
+      completion: async (
+        params: CompletionParams,
+        callback?: (value: TokenData) => void,
+        onPromptProgress?: (percent: number) => void,
+      ) => {
         this.executions.push(modelId);
         interrupted = false;
         this.promptTokens.push(Math.ceil((params.prompt ?? '').length / this.charactersPerToken));
@@ -187,10 +200,19 @@ export class FakeLlama {
         const script = this.replies.shift() ?? { content: 'Done.' };
         const emit = (text: string) =>
           callback?.({ token: text, content: text, accumulated_text: text });
+        const reportPromptProgress = (percent: number) => onPromptProgress?.(percent);
+        if (this.emitInitialPromptProgress) {
+          reportPromptProgress(0);
+        }
         this.tokenCallbacks.push(emit);
         if (this.holdCompletions) {
           await new Promise<void>((resolve, reject) => {
-            this.completionStep = { resolve, reject, stream: emit };
+            this.completionStep = {
+              resolve,
+              reject,
+              stream: emit,
+              promptProgress: reportPromptProgress,
+            };
           });
         }
         if (script.fail) {

@@ -1943,6 +1943,43 @@ describe('On this iPhone through the real runtime, transport, and shell', () => 
     act(() => tree.unmount());
   });
 
+  it('shows prompt processing percentage while prompt processing runs, then switches to Generating', async () => {
+    const { tree, root, runtime } = await renderShell({ localRunActivity: 'continued' });
+    mockLlama.holdCompletions = true;
+    mockLlama.emitInitialPromptProgress = true;
+    mockLlama.reply({ content: 'Prompt processed cleanly.' });
+    await submit(root, 'Summarize this repository');
+    expect(hasText(root, 'Processing prompt')).toBe(true);
+    expect(hasText(root, ' · 0%')).toBe(true);
+    expect(hasText(root, 'Generating')).toBe(false);
+    expect(drawerStatus(root)).toBe('Processing prompt · 0%');
+    expect([...mockNative.localRuns.values()][0]?.subtitles).not.toContain(
+      'Generating on this iPhone',
+    );
+
+    await drive(() => mockLlama.promptProgress(42));
+    expect(hasText(root, 'Processing prompt')).toBe(true);
+    expect(hasText(root, ' · 42%')).toBe(true);
+    expect(hasText(root, 'Generating')).toBe(false);
+    expect(drawerStatus(root)).toBe('Processing prompt · 42%');
+    expect([...mockNative.localRuns.values()][0]?.subtitles).toContain('Processing prompt · 0%');
+
+    await drive(() => mockLlama.promptProgress(100));
+    expect(hasText(root, 'Generating')).toBe(true);
+    expect(hasText(root, 'Processing prompt')).toBe(false);
+    expect(drawerStatus(root)).toBe('Generating on this iPhone');
+    expect([...mockNative.localRuns.values()][0]?.subtitles).toContain('Generating on this iPhone');
+
+    await drive(() => mockLlama.finishCompletion());
+    expect(transcript(root)).toEqual(
+      expect.arrayContaining(['Summarize this repository', 'Prompt processed cleanly.']),
+    );
+    expect(runtime.models.snapshot()).toMatchObject({ phase: 'ready', promptProgress: null });
+    expect(drawerStatus(root)).toBe('Qwen3 1.7B Q4_K_M · ready on this iPhone');
+    expect(labeled(root, 'Stop agent')).toBeUndefined();
+    act(() => tree.unmount());
+  });
+
   it('keeps generating while the phone is locked when iOS grants background time, and explains when it ends', async () => {
     const { tree, root, runtime } = await renderShell({ localRunActivity: 'continued' });
     mockLlama.holdCompletions = true;

@@ -40,6 +40,7 @@ export type LocalModelContext = Pick<
   completion(
     params: CompletionParams,
     callback?: (value: TokenData) => void,
+    onPromptProgress?: (percent: number) => void,
   ): Promise<LocalModelReply>;
 };
 

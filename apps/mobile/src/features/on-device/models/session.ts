@@ -19,7 +19,21 @@ import type {
   LocalModelMessage,
   LocalModelReply,
 } from './engine';
-import { completionParams, decodeFailed } from './completion';
+import {
+  awaitStartedCompletion,
+  completionParams,
+  decodeFailed,
+  EMPTY_MODEL_SESSION as EMPTY,
+  LocalModelInterrupted,
+  normalizePromptProgress,
+  readyModelSession,
+  roundPredictBudget,
+  roundThinks,
+  type LocalGenerationOptions,
+  type LocalModelPlacement,
+  type LocalModelSessionSnapshot,
+  type LocalModelUpdate,
+} from './completion';
 import {
   modelContextTokens,
   requireContextMemory,
@@ -30,30 +44,13 @@ import {
 import type { LocalModelDefinition, LocalModelFile } from './types';
 import { compactEarlierTurns, type LocalSummaryCheckpoint } from './summary';
 
-export { LocalContextFull };
-
-export interface LocalModelSessionSnapshot {
-  phase: 'empty' | 'loading' | 'ready' | 'running' | 'stopping' | 'error';
-  modelId: string | null;
-  progress: number;
-  /** A model-level failure (load or native stop). Turn failures belong to the conversation. */
-  error: string | null;
-  /** The context size of the resident model, chosen from fresh memory headroom at load. */
-  contextTokens: number | null;
-}
-
-export interface LocalModelUpdate {
-  content: string;
-  reasoning: string;
-}
-
-export interface LocalGenerationOptions {
-  checkpoint?: LocalSummaryCheckpoint;
-  outputTokens?: number;
-}
-
-/** Where the app is running; iOS refuses GPU work from background apps. */
-export type LocalModelPlacement = 'foreground' | 'background';
+export { LocalContextFull, LocalModelInterrupted };
+export type {
+  LocalGenerationOptions,
+  LocalModelPlacement,
+  LocalModelSessionSnapshot,
+  LocalModelUpdate,
+};
 
 /** Context recreations allowed for one completion before its turn fails. */
 const DECODE_RECOVERIES = 2;
@@ -84,25 +81,8 @@ interface PreparedPrompt {
   tokens: number;
 }
 
-export class LocalModelInterrupted extends Error {
-  constructor() {
-    super('Local model work was interrupted.');
-    this.name = 'LocalModelInterrupted';
-  }
-}
-
-const EMPTY: LocalModelSessionSnapshot = {
-  phase: 'empty',
-  modelId: null,
-  progress: 0,
-  error: null,
-  contextTokens: null,
-};
-
-function ready(model: LoadedModel): LocalModelSessionSnapshot {
-  const { definition, contextTokens } = model;
-  return { phase: 'ready', modelId: definition.id, progress: 100, error: null, contextTokens };
-}
+const ready = ({ definition, contextTokens }: LoadedModel) =>
+  readyModelSession(definition.id, contextTokens);
 
 export class LocalModelSession {
   private current: LoadedModel | null = null;
@@ -355,9 +335,9 @@ export class LocalModelSession {
     options?: LocalGenerationOptions,
   ): Promise<LocalModelReply> {
     try {
-      this.requireExecutionMemory();
-      this.publish({ phase: 'running', error: null });
-      const thinking = roundThinks(generation.model.definition, options);
+      requireExecutionMemory(this.native.getMemoryInfo());
+      this.publish({ phase: 'running', promptProgress: null, error: null });
+      const thinking = roundThinks(generation.model.definition, options?.outputTokens);
       const prompt = await this.preparePrompt(
         generation,
         messages,
@@ -368,19 +348,16 @@ export class LocalModelSession {
       if (generation.interrupted) {
         throw new LocalModelInterrupted();
       }
+      const budget = roundPredictBudget(
+        generationTokenBudget(prompt.tokens, generation.model.contextTokens),
+        options?.outputTokens,
+      );
       return await this.complete(
         generation,
-        completionParams(
-          prompt.formatted,
-          Math.min(
-            generationTokenBudget(prompt.tokens, generation.model.contextTokens),
-            options?.outputTokens === undefined
-              ? Infinity
-              : Math.max(1, Math.min(512, options.outputTokens)),
-          ),
-          thinking,
-        ),
+        completionParams(prompt.formatted, budget, thinking),
         (value) => this.partial(generation, value, update),
+        (percent) => this.promptProgress(generation, percent),
+        options?.onStart,
       );
     } finally {
       if (this.generation === generation) {
@@ -431,7 +408,7 @@ export class LocalModelSession {
           if (error instanceof LocalModelInterrupted) {
             throw error;
           }
-          this.requireExecutionMemory();
+          requireExecutionMemory(this.native.getMemoryInfo());
           this.failedCheckpoint = checkpoint.key;
         },
       });
@@ -493,7 +470,7 @@ export class LocalModelSession {
     prompt: PreparedPrompt,
     outputTokens: number,
   ): Promise<LocalModelReply> {
-    this.requireExecutionMemory();
+    requireExecutionMemory(this.native.getMemoryInfo());
     this.checkGeneration(generation);
     return this.complete(generation, completionParams(prompt.formatted, outputTokens));
   }
@@ -507,12 +484,20 @@ export class LocalModelSession {
     generation: Generation,
     params: CompletionParams,
     callback?: (value: TokenData) => void,
+    onPromptProgress?: (percent: number) => void,
+    onStart?: () => void,
   ): Promise<LocalModelReply> {
     for (let recoveries = 0; ; recoveries += 1) {
       if (generation.model.failed || generation.model.backend !== this.backend()) {
         await this.relocate(generation);
       }
-      const reply = await generation.model.context.completion(params, callback);
+      const pending = generation.model.context.completion(params, callback, onPromptProgress);
+      const reply = await awaitStartedCompletion(pending, onStart, generation, () =>
+        generation.model.context.stopCompletion(),
+      );
+      if (this.generation === generation) {
+        this.setPromptProgress(null);
+      }
       if (generation.stopFailure) {
         throw generation.stopFailure;
       }
@@ -536,6 +521,7 @@ export class LocalModelSession {
     if (this.current !== previous) {
       throw new LocalModelInterrupted();
     }
+    this.setPromptProgress(null);
     generation.relocating = true;
     try {
       await this.releaseCurrent();
@@ -573,6 +559,19 @@ export class LocalModelSession {
     return this.simulator || this.placement === 'background' ? 'cpu' : 'gpu';
   }
 
+  private setPromptProgress(next: number | null): void {
+    if (this.value.promptProgress !== next) {
+      this.publish({ promptProgress: next });
+    }
+  }
+
+  private promptProgress(generation: Generation, value: number): void {
+    const active = this.generation === generation && !this.disposed && !generation.interrupted;
+    if (active && Number.isFinite(value)) {
+      this.setPromptProgress(normalizePromptProgress(value));
+    }
+  }
+
   private partial(
     generation: Generation,
     value: TokenData,
@@ -593,13 +592,10 @@ export class LocalModelSession {
       }
       return;
     }
+    this.setPromptProgress(null);
     if (value.accumulated_text !== undefined) {
       update({ content: value.content ?? '', reasoning: value.reasoning_content ?? '' });
     }
-  }
-
-  private requireExecutionMemory(): void {
-    requireExecutionMemory(this.native.getMemoryInfo());
   }
 
   private async releaseCurrent(): Promise<void> {
@@ -613,16 +609,12 @@ export class LocalModelSession {
   }
 
   private publish(patch: Partial<LocalModelSessionSnapshot>): void {
-    this.value = { ...this.value, ...patch };
+    const clearPrompt = patch.phase !== undefined && patch.phase !== 'running';
+    this.value = { ...this.value, ...(clearPrompt ? { promptProgress: null } : {}), ...patch };
     this.changed(this.value);
   }
 
   private error(error: unknown): Error {
     return error instanceof Error ? error : new Error('The native model operation failed.');
   }
-}
-
-/** Capped rounds (child agents) cannot spare output tokens for reasoning. */
-function roundThinks(model: LocalModelDefinition, options?: LocalGenerationOptions): boolean {
-  return model.thinking === true && options?.outputTokens === undefined;
 }

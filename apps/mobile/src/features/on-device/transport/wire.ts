@@ -271,18 +271,15 @@ export function describeLocalToolMessage(
   return describeLocalToolCall(tool.name, (calls ?? localToolCalls(thread)).get(tool.callId));
 }
 
+const CHILD_STATES: Partial<Record<LocalChild['status'], string>> = {
+  complete: 'completed',
+  interrupted: 'cancelled',
+  idle: 'pending',
+};
+
 /** A task child's state, named as ACP sub-agent cards and `<task state>` headers name it. */
 export function localChildState(child: LocalChild): string {
-  switch (child.status) {
-    case 'complete':
-      return 'completed';
-    case 'interrupted':
-      return 'cancelled';
-    case 'idle':
-      return 'pending';
-    default:
-      return child.status;
-  }
+  return CHILD_STATES[child.status] ?? child.status;
 }
 
 /**
@@ -304,13 +301,13 @@ export function localChildLatest(child: LocalChild): string {
 
 /**
  * What a running local turn is doing, named the way the user would describe it: loading the model
- * (with progress), generating, or the running tool's action. Null when the thread is not the one
- * running.
+ * (with progress), processing the prompt (with progress), generating, or the running tool's action.
+ * Null when the thread is not the one running.
  */
 export function localRunActivity(
   thread: LocalThread,
   run: LocalRunSnapshot,
-  model: Pick<LocalModelSessionSnapshot, 'phase' | 'modelId' | 'progress'>,
+  model: Pick<LocalModelSessionSnapshot, 'phase' | 'modelId' | 'progress' | 'promptProgress'>,
 ): RunActivity | null {
   // Before the model loads the thread is not running yet; the loop already names it.
   const loading = run.phase === 'preparing' || run.phase === 'stopping';
@@ -321,7 +318,9 @@ export function localRunActivity(
     case 'preparing':
       return preparingActivity(model);
     case 'generating':
-      return { title: 'Generating' };
+      return model.promptProgress !== null
+        ? { title: 'Processing prompt', detail: percentText(model.promptProgress) }
+        : { title: 'Generating' };
     case 'compacting':
       return { title: 'Summarizing conversation' };
     case 'tool':
@@ -336,13 +335,16 @@ export function localRunActivity(
   }
 }
 
+function percentText(value: number): string {
+  return `${String(Math.max(0, Math.min(100, Math.floor(value))))}%`;
+}
+
 function preparingActivity(
   model: Pick<LocalModelSessionSnapshot, 'phase' | 'modelId' | 'progress'>,
 ): RunActivity {
   if (model.phase === 'loading') {
     const name = findLocalModelDefinition(model.modelId ?? '')?.name ?? 'model';
-    const percent = Math.max(0, Math.min(100, Math.floor(model.progress)));
-    return { title: `Loading ${name}`, detail: `${String(percent)}%` };
+    return { title: `Loading ${name}`, detail: percentText(model.progress) };
   }
   return model.phase === 'stopping'
     ? { title: 'Releasing the previous model' }

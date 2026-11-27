@@ -1,8 +1,11 @@
+import type { LocalModelSessionSnapshot } from '../models/session';
 import { LOCAL_RUN_EXPIRED_EVENT, type OnDeviceNativeServices } from '../native/services.types';
 import type { LocalRunSnapshot, LocalThread } from './types';
 
 /** iOS may expire a continued-processing task whose progress stalls, so progress is reported. */
 export const LOCAL_RUN_HEARTBEAT_MS = 5_000;
+/** Minimum spacing between Lock Screen updates caused by rapid progress ticks within one phase. */
+export const LOCAL_RUN_PROGRESS_INTERVAL_MS = 1_000;
 export const LOCAL_RUN_ACTIVITY_TITLE = 'Local agent';
 export const LOCAL_RUN_EXPIRED_MESSAGE =
   'iOS ended background time for this turn. Completed edits are preserved; retry to continue.';
@@ -16,12 +19,19 @@ type ActivityNative = Pick<
  * The run's description in the system progress UI, which can appear on the Lock Screen, so it
  * names the phase and tool but never conversation content or approval details.
  */
-export function localRunActivitySubtitle(run: LocalRunSnapshot): string {
+export function localRunActivitySubtitle(
+  run: LocalRunSnapshot,
+  model?: Pick<LocalModelSessionSnapshot, 'promptProgress'>,
+): string {
   switch (run.phase) {
     case 'idle':
     case 'preparing':
       return 'Preparing';
     case 'generating':
+      if (model?.promptProgress != null) {
+        const progress = Math.max(0, Math.min(100, Math.floor(model.promptProgress)));
+        return `Processing prompt · ${String(progress)}%`;
+      }
       return 'Generating on this iPhone';
     case 'compacting':
       return 'Summarizing the conversation';
@@ -41,6 +51,7 @@ export function localRunActivitySubtitle(run: LocalRunSnapshot): string {
 interface Hold {
   expired: boolean;
   subtitle: string;
+  updatedAt: number;
 }
 
 export interface LocalRunHost {
@@ -66,6 +77,7 @@ export class LocalRunActivities {
     private readonly native: ActivityNative,
     private readonly host: LocalRunHost,
     private readonly heartbeatMs = LOCAL_RUN_HEARTBEAT_MS,
+    private readonly progressIntervalMs = LOCAL_RUN_PROGRESS_INTERVAL_MS,
   ) {
     this.subscription = native.addListener(LOCAL_RUN_EXPIRED_EVENT, ({ id }) => this.expire(id));
   }
@@ -110,14 +122,14 @@ export class LocalRunActivities {
     if (activity.kind === 'none') {
       return null;
     }
-    this.holds.set(activity.id, { expired: false, subtitle });
-    this.heartbeat ??= setInterval(() => this.report(true), this.heartbeatMs);
+    this.holds.set(activity.id, { expired: false, subtitle, updatedAt: Date.now() });
+    this.heartbeat ??= setInterval(() => this.report(true, false), this.heartbeatMs);
     return activity.id;
   }
 
   /** Mirrors a run change into the system progress UI when its description changed. */
-  changed(): void {
-    this.report(false);
+  changed(throttled = false): void {
+    this.report(false, throttled);
   }
 
   end(id: string | null, success: boolean): void {
@@ -138,14 +150,25 @@ export class LocalRunActivities {
     this.subscription.remove();
   }
 
-  private report(heartbeat: boolean): void {
+  private report(heartbeat: boolean, throttled: boolean): void {
     if (this.holds.size === 0) {
       return;
     }
     const subtitle = this.host.subtitle();
+    const phase = subtitle.split(' · ')[0];
+    const now = Date.now();
     for (const [id, hold] of this.holds) {
-      if (!hold.expired && (heartbeat || hold.subtitle !== subtitle)) {
+      if (hold.expired) {
+        continue;
+      }
+      const samePhase = hold.subtitle.split(' · ')[0] === phase;
+      const due =
+        heartbeat ||
+        (hold.subtitle !== subtitle &&
+          (!throttled || !samePhase || now - hold.updatedAt >= this.progressIntervalMs));
+      if (due) {
         hold.subtitle = subtitle;
+        hold.updatedAt = now;
         this.native.updateLocalRunActivity(id, subtitle);
       }
     }

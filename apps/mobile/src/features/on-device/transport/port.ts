@@ -60,8 +60,11 @@ export interface LocalAgentPort {
    * Settles when the run settles; the thread reports `running` once it has started.
    */
   retryTurn(id: string): Promise<LocalThread>;
-  /** The resident model's lifecycle, which the run activity (load progress, errors) reports. */
-  modelSession(): Pick<LocalModelSessionSnapshot, 'phase' | 'modelId' | 'progress' | 'error'>;
+  /** The resident model's lifecycle, which the run activity (load/prompt progress, errors) reports. */
+  modelSession(): Pick<
+    LocalModelSessionSnapshot,
+    'phase' | 'modelId' | 'progress' | 'promptProgress' | 'error'
+  >;
   /** Answers the pending tool approval in `run().approval`. */
   resolveApproval(callId: string, approved: boolean): void;
   resolveUserInput(requestId: string, reply: LocalInputReply): void;
