@@ -18,6 +18,7 @@ use super::sip::{InboundRtpAudioFrame, SipCallEvent, SipCallHandle};
 use super::voice::{
     is_substantive_reply, VoiceCallPromptParams, VoiceConversation, VoiceError, VoiceToolCall,
 };
+use super::web_search::{execute_web_search, sanitize_query};
 use super::{
     is_incomplete_utterance, publish_in_call_card_update, recv_optional_inbound_audio,
     recv_optional_sip_event, set_call_hold, settle_connected_call, sync_shared_transcript,
@@ -64,6 +65,7 @@ struct RealtimeDialogState {
     steers: Vec<String>,
     callee_has_spoken: bool,
     last_callee_text: Option<String>,
+    last_search_query: Option<String>,
 }
 
 impl RealtimeDialogState {
@@ -86,6 +88,7 @@ impl RealtimeDialogState {
             steers: ctx.initial_steers.clone(),
             callee_has_spoken: false,
             last_callee_text: None,
+            last_search_query: None,
         }
     }
 
@@ -1001,9 +1004,39 @@ async fn apply_realtime_tool_call(
                 needs_spoken_goodbye,
             );
         }
+        VoiceToolCall::WebSearch { call_id, query } => {
+            handle_realtime_web_search_tool(ctx, state, call_id, &query).await;
+        }
         VoiceToolCall::WaitSilently { .. } | VoiceToolCall::ResumeCall { .. } => {}
     }
     None
+}
+
+async fn handle_realtime_web_search_tool(
+    ctx: &ConnectedCallContext,
+    state: &mut RealtimeLoopState,
+    call_id: String,
+    query: &str,
+) {
+    let normalized = sanitize_query(query).to_ascii_lowercase();
+    let output = if !normalized.is_empty()
+        && state.dialog.last_search_query.as_deref() == Some(normalized.as_str())
+    {
+        r#"{"note":"Already searched that earlier. Reply directly to what the listener just said."}"#
+            .to_string()
+    } else {
+        if !normalized.is_empty() {
+            state.dialog.last_search_query = Some(normalized);
+        }
+        execute_web_search(ctx.voice_client.http_client(), query, &ctx.slot.cancel)
+            .await
+            .to_string()
+    };
+    state.pending_turn = Some(RealtimeTurnRequest::ToolOutput {
+        call_id,
+        output,
+        request_spoken_reply: true,
+    });
 }
 
 fn handle_realtime_end_call_tool(

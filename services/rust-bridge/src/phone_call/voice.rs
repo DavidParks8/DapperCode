@@ -934,6 +934,10 @@ pub enum VoiceToolCall {
     ResumeCall {
         call_id: String,
     },
+    WebSearch {
+        call_id: String,
+        query: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

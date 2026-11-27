@@ -197,7 +197,8 @@ fn realtime_helpers_detect_lfm3_derive_ws_url_upsample_and_forbid_robotic_phrase
     assert!(
         instructions.starts_with("Respond with function calls, and interleaved text and audio."),
     );
-    assert!(instructions.contains("You are Lily,"));
+    assert!(instructions.contains("Your own name is Lily"));
+    assert!(instructions.contains("Use web_search ONLY for specific external facts"));
     assert!(instructions.contains("rather than ending every turn with a question"));
     assert!(instructions.contains("Always share your own fun personal take, opinion"));
     assert!(instructions.contains("Call end_call immediately when the other person says goodbye"));
@@ -230,12 +231,14 @@ fn realtime_helpers_detect_lfm3_derive_ws_url_upsample_and_forbid_robotic_phrase
 
     let no_end = build_realtime_tools(false);
     let no_end_arr = no_end.as_array().unwrap();
-    assert_eq!(no_end_arr.len(), 1);
+    assert_eq!(no_end_arr.len(), 2);
     assert_eq!(no_end_arr[0]["name"], "send_dtmf");
+    assert_eq!(no_end_arr[1]["name"], "web_search");
 
     let with_end = build_realtime_tools(true);
     let with_end_arr = with_end.as_array().unwrap();
-    assert_eq!(with_end_arr.len(), 2);
+    assert_eq!(with_end_arr.len(), 3);
+    assert!(with_end_arr.iter().any(|tool| tool["name"] == "web_search"));
     assert!(with_end_arr.iter().all(|tool| tool["name"] != "hold_call"));
 
     // Mid-length utterances captured near assistant audio are pre-checked for self-echo,

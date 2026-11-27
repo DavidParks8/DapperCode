@@ -13,6 +13,7 @@ pub(crate) mod sip;
 pub(crate) mod voice;
 
 mod realtime_loop;
+mod web_search;
 
 use crate::bridge_protocol::{
     BridgeQueueService, BridgeThreadQueueSendRequest, BridgeUiAction, BridgeUiActionStyle,
@@ -882,7 +883,7 @@ impl PhoneCallService {
         };
 
         tokio::spawn(Box::pin(async move {
-            run_connected_call(runner_ctx).await;
+            Box::pin(run_connected_call(runner_ctx)).await;
         }));
 
         Ok(StartPhoneCallResult {
@@ -1898,8 +1899,18 @@ fn is_common_short_callee_reply(tokens: &[String]) -> bool {
 fn is_likely_self_echo(callee_text: &str, assistant_text: &str) -> bool {
     let callee_tokens = normalize_echo_tokens(callee_text);
     let assistant_tokens = normalize_echo_tokens(assistant_text);
-    if callee_tokens.len() < 2 || assistant_tokens.len() < 2 {
+    if callee_tokens.is_empty() || assistant_tokens.len() < 2 {
         return false;
+    }
+    if callee_tokens.len() == 1 {
+        let word = &callee_tokens[0];
+        const SAFE_SINGLE_REPLIES: &[&str] = &[
+            "yes", "yeah", "yep", "sure", "okay", "right", "nope", "wait", "stop", "help", "hello",
+            "goodbye", "bye", "what", "why",
+        ];
+        return word.len() >= 4
+            && !SAFE_SINGLE_REPLIES.contains(&word.as_str())
+            && assistant_tokens.first().map(String::as_str) == Some(word.as_str());
     }
     if is_common_short_callee_reply(&callee_tokens) {
         return false;
@@ -2072,7 +2083,7 @@ fn set_call_hold(slot: &ActiveCallSlot, conversation: &mut VoiceConversation, on
 )]
 async fn run_connected_call(mut ctx: ConnectedCallContext) {
     if ctx.voice_client.is_realtime_s2s() {
-        realtime_loop::run_connected_realtime_call(ctx).await;
+        Box::pin(realtime_loop::run_connected_realtime_call(ctx)).await;
         return;
     }
     let sip_handle = ctx.sip_session.control_handle();
@@ -2559,6 +2570,7 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                                     }
                                     conversation.record_tool_result(tc_id, "Conversation resumed; respond to the recipient now.");
                                 }
+                                VoiceToolCall::WebSearch { .. } => {}
                                 VoiceToolCall::EndCall {
                                     call_id: tc_id,
                                     reason,

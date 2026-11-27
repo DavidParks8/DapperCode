@@ -5673,6 +5673,7 @@ fn self_echo_matcher_rejects_echo_fragments_and_preserves_genuine_replies() {
         ),
         ("I apologize", "I apologize if I interrupted."),
         ("anything else", "Is there anything else on your mind?"),
+        ("Great.", "Great! What would you like to talk about today?"),
     ] {
         assert!(
             is_likely_self_echo(callee, assistant),
@@ -5698,6 +5699,8 @@ fn self_echo_matcher_rejects_echo_fragments_and_preserves_genuine_replies() {
             "Hi, I'm calling for Alex to check your hours.",
         ),
         ("For David, sure", "Hi, I'm calling for David."),
+        ("Okay.", "Okay! Sounds good."),
+        ("Goodbye.", "Goodbye! Have a great day."),
     ] {
         assert!(
             !is_likely_self_echo(callee, assistant),
