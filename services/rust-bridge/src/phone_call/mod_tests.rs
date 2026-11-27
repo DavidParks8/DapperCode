@@ -5893,7 +5893,10 @@ fn live_card_and_report_serialize_event_and_tool_transcript_entries() {
     let BridgeUiBlock::Markdown { markdown } = &card.blocks[1] else {
         panic!("expected markdown block");
     };
-    assert!(markdown.contains("**Event:** Pressed 2"), "{markdown}");
+    assert!(
+        markdown.contains("**Event:** Pressed 2"),
+        "live card markdown should include DTMF event entry",
+    );
     let report = build_post_call_report_content(
         "ev-1",
         PhoneCallStatus::Completed,
@@ -5903,7 +5906,10 @@ fn live_card_and_report_serialize_event_and_tool_transcript_entries() {
         Some("Refill ready"),
         &entries,
     );
-    assert!(report.contains("Event: Pressed 2"), "{report}");
+    assert!(
+        report.contains("Event: Pressed 2"),
+        "post-call report should include DTMF event entry",
+    );
 }
 
 #[tokio::test]
