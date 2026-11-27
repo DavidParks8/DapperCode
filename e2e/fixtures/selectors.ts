@@ -235,6 +235,9 @@ export const selectors = {
     page.getByText('This bridge did not start its preview server.', { exact: false }),
 
   topChrome: (page: Page): Locator => page.getByTestId('main-screen-top-chrome'),
+  topCardsContainer: (page: Page): Locator => page.getByTestId('chat-top-cards-container'),
+  topCards: (page: Page): Locator => page.getByTestId('chat-top-cards'),
+  workflowCards: (page: Page): Locator => page.getByTestId('bridge-ui-workflow-card'),
   chatHeaderRow: (page: Page): Locator => page.getByTestId('chat-header-row'),
   chatHeaderTitleRow: (page: Page): Locator => page.getByTestId('chat-header-title-row'),
   chatHeaderNewChat: (page: Page): Locator =>
@@ -275,6 +278,9 @@ export const selectors = {
   toolPatchStats: (root: Page | Locator): Locator => root.getByTestId('tool-patch-stats'),
 
   composer: (page: Page): Locator => page.getByTestId('chat-composer'),
+  phoneCallDock: (page: Page): Locator => page.getByTestId('phone-call-dock'),
+  phoneCallDockToggle: (page: Page): Locator => page.getByTestId('phone-call-dock-toggle'),
+  phoneCallDockDetails: (page: Page): Locator => page.getByTestId('phone-call-dock-details'),
   composerControls: (page: Page): Locator => page.getByTestId('composer-control-groups'),
   composerInputSurface: (page: Page): Locator => page.getByTestId('composer-input-glass-surface'),
   composerInput: (page: Page): Locator =>

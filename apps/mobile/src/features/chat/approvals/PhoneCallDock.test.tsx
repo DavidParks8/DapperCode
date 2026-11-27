@@ -378,10 +378,24 @@ describe('phoneCallDetailsMaxHeight', () => {
     expect(chat).toBeGreaterThanOrEqual(details);
   });
 
-  it('caps tall screens and never goes negative when nothing is left', () => {
+  it('caps tall screens, shares space across multiple live docks, and never goes negative', () => {
     expect(
       phoneCallDetailsMaxHeight({ windowHeight: 1366, topChromeHeight: 110, bottomInset: 34 }),
     ).toBe(300);
+    const single = phoneCallDetailsMaxHeight({
+      windowHeight: 678,
+      topChromeHeight: 110,
+      bottomInset: 34,
+      dockCount: 1,
+    });
+    const dual = phoneCallDetailsMaxHeight({
+      windowHeight: 678,
+      topChromeHeight: 110,
+      bottomInset: 34,
+      dockCount: 2,
+    });
+    expect(dual).toBeGreaterThan(0);
+    expect(dual * 2 + 60).toBeLessThanOrEqual(single + 60);
     expect(
       phoneCallDetailsMaxHeight({ windowHeight: 400, topChromeHeight: 110, bottomInset: 260 }),
     ).toBe(0);

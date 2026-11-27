@@ -118,6 +118,7 @@ export function useMainScreenComposerRenderer(context: MainScreenComposerRendere
     windowHeight,
     topChromeHeight,
     bottomInset: composerOverlayInset + composerSafeAreaBottomInset,
+    dockCount: callBridgeUiSurfaces.length,
   });
   const actionRail = useTrailingActionRail();
   const actionColumn = actionRail

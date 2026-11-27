@@ -1,6 +1,6 @@
 import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 
-import { ActivityIndicator, Platform, StyleSheet } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { BridgeUiAction, BridgeUiSurface } from '@bridge/types/types';
 import { feedback } from '@shared/feedback';
@@ -562,6 +562,48 @@ describe('BridgeUiWorkflowCard', () => {
     } finally {
       Platform.OS = originalOS;
     }
+  });
+
+  it('starts collapsed when defaultCollapsed is set and skips the inner ScrollView when scrollMaxHeight is null', () => {
+    const surface: BridgeUiSurface = {
+      id: 'outer-scroll',
+      threadId: 'thread-1',
+      turnId: null,
+      kind: 'goal',
+      presentation: 'workflowCard',
+      tone: 'neutral',
+      title: 'Outer scrolled card',
+      subtitle: 'Details',
+      bodyMarkdown: null,
+      blocks: [
+        { type: 'text', text: 'Summary line' },
+        { type: 'keyValue', items: [{ label: 'Detail', value: 'Hidden while collapsed' }] },
+      ],
+      actions: [],
+      dismissible: true,
+    };
+    let rendered: ReactTestRenderer | undefined;
+    act(() => {
+      rendered = renderer.create(
+        <SafeAreaProvider initialMetrics={safeAreaMetrics}>
+          <AppThemeProvider theme={theme}>
+            <BridgeUiWorkflowCard
+              surface={surface}
+              scrollMaxHeight={null}
+              defaultCollapsed
+              onAction={jest.fn()}
+              onDismiss={jest.fn()}
+            />
+          </AppThemeProvider>
+        </SafeAreaProvider>,
+      );
+    });
+    const root = expectValue(rendered).root as QueryableTestInstance;
+    expect(findText(root, 'Hidden while collapsed')).toBe(false);
+    act(() => readOnPress(findPressableByLabel(root, 'Expand surface').props)());
+    expect(findText(root, 'Hidden while collapsed')).toBe(true);
+    expect(root.findAll((node) => node.type === ScrollView)).toHaveLength(0);
+    act(() => expectValue(rendered).unmount());
   });
 });
 

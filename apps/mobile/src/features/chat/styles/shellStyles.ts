@@ -62,9 +62,13 @@ export const createMainScreenShellStyles = (theme: AppTheme) =>
     },
     topCardsRow: {
       backgroundColor: theme.colors.bgMain,
-      paddingHorizontal: theme.spacing.lg,
+      zIndex: 2,
+    },
+    topCardsScroll: {
+      flexGrow: 0,
+    },
+    topCardsRowContent: {
       paddingBottom: theme.spacing.sm,
       gap: theme.spacing.sm,
-      zIndex: 2,
     },
   }) as const;

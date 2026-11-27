@@ -47,7 +47,9 @@ export type BridgeUiActionHandler = (
 
 interface BridgeUiSurfaceProps {
   surface: BridgeUiSurface;
-  scrollMaxHeight?: number;
+  /** Maximum height of the card's internal scroll view, or `null` when an outer scroll container owns scrolling. */
+  scrollMaxHeight?: number | null;
+  defaultCollapsed?: boolean;
   onAction: BridgeUiActionHandler;
   onDismiss: (surface: BridgeUiSurface) => void;
 }
@@ -55,12 +57,13 @@ interface BridgeUiSurfaceProps {
 export function BridgeUiWorkflowCard({
   surface,
   scrollMaxHeight = 320,
+  defaultCollapsed = false,
   onAction,
   onDismiss,
 }: BridgeUiSurfaceProps) {
   const theme = useAppTheme();
   const styles = useMemo(() => createBridgeUiSurfaceStyles(theme), [theme]);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
 
   const handleToggleCollapse = useCallback(() => {
     setCollapsed((value) => !value);
@@ -68,6 +71,7 @@ export function BridgeUiWorkflowCard({
 
   return (
     <Animated.View
+      testID="bridge-ui-workflow-card"
       style={[styles.surfaceCard, styles.workflowCard]}
       layout={LinearTransition.duration(motion.duration.layout).easing(
         Easing.bezier(...motion.easing.standard),
@@ -86,15 +90,21 @@ export function BridgeUiWorkflowCard({
           )}
           exiting={FadeOut.duration(motion.duration.immediate)}
         >
-          <ScrollView
-            nestedScrollEnabled
-            bounces={false}
-            style={{ maxHeight: scrollMaxHeight }}
-            contentContainerStyle={styles.surfaceBody}
-            showsVerticalScrollIndicator
-          >
-            <SurfaceContent surface={surface} />
-          </ScrollView>
+          {scrollMaxHeight === null ? (
+            <View style={styles.surfaceBody}>
+              <SurfaceContent surface={surface} />
+            </View>
+          ) : (
+            <ScrollView
+              nestedScrollEnabled
+              bounces={false}
+              style={{ maxHeight: scrollMaxHeight }}
+              contentContainerStyle={styles.surfaceBody}
+              showsVerticalScrollIndicator
+            >
+              <SurfaceContent surface={surface} />
+            </ScrollView>
+          )}
           <SurfaceActions surface={surface} onAction={onAction} />
         </Animated.View>
       )}

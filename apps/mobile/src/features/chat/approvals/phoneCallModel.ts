@@ -19,7 +19,10 @@ const TITLE_PREFIX = 'Phone call · ';
 const TRANSCRIPT_HEADING = /^\*\*Live transcript\*\*\s*/;
 
 export function isPhoneCallSurface(surface: BridgeUiSurface): boolean {
-  return surface.kind === 'phone-call' && surface.presentation === 'workflowCard';
+  return (
+    surface.presentation === 'workflowCard' &&
+    (surface.kind === 'phone-call' || (!surface.kind && surface.id.startsWith('phone-call-live:')))
+  );
 }
 
 function isActivePhoneCall(surface: BridgeUiSurface): boolean {

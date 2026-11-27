@@ -43,6 +43,7 @@ interface PhoneCallDockProps {
 const FOLLOW_LATEST_SLOP = 24;
 // The dock's header row, the gap below it, and a one-line composer stay on screen when expanded.
 const EXPANDED_FIXED_CONTROLS_HEIGHT = 114;
+const ADDITIONAL_DOCK_ROW_HEIGHT = 60;
 
 /**
  * Expanded details share the reading space left between the top chrome, the fixed call and
@@ -53,13 +54,17 @@ export function phoneCallDetailsMaxHeight(options: {
   windowHeight: number;
   topChromeHeight: number;
   bottomInset: number;
+  dockCount?: number;
 }): number {
+  const count = Math.max(1, options.dockCount ?? 1);
+  const extraRows = (count - 1) * ADDITIONAL_DOCK_ROW_HEIGHT;
   const reading =
     options.windowHeight -
     options.topChromeHeight -
     options.bottomInset -
-    EXPANDED_FIXED_CONTROLS_HEIGHT;
-  return Math.max(0, Math.min(Math.floor(reading / 2), 300));
+    EXPANDED_FIXED_CONTROLS_HEIGHT -
+    extraRows;
+  return Math.max(0, Math.min(Math.floor(reading / 2 / count), 300));
 }
 
 /**
