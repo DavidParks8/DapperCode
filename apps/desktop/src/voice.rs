@@ -2,7 +2,7 @@ use std::io::Read;
 
 use anyhow::{bail, Context, Result};
 use dappercode_desktop_core::{
-    AppPaths, PhoneCallSettings, SecretStore, DEFAULT_SIP_TRANSPORT, DEFAULT_VOICE_BASE_URL,
+    AppPaths, PhoneCallSettings, SecretStore, DEFAULT_SIP_TRANSPORT, DEFAULT_VOICE_AUDIO_BASE_URL,
     DEFAULT_VOICE_LLM_MODEL, DEFAULT_VOICE_STT_MODEL, DEFAULT_VOICE_TTS_MODEL,
     DEFAULT_VOICE_TTS_VOICE,
 };
@@ -133,7 +133,7 @@ impl VoiceOverrides {
             stt_base_url: self
                 .stt_base_url
                 .or_else(|| existing.map(|settings| settings.stt_base_url.clone()))
-                .unwrap_or_else(|| DEFAULT_VOICE_BASE_URL.to_string()),
+                .unwrap_or_else(|| DEFAULT_VOICE_AUDIO_BASE_URL.to_string()),
             stt_model: self
                 .stt_model
                 .or_else(|| existing.map(|settings| settings.stt_model.clone()))
@@ -141,7 +141,7 @@ impl VoiceOverrides {
             llm_base_url: self
                 .llm_base_url
                 .or_else(|| existing.map(|settings| settings.llm_base_url.clone()))
-                .unwrap_or_else(|| DEFAULT_VOICE_BASE_URL.to_string()),
+                .unwrap_or_else(|| DEFAULT_VOICE_AUDIO_BASE_URL.to_string()),
             llm_model: self
                 .llm_model
                 .or_else(|| existing.map(|settings| settings.llm_model.clone()))
@@ -149,7 +149,7 @@ impl VoiceOverrides {
             tts_base_url: self
                 .tts_base_url
                 .or_else(|| existing.map(|settings| settings.tts_base_url.clone()))
-                .unwrap_or_else(|| DEFAULT_VOICE_BASE_URL.to_string()),
+                .unwrap_or_else(|| DEFAULT_VOICE_AUDIO_BASE_URL.to_string()),
             tts_model: self
                 .tts_model
                 .or_else(|| existing.map(|settings| settings.tts_model.clone()))

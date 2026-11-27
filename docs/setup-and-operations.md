@@ -505,24 +505,21 @@ DAPPERCODE_TEST_VOICE_AUDIO_DATA_DIR=/absolute/scenario-owned-data \
 node --test scripts/__tests__/voice-intelligibility.test.mjs
 ```
 
-By default, speech-to-text, tool-calling voice turns, and 24 kHz streaming text-to-speech run
-against one local Ollama daemon (`>= v0.40.9`, `http://127.0.0.1:11434/v1`):
+By default, phone calls run against a single local `llama.cpp` v0.8.0+ (`/v1/realtime` WebSocket)
+server on `http://127.0.0.1:8000/v1` serving `LiquidAI/LFM3-Audio-2B-GGUF:Q8_0` (`--tts-voice female`):
 
 ```bash
-ollama pull gemma4:e4b
-ollama pull gpt-oss:20b
-ollama pull phonon
+brew install llama.cpp
+llama serve -hf LiquidAI/LFM3-Audio-2B-GGUF:Q8_0 --host 127.0.0.1 --port 8000 --temp 0 -np 2
 ```
 
-`gemma4:e4b` handles `/v1/audio/transcriptions`; `gpt-oss:20b` handles `/v1/chat/completions`
-conversation turns with low reasoning effort and reduced sampling variability.
-`phonon` handles `/v1/audio/speech` 24 kHz PCM synthesis (`--tts-voice` defaults to `default`). To
-override narrowband 8 kHz transcription with a dedicated local server—for example `mlx_audio.server`
-serving `mlx-community/parakeet-tdt-0.6b-v2`—pass `--stt-base-url` and `--stt-model` (and optionally
-`--llm-base-url` / `--llm-model` or `--tts-base-url` / `--tts-model`).
+To use a custom OpenAI-compatible HTTP endpoint instead (for example an Ollama-only setup with
+`gemma4:e4b` for `/v1/audio/transcriptions` and `phonon` with `--tts-voice Harper` for
+`/v1/audio/speech`), pass `--stt-base-url` / `--stt-model`, `--llm-base-url` / `--llm-model`, and
+`--tts-base-url` / `--tts-model` / `--tts-voice` explicitly.
 All three URLs, all three model IDs, and the TTS voice can be changed independently with
 `voice configure`; omitted flags preserve the existing values rather than resetting them to defaults.
-Existing configurations keep their saved model. After pulling the new model, select it with
+Existing configurations keep their saved models and URLs. After pulling a new model, select it with
 `dappercode voice configure --llm-model gpt-oss:20b`; this preserves SIP settings, transcription,
 and the TTS voice. Existing workers keep the environment they started with; finish active calls
 before restarting the affected worker to pick up changed settings.
@@ -585,7 +582,7 @@ dappercode voice configure \
   --stt-model mlx-community/parakeet-tdt-0.6b-v2 \
   --tts-base-url "$TTS_BASE_URL" \
   --tts-model phonon \
-  --tts-voice default
+  --tts-voice Harper
 ```
 
 Model weights may download during host setup; inference remains local. Keep all providers
@@ -597,44 +594,6 @@ repository.
 Validate the complete audio path on the intended host. Larger models alone can worsen recognition
 or exhaust available memory; paging and other model workloads can introduce long pauses. Synthetic
 noise checks do not replace accent coverage, consented listening tests, or review of a real call.
-
-### Conversational female voice on Apple silicon
-
-The opt-in `conversational-female` voice profile uses
-`mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit` through a local MLX Audio
-server. It targets the warm, conversational US-English female delivery evaluated
-with the listening samples, rather than cloning the macOS system voice.
-It changes speech synthesis only: dialogue, private text steering, sentence-boundary
-ordinary steering, immediate stop, DTMF, holds, and hang-up remain bridge-controlled.
-Existing Phonon defaults and saved voice selections are unchanged.
-
-Use the same separate Python environment described above. The verified provider
-version is `mlx-audio[server,stt]==0.6.5`; keep it outside repositories:
-
-```bash
-python -m pip install 'mlx-audio[server,stt]==0.6.5'
-python -m uvicorn mlx_audio.server:app --host 127.0.0.1 --port 0
-```
-
-Set `TTS_BASE_URL` to the printed loopback URL with `/v1` appended. Choose a stable
-available service port for ongoing use; do not use a workspace bridge port.
-Load the speech model, then select the profile using the existing voice settings:
-
-```bash
-curl --fail --request POST \
-  "$TTS_BASE_URL/models?model_name=mlx-community%2FQwen3-TTS-12Hz-1.7B-VoiceDesign-8bit"
-dappercode voice configure \
-  --tts-base-url "$TTS_BASE_URL" \
-  --tts-model mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit \
-  --tts-voice conversational-female
-dappercode voice status --human
-```
-
-The alias requires that exact model ID; incompatible model/profile combinations
-are rejected instead of silently falling back to another voice. The bridge sends
-the female voice description, conversational style, English language, and the
-evaluated sampling parameters separately from the spoken text. No style instructions
-are inserted into the callee transcript or read aloud as part of the speech input.
 Providers other than this selected profile retain the original speech request shape.
 
 The provider is host-managed; the bridge does not install or supervise Python or
@@ -652,7 +611,7 @@ above for intelligibility; listening is still needed for accent, prosody, and
 context-sensitive delivery.
 
 To return to Phonon, explicitly select the original local Ollama endpoint,
-`--tts-model phonon`, and `--tts-voice default`. This profile does not adopt MiniCPM
+`--tts-model phonon`, and `--tts-voice Harper`. This profile does not adopt MiniCPM
 or remove the existing approval/authorization safeguards.
 
 Security and storage boundaries:

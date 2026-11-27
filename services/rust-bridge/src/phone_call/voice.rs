@@ -17,19 +17,11 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-pub const DEFAULT_OLLAMA_OPENAI_BASE_URL: &str = "http://127.0.0.1:11434/v1";
-pub const DEFAULT_STT_MODEL: &str = "gemma4:e4b";
-pub const DEFAULT_LLM_MODEL: &str = "gpt-oss:20b";
-pub const DEFAULT_TTS_MODEL: &str = "phonon";
-pub const DEFAULT_TTS_VOICE: &str = "default";
-pub const CONVERSATIONAL_FEMALE_TTS_MODEL: &str =
-    "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit";
-pub const CONVERSATIONAL_FEMALE_TTS_VOICE: &str = "conversational-female";
-const CONVERSATIONAL_FEMALE_INSTRUCT: &str =
-    "An adult woman with a warm, clear, medium-pitched voice and a General American accent. \
-     Speak naturally and casually in American English, as if calling a restaurant. \
-     Warm and relaxed, with connected phrasing, varied rhythm and gentle intonation. \
-     Not an announcer or a customer-service recording. Do not add any words.";
+pub const DEFAULT_LOCAL_VOICE_BASE_URL: &str = "http://127.0.0.1:8000/v1";
+pub const DEFAULT_STT_MODEL: &str = super::realtime::DEFAULT_LFM3_AUDIO_MODEL;
+pub const DEFAULT_LLM_MODEL: &str = super::realtime::DEFAULT_LFM3_AUDIO_MODEL;
+pub const DEFAULT_TTS_MODEL: &str = super::realtime::DEFAULT_LFM3_AUDIO_MODEL;
+pub const DEFAULT_TTS_VOICE: &str = "female";
 pub const DEFAULT_KEEP_ALIVE: &str = "15m";
 pub const DEFAULT_STT_LANGUAGE: &str = "en";
 pub const STT_PROMPT_MAX_BYTES: usize = 320;
@@ -39,6 +31,7 @@ pub const LIVE_STEER_PREFIX: &str = "[Live instruction from user via mobile app]
 const CONNECT_TIMEOUT_SECS: u64 = 10;
 const PRELOAD_REQUEST_TIMEOUT_SECS: u64 = 30;
 const STT_REQUEST_TIMEOUT_SECS: u64 = 30;
+const MIN_CLAUSE_SPLIT_CHARS: usize = 12;
 const ERROR_BODY_MAX_BYTES: usize = 4_096;
 const SSE_LINE_MAX_BYTES: usize = 256 * 1024;
 const SILENT_PICKUP_USER_CUE: &str =
@@ -97,11 +90,11 @@ pub struct VoicePipelineConfig {
 impl Default for VoicePipelineConfig {
     fn default() -> Self {
         Self {
-            stt_base_url: DEFAULT_OLLAMA_OPENAI_BASE_URL.to_string(),
+            stt_base_url: DEFAULT_LOCAL_VOICE_BASE_URL.to_string(),
             stt_model: DEFAULT_STT_MODEL.to_string(),
-            llm_base_url: DEFAULT_OLLAMA_OPENAI_BASE_URL.to_string(),
+            llm_base_url: DEFAULT_LOCAL_VOICE_BASE_URL.to_string(),
             llm_model: DEFAULT_LLM_MODEL.to_string(),
-            tts_base_url: DEFAULT_OLLAMA_OPENAI_BASE_URL.to_string(),
+            tts_base_url: DEFAULT_LOCAL_VOICE_BASE_URL.to_string(),
             tts_model: DEFAULT_TTS_MODEL.to_string(),
             tts_voice: DEFAULT_TTS_VOICE.to_string(),
         }
@@ -122,16 +115,6 @@ impl VoicePipelineConfig {
         validate_non_empty_field("llm_model", &self.llm_model)?;
         validate_non_empty_field("tts_model", &self.tts_model)?;
         validate_non_empty_field("tts_voice", &self.tts_voice)?;
-        if self.tts_voice.trim() == CONVERSATIONAL_FEMALE_TTS_VOICE
-            && self.tts_model.trim() != CONVERSATIONAL_FEMALE_TTS_MODEL
-        {
-            return Err(VoiceError::InvalidConfig {
-                field: "tts_model",
-                reason: format!(
-                    "{CONVERSATIONAL_FEMALE_TTS_VOICE} requires {CONVERSATIONAL_FEMALE_TTS_MODEL}",
-                ),
-            });
-        }
         Ok(())
     }
 
@@ -211,6 +194,10 @@ pub fn validate_loopback_base_url(field: &'static str, raw: &str) -> Result<Url,
     let normalized_path = parsed.path().trim_end_matches('/').to_string();
     parsed.set_path(&normalized_path);
     Ok(parsed)
+}
+
+pub(super) fn is_loopback_base_url(url: &Url) -> bool {
+    url.host_str().is_some_and(is_loopback_host)
 }
 
 fn is_loopback_host(host_raw: &str) -> bool {
@@ -401,19 +388,19 @@ pub fn build_system_prompt(params: &VoiceCallPromptParams) -> String {
         "You are an automated phone assistant carrying out a request for {caller_name}. This is a live two-way conversation.\n\
          You are CALLING the recipient on the caller's behalf; you do not work for the recipient. Messages labelled Recipient are what the other person said. Your replies answer them using the caller's objective and background. Never reverse these roles or ask for facts already supplied in the objective.\n\
          \n\
-         CALLER-IDENTIFYING OPENING: Begin with who you are calling for and why: \"Hi, I'm calling for {caller_name} to book a table.\" Use the actual objective's facts. For routine questions like \"Who's calling?\" or \"Who am I speaking with?\", answer \"I'm calling for {caller_name}\" with the actual purpose. Answer their question; do not ask for their name, turn the question back, or restart the greeting. These are not questions about automation: use no AI, automation, bot, or model labels. Do not volunteer those labels or use a stock \"automated assistant\" introduction. Never pretend to be {caller_name} or claim to be human. Only if directly asked whether you are human, AI, or automated, answer truthfully and briefly.\n\
+         CALLER-IDENTIFYING OPENING: Begin with who you are calling for and why using the actual call objective, for example: \"Hi, I'm calling for {caller_name} about <the actual call objective>.\" If Opening turn guidance is provided below, open naturally following that guidance and the actual objective rather than inventing a different reason for calling. For routine questions like \"Who's calling?\" or \"Who am I speaking with?\", answer \"I'm calling for {caller_name}\" with the actual purpose. Answer their question; do not ask for their name, turn the question back, or restart the greeting. These are not questions about automation: use no AI, automation, bot, or model labels. Do not volunteer those labels or use a stock \"automated assistant\" introduction. Never pretend to be {caller_name} or claim to be human. Only if directly asked whether you are human, AI, or automated, answer truthfully and briefly.\n\
          \n\
-         RESPONSE: Return exactly one JSON object with speech, decision, digits, reason, on_hold, and outcome_summary. Only speech is spoken; reason is a brief private explanation of the action. For send_dtmf, digits must contain the literal menu symbols, such as \"1\", never \"one\"; for other decisions use digits=\"\". Set on_hold=true whenever asked to hold or wait for a person; false for ordinary listening. Use one or two short sentences, at most one question, contractions and plain language. No markdown, stage directions, tool syntax, fake hesitations, or invented human experiences. In speech, write numbers, times and codes in spoken words: \"seven forty-five p m\", not \"7:45pm\"; \"October twenty-third\", not \"10/23\".\n\
+         RESPONSE: Return exactly one JSON object with speech, decision, digits, reason, on_hold, and outcome_summary. Only speech is spoken; reason is a brief private explanation of the action. For send_dtmf, digits must contain the literal menu symbols, such as \"1\", never \"one\"; for other decisions use digits=\"\". Set on_hold=true whenever asked to hold or wait for a person; false for ordinary listening. Use one or two short sentences, at most one question, contractions and plain language. No markdown, stage directions, tool syntax, fake hesitations, or invented human experiences. Never say you are \"following a script\", never repeat the call objective word-for-word, and never give robotic disclaimers like \"I don't have personal preferences or feelings\". In speech, write numbers, times and codes in spoken words: \"seven forty-five p m\", not \"7:45pm\"; \"October twenty-third\", not \"10/23\".\n\
          \n\
          FIRST decide whether the recipient can continue:\n\
-         - If they ask to stop, cannot help further, refuse automation, or report a wrong number: apologize or acknowledge their situation, say goodbye without another question, and decision=end_call. For a wrong number or refusal, do not repeat or explain the business request; a short apology and goodbye is enough.\n\
+         - If they explicitly ask to stop or hang up, cannot help further, refuse automation, or report a wrong number: apologize or acknowledge their situation, say goodbye without another question, and decision=end_call. For a wrong number or refusal, do not repeat or explain the business request; a short apology and goodbye is enough. Criticism or questions about your voice, tone, pacing, or latency are feedback, NOT a refusal to continue: apologize briefly, adjust, and keep talking with decision=wait_silently.\n\
          - If grieving and asking to leave: express sympathy, close gently, and decision=end_call. Do not discuss the objective or offer another conversation.\n\
          - If someone reports a medical emergency: tell them to contact local emergency services now, close, and decision=end_call. Never claim help was dispatched or delay them with booking questions.\n\
          - If there is a fire: give an urgent protective action and emergency-services referral in one sentence, for example \"Please get everyone outside and contact local emergency services now.\" Then decision=end_call. Do not advise going back inside.\n\
          - If voicemail invites a message: identify the caller and objective with supplied facts only, then close and decision=end_call. Never invent callback details.\n\
          - Otherwise continue. Acknowledge good news warmly (for example, \"Congratulations!\") AND answer the recipient's question from the objective. If rushed, give just the requested facts. If frustrated, apologize specifically and repair the misunderstanding. Never claim you know exactly how they feel.\n\
          \n\
-         CONTINUING: Answer before pursuing the task. Keep corrections. Ask one focused clarification for unclear details; never guess. After {INTERRUPTED_MARKER}, unfinished words may not have been heard; do not repeat the introduction. Fragments or silence mean speech=\"\", decision=wait_silently, on_hold=false, not success or refusal.\n\
+         CONTINUING: Answer before pursuing the task. Keep corrections. Ask one focused clarification for unclear details; never guess. After {INTERRUPTED_MARKER}, unfinished words may not have been heard; do not repeat the introduction. Use speech=\"\" with decision=wait_silently and on_hold=false ONLY for unintelligible noise, empty audio, or trailing silence; never for a greeting (like \"Hello?\"), a question (like \"Why did you stop talking?\"), or any understandable sentence from the recipient. Whenever the recipient speaks understandable words and the call is not on hold, ALWAYS reply briefly in speech rather than staying silent. Unclear fragments are not success or refusal.\n\
          \n\
          AUTHORITY: Never invent confirmations, availability, payment details, or permission for fees or changed dates. If not authorized, explain briefly and ask the recipient to check alternatives; decision=wait_silently. Your lack of permission is not recipient refusal. End after explicit resolution or no further help, never while alternatives remain. For end_call, outcome_summary records only what happened and unresolved details; otherwise it is empty.\n\
          \n\
@@ -477,6 +464,7 @@ pub struct VoiceConversation {
     transcript: Vec<TranscriptEntry>,
     stt_vocabulary_prompt: String,
     on_hold: bool,
+    require_spoken_reply: bool,
     caller_request: String,
     steer_revision: usize,
     pending_steers: Vec<(usize, String)>,
@@ -496,6 +484,7 @@ impl VoiceConversation {
             transcript: Vec::new(),
             stt_vocabulary_prompt,
             on_hold: false,
+            require_spoken_reply: false,
             steer_revision: 0,
             pending_steers: Vec::new(),
             caller_request: format!(
@@ -535,6 +524,14 @@ impl VoiceConversation {
         self.on_hold
     }
 
+    pub fn requires_spoken_reply(&self) -> bool {
+        self.require_spoken_reply
+    }
+
+    pub fn set_require_spoken_reply(&mut self, required: bool) {
+        self.require_spoken_reply = required;
+    }
+
     // A one-word ASR snippet is provisional, even when the model invents a successful outcome.
     // User hang-up and remote BYE remain available regardless of transcript length.
     pub fn can_end_call(&self) -> bool {
@@ -563,6 +560,7 @@ impl VoiceConversation {
         if trimmed.is_empty() {
             return;
         }
+        self.require_spoken_reply = false;
         self.messages.push(ChatMessage::user(trimmed));
         self.transcript.push(TranscriptEntry {
             speaker: TranscriptSpeaker::Callee,
@@ -573,6 +571,9 @@ impl VoiceConversation {
 
     pub fn record_assistant_turn(&mut self, turn: &AssistantTurnOutput) {
         let trimmed_text = turn.full_text.trim();
+        if !trimmed_text.is_empty() {
+            self.require_spoken_reply = false;
+        }
         if trimmed_text.is_empty() && turn.raw_tool_calls.is_empty() {
             return;
         }
@@ -883,6 +884,10 @@ fn find_clause_split_index(buffer: &str) -> Option<usize> {
             continue;
         }
 
+        if slice[..end_rel_idx].chars().count() < MIN_CLAUSE_SPLIT_CHARS {
+            continue;
+        }
+
         return Some(leading_ws.saturating_add(end_rel_idx));
     }
 
@@ -939,6 +944,20 @@ pub struct AssistantTurnOutput {
     pub raw_tool_calls: Vec<AssistantToolCallMessage>,
 }
 
+fn phone_turn_response_schema(can_end_call: bool, require_spoken_reply: bool) -> Value {
+    let mut schema = voice_tool_definitions(can_end_call)[0]["function"]["parameters"].clone();
+    if require_spoken_reply {
+        if let Some(speech) = schema
+            .get_mut("properties")
+            .and_then(|props| props.get_mut("speech"))
+            .and_then(Value::as_object_mut)
+        {
+            speech.insert("minLength".to_string(), json!(2));
+        }
+    }
+    schema
+}
+
 #[must_use]
 pub fn voice_tool_definitions(can_end_call: bool) -> Value {
     let mut decisions = vec!["wait_silently", "send_dtmf"];
@@ -961,7 +980,7 @@ pub fn voice_tool_definitions(can_end_call: bool) -> Value {
                         },
                         "speech": {
                             "type": "string",
-                            "description": "Words the recipient should hear, including caller and purpose on the opening turn. Always empty while on hold or resuming a held call. Acknowledge distress or frustration sincerely before closing; do not use a generic cheerful goodbye."
+                            "description": "Words the recipient should hear, including caller and purpose on the opening turn. Always empty while on hold or resuming a held call. Otherwise, whenever the recipient speaks understandable words, a greeting, or a question, reply briefly in speech rather than leaving speech empty. Acknowledge distress or frustration sincerely before closing; do not use a generic cheerful goodbye."
                         },
                         "digits": {
                             "type": "string",
@@ -969,7 +988,7 @@ pub fn voice_tool_definitions(can_end_call: bool) -> Value {
                         },
                         "reason": {
                             "type": "string",
-                            "description": "Brief reason for the chosen action."
+                            "description": "Very short 2-5 word private note for the chosen action."
                         },
                         "on_hold": {
                             "type": "boolean",
@@ -1028,6 +1047,53 @@ impl VoicePipelineClient {
         &self.config
     }
 
+    #[must_use]
+    pub fn is_realtime_s2s(&self) -> bool {
+        super::realtime::is_realtime_s2s_model(&self.config.llm_model)
+            && self.endpoints.llm_base == self.endpoints.tts_base
+    }
+
+    #[must_use]
+    pub fn llm_base_url(&self) -> &Url {
+        &self.endpoints.llm_base
+    }
+
+    #[must_use]
+    pub fn llm_model(&self) -> &str {
+        self.config.llm_model.trim()
+    }
+
+    #[must_use]
+    pub fn http_client(&self) -> &reqwest::Client {
+        &self.http
+    }
+
+    async fn probe_realtime_server(&self, cancel: &CancellationToken) -> Result<(), VoiceError> {
+        let models_url = append_endpoint_path(&self.endpoints.llm_base, "models");
+        let request = self
+            .http
+            .get(models_url.clone())
+            .timeout(Duration::from_secs(PRELOAD_REQUEST_TIMEOUT_SECS));
+        let response = tokio::select! {
+            biased;
+            () = cancel.cancelled() => return Err(VoiceError::Cancelled),
+            res = request.send() => res.map_err(|source| VoiceError::Transport {
+                endpoint: models_url.to_string(),
+                source,
+            })?,
+        };
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let body = read_bounded_error_body(response, cancel).await?;
+            return Err(VoiceError::HttpStatus {
+                endpoint: models_url.to_string(),
+                status,
+                body,
+            });
+        }
+        Ok(())
+    }
+
     #[cfg_attr(
         dylint_lib = "perfectionist",
         expect(
@@ -1038,6 +1104,9 @@ impl VoicePipelineClient {
     pub async fn preload_models(&self, cancel: &CancellationToken) -> Result<(), VoiceError> {
         if cancel.is_cancelled() {
             return Err(VoiceError::Cancelled);
+        }
+        if self.is_realtime_s2s() {
+            return self.probe_realtime_server(cancel).await;
         }
 
         let candidates = [
@@ -1313,7 +1382,7 @@ impl VoicePipelineClient {
             ];
         } else {
             request_messages.push(ChatMessage::system(format!(
-                "You are the caller's representative, not the recipient's employee.\n{}\nFor this reply, address the latest recipient message as a whole: briefly acknowledge any news or problem they shared, then answer their question from the caller request above, never ask them to supply those same facts. Use later corrections or live instructions if the request changed. If they explicitly ask to stop or cannot continue, close kindly and choose end_call; if they offer to check alternatives, keep listening. Return the complete phone_turn JSON, including outcome_summary.",
+                "You are the caller's representative, not the recipient's employee.\n{}\nFor this reply, address the latest recipient message as a whole: briefly acknowledge any news or problem they shared, then answer their question from the caller request above, never ask them to supply those same facts. If the recipient spoke understandable words, a greeting, or a question, reply briefly in speech instead of returning empty speech. Use later corrections or live instructions if the request changed. If they explicitly ask to stop or cannot continue, close kindly and choose end_call; if they offer to check alternatives, keep listening. Return the complete phone_turn JSON, including outcome_summary.",
                 conversation.caller_request,
             )));
         }
@@ -1347,7 +1416,10 @@ impl VoicePipelineClient {
                     "json_schema": {
                         "name": "phone_turn",
                         "strict": true,
-                        "schema": voice_tool_definitions(conversation.can_end_call())[0]["function"]["parameters"]
+                        "schema": phone_turn_response_schema(
+                            conversation.can_end_call(),
+                            conversation.requires_spoken_reply(),
+                        )
                     }
                 })
             }),
@@ -1607,21 +1679,11 @@ impl VoicePipelineClient {
         }
 
         let endpoint = append_endpoint_path(&self.endpoints.tts_base, "audio/speech");
-        let conversational_female = self.config.tts_voice.trim() == CONVERSATIONAL_FEMALE_TTS_VOICE;
         let payload = SpeechSynthesisRequest {
             model: self.config.tts_model.trim(),
             input,
-            voice: (!conversational_female).then_some(self.config.tts_voice.trim()),
+            voice: self.config.tts_voice.trim(),
             response_format: "pcm",
-            style: conversational_female.then_some(SpeechSynthesisStyle {
-                instruct: CONVERSATIONAL_FEMALE_INSTRUCT,
-                lang_code: "English",
-                temperature: 0.9,
-                top_p: 1.0,
-                top_k: 50,
-                repetition_penalty: 1.05,
-                max_tokens: 1024,
-            }),
         };
 
         let response = tokio::select! {
@@ -1744,22 +1806,8 @@ enum HoldAction {
 struct SpeechSynthesisRequest<'a> {
     model: &'a str,
     input: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    voice: Option<&'a str>,
+    voice: &'a str,
     response_format: &'static str,
-    #[serde(flatten)]
-    style: Option<SpeechSynthesisStyle>,
-}
-
-#[derive(Debug, Serialize)]
-struct SpeechSynthesisStyle {
-    instruct: &'static str,
-    lang_code: &'static str,
-    temperature: f64,
-    top_p: f64,
-    top_k: u32,
-    repetition_penalty: f64,
-    max_tokens: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2206,13 +2254,87 @@ fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
-fn clean_transcription_text(raw: &str) -> Option<String> {
+const STT_META_HALLUCINATION_PREFIXES: &[&str] = &[
+    "follow these specific instructions",
+    "please follow these specific instructions",
+    "transcribe the audio",
+    "transcribe the following audio",
+    "please transcribe the audio",
+    "please transcribe the following audio",
+    "here is the transcription",
+    "here's the transcription",
+    "the transcription is",
+    "audio transcription",
+    "there is no speech in",
+    "the audio contains no speech",
+    "the audio is silent",
+    "no speech detected",
+    "no speech was detected",
+    "i cannot hear any speech",
+    "unable to transcribe",
+    "please provide the audio",
+    "as an ai",
+    "i am an ai language model",
+];
+
+const STT_META_HALLUCINATION_SUBSTRINGS: &[&str] = &[
+    "specific instructions for formatting the answer",
+    "no speech in the audio",
+    "transcribe the audio verbatim",
+];
+
+pub(super) fn clean_transcription_text(raw: &str) -> Option<String> {
     let without_brackets = strip_non_speech_annotations(raw);
     let collapsed = collapse_whitespace(&without_brackets);
-    if !contains_speakable_char(&collapsed) {
+    if !contains_speakable_char(&collapsed)
+        || is_stt_meta_hallucination(&collapsed)
+        || is_repetitive_stt_hallucination(&collapsed)
+    {
         return None;
     }
     Some(collapsed)
+}
+
+fn is_repetitive_stt_hallucination(text: &str) -> bool {
+    let mut prev: Option<String> = None;
+    let mut run = 0usize;
+    let mut total = 0usize;
+    for raw in text.split_whitespace() {
+        let token = raw
+            .trim_matches(|ch: char| !ch.is_alphanumeric())
+            .to_ascii_lowercase();
+        if token.is_empty() {
+            continue;
+        }
+        total += 1;
+        if prev.as_deref() == Some(token.as_str()) {
+            run += 1;
+            if run >= 4 {
+                return true;
+            }
+        } else {
+            prev = Some(token);
+            run = 1;
+        }
+    }
+    total >= 4 && run >= 4
+}
+
+fn is_stt_meta_hallucination(text: &str) -> bool {
+    let normalized = text
+        .trim_matches(|ch: char| !ch.is_alphanumeric())
+        .to_ascii_lowercase()
+        .replace('’', "'");
+    let matches_prefix = STT_META_HALLUCINATION_PREFIXES.iter().any(|prefix| {
+        normalized == *prefix
+            || normalized
+                .strip_prefix(prefix)
+                .is_some_and(|rest| rest.starts_with(|ch: char| !ch.is_alphanumeric()))
+    });
+    matches_prefix
+        || STT_META_HALLUCINATION_SUBSTRINGS
+            .iter()
+            .any(|phrase| normalized.contains(phrase))
 }
 
 #[cfg_attr(

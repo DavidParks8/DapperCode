@@ -8,8 +8,11 @@
 )]
 
 pub(crate) mod audio;
+pub(crate) mod realtime;
 pub(crate) mod sip;
 pub(crate) mod voice;
+
+mod realtime_loop;
 
 use crate::bridge_protocol::{
     BridgeQueueService, BridgeThreadQueueSendRequest, BridgeUiAction, BridgeUiActionStyle,
@@ -50,7 +53,7 @@ use uuid::Uuid;
 
 pub(crate) const DEFAULT_APPROVAL_TIMEOUT: Duration = Duration::from_secs(120);
 pub(crate) const DEFAULT_MAX_CALL_DURATION: Duration = Duration::from_secs(15 * 60);
-pub(crate) const DEFAULT_OPENING_GREETING_WAIT: Duration = Duration::from_millis(1_200);
+pub(crate) const DEFAULT_OPENING_GREETING_WAIT: Duration = Duration::from_millis(700);
 pub(crate) const COMPLETED_CALL_HISTORY_LIMIT: usize = 32;
 
 const MAX_CALL_ID_BYTES: usize = 128;
@@ -66,6 +69,44 @@ const HANGUP_SETTLE_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 const SHUTDOWN_SETTLE_WAIT_TIMEOUT: Duration = Duration::from_secs(3);
 const PLAYBACK_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const END_CALL_QUIET_GRACE: Duration = Duration::from_secs(2);
+const SELF_ECHO_WINDOW: Duration = Duration::from_millis(2_500);
+const SELF_ECHO_MIN_OVERLAP_PERCENT: usize = 65;
+const SELF_ECHO_MAX_TOKENS: usize = 96;
+const SELF_ECHO_MIN_JOINED_CHARS: usize = 10;
+const ECHO_RECOVERY_NUDGE: &str =
+    "Your previous audio was cut off by line echo, not the recipient. Briefly finish your response aloud.";
+const SILENT_TURN_RETRY_NUDGE: &str =
+    "The recipient spoke to you; respond briefly aloud instead of staying silent.";
+
+const DIRECT_GREETING_WORDS: &[&str] = &["hello", "hi", "hey"];
+const COMMON_SHORT_CALLEE_REPLIES: &[(&str, &str)] = &[
+    ("all", "right"),
+    ("bye", "bye"),
+    ("cant", "hear"),
+    ("excuse", "me"),
+    ("go", "ahead"),
+    ("good", "afternoon"),
+    ("good", "evening"),
+    ("good", "morning"),
+    ("got", "it"),
+    ("hang", "on"),
+    ("hello", "there"),
+    ("hi", "there"),
+    ("hold", "on"),
+    ("im", "here"),
+    ("my", "pleasure"),
+    ("no", "problem"),
+    ("no", "thanks"),
+    ("of", "course"),
+    ("one", "moment"),
+    ("see", "you"),
+    ("sounds", "good"),
+    ("sure", "thing"),
+    ("thank", "you"),
+    ("thanks", "again"),
+    ("yes", "please"),
+    ("youre", "welcome"),
+];
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PhoneCallTimeouts {
@@ -1595,6 +1636,14 @@ impl SpokenTurnProgress {
         }
         spoken.join(" ")
     }
+
+    fn started_clauses_text(&self) -> String {
+        self.clauses_started
+            .iter()
+            .map(|(_, clause)| clause.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
 }
 
 struct ActiveAssistantTurn {
@@ -1605,6 +1654,10 @@ struct ActiveAssistantTurn {
 }
 
 impl ActiveAssistantTurn {
+    fn started_clauses_text(&self) -> String {
+        lock_unpoisoned(&self.progress).started_clauses_text()
+    }
+
     fn abort_and_extract_spoken(&self, sip_handle: &SipCallHandle) -> String {
         self.cancel.cancel();
         self.handle.abort();
@@ -1677,12 +1730,289 @@ fn requests_immediate_speech_stop(instruction: &str) -> bool {
 struct ActiveSttTask {
     cancel: CancellationToken,
     handle: JoinHandle<Result<Option<String>, VoiceError>>,
+    near_assistant_audio: bool,
 }
 
 impl ActiveSttTask {
     fn abort(&self) {
         self.cancel.cancel();
         self.handle.abort();
+    }
+}
+
+struct PendingUtterance {
+    samples: Vec<i16>,
+    near_assistant_audio: bool,
+}
+
+#[derive(Debug, Default)]
+struct AssistantEchoTracker {
+    recent_text: String,
+    last_audio_at: Option<Instant>,
+    utterance_near_audio: bool,
+    barge_in_aborted_turn: bool,
+    echo_recovery_used: bool,
+}
+
+impl AssistantEchoTracker {
+    fn note_outbound_audio(&mut self, now: Instant) {
+        self.last_audio_at = Some(now);
+    }
+
+    fn record_assistant_speech(&mut self, text: &str, now: Instant) {
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            self.recent_text = trimmed.to_string();
+            self.last_audio_at = Some(now);
+        }
+    }
+
+    fn is_within_window(&self, now: Instant) -> bool {
+        self.last_audio_at
+            .is_some_and(|at| now.saturating_duration_since(at) <= SELF_ECHO_WINDOW)
+    }
+
+    fn note_vad_pending(&mut self, has_pending_speech: bool, now: Instant) {
+        if has_pending_speech {
+            if self.is_within_window(now) {
+                self.utterance_near_audio = true;
+            }
+        } else {
+            self.utterance_near_audio = false;
+        }
+    }
+
+    fn note_barge_in(&mut self, aborted_text: Option<&str>, now: Instant) {
+        if let Some(text) = aborted_text {
+            self.record_assistant_speech(text, now);
+            self.barge_in_aborted_turn = true;
+        }
+        if self.is_within_window(now) {
+            self.utterance_near_audio = true;
+        }
+    }
+
+    fn take_utterance_near_audio(&mut self, now: Instant) -> bool {
+        let near = self.utterance_near_audio || self.is_within_window(now);
+        self.utterance_near_audio = false;
+        near
+    }
+
+    fn matches_self_echo(
+        &self,
+        callee_text: &str,
+        near_audio: bool,
+        active_turn: Option<&ActiveAssistantTurn>,
+        now: Instant,
+    ) -> bool {
+        if !near_audio && !self.is_within_window(now) {
+            return false;
+        }
+        if !self.recent_text.is_empty() && is_likely_self_echo(callee_text, &self.recent_text) {
+            return true;
+        }
+        active_turn
+            .map(ActiveAssistantTurn::started_clauses_text)
+            .filter(|text| !text.is_empty())
+            .is_some_and(|text| is_likely_self_echo(callee_text, &text))
+    }
+
+    fn should_recover_barge_in(&mut self) -> bool {
+        if self.barge_in_aborted_turn && !self.echo_recovery_used {
+            self.barge_in_aborted_turn = false;
+            self.echo_recovery_used = true;
+            return true;
+        }
+        self.barge_in_aborted_turn = false;
+        false
+    }
+
+    fn note_real_callee_utterance(&mut self) {
+        self.barge_in_aborted_turn = false;
+        self.echo_recovery_used = false;
+    }
+
+    fn note_completed_speech(&mut self, text: &str, now: Instant) {
+        self.record_assistant_speech(text, now);
+        self.barge_in_aborted_turn = false;
+        self.echo_recovery_used = false;
+    }
+
+    fn reset_interruption_state(&mut self) {
+        self.utterance_near_audio = false;
+        self.barge_in_aborted_turn = false;
+        self.echo_recovery_used = false;
+    }
+}
+
+fn normalize_echo_tokens(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() {
+            current.push(ch.to_ascii_lowercase());
+        } else if matches!(ch, '\'' | '’') && !current.is_empty() {
+            // Keep contractions as a single token (for example "I've" -> "ive").
+        } else if !current.is_empty() {
+            tokens.push(std::mem::take(&mut current));
+            if tokens.len() >= SELF_ECHO_MAX_TOKENS {
+                return tokens;
+            }
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+fn lcs_token_len(left: &[String], right: &[String]) -> usize {
+    if left.is_empty() || right.is_empty() {
+        return 0;
+    }
+    let mut prev = vec![0_usize; right.len() + 1];
+    let mut curr = vec![0_usize; right.len() + 1];
+    for left_tok in left {
+        for (idx, right_tok) in right.iter().enumerate() {
+            curr[idx + 1] = if left_tok == right_tok {
+                prev[idx] + 1
+            } else {
+                prev[idx + 1].max(curr[idx])
+            };
+        }
+        std::mem::swap(&mut prev, &mut curr);
+        curr.fill(0);
+    }
+    prev.last().copied().unwrap_or(0)
+}
+
+fn is_common_short_callee_reply(tokens: &[String]) -> bool {
+    let [first, second] = tokens else {
+        return false;
+    };
+    COMMON_SHORT_CALLEE_REPLIES
+        .iter()
+        .any(|(left, right)| first == left && second == right)
+}
+
+fn is_likely_self_echo(callee_text: &str, assistant_text: &str) -> bool {
+    let callee_tokens = normalize_echo_tokens(callee_text);
+    let assistant_tokens = normalize_echo_tokens(assistant_text);
+    if callee_tokens.len() < 2 || assistant_tokens.len() < 2 {
+        return false;
+    }
+    if is_common_short_callee_reply(&callee_tokens) {
+        return false;
+    }
+    if callee_tokens.len() == 2 {
+        let has_substantive = callee_tokens.iter().any(|tok| tok.len() >= 4);
+        return has_substantive
+            && assistant_tokens
+                .windows(2)
+                .any(|window| window == callee_tokens.as_slice());
+    }
+    let matched = lcs_token_len(&callee_tokens, &assistant_tokens);
+    if matched >= 3 && matched * 100 >= callee_tokens.len() * SELF_ECHO_MIN_OVERLAP_PERCENT {
+        return true;
+    }
+    let callee_joined = callee_tokens.concat();
+    callee_joined.len() >= SELF_ECHO_MIN_JOINED_CHARS
+        && assistant_tokens.concat().contains(&callee_joined)
+}
+
+const SINGLE_WORD_FILLERS: &[&str] = &[
+    "a", "ah", "and", "but", "er", "hm", "hmm", "i", "mhm", "mm", "oh", "or", "so", "the", "uh",
+    "uhh", "um", "umm", "well",
+];
+const DANGLING_CONTINUATION_WORDS: &[&str] = &[
+    "a", "an", "and", "are", "as", "at", "because", "but", "by", "can", "could", "did", "do",
+    "does", "dont", "for", "from", "had", "has", "have", "how", "i", "if", "im", "in", "into",
+    "is", "isnt", "it", "its", "just", "like", "my", "of", "on", "or", "our", "should", "so",
+    "that", "thats", "the", "their", "these", "they", "this", "those", "to", "uh", "um", "was",
+    "we", "were", "what", "when", "where", "which", "who", "why", "will", "with", "would", "you",
+    "your", "youre",
+];
+pub(super) const INCOMPLETE_UTTERANCE_DEFER: Duration = Duration::from_millis(1_600);
+
+pub(super) fn is_incomplete_utterance(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.ends_with('?') || trimmed.ends_with('!') {
+        return false;
+    }
+    if trimmed.ends_with("...") {
+        return true;
+    }
+    let tokens = normalize_echo_tokens(trimmed);
+    let Some(last) = tokens.last() else {
+        return false;
+    };
+    if DANGLING_CONTINUATION_WORDS.contains(&last.as_str()) {
+        return true;
+    }
+    tokens.len() == 1 && !callee_expects_spoken_reply(trimmed)
+}
+
+fn callee_expects_spoken_reply(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if is_substantive_reply(trimmed) {
+        return true;
+    }
+    if trimmed.ends_with('?') && trimmed.chars().any(char::is_alphanumeric) {
+        return true;
+    }
+    let tokens = normalize_echo_tokens(trimmed);
+    let Some(word) = tokens.first() else {
+        return false;
+    };
+    if tokens.len() != 1 {
+        return false;
+    }
+    if DIRECT_GREETING_WORDS.contains(&word.as_str()) {
+        return true;
+    }
+    !trimmed.ends_with("...") && word.len() >= 2 && !SINGLE_WORD_FILLERS.contains(&word.as_str())
+}
+
+fn should_retry_silent_turn(
+    turn_output: &AssistantTurnOutput,
+    on_hold: bool,
+    steer_pending_turn: bool,
+    silent_retry_used: bool,
+    last_callee_utterance: Option<&str>,
+) -> bool {
+    if on_hold || steer_pending_turn || silent_retry_used {
+        return false;
+    }
+    if !turn_output.full_text.trim().is_empty() {
+        return false;
+    }
+    let has_other_tool = turn_output
+        .tool_calls
+        .iter()
+        .any(|tool| !matches!(tool, VoiceToolCall::WaitSilently { on_hold: false, .. }));
+    if has_other_tool {
+        return false;
+    }
+    last_callee_utterance.is_some_and(callee_expects_spoken_reply)
+}
+
+fn update_vad_ivr_mode_for_wait_silently(
+    vad: &mut TelephonyVad,
+    on_hold: bool,
+    silent_turn: bool,
+    retry_silent_turn: bool,
+    sent_dtmf_this_turn: bool,
+) {
+    if on_hold || (silent_turn && !retry_silent_turn) {
+        vad.set_ivr_mode(true);
+    } else if !silent_turn && !sent_dtmf_this_turn {
+        vad.set_ivr_mode(false);
     }
 }
 
@@ -1741,6 +2071,10 @@ fn set_call_hold(slot: &ActiveCallSlot, conversation: &mut VoiceConversation, on
     )
 )]
 async fn run_connected_call(mut ctx: ConnectedCallContext) {
+    if ctx.voice_client.is_realtime_s2s() {
+        realtime_loop::run_connected_realtime_call(ctx).await;
+        return;
+    }
     let sip_handle = ctx.sip_session.control_handle();
     let mut event_rx = ctx.sip_session.take_event_receiver();
     let mut inbound_audio_rx = ctx.sip_session.take_inbound_audio_receiver();
@@ -1768,11 +2102,15 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
     let mut opening_window_elapsed = false;
     let mut steer_pending_turn = !ctx.initial_steers.is_empty();
     let mut active_stt: Option<ActiveSttTask> = None;
-    let mut pending_utterances: VecDeque<Vec<i16>> = VecDeque::new();
+    let mut pending_utterances: VecDeque<PendingUtterance> = VecDeque::new();
     let mut speech_quiet_deadline = None;
+    let mut continuation_deadline: Option<tokio::time::Instant> = None;
     let mut active_turn: Option<ActiveAssistantTurn> = None;
     let mut pending_end: Option<PendingCallEnd> = None;
     let mut transport_on_hold = false;
+    let mut echo_tracker = AssistantEchoTracker::default();
+    let mut last_callee_utterance: Option<String> = None;
+    let mut silent_retry_used = false;
 
     if steer_pending_turn {
         opening_greeting_pending = false;
@@ -1867,8 +2205,14 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                         opening_window_elapsed = true;
                         steer_pending_turn |= conversation.has_pending_steers();
                         if let Some(VadEvent::UtteranceComplete(samples)) = vad.finish_after_media_quiet() {
-                            new_utterance = Some(samples);
+                            new_utterance = Some(PendingUtterance {
+                                samples,
+                                near_assistant_audio: echo_tracker
+                                    .take_utterance_near_audio(Instant::now()),
+                            });
                         }
+                        echo_tracker.reset_interruption_state();
+                        silent_retry_used = false;
                         speech_quiet_deadline = None;
                         set_call_hold(&ctx.slot, &mut conversation, on_hold);
                         vad = TelephonyVad::new();
@@ -1887,7 +2231,9 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                     && active_turn.as_ref().is_some_and(|turn| turn.finish_current_sentence(&sip_handle));
                 if !finish_sentence {
                     if let Some(turn) = active_turn.take() {
+                        let started_clauses = turn.started_clauses_text();
                         let spoken = turn.abort_and_extract_spoken(&sip_handle);
+                        echo_tracker.record_assistant_speech(&started_clauses, Instant::now());
                         if !spoken.is_empty() {
                             conversation.record_active_assistant_interrupted(&spoken);
                         }
@@ -1916,10 +2262,15 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                     inbound_audio_rx = None;
                     continue;
                 };
+                let now = Instant::now();
+                if frame.outbound_playing && active_turn.is_some() {
+                    echo_tracker.note_outbound_audio(now);
+                }
                 let outbound_mean = mulaw_frame_mean_abs(&frame.outbound_pcmu);
                 if mulaw_frame_mean_abs(&frame.inbound_pcmu)
                     >= vad.speech_threshold(frame.outbound_playing, outbound_mean)
                 {
+                    continuation_deadline = None;
                     let hangover = u32::try_from(vad.hangover_frames()).expect("VAD hangover is bounded");
                     speech_quiet_deadline = Some(tokio::time::Instant::now() + Duration::from_millis(20) * hangover);
                 }
@@ -1931,71 +2282,123 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                     Some(VadEvent::BargeIn) => {
                         match active_turn.take() {
                             Some(turn) => {
+                                let started_clauses = turn.started_clauses_text();
                                 let spoken = turn.abort_and_extract_spoken(&sip_handle);
+                                echo_tracker.note_barge_in(Some(&started_clauses), now);
                                 conversation.record_active_assistant_interrupted(&spoken);
                                 sync_shared_transcript(&ctx.slot, conversation.transcript());
                                 publish_in_call_card_update(&ctx, conversation.transcript()).await;
                             }
                             None => {
+                                echo_tracker.note_barge_in(None, now);
                                 sip_handle.clear_outbound_audio();
                             }
                         }
                     }
                     Some(VadEvent::UtteranceComplete(samples)) => {
                         speech_quiet_deadline = None;
-                        new_utterance = Some(samples);
+                        new_utterance = Some(PendingUtterance {
+                            samples,
+                            near_assistant_audio: echo_tracker.take_utterance_near_audio(now),
+                        });
                     }
-                    None => {}
+                    None => {
+                        echo_tracker.note_vad_pending(vad.has_pending_speech(), now);
+                    }
                 }
             }
             () = tokio::time::sleep_until(speech_quiet_deadline.unwrap_or(call_deadline)),
                 if speech_quiet_deadline.is_some() => {
                 speech_quiet_deadline = None;
                 if let Some(VadEvent::UtteranceComplete(samples)) = vad.finish_after_media_quiet() {
-                    new_utterance = Some(samples);
+                    new_utterance = Some(PendingUtterance {
+                        samples,
+                        near_assistant_audio: echo_tracker
+                            .take_utterance_near_audio(Instant::now()),
+                    });
                 }
             }
             stt_join = poll_active_stt(&mut active_stt), if active_stt.is_some() => {
+                let stt_near_assistant = active_stt
+                    .as_ref()
+                    .is_some_and(|task| task.near_assistant_audio);
                 active_stt = None;
-                if let Some(samples) = pending_utterances.pop_front() {
+                if let Some(next) = pending_utterances.pop_front() {
                     active_stt = Some(spawn_stt_task(
                         &ctx.voice_client,
-                        encode_wav_8k_mono(&samples),
+                        encode_wav_8k_mono(&next.samples),
                         &conversation,
                         &ctx.slot.cancel,
+                        next.near_assistant_audio,
                     ));
                 }
                 match stt_join {
                     Ok(Ok(Some(callee_text))) => {
-                        if pending_end.is_some() && !is_substantive_reply(&callee_text) {
+                        if echo_tracker.matches_self_echo(
+                            &callee_text,
+                            stt_near_assistant,
+                            active_turn.as_ref(),
+                            Instant::now(),
+                        ) {
+                            if !transport_on_hold
+                                && !conversation.is_on_hold()
+                                && active_turn.is_none()
+                                && echo_tracker.should_recover_barge_in()
+                            {
+                                conversation
+                                    .record_tool_result("echo_recovery", ECHO_RECOVERY_NUDGE);
+                                steer_pending_turn = true;
+                            }
+                        } else if pending_end.is_some() && !is_substantive_reply(&callee_text) {
                             // A short "Bye" or noise fragment after the spoken closing confirms it.
+                            echo_tracker.note_real_callee_utterance();
                             conversation.push_callee_utterance(&callee_text);
                             sync_shared_transcript(&ctx.slot, conversation.transcript());
                             publish_in_call_card_update(&ctx, conversation.transcript()).await;
                             if let Some(end) = &mut pending_end {
                                 end.deadline = tokio::time::Instant::now() + END_CALL_QUIET_GRACE;
                             }
-                            continue;
-                        }
-                        pending_end = None;
-                        opening_greeting_pending = false;
-                        opening_window_elapsed = true;
-                        steer_pending_turn = true;
-                        if let Some(turn) = active_turn.take() {
-                            let spoken = turn.abort_and_extract_spoken(&sip_handle);
-                            conversation.record_active_assistant_interrupted(&spoken);
-                        }
-                        conversation.push_callee_utterance(&callee_text);
-                        sync_shared_transcript(&ctx.slot, conversation.transcript());
-                        publish_in_call_card_update(&ctx, conversation.transcript()).await;
-                        if !transport_on_hold && active_stt.is_none() && !vad.has_pending_speech() {
-                            steer_pending_turn = false;
-                            active_turn = Some(start_assistant_turn(
-                                &ctx,
-                                &conversation,
-                                &sip_handle,
-                                &mut pending_end,
-                            ));
+                        } else {
+                            echo_tracker.note_real_callee_utterance();
+                            pending_end = None;
+                            opening_greeting_pending = false;
+                            opening_window_elapsed = true;
+                            steer_pending_turn = true;
+                            last_callee_utterance = Some(callee_text.clone());
+                            silent_retry_used = false;
+                            if let Some(turn) = active_turn.take() {
+                                let started_clauses = turn.started_clauses_text();
+                                let spoken = turn.abort_and_extract_spoken(&sip_handle);
+                                echo_tracker.record_assistant_speech(&started_clauses, Instant::now());
+                                conversation.record_active_assistant_interrupted(&spoken);
+                            }
+                            conversation.push_callee_utterance(&callee_text);
+                            if !transport_on_hold
+                                && !conversation.is_on_hold()
+                                && callee_expects_spoken_reply(&callee_text)
+                            {
+                                conversation.set_require_spoken_reply(true);
+                            }
+                            sync_shared_transcript(&ctx.slot, conversation.transcript());
+                            publish_in_call_card_update(&ctx, conversation.transcript()).await;
+                            if !conversation.is_on_hold() && is_incomplete_utterance(&callee_text) {
+                                continuation_deadline =
+                                    Some(tokio::time::Instant::now() + INCOMPLETE_UTTERANCE_DEFER);
+                            } else {
+                                continuation_deadline = None;
+                                if !transport_on_hold
+                                    && active_stt.is_none()
+                                    && !vad.has_pending_speech()
+                                {
+                                    steer_pending_turn = false;
+                                    active_turn = Some(start_assistant_turn(
+                                        &ctx,
+                                        &conversation,
+                                        &sip_handle,
+                                        &mut pending_end,
+                                    ));
+                                }
+                            }
                         }
                     }
                     Ok(Ok(None)) => {
@@ -2053,14 +2456,40 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                             turn_output.full_text.clear();
                             turn_output.clauses.clear();
                         }
+                        conversation.set_require_spoken_reply(false);
                         conversation.record_assistant_turn(&turn_output);
                         sync_shared_transcript(&ctx.slot, conversation.transcript());
                         publish_in_call_card_update(&ctx, conversation.transcript()).await;
+
+                        let silent_turn = turn_output.full_text.trim().is_empty();
+                        if !silent_turn {
+                            let echo_text = completed_turn
+                                .as_ref()
+                                .map(ActiveAssistantTurn::started_clauses_text)
+                                .filter(|text| !text.trim().is_empty())
+                                .unwrap_or_else(|| turn_output.full_text.clone());
+                            echo_tracker.note_completed_speech(&echo_text, Instant::now());
+                            last_callee_utterance = None;
+                            silent_retry_used = false;
+                        }
 
                         let mut dtmf_error: Option<String> = None;
                         let requested_hold = turn_output.tool_calls.iter().any(|tool| {
                             matches!(tool, VoiceToolCall::WaitSilently { on_hold: true, .. })
                         });
+                        let sent_dtmf_this_turn = !was_on_hold
+                            && turn_output
+                                .tool_calls
+                                .iter()
+                                .any(|tool| matches!(tool, VoiceToolCall::SendDtmf { .. }));
+                        let retry_silent_turn = should_retry_silent_turn(
+                            &turn_output,
+                            was_on_hold || requested_hold || transport_on_hold,
+                            steer_pending_turn,
+                            silent_retry_used,
+                            last_callee_utterance.as_deref(),
+                        );
+                        let mut recorded_silent_retry_nudge = false;
 
                         for tool_call in &turn_output.tool_calls {
                             match tool_call {
@@ -2095,11 +2524,28 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                                     if *on_hold {
                                         set_call_hold(&ctx.slot, &mut conversation, true);
                                     }
-                                    vad.set_ivr_mode(true);
-                                    conversation.record_tool_result(
-                                        tc_id,
-                                        &format!("Waiting silently: {reason}"),
+                                    update_vad_ivr_mode_for_wait_silently(
+                                        &mut vad,
+                                        *on_hold,
+                                        silent_turn,
+                                        retry_silent_turn,
+                                        sent_dtmf_this_turn,
                                     );
+                                    if retry_silent_turn {
+                                        recorded_silent_retry_nudge = true;
+                                        conversation.record_tool_result(
+                                            tc_id,
+                                            SILENT_TURN_RETRY_NUDGE,
+                                        );
+                                    } else if *on_hold
+                                        || silent_turn
+                                        || !turn_output.raw_tool_calls.is_empty()
+                                    {
+                                        conversation.record_tool_result(
+                                            tc_id,
+                                            &format!("Waiting silently: {reason}"),
+                                        );
+                                    }
                                 }
                                 VoiceToolCall::ResumeCall { call_id: tc_id } => {
                                     if transport_on_hold {
@@ -2145,6 +2591,18 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                         if let Some(err) = dtmf_error {
                             let _ = sip_handle.hangup().await;
                             break CallLoopExit::Failed { error: err };
+                        }
+
+                        if retry_silent_turn {
+                            if !recorded_silent_retry_nudge {
+                                conversation.record_tool_result(
+                                    "silent_turn_retry",
+                                    SILENT_TURN_RETRY_NUDGE,
+                                );
+                            }
+                            conversation.set_require_spoken_reply(true);
+                            silent_retry_used = true;
+                            steer_pending_turn = true;
                         }
 
                         publish_in_call_card_update(&ctx, conversation.transcript()).await;
@@ -2200,11 +2658,16 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                     };
                 }
             }
+            () = tokio::time::sleep_until(continuation_deadline.unwrap_or(call_deadline)),
+                if continuation_deadline.is_some() => {
+                continuation_deadline = None;
+            }
             () = tokio::time::sleep_until(opening_deadline), if opening_greeting_pending && !opening_window_elapsed && active_turn.is_none() => {
                 opening_window_elapsed = true;
                 if !transport_on_hold && !vad.has_pending_speech() && active_stt.is_none() {
                     opening_greeting_pending = false;
                     steer_pending_turn = false;
+                    conversation.set_require_spoken_reply(true);
                     active_turn = Some(start_assistant_turn(
                         &ctx,
                         &conversation,
@@ -2214,29 +2677,36 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                 }
             }
         }
-        if let Some(samples) = new_utterance {
+        if let Some(utterance) = new_utterance {
             if active_stt.is_some() {
-                let queued_samples: usize = pending_utterances.iter().map(Vec::len).sum();
-                if queued_samples.saturating_add(samples.len()) > VAD_MAX_UTTERANCE_SAMPLES {
+                let queued_samples: usize = pending_utterances
+                    .iter()
+                    .map(|item| item.samples.len())
+                    .sum();
+                if queued_samples.saturating_add(utterance.samples.len())
+                    > VAD_MAX_UTTERANCE_SAMPLES
+                {
                     let _ = sip_handle.hangup().await;
                     break CallLoopExit::Failed {
                         error: "The transcription backlog exceeded the bounded audio limit."
                             .to_string(),
                     };
                 }
-                pending_utterances.push_back(samples);
+                pending_utterances.push_back(utterance);
             } else {
                 active_stt = Some(spawn_stt_task(
                     &ctx.voice_client,
-                    encode_wav_8k_mono(&samples),
+                    encode_wav_8k_mono(&utterance.samples),
                     &conversation,
                     &ctx.slot.cancel,
+                    utterance.near_assistant_audio,
                 ));
             }
         }
         let call_idle = !transport_on_hold
             && active_turn.is_none()
             && active_stt.is_none()
+            && continuation_deadline.is_none()
             && !vad.has_pending_speech();
         let ready_to_speak =
             steer_pending_turn || (opening_greeting_pending && opening_window_elapsed);
@@ -2411,6 +2881,7 @@ fn spawn_stt_task(
     wav_bytes: Vec<u8>,
     conversation: &VoiceConversation,
     parent_cancel: &CancellationToken,
+    near_assistant_audio: bool,
 ) -> ActiveSttTask {
     let stt_cancel = parent_cancel.child_token();
     let task_cancel = stt_cancel.clone();
@@ -2424,6 +2895,7 @@ fn spawn_stt_task(
     ActiveSttTask {
         cancel: stt_cancel,
         handle,
+        near_assistant_audio,
     }
 }
 

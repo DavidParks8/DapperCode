@@ -798,6 +798,22 @@ fn phone_call_runtime_config_rejects_each_invalid_field_and_honors_explicit_tls(
     assert_eq!(explicit_tls.server_host, "sip.example.com");
     assert_eq!(explicit_tls.server_port, 5070);
     assert_eq!(explicit_tls.sip_password, generated_secret);
+    assert_eq!(explicit_tls.voice.stt_base_url, "http://127.0.0.1:8000/v1");
+    assert_eq!(
+        explicit_tls.voice.stt_model,
+        "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0",
+    );
+    assert_eq!(explicit_tls.voice.llm_base_url, "http://127.0.0.1:8000/v1");
+    assert_eq!(
+        explicit_tls.voice.llm_model,
+        "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0",
+    );
+    assert_eq!(explicit_tls.voice.tts_base_url, "http://127.0.0.1:8000/v1");
+    assert_eq!(
+        explicit_tls.voice.tts_model,
+        "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0",
+    );
+    assert_eq!(explicit_tls.voice.tts_voice, "female");
 
     const USERNAME_ERROR: &str = "PHONE_CALL_SIP_USERNAME must be at most";
     const PASSWORD_ERROR: &str = "PHONE_CALL_SIP_PASSWORD must be non-empty";

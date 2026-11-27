@@ -6,7 +6,7 @@ use super::{
     TelephonyVad, VadEvent, DTMF_INTER_DIGIT_SILENCE_FRAMES, DTMF_TONE_FRAMES, FIR_24K_TO_8K_Q15,
     MULAW_SILENCE, RFC4733_DEFAULT_HOLD_PACKETS, RFC4733_DEFAULT_VOLUME, RFC4733_END_FLAG,
     RFC4733_END_RETRANSMIT_COUNT, RTP_FRAME_SAMPLES, TELEPHONY_SAMPLE_RATE_HZ,
-    VAD_BARGE_IN_ONSET_FRAMES, VAD_DEFAULT_HANGOVER_FRAMES, VAD_ECHO_MARGIN,
+    VAD_BARGE_IN_ONSET_FRAMES, VAD_DEFAULT_HANGOVER_FRAMES, VAD_ECHO_MARGIN, VAD_ECHO_TAIL_FRAMES,
     VAD_INITIAL_NOISE_FLOOR, VAD_IVR_HANGOVER_FRAMES, VAD_MAX_UTTERANCE_SAMPLES,
     VAD_PREROLL_FRAMES, VAD_SPEECH_ONSET_FRAMES, WAV_HEADER_BYTES,
 };
@@ -264,8 +264,11 @@ fn vad_preserves_300ms_preroll_and_emits_after_hangover_in_normal_and_ivr_modes(
     };
 
     // Pre-roll at onset (7th speech frame) held 9 pre-speech frames (markers 12..=20) + 6 speech frames,
-    // followed by 4 remaining speech frames + 50 hangover silence frames = 69 frames.
-    assert_eq!(utterance.len(), 69 * RTP_FRAME_SAMPLES);
+    // followed by 4 remaining speech frames + VAD_DEFAULT_HANGOVER_FRAMES hangover silence frames.
+    assert_eq!(
+        utterance.len(),
+        (19 + VAD_DEFAULT_HANGOVER_FRAMES) * RTP_FRAME_SAMPLES,
+    );
     // First frame of the utterance must be pre-speech frame marker 12 (9 frames = 180 ms before speech frame 1,
     // i.e. 15 frames = 300 ms before the 7th onset frame!).
     assert_eq!(utterance[0], 12);
@@ -285,7 +288,7 @@ fn vad_preserves_300ms_preroll_and_emits_after_hangover_in_normal_and_ivr_modes(
     for _ in 0..7 {
         assert_eq!(vad.process_frame(&speech_frame, false, 0), None);
     }
-    for _ in 0..49 {
+    for _ in 0..(VAD_DEFAULT_HANGOVER_FRAMES - 1) {
         assert_eq!(vad.process_frame(&silence_frame, false, 0), None);
     }
     assert!(matches!(
@@ -316,7 +319,7 @@ fn vad_rejects_outbound_echo_and_triggers_barge_in_on_sustained_loud_speech() {
     let active_thresh = vad.speech_threshold(true, outbound_mean_abs);
     assert_eq!(active_thresh, (outbound_mean_abs / 4) + VAD_ECHO_MARGIN);
 
-    // Simulated acoustic/hybrid echo at 1000 (< 3600/4 + 500 = 1400) for 40 frames:
+    // Simulated acoustic/hybrid echo at 1000 (< 3600/4 + 1800 = 2700) for 40 frames:
     // must never trigger BargeIn or speech accumulation.
     let echo_frame = [1_000_i16; RTP_FRAME_SAMPLES];
     for _ in 0..40 {
@@ -327,26 +330,28 @@ fn vad_rejects_outbound_echo_and_triggers_barge_in_on_sustained_loud_speech() {
         assert!(!vad.is_in_speech());
     }
 
-    // Brief loud spike (8 frames < 12 required frames) while TTS plays must ALSO be ignored.
+    // Brief loud spike (4 frames < 8 required frames) while TTS plays must ALSO be ignored.
     let loud_human_frame = [2_800_i16; RTP_FRAME_SAMPLES];
-    for _ in 0..8 {
+    for _ in 0..4 {
         assert_eq!(
             vad.process_frame(&loud_human_frame, true, outbound_mean_abs),
             None,
         );
         assert!(!vad.is_in_speech());
     }
-    // Drop back to echo resets the barge-in streak; trailing silence must NOT emit any echo utterance.
-    assert_eq!(
-        vad.process_frame(&echo_frame, true, outbound_mean_abs),
-        None,
-    );
+    // Drop back to echo decays the barge-in streak; trailing silence must NOT emit any echo utterance.
+    for _ in 0..4 {
+        assert_eq!(
+            vad.process_frame(&echo_frame, true, outbound_mean_abs),
+            None,
+        );
+    }
     let silence = [0_i16; RTP_FRAME_SAMPLES];
     for _ in 0..40 {
         assert_eq!(vad.process_frame(&silence, false, 0), None);
     }
 
-    // Now sustained human interruption for 12 frames (240 ms) while outbound TTS plays:
+    // Now sustained human interruption for 8 frames (160 ms) while outbound TTS plays:
     for step in 0..(VAD_BARGE_IN_ONSET_FRAMES - 1) {
         assert_eq!(
             vad.process_frame(&loud_human_frame, true, outbound_mean_abs),
@@ -440,7 +445,9 @@ fn vad_playback_starting_mid_utterance_drops_echo_and_needs_sustained_speech_to_
     );
     assert!(!vad.is_in_speech());
 
-    // Loud speech that continues over playback must persist for the barge-in onset window.
+    // Loud speech that starts before playback and continues over playback must persist for the
+    // barge-in onset window. Reset so Scenario 1's active playback tail does not carry over.
+    vad.reset();
     start_speech_before_playback(&mut vad);
     for step in 0..(VAD_BARGE_IN_ONSET_FRAMES - 1) {
         assert_eq!(
@@ -519,6 +526,247 @@ fn vad_caps_utterances_that_fill_during_playback_and_barge_in_capture() {
         other => panic!("expected capped UtteranceComplete after barge-in, got {other:?}"),
     }
     assert!(!vad.is_in_speech());
+}
+
+#[test]
+fn vad_rejects_delayed_speakerphone_echo_after_outbound_playback_ends() {
+    let mut vad = TelephonyVad::new();
+    let baseline_thresh = vad.speech_threshold(false, 0);
+    let outbound_mean_abs: u32 = 1_200;
+    let expected_echo_thresh = (outbound_mean_abs / 4) + VAD_ECHO_MARGIN;
+    let silence = [0_i16; RTP_FRAME_SAMPLES];
+    let delayed_echo = [1_400_i16; RTP_FRAME_SAMPLES];
+
+    // 500 ms of AI outbound speech (typical -12 dBFS TTS level).
+    for _ in 0..25 {
+        assert_eq!(vad.process_frame(&silence, true, outbound_mean_abs), None);
+    }
+    assert_eq!(vad.speech_threshold(false, 0), expected_echo_thresh);
+
+    // 400 ms propagation delay after outbound playback ends, followed by 300 ms of acoustic echo
+    // louder than the outbound digital level (400-700 ms post-playback).
+    for _ in 0..20 {
+        assert_eq!(vad.process_frame(&silence, false, 0), None);
+    }
+    assert_eq!(vad.speech_threshold(false, 0), expected_echo_thresh);
+    for _ in 0..(VAD_ECHO_TAIL_FRAMES - 20) {
+        assert_eq!(vad.process_frame(&delayed_echo, false, 0), None);
+        assert!(!vad.is_in_speech());
+        assert!(!vad.has_pending_speech());
+    }
+
+    // Echo arriving during the tail must neither raise noise_floor nor trigger an utterance.
+    assert_eq!(vad.noise_floor(), VAD_INITIAL_NOISE_FLOOR);
+    assert_eq!(vad.speech_threshold(false, 0), baseline_thresh);
+    for _ in 0..VAD_DEFAULT_HANGOVER_FRAMES {
+        assert_eq!(vad.process_frame(&silence, false, 0), None);
+    }
+    assert!(!vad.is_in_speech());
+
+    // Even a super-loud transient burst above the echo threshold during the echo tail must not
+    // start a fresh utterance when shorter than VAD_SPEECH_ONSET_FRAMES.
+    for _ in 0..10 {
+        assert_eq!(vad.process_frame(&silence, true, outbound_mean_abs), None);
+    }
+    let loud_spike = [2_500_i16; RTP_FRAME_SAMPLES];
+    for _ in 0..(VAD_SPEECH_ONSET_FRAMES - 1) {
+        assert_eq!(vad.process_frame(&loud_spike, false, 0), None);
+        assert!(!vad.is_in_speech());
+    }
+    for _ in 0..VAD_DEFAULT_HANGOVER_FRAMES {
+        assert_eq!(vad.process_frame(&silence, false, 0), None);
+    }
+    assert!(!vad.is_in_speech());
+    assert!(!vad.has_pending_speech());
+}
+
+#[test]
+fn vad_rejects_delayed_echo_during_inter_clause_pause_using_peak_envelope() {
+    let mut vad = TelephonyVad::new();
+    let outbound_mean_abs: u32 = 1_200;
+    let expected_echo_thresh = (outbound_mean_abs / 4) + VAD_ECHO_MARGIN;
+    let silence = [0_i16; RTP_FRAME_SAMPLES];
+    // Exceeds bare VAD_ECHO_MARGIN (1400) so rejection depends on tracking the delayed peak.
+    let loud_echo = [1_500_i16; RTP_FRAME_SAMPLES];
+
+    for _ in 0..20 {
+        assert_eq!(vad.process_frame(&silence, true, outbound_mean_abs), None);
+    }
+
+    // Brief 300 ms inter-clause silence while outbound_playing remains true.
+    assert_eq!(vad.speech_threshold(true, 0), expected_echo_thresh);
+    for _ in 0..15 {
+        assert_eq!(vad.process_frame(&loud_echo, true, 0), None);
+        assert!(!vad.is_in_speech());
+        assert!(!vad.has_pending_speech());
+    }
+
+    // Immediately after playback stops, the delayed peak still protects the remaining echo tail.
+    assert_eq!(vad.speech_threshold(false, 0), expected_echo_thresh);
+    for _ in 0..15 {
+        assert_eq!(vad.process_frame(&loud_echo, false, 0), None);
+        assert!(!vad.is_in_speech());
+        assert!(!vad.has_pending_speech());
+    }
+
+    for _ in 0..VAD_DEFAULT_HANGOVER_FRAMES {
+        assert_eq!(vad.process_frame(&silence, false, 0), None);
+    }
+    assert!(!vad.is_in_speech());
+}
+
+#[test]
+fn vad_detects_real_speech_after_echo_tail_and_sustained_speech_over_playback_or_tail() {
+    let outbound_mean_abs: u32 = 1_200;
+    let silence = [0_i16; RTP_FRAME_SAMPLES];
+    let normal_human = [1_000_i16; RTP_FRAME_SAMPLES];
+    let echo_frame = [1_300_i16; RTP_FRAME_SAMPLES];
+
+    // Normal human speech after the 700 ms echo tail expires triggers cleanly in 7 frames.
+    let mut vad = TelephonyVad::new();
+    for _ in 0..15 {
+        assert_eq!(
+            vad.process_frame(&echo_frame, true, outbound_mean_abs),
+            None,
+        );
+    }
+    for _ in 0..VAD_ECHO_TAIL_FRAMES {
+        assert_eq!(vad.process_frame(&silence, false, 0), None);
+    }
+    for _ in 0..VAD_SPEECH_ONSET_FRAMES {
+        assert_eq!(vad.process_frame(&normal_human, false, 0), None);
+    }
+    assert!(vad.is_in_speech());
+    let mut completed = None;
+    for _ in 0..VAD_DEFAULT_HANGOVER_FRAMES {
+        completed = vad.process_frame(&silence, false, 0);
+    }
+    assert!(matches!(completed, Some(VadEvent::UtteranceComplete(ref s)) if !s.is_empty()));
+
+    // Sustained loud human speech over active outbound playback triggers BargeIn without leaking
+    // prior sub-threshold echo into preroll.
+    let mut vad = TelephonyVad::new();
+    for _ in 0..10 {
+        assert_eq!(
+            vad.process_frame(&echo_frame, true, outbound_mean_abs),
+            None,
+        );
+    }
+    for step in 0..(VAD_BARGE_IN_ONSET_FRAMES - 1) {
+        assert_eq!(
+            vad.process_frame(&LOUD_SPEECH_FRAME, true, outbound_mean_abs),
+            None,
+            "premature barge-in at frame {step}",
+        );
+    }
+    assert_eq!(
+        vad.process_frame(&LOUD_SPEECH_FRAME, true, outbound_mean_abs),
+        Some(VadEvent::BargeIn),
+    );
+    assert!(vad.is_in_speech());
+    let mut barge_completed = None;
+    for _ in 0..VAD_DEFAULT_HANGOVER_FRAMES {
+        barge_completed = vad.process_frame(&silence, false, 0);
+    }
+    match barge_completed {
+        Some(VadEvent::UtteranceComplete(samples)) => {
+            assert_eq!(
+                samples.len(),
+                (VAD_BARGE_IN_ONSET_FRAMES + VAD_DEFAULT_HANGOVER_FRAMES) * RTP_FRAME_SAMPLES,
+            );
+            assert_eq!(samples[0], 2_800);
+        }
+        other => panic!("expected UtteranceComplete after barge-in, got {other:?}"),
+    }
+
+    // Crisp loud human speech arriving inside the echo tail (outbound_playing == false) still
+    // must exceed the elevated echo threshold, and once it does it enters speech in
+    // VAD_SPEECH_ONSET_FRAMES without emitting a bogus BargeIn.
+    let mut vad = TelephonyVad::new();
+    for _ in 0..10 {
+        assert_eq!(vad.process_frame(&silence, true, outbound_mean_abs), None);
+    }
+    for _ in 0..(VAD_SPEECH_ONSET_FRAMES - 1) {
+        assert_eq!(vad.process_frame(&LOUD_SPEECH_FRAME, false, 0), None);
+        assert!(!vad.is_in_speech());
+    }
+    assert_eq!(vad.process_frame(&LOUD_SPEECH_FRAME, false, 0), None);
+    assert!(vad.is_in_speech());
+    let mut tail_completed = None;
+    for _ in 0..VAD_DEFAULT_HANGOVER_FRAMES {
+        tail_completed = vad.process_frame(&silence, false, 0);
+    }
+    match tail_completed {
+        Some(VadEvent::UtteranceComplete(samples)) => {
+            assert_eq!(
+                samples.len(),
+                (VAD_SPEECH_ONSET_FRAMES + VAD_DEFAULT_HANGOVER_FRAMES) * RTP_FRAME_SAMPLES,
+            );
+        }
+        other => panic!("expected UtteranceComplete from echo-tail speech, got {other:?}"),
+    }
+}
+
+#[test]
+fn vad_reset_clears_delayed_outbound_echo_history_and_tail() {
+    let mut vad = TelephonyVad::new();
+    let baseline_thresh = vad.speech_threshold(false, 0);
+    let silence = [0_i16; RTP_FRAME_SAMPLES];
+
+    for _ in 0..10 {
+        assert_eq!(vad.process_frame(&silence, true, PLAYBACK_MEAN_ABS), None);
+    }
+    assert_eq!(
+        vad.speech_threshold(false, 0),
+        (PLAYBACK_MEAN_ABS / 4) + VAD_ECHO_MARGIN,
+    );
+
+    vad.reset();
+    assert_eq!(vad.speech_threshold(false, 0), baseline_thresh);
+    let normal_human = [1_000_i16; RTP_FRAME_SAMPLES];
+    for _ in 0..VAD_SPEECH_ONSET_FRAMES {
+        assert_eq!(vad.process_frame(&normal_human, false, 0), None);
+    }
+    assert!(vad.is_in_speech());
+}
+
+#[test]
+fn vad_triggers_barge_in_when_human_speech_has_brief_consonant_dips() {
+    let mut vad = TelephonyVad::new();
+    let outbound_mean_abs: u32 = 700;
+    let echo_frame = [850_i16; RTP_FRAME_SAMPLES];
+    let vowel_frame = [1_750_i16; RTP_FRAME_SAMPLES];
+    let consonant_frame = [600_i16; RTP_FRAME_SAMPLES];
+
+    // Pure speakerphone echo at 850 over 700 outbound must never trigger barge-in.
+    for _ in 0..40 {
+        assert_eq!(
+            vad.process_frame(&echo_frame, true, outbound_mean_abs),
+            None,
+        );
+        assert!(!vad.is_in_speech());
+    }
+
+    // Human speech over playback with periodic 20 ms consonant dips still triggers barge-in.
+    let mut barged_in = false;
+    for idx in 0..14 {
+        let frame = if idx % 4 == 3 {
+            &consonant_frame
+        } else {
+            &vowel_frame
+        };
+        if matches!(
+            vad.process_frame(frame, true, outbound_mean_abs),
+            Some(VadEvent::BargeIn),
+        ) {
+            barged_in = true;
+            break;
+        }
+    }
+    assert!(
+        barged_in,
+        "expected leaky barge-in to catch human speech across brief consonant dips",
+    );
 }
 
 #[test]

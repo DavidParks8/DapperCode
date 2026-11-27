@@ -1,21 +1,26 @@
 use super::{
     approval_surface_id, build_approval_modal_surface, build_live_workflow_card,
-    build_post_call_report_content, format_rolling_transcript_markdown, format_transcript_line,
-    json, live_surface_id, lock_unpoisoned, mpsc, non_empty_kv_value, oneshot,
-    transcript_recipient_label, truncate_utf8_tail, validate_bridge_ui_surface, validate_call_id,
-    validate_start_request, validate_steer_instruction, Arc, AtomicUsize, BridgeQueueService,
-    BridgeUiBlock, BridgeUiTone, ClientHub, Duration, HangupPhoneCallResult, HangupPhoneCallStatus,
-    Instant, LiveCardParams, Ordering, PhoneCallError, PhoneCallRuntimeConfig, PhoneCallService,
-    PhoneCallSnapshot, PhoneCallStatus, PhoneCallTimeouts, ResolveBridgeUiSurfaceRequest,
-    SpokenTurnProgress, StartPhoneCallRequest, SteerPhoneCallStatus, TranscriptEntry,
-    TranscriptSpeaker, ValidatedStartRequest, VecDeque, Weak, COMPLETED_CALL_HISTORY_LIMIT,
+    build_post_call_report_content, callee_expects_spoken_reply,
+    format_rolling_transcript_markdown, format_transcript_line, is_likely_self_echo, json,
+    live_surface_id, lock_unpoisoned, mpsc, non_empty_kv_value, oneshot,
+    transcript_recipient_label, truncate_utf8_tail, update_vad_ivr_mode_for_wait_silently,
+    validate_bridge_ui_surface, validate_call_id, validate_start_request,
+    validate_steer_instruction, Arc, AtomicUsize, BridgeQueueService, BridgeUiBlock, BridgeUiTone,
+    ClientHub, Duration, HangupPhoneCallResult, HangupPhoneCallStatus, Instant, LiveCardParams,
+    Ordering, PhoneCallError, PhoneCallRuntimeConfig, PhoneCallService, PhoneCallSnapshot,
+    PhoneCallStatus, PhoneCallTimeouts, ResolveBridgeUiSurfaceRequest, SpokenTurnProgress,
+    StartPhoneCallRequest, SteerPhoneCallStatus, TranscriptEntry, TranscriptSpeaker,
+    ValidatedStartRequest, VecDeque, Weak, COMPLETED_CALL_HISTORY_LIMIT, ECHO_RECOVERY_NUDGE,
     END_CALL_QUIET_GRACE, INTERRUPTED_MARKER, MAX_CALLEE_NAME_BYTES, MAX_CALL_ID_BYTES,
     MAX_CONTEXT_BYTES, MAX_FIRST_MESSAGE_BYTES, MAX_KV_VALUE_BYTES, MAX_OBJECTIVE_BYTES,
     MAX_REPORT_BODY_BYTES, MAX_STEER_INSTRUCTION_BYTES, QUEUE_MAX_CONTENT_BYTES, RTP_FRAME_SAMPLES,
+    SILENT_TURN_RETRY_NUDGE,
 };
 use crate::client_hub::ClientConnectionMetadata;
 use crate::client_outbox::{client_outbox, ClientOutboxReceiver};
-use crate::phone_call::audio::{VAD_BARGE_IN_ONSET_FRAMES, VAD_DEFAULT_HANGOVER_FRAMES};
+use crate::phone_call::audio::{
+    TelephonyVad, VAD_BARGE_IN_ONSET_FRAMES, VAD_DEFAULT_HANGOVER_FRAMES, VAD_IVR_HANGOVER_FRAMES,
+};
 use crate::phone_call::sip::{
     build_rtp_packet, parse_rtp_packet, SipTransportKind, DEFAULT_TELEPHONE_EVENT_PT,
     PCMU_FRAME_BYTES, PCMU_PAYLOAD_TYPE,
@@ -362,9 +367,12 @@ fn sample_runtime_config(sip_port: u16, voice_url: &str) -> PhoneCallRuntimeConf
         user_display_name: "Alex Example".to_string(),
         voice: VoicePipelineConfig {
             stt_base_url: voice_url.to_string(),
+            stt_model: "gemma4:e4b".to_string(),
             llm_base_url: voice_url.to_string(),
+            llm_model: "gemma4:e4b".to_string(),
             tts_base_url: voice_url.to_string(),
-            ..VoicePipelineConfig::default()
+            tts_model: "phonon".to_string(),
+            tts_voice: "Harper".to_string(),
         },
     }
 }
@@ -5642,4 +5650,421 @@ async fn transcription_and_assistant_turn_failures_fail_the_call() {
         );
         assert!(report.contains("Status: failed"), "{report}");
     }
+}
+
+#[test]
+fn self_echo_matcher_rejects_echo_fragments_and_preserves_genuine_replies() {
+    for (callee, assistant) in [
+        (
+            "I wish I could find a",
+            "I wish I could find a better option for you.",
+        ),
+        (
+            "anything else on your mug",
+            "Hi again! Is there anything else on your mind?",
+        ),
+        (
+            "apologize if i what",
+            "I apologize if I interrupted you earlier.",
+        ),
+        (
+            "Sorry if I've made you",
+            "Sorry if I've made you wait on the line.",
+        ),
+        ("I apologize", "I apologize if I interrupted."),
+        ("anything else", "Is there anything else on your mind?"),
+    ] {
+        assert!(
+            is_likely_self_echo(callee, assistant),
+            "expected echo match for callee={callee:?} vs assistant={assistant:?}",
+        );
+    }
+
+    for (callee, assistant) in [
+        ("Hello", "Hello, I'm calling for David."),
+        ("Yes", "Yes, I can check that."),
+        ("No", "No problem at all."),
+        ("Wait", "Wait a second, let me check."),
+        ("Stop", "Please don't stop talking."),
+        ("Hi there", "Hi there, I'm calling for Alex."),
+        ("Thank you", "Thank you for checking."),
+        ("Yes, I can hear you", "Hi, can you hear me okay?"),
+        (
+            "Yes, we take reservations.",
+            "One more question: do you take reservations?",
+        ),
+        (
+            "Book a table for two",
+            "Hi, I'm calling for Alex to check your hours.",
+        ),
+        ("For David, sure", "Hi, I'm calling for David."),
+    ] {
+        assert!(
+            !is_likely_self_echo(callee, assistant),
+            "must not drop genuine reply callee={callee:?} vs assistant={assistant:?}",
+        );
+    }
+
+    let progress = SpokenTurnProgress {
+        clauses_started: vec![
+            (0, "I wish I could find a better option.".to_string()),
+            (20, "Let me check that for you.".to_string()),
+        ],
+        clauses_finished: vec![20],
+        total_frames_enqueued: 25,
+        ..SpokenTurnProgress::default()
+    };
+    assert_eq!(progress.spoken_text(20), "[partially spoken sentence]");
+    assert_eq!(
+        progress.started_clauses_text(),
+        "I wish I could find a better option. Let me check that for you.",
+    );
+}
+
+#[tokio::test]
+async fn self_echo_after_barge_in_and_playback_is_dropped_while_real_callee_speech_passes() {
+    let voice = MockVoiceState::new(
+        vec![
+            voice_reply(
+                "I wish I could find a better option for you today.",
+                json!([]),
+            ),
+            voice_reply("Hi again! Is there anything else on your mind?", json!([])),
+            voice_reply("Seven works great, thank you.", json!([])),
+        ],
+        vec![
+            "I wish I could find a",
+            "anything else on your mug",
+            "Yes, we have a table at seven.",
+        ],
+        24_000,
+    );
+    voice.tts_chunk_delay_ms.store(10, Ordering::SeqCst);
+    let mut call = TrunkCall::connect(
+        &voice,
+        TrunkCallOptions::new(Duration::from_millis(20), Duration::from_secs(60)),
+    )
+    .await;
+
+    // Trigger barge-in during Turn 1; STT returns an echo of the interrupted clause.
+    call.assistant_audio_reaches_trunk().await;
+    send_rtp_utterance(
+        &call.rtp,
+        call.dialog.client_rtp_addr,
+        &mut call.seq,
+        &mut call.ts,
+        VAD_BARGE_IN_ONSET_FRAMES + 4,
+        VAD_DEFAULT_HANGOVER_FRAMES + 2,
+    )
+    .await;
+    stt_requests_reach(&voice, 1).await;
+
+    // Echoed barge-in must be dropped and recover the interrupted turn without stalling.
+    call.card_shows("Hi again! Is there anything else on your mind?")
+        .await;
+    {
+        let requests = voice.chat_requests.lock().await;
+        assert_eq!(requests.len(), 2);
+        let recovery_messages = requests[1]["messages"].to_string();
+        assert!(
+            recovery_messages.contains(ECHO_RECOVERY_NUDGE),
+            "{recovery_messages}",
+        );
+        assert!(
+            !recovery_messages.contains("I wish I could find a"),
+            "{recovery_messages}",
+        );
+    }
+
+    // Speakerphone echo right after Turn 2 finishes must be dropped without prompting again.
+    send_rtp_utterance(
+        &call.rtp,
+        call.dialog.client_rtp_addr,
+        &mut call.seq,
+        &mut call.ts,
+        VAD_BARGE_IN_ONSET_FRAMES + 4,
+        VAD_DEFAULT_HANGOVER_FRAMES + 2,
+    )
+    .await;
+    stt_requests_reach(&voice, 2).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(voice.chat_requests.lock().await.len(), 2);
+    assert!(!call
+        .snapshot()
+        .transcript
+        .iter()
+        .any(|entry| entry.text.contains("anything else on your mug")));
+
+    // Genuine callee speech is accepted and answered normally.
+    send_rtp_utterance(
+        &call.rtp,
+        call.dialog.client_rtp_addr,
+        &mut call.seq,
+        &mut call.ts,
+        VAD_BARGE_IN_ONSET_FRAMES + 4,
+        VAD_DEFAULT_HANGOVER_FRAMES + 2,
+    )
+    .await;
+    call.card_shows("Seven works great, thank you.").await;
+    assert_eq!(voice.chat_requests.lock().await.len(), 3);
+    let snapshot = call.snapshot();
+    assert!(snapshot
+        .transcript
+        .iter()
+        .any(|entry| entry.text == "Yes, we have a table at seven."));
+    assert!(!snapshot.transcript.iter().any(|entry| {
+        entry.speaker == TranscriptSpeaker::Callee
+            && (entry.text.contains("I wish I could find a")
+                || entry.text.contains("anything else on your mug"))
+    }));
+
+    call.agent_hangup().await;
+    assert_eq!(call.settled().await.status, PhoneCallStatus::Completed);
+}
+
+#[tokio::test]
+async fn silent_non_hold_turn_retries_once_on_substantive_speech_without_looping() {
+    for prompt in [
+        "Why did you stop talking?",
+        "Hello",
+        "Hello?",
+        "Are you there",
+        "Hi!",
+        "Story.",
+        "Yes.",
+    ] {
+        assert!(callee_expects_spoken_reply(prompt), "{prompt:?}");
+    }
+    for fragment in ["", "...", "?", "I", "I ...", "Uh", "And", "Um"] {
+        assert!(!callee_expects_spoken_reply(fragment), "{fragment:?}");
+    }
+    for incomplete in [
+        "This",
+        "Isn't",
+        "And",
+        "Tempo, the pacing, that's how you know that I'm",
+        "I need to",
+        "Um",
+        "Wait...",
+    ] {
+        assert!(super::is_incomplete_utterance(incomplete), "{incomplete:?}");
+    }
+    for complete in [
+        "Tell me about Grand Theft Auto.",
+        "Story.",
+        "Stop the call.",
+        "Why did you stop talking?",
+        "Hello!",
+    ] {
+        assert!(!super::is_incomplete_utterance(complete), "{complete:?}");
+    }
+
+    let silent_wait = |reason: &str| {
+        voice_reply(
+            "",
+            voice_tool("wait_silently", json!({"reason": reason, "on_hold": false})),
+        )
+    };
+    let voice = MockVoiceState::new(
+        vec![
+            silent_wait("Listening"),
+            voice_reply(
+                "Sorry about that, I am still here and listening.",
+                json!([]),
+            ),
+            silent_wait("Listening"),
+            silent_wait("Still listening"),
+            silent_wait("Waiting for complete thought"),
+        ],
+        vec!["Why did you stop talking?", "Hello", "I"],
+        2_400,
+    );
+    let mut call = TrunkCall::connect(
+        &voice,
+        TrunkCallOptions::new(Duration::from_secs(20), Duration::from_secs(60)),
+    )
+    .await;
+
+    // Substantive question met with empty speech + wait_silently(on_hold=false) retries once.
+    call.callee_speaks(VAD_DEFAULT_HANGOVER_FRAMES + 2).await;
+    call.card_shows("Sorry about that, I am still here and listening.")
+        .await;
+    {
+        let requests = voice.chat_requests.lock().await;
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests[0]["response_format"]["json_schema"]["schema"]["properties"]["speech"]
+                ["minLength"],
+            2,
+            "first turn on a substantive reply must require spoken speech immediately",
+        );
+        assert_eq!(
+            requests[1]["response_format"]["json_schema"]["schema"]["properties"]["speech"]
+                ["minLength"],
+            2,
+        );
+        assert!(
+            requests[1]["messages"]
+                .to_string()
+                .contains(SILENT_TURN_RETRY_NUDGE),
+            "{}",
+            requests[1]["messages"],
+        );
+    }
+    call.outbound_audio_goes_quiet().await;
+
+    // If the single retry also stays silent, the loop stops without infinite retrying.
+    send_rtp_utterance(
+        &call.rtp,
+        call.dialog.client_rtp_addr,
+        &mut call.seq,
+        &mut call.ts,
+        VAD_BARGE_IN_ONSET_FRAMES + 4,
+        VAD_DEFAULT_HANGOVER_FRAMES + 2,
+    )
+    .await;
+    chat_requests_reach(&voice, 4).await;
+    {
+        let requests = voice.chat_requests.lock().await;
+        assert_eq!(
+            requests[2]["response_format"]["json_schema"]["schema"]["properties"]["speech"]
+                ["minLength"],
+            2,
+            "direct greeting must require spoken speech on the first attempt",
+        );
+        assert_eq!(
+            requests[3]["response_format"]["json_schema"]["schema"]["properties"]["speech"]
+                ["minLength"],
+            2,
+        );
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(voice.chat_requests.lock().await.len(), 4);
+    assert_eq!(call.snapshot().status, PhoneCallStatus::InProgress);
+    assert!(!call.snapshot().on_hold);
+
+    // Non-substantive 1-word fragment does not trigger a silent-turn retry or minLength.
+    send_rtp_utterance(
+        &call.rtp,
+        call.dialog.client_rtp_addr,
+        &mut call.seq,
+        &mut call.ts,
+        VAD_BARGE_IN_ONSET_FRAMES + 4,
+        VAD_IVR_HANGOVER_FRAMES + 4,
+    )
+    .await;
+    chat_requests_reach(&voice, 5).await;
+    {
+        let requests = voice.chat_requests.lock().await;
+        assert!(
+            requests[4]["response_format"]["json_schema"]["schema"]["properties"]["speech"]
+                .get("minLength")
+                .is_none(),
+            "single-word fragment must not force minLength on speech",
+        );
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(voice.chat_requests.lock().await.len(), 5);
+
+    call.agent_hangup().await;
+    assert_eq!(call.settled().await.status, PhoneCallStatus::Completed);
+}
+
+#[tokio::test]
+async fn normal_spoken_wait_silently_does_not_stick_vad_in_ivr_mode() {
+    let mut vad = TelephonyVad::new();
+    update_vad_ivr_mode_for_wait_silently(&mut vad, false, false, false, false);
+    assert!(!vad.is_ivr_mode());
+    update_vad_ivr_mode_for_wait_silently(&mut vad, true, false, false, false);
+    assert!(vad.is_ivr_mode());
+    update_vad_ivr_mode_for_wait_silently(&mut vad, false, false, false, false);
+    assert!(!vad.is_ivr_mode());
+    update_vad_ivr_mode_for_wait_silently(&mut vad, false, true, false, false);
+    assert!(vad.is_ivr_mode());
+    update_vad_ivr_mode_for_wait_silently(&mut vad, false, false, false, true);
+    assert!(vad.is_ivr_mode());
+    vad.set_ivr_mode(false);
+    update_vad_ivr_mode_for_wait_silently(&mut vad, false, true, true, false);
+    assert!(!vad.is_ivr_mode());
+
+    let structured_wait = |speech: &str| {
+        let turn_json = json!({
+            "speech": speech,
+            "decision": "wait_silently",
+            "digits": "",
+            "reason": "Listening",
+            "on_hold": false,
+            "outcome_summary": "",
+        })
+        .to_string();
+        vec![
+            format!(
+                "data: {}\n\n",
+                json!({"choices": [{"delta": {"content": turn_json}}]}),
+            )
+            .into_bytes(),
+            b"data: [DONE]\n\n".to_vec(),
+        ]
+    };
+
+    let voice = MockVoiceState::new(
+        vec![
+            structured_wait("Hello, what time do you close tonight?"),
+            structured_wait("Nine p m, got it."),
+        ],
+        vec!["We close at nine tonight."],
+        2_400,
+    );
+    let mut call = TrunkCall::connect(
+        &voice,
+        TrunkCallOptions::new(Duration::from_millis(20), Duration::from_secs(60)),
+    )
+    .await;
+    call.card_shows("Hello, what time do you close tonight?")
+        .await;
+    call.outbound_audio_goes_quiet().await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Exact default hangover followed by a loud frame completes immediately only when IVR mode is off.
+    send_rtp_utterance(
+        &call.rtp,
+        call.dialog.client_rtp_addr,
+        &mut call.seq,
+        &mut call.ts,
+        VAD_BARGE_IN_ONSET_FRAMES + 2,
+        VAD_DEFAULT_HANGOVER_FRAMES,
+    )
+    .await;
+    send_rtp_utterance(
+        &call.rtp,
+        call.dialog.client_rtp_addr,
+        &mut call.seq,
+        &mut call.ts,
+        1,
+        0,
+    )
+    .await;
+
+    timeout(Duration::from_millis(450), async {
+        while voice.stt_requests.load(Ordering::SeqCst) < 1 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("normal spoken wait_silently must keep default VAD hangover, not IVR hangover");
+
+    call.card_shows("Nine p m, got it.").await;
+    {
+        let requests = voice.chat_requests.lock().await;
+        assert_eq!(requests.len(), 2);
+        assert!(
+            !requests[1]["messages"]
+                .to_string()
+                .contains("Waiting silently:"),
+            "normal spoken structured turns must not spam Waiting silently system messages: {}",
+            requests[1]["messages"],
+        );
+    }
+    call.agent_hangup().await;
+    assert_eq!(call.settled().await.status, PhoneCallStatus::Completed);
 }

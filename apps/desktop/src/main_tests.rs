@@ -169,6 +169,14 @@ fn voice_cli_configures_updates_reports_and_clears_without_leaking_sip_password(
     assert!(configured.configured);
     assert!(configured.secret_present);
     assert_eq!(configured.secret_backend.as_deref(), Some("file"));
+    let defaults = configured.settings.as_ref().unwrap();
+    assert_eq!(defaults.stt_base_url, "http://127.0.0.1:8000/v1");
+    assert_eq!(defaults.stt_model, "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0");
+    assert_eq!(defaults.llm_base_url, "http://127.0.0.1:8000/v1");
+    assert_eq!(defaults.llm_model, "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0");
+    assert_eq!(defaults.tts_base_url, "http://127.0.0.1:8000/v1");
+    assert_eq!(defaults.tts_model, "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0");
+    assert_eq!(defaults.tts_voice, "female");
     assert_eq!(
         secrets.load_sip_password(&paths).unwrap().unwrap().0,
         "sip-s3cr3t-value",
@@ -231,9 +239,9 @@ fn voice_cli_configures_updates_reports_and_clears_without_leaking_sip_password(
     configure_voice(
         vec![
             "--tts-model".into(),
-            "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit".into(),
+            "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0".into(),
             "--tts-voice".into(),
-            "conversational-female".into(),
+            "female".into(),
         ],
         std::io::empty(),
         &paths,
@@ -249,11 +257,8 @@ fn voice_cli_configures_updates_reports_and_clears_without_leaking_sip_password(
     .unwrap()
     .settings
     .unwrap();
-    assert_eq!(preserved.tts_voice, "conversational-female");
-    assert_eq!(
-        preserved.tts_model,
-        "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit",
-    );
+    assert_eq!(preserved.tts_voice, "female");
+    assert_eq!(preserved.tts_model, "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0");
     assert_eq!(preserved.sip_server, "sip.telnyx.com:5061");
 
     let cleared = clear_voice(&paths, &secrets).unwrap();

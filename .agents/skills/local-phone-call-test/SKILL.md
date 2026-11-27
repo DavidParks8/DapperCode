@@ -15,8 +15,9 @@ feed back to an agent for root-cause analysis and improvement.
 ## Prerequisites
 
 - `baresip` installed (`brew install baresip`)
-- Local voice endpoint(s) running on loopback (for example Ollama on `http://127.0.0.1:11434/v1`
-  with your configured STT/LLM/TTS models, or `mlx_audio.server` if selected)
+- `llama.cpp` v0.8.0+ (`brew install llama.cpp`) — the runner automatically starts an isolated
+  `llama serve -hf LiquidAI/LFM3-Audio-2B-GGUF:Q8_0` server for native `/v1/realtime` streaming
+  speech-to-speech + tool calling (no Python or Ollama needed by default)
 - `dappercode-bridge` built once (or pass `--build`):
 
 ```bash
@@ -40,17 +41,25 @@ node .agents/skills/local-phone-call-test/scripts/run-call.mjs \
 
 By default, the runner:
 
-1. Reads non-secret voice defaults (`stt/llm/tts` URLs, models, voice, display name) from the
-   desktop `config.json` (or falls back to Ollama `gemma4:e4b` + `phonon`), with CLI flags overriding
-   any field.
-2. Starts an isolated `baresip` instance, an embedded transparent SIP/RTP recording proxy, and an
+1. Uses the deterministic default realtime speech-to-speech model:
+   `LiquidAI/LFM3-Audio-2B-GGUF:Q8_0` (`voice=female`) over local `llama.cpp` `/v1/realtime`
+   WebSocket (~400–550 ms first-audio latency, ~2.15 GB RAM, native `send_dtmf` / `end_call`
+   tool calling), while picking up `userDisplayName` from desktop `config.json`. Pass
+   `--use-saved-voice` to inherit saved voice settings from `config.json`, or use CLI flags
+   to override any field.
+2. Auto-starts a managed, isolated `llama serve` instance on an ephemeral loopback port (or reuses
+   an already-running server on `http://127.0.0.1:8000/v1`), logs to `llama-server.log`, and
+   terminates cleanly when the call ends. Pass `--no-start-llama` to disable auto-start.
+3. Starts an isolated `baresip` instance, an embedded transparent SIP/RTP recording proxy, and an
    isolated production `dappercode-bridge` on ephemeral loopback ports with random ephemeral
    credentials.
-3. Triggers `start_phone_call` deterministically through a minimal ACP driver (`acp-call-driver.mjs`)
+4. Triggers `start_phone_call` deterministically through a minimal ACP driver (`acp-call-driver.mjs`)
    with an open-ended objective and greeting ("talk about whatever you want"), then auto-approves
    the local test call modal on the bridge WebSocket—no phone or manual approval needed.
-4. Streams live status changes and transcript turns to the terminal. During the call:
-   - Speak into your Mac microphone and listen on your speakers.
+5. Streams live status changes and transcript turns to the terminal. During the call:
+   - Speak into your Mac microphone and listen on your speakers. For clean local speakerphone
+     tests, use headphones or moderate speaker volume—macOS `baresip` `coreaudio` has no built-in
+     acoustic echo cancellation (AEC) module.
    - Type any line + Enter in the terminal to send a private `steer_phone_call` instruction mid-call.
    - Type `/hangup` (or press `Ctrl+C`) to hang up cleanly and flush all artifacts.
 
@@ -63,6 +72,8 @@ By default, the runner:
 | `--first-message <text>` | Override the opening spoken turn guidance |
 | `--context <text>` | Add background context for scenario testing |
 | `--callee-name <name>` | Override the recipient label in transcripts |
+| `--use-saved-voice` | Use saved voice settings from desktop `config.json` instead of LFM3-Audio defaults |
+| `--no-start-llama` | Do not auto-start `llama serve` (require an already-running server) |
 | `--stt-base-url` / `--stt-model` | Override STT endpoint or model |
 | `--llm-base-url` / `--llm-model` | Override LLM endpoint or model |
 | `--tts-base-url` / `--tts-model` / `--tts-voice` | Override TTS endpoint, model, or voice |
@@ -83,7 +94,7 @@ Each run writes a self-contained bundle to the output directory (default
 | `mixed.wav` | Mono 8 kHz PCM16 mix of AI + User (time-aligned) |
 | `stereo.wav` | Stereo 8 kHz PCM16 (Left = AI, Right = User) for inspecting barge-in, echo, and turn gaps |
 | `ai.wav` / `user.wav` | Separate mono 8 kHz PCM16 tracks for independent ASR or listening checks |
-| `bridge.log` / `baresip.log` | Raw process logs for transport or model debugging |
+| `bridge.log` / `baresip.log` / `llama-server.log` | Raw process logs for transport or model debugging (`llama-server.log` when auto-started) |
 
 ## 3. Analyze a Recorded Call for Improvements
 

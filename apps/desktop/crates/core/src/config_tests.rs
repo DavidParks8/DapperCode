@@ -535,7 +535,7 @@ fn apply_phone_call_populates_exact_worker_env_keys_and_redacts_debug_output() {
         llm_model: "gemma4:e4b".to_string(),
         tts_base_url: "http://[::1]:11434/v1".to_string(),
         tts_model: "phonon".to_string(),
-        tts_voice: "default".to_string(),
+        tts_voice: "Harper".to_string(),
     };
 
     let sip_password = crate::secrets::generate_token();
@@ -575,7 +575,7 @@ fn apply_phone_call_populates_exact_worker_env_keys_and_redacts_debug_output() {
         "http://[::1]:11434/v1",
     );
     assert_eq!(config.values["PHONE_CALL_TTS_MODEL"], "phonon");
-    assert_eq!(config.values["PHONE_CALL_TTS_VOICE"], "default");
+    assert_eq!(config.values["PHONE_CALL_TTS_VOICE"], "Harper");
 
     for debug_repr in [format!("{config:?}"), format!("{config:#?}")] {
         assert!(!debug_repr.contains(&sip_password));

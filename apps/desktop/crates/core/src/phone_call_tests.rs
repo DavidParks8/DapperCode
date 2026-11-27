@@ -1,6 +1,7 @@
 use super::{
     AppPaths, BridgeRuntimeConfig, PhoneCallSettings, SecretBackend, SecretStore,
-    CONVERSATIONAL_FEMALE_TTS_MODEL,
+    DEFAULT_VOICE_AUDIO_BASE_URL, DEFAULT_VOICE_STT_MODEL, DEFAULT_VOICE_TTS_MODEL,
+    DEFAULT_VOICE_TTS_VOICE,
 };
 use crate::secrets::generate_token;
 use crate::store::atomic_private_write;
@@ -9,23 +10,17 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 #[test]
-fn conversational_female_profile_rejects_an_incompatible_model_before_saving() {
+fn realtime_voice_settings_persist_and_apply_to_bridge_runtime_config() {
     let directory = tempfile::tempdir().unwrap();
     let paths = AppPaths::for_tests(directory.path().to_path_buf());
     let secrets = SecretStore::file_backend_for_tests();
-    let mut settings: PhoneCallSettings = serde_json::from_value(serde_json::json!({
+    let settings: PhoneCallSettings = serde_json::from_value(serde_json::json!({
         "sipServer": "sip.example.test:5061", "sipUsername": "test-account",
         "callerId": "+15551234567", "userDisplayName": "Example Caller",
-        "ttsVoice": "conversational-female"
+        "ttsModel": DEFAULT_VOICE_TTS_MODEL, "ttsVoice": DEFAULT_VOICE_TTS_VOICE
     }))
     .unwrap();
     let secret = generate_token();
-    assert!(paths
-        .configure_phone_call(&secrets, Some(&secret), |_| Ok(settings.clone()))
-        .is_err());
-    assert!(paths.load_config().unwrap().phone_call.is_none());
-    assert!(secrets.load_sip_password(&paths).unwrap().is_none());
-    settings.tts_model = CONVERSATIONAL_FEMALE_TTS_MODEL.to_string();
     paths
         .configure_phone_call(&secrets, Some(&secret), |_| Ok(settings.clone()))
         .unwrap();
@@ -92,6 +87,31 @@ fn worker_phone_call_settings_and_password_wait_for_the_same_config_commit() {
     let (outcome, runtime) = completed_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     outcome.unwrap();
     worker.join().unwrap();
+    assert_eq!(DEFAULT_VOICE_AUDIO_BASE_URL, "http://127.0.0.1:8000/v1");
+    assert_eq!(DEFAULT_VOICE_STT_MODEL, "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0");
+    assert_eq!(DEFAULT_VOICE_TTS_MODEL, "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0");
+    assert_eq!(DEFAULT_VOICE_TTS_VOICE, "female");
     assert_eq!(runtime.values["PHONE_CALL_SIP_USERNAME"], "new-account");
     assert_eq!(runtime.values["PHONE_CALL_SIP_PASSWORD"], next_password);
+    assert_eq!(
+        runtime.values["PHONE_CALL_STT_BASE_URL"],
+        "http://127.0.0.1:8000/v1",
+    );
+    assert_eq!(
+        runtime.values["PHONE_CALL_STT_MODEL"],
+        "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0",
+    );
+    assert_eq!(
+        runtime.values["PHONE_CALL_LLM_BASE_URL"],
+        "http://127.0.0.1:8000/v1",
+    );
+    assert_eq!(
+        runtime.values["PHONE_CALL_TTS_BASE_URL"],
+        "http://127.0.0.1:8000/v1",
+    );
+    assert_eq!(
+        runtime.values["PHONE_CALL_TTS_MODEL"],
+        "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0",
+    );
+    assert_eq!(runtime.values["PHONE_CALL_TTS_VOICE"], "female");
 }
