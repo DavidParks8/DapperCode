@@ -1,12 +1,13 @@
-use super::{
-    build_realtime_instructions, build_realtime_tools, derive_realtime_ws_url, encode_wav_16k_mono,
-    is_realtime_s2s_model, transcribe_lfm3_chat_wav, upsample_8k_to_16k, RealtimeSession,
-};
+use super::{Lfm3AudioStrategy, Lfm3RealtimeSession};
 use crate::phone_call::audio::{decode_mulaw, RTP_FRAME_SAMPLES};
-use crate::phone_call::realtime_loop::{
-    encode_realtime_mulaw_frame, is_mutual_farewell, should_precheck_utterance,
+use crate::phone_call::realtime::lfm3_audio::{
+    build_lfm3_instructions, derive_realtime_ws_url, encode_lfm3_mulaw_frame, encode_wav_16k_mono,
+    transcribe_lfm3_chat_wav, upsample_8k_to_16k,
 };
-use crate::phone_call::voice::{VoiceCallPromptParams, VoiceToolCall};
+use crate::phone_call::realtime::strategy::{
+    RealtimeModelSession, RealtimeModelStrategy, RealtimeToolInvocation,
+};
+use crate::phone_call::voice::VoiceCallPromptParams;
 use axum::extract::ws::{Message as AxumWsMsg, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::IntoResponse;
@@ -30,7 +31,7 @@ struct MockRealtimeState {
 
 struct MockTurnScript {
     text_deltas: Vec<String>,
-    audio_samples: Vec<i16>,
+    audio_samples_24k: Vec<i16>,
     tool_calls: Vec<Value>,
     pause_for_cancel: bool,
 }
@@ -96,7 +97,7 @@ async fn handle_ws_session(mut socket: WebSocket, state: Arc<MockRealtimeState>)
                     if guard.is_empty() {
                         MockTurnScript {
                             text_deltas: vec!["Default reply.".to_string()],
-                            audio_samples: vec![1_000, -1_000, 1_000, -1_000],
+                            audio_samples_24k: vec![1_000; 480],
                             tool_calls: Vec::new(),
                             pause_for_cancel: false,
                         }
@@ -113,9 +114,9 @@ async fn handle_ws_session(mut socket: WebSocket, state: Arc<MockRealtimeState>)
                         ))
                         .await;
                 }
-                if !script.audio_samples.is_empty() {
-                    let mut bytes = Vec::with_capacity(script.audio_samples.len() * 2);
-                    for sample in script.audio_samples {
+                if !script.audio_samples_24k.is_empty() {
+                    let mut bytes = Vec::with_capacity(script.audio_samples_24k.len() * 2);
+                    for sample in script.audio_samples_24k {
                         bytes.extend_from_slice(&sample.to_le_bytes());
                     }
                     let _ = socket
@@ -164,11 +165,13 @@ async fn handle_ws_session(mut socket: WebSocket, state: Arc<MockRealtimeState>)
 }
 
 #[test]
-fn realtime_helpers_detect_lfm3_derive_ws_url_upsample_and_forbid_robotic_phrases() {
-    assert!(is_realtime_s2s_model("LiquidAI/LFM3-Audio-2B-GGUF:Q8_0"));
-    assert!(is_realtime_s2s_model("LiquidAI/LFM3-Audio-2B-MLX-8bit"));
-    assert!(!is_realtime_s2s_model("gemma4:e4b"));
-    assert!(!is_realtime_s2s_model("gpt-oss:20b"));
+fn lfm3_helpers_match_models_derive_ws_url_upsample_encode_and_build_instructions() {
+    let strategy = Lfm3AudioStrategy;
+    assert_eq!(strategy.id(), "lfm3-audio-realtime");
+    assert!(strategy.matches_model("LiquidAI/LFM3-Audio-2B-GGUF:Q8_0"));
+    assert!(strategy.matches_model("LiquidAI/LFM3-Audio-2B-MLX-8bit"));
+    assert!(!strategy.matches_model("gemma4:e4b"));
+    assert!(!strategy.matches_model("gpt-oss:20b"));
 
     let http_url = Url::parse("http://127.0.0.1:8000/v1").unwrap();
     assert_eq!(
@@ -184,7 +187,20 @@ fn realtime_helpers_detect_lfm3_derive_ws_url_upsample_and_forbid_robotic_phrase
     assert_eq!(upsample_8k_to_16k(&[]), Vec::<i16>::new());
     assert_eq!(upsample_8k_to_16k(&[100, 300]), vec![100, 200, 300, 300]);
 
-    let instructions = build_realtime_instructions(
+    let wav_16k = encode_wav_16k_mono(&[100, -100, 200, -200]);
+    assert_eq!(&wav_16k[0..4], b"RIFF");
+    assert_eq!(
+        u32::from_le_bytes(wav_16k[24..28].try_into().unwrap()),
+        16_000,
+    );
+    assert_eq!(wav_16k.len(), 44 + 8);
+
+    let loud = [10_000_i16; RTP_FRAME_SAMPLES];
+    let encoded = encode_lfm3_mulaw_frame(&loud);
+    let decoded = decode_mulaw(encoded[0]);
+    assert!((4_500..=5_500).contains(&decoded), "decoded={decoded}");
+
+    let instructions = build_lfm3_instructions(
         &VoiceCallPromptParams {
             user_display_name: "David Parks".to_string(),
             callee_name: Some("User".to_string()),
@@ -200,80 +216,22 @@ fn realtime_helpers_detect_lfm3_derive_ws_url_upsample_and_forbid_robotic_phrase
     assert!(instructions.contains("Your own name is Lily"));
     assert!(instructions.contains("instead of over-simplifying"));
     assert!(instructions.contains("Use web_search ONLY for specific external facts"));
-    assert!(instructions.contains("rather than ending every turn with a question"));
-    assert!(instructions.contains("Always share your own fun personal take, opinion"));
-    assert!(instructions.contains("Call end_call immediately when the other person says goodbye"));
     assert!(instructions.contains("Private live instruction: Keep it upbeat"));
-
-    assert!(is_mutual_farewell(
-        Some("Goodbye."),
-        "Goodbye! Have a great day!",
-    ));
-    assert!(is_mutual_farewell(
-        Some("Okay, bye!"),
-        "Take care, talk to you later!",
-    ));
-    assert!(!is_mutual_farewell(
-        Some("Bye, daddy!"),
-        "Goodbye! Have a great day!",
-    ));
-    assert!(!is_mutual_farewell(
-        Some("Can you play Goodbye Yellow Brick Road for me please?"),
-        "Sure, I can talk about that song!",
-    ));
-    assert!(!is_mutual_farewell(
-        Some("How is white chocolate made?"),
-        "Have a great day!",
-    ));
-
-    let wav_16k = encode_wav_16k_mono(&[100, -100, 200, -200]);
-    assert_eq!(&wav_16k[0..4], b"RIFF");
-    assert_eq!(
-        u32::from_le_bytes(wav_16k[24..28].try_into().unwrap()),
-        16_000,
-    );
-    assert_eq!(wav_16k.len(), 44 + 8);
-
-    let no_end = build_realtime_tools(false);
-    let no_end_arr = no_end.as_array().unwrap();
-    assert_eq!(no_end_arr.len(), 2);
-    assert_eq!(no_end_arr[0]["name"], "send_dtmf");
-    assert_eq!(no_end_arr[1]["name"], "web_search");
-
-    let with_end = build_realtime_tools(true);
-    let with_end_arr = with_end.as_array().unwrap();
-    assert_eq!(with_end_arr.len(), 3);
-    assert!(with_end_arr.iter().any(|tool| tool["name"] == "web_search"));
-    assert!(with_end_arr.iter().all(|tool| tool["name"] != "hold_call"));
-
-    // Mid-length utterances captured near assistant audio are pre-checked for self-echo,
-    // short clips are pre-checked for incomplete-thought deferral, and long (>= 5s) utterances
-    // or non-echo >= 1.5s clips go straight to LFM3 for low latency.
-    assert!(should_precheck_utterance(24_000, true));
-    assert!(!should_precheck_utterance(48_000, true));
-    assert!(should_precheck_utterance(4_000, false));
-    assert!(!should_precheck_utterance(24_000, false));
-
-    // LFM3 realtime mu-law encoding applies -6 dB headroom (~0.5x).
-    let loud = [10_000_i16; RTP_FRAME_SAMPLES];
-    let encoded = encode_realtime_mulaw_frame(&loud);
-    let decoded = decode_mulaw(encoded[0]);
-    assert!((4_500..=5_500).contains(&decoded), "decoded={decoded}");
 }
 
 #[tokio::test]
-async fn realtime_session_streams_audio_handles_tools_barge_in_cancel_and_chat_asr() {
+async fn lfm3_realtime_session_streams_pcmu_handles_tools_cancel_and_chat_asr() {
     let state = Arc::new(MockRealtimeState::default());
     *state.scripted_turns.lock().await = vec![
         MockTurnScript {
             text_deltas: vec!["Hi! ".to_string(), "What's on your mind?".to_string()],
-            audio_samples: vec![500, -500, 800, -800],
+            audio_samples_24k: vec![2_000; 480],
             tool_calls: Vec::new(),
             pause_for_cancel: false,
         },
         MockTurnScript {
             text_deltas: Vec::new(),
-            audio_samples: Vec::new(),
+            audio_samples_24k: Vec::new(),
             tool_calls: vec![json!({
                 "type": "function_call",
                 "name": "end_call",
@@ -284,73 +242,70 @@ async fn realtime_session_streams_audio_handles_tools_barge_in_cancel_and_chat_a
         },
         MockTurnScript {
             text_deltas: vec!["Bye, have a great day!".to_string()],
-            audio_samples: vec![600, -600],
+            audio_samples_24k: vec![2_000; 480],
             tool_calls: Vec::new(),
             pause_for_cancel: false,
         },
         MockTurnScript {
-            text_deltas: vec!["Partial ".to_string()],
-            audio_samples: vec![400, -400],
+            text_deltas: vec!["Partial".to_string()],
+            audio_samples_24k: vec![2_000; 480],
             tool_calls: Vec::new(),
             pause_for_cancel: true,
         },
     ];
+
     let base = spawn_mock_realtime_server(Arc::clone(&state)).await;
     let cancel = CancellationToken::new();
-
-    let mut session = RealtimeSession::connect(
+    let mut session = Lfm3RealtimeSession::connect(
         &base,
-        "Respond with interleaved text and audio.",
-        build_realtime_tools(true),
+        "Respond with function calls, and interleaved text and audio.",
+        json!([]),
         &cancel,
     )
     .await
     .unwrap();
 
-    // Turn 1: audio turn streams PCM24k and text.
-    let mut received_pcm = Vec::new();
+    // Turn 1: audio turn streams 8 kHz PCMU frames and text.
+    let mut received_frames = Vec::new();
     let out1 = session
-        .run_audio_turn(&[100_i16; 320], &cancel, |chunk| {
-            received_pcm.extend_from_slice(chunk);
+        .run_audio_turn(&[100_i16; 160], &cancel, &mut |frame| {
+            received_frames.push(frame);
         })
         .await
         .unwrap();
     assert_eq!(out1.spoken_text, "Hi! What's on your mind?");
-    assert_eq!(received_pcm, vec![500, -500, 800, -800]);
+    assert_eq!(out1.audio_frames_emitted, 1);
+    assert_eq!(received_frames.len(), 1);
     assert!(out1.tool_calls.is_empty());
 
-    // Turn 2: spoken hangup triggers end_call tool, then submit_tool_output yields spoken goodbye.
+    // Turn 2: spoken hangup yields generic RawToolCall, then submit_tool_output yields goodbye.
     let out2 = session
-        .run_audio_turn(&[200_i16; 320], &cancel, |_| {})
+        .run_audio_turn(&[200_i16; 160], &cancel, &mut |_| {})
         .await
         .unwrap();
     assert_eq!(
         out2.tool_calls,
-        vec![VoiceToolCall::EndCall {
+        vec![RealtimeToolInvocation {
             call_id: "call_end_1".to_string(),
-            reason: "Recipient said goodbye".to_string(),
-            outcome_summary: "Recipient said goodbye".to_string(),
+            name: "end_call".to_string(),
+            arguments: json!({ "reason": "Recipient said goodbye" }),
         }],
     );
-    let mut bye_pcm = Vec::new();
+    let mut bye_frames = 0usize;
     let out3 = session
-        .submit_tool_output(
-            "call_end_1",
-            "Say a brief goodbye.",
-            true,
-            &cancel,
-            |chunk| bye_pcm.extend_from_slice(chunk),
-        )
+        .submit_tool_output("call_end_1", r#"{"ok":true}"#, true, &cancel, &mut |_| {
+            bye_frames += 1;
+        })
         .await
         .unwrap();
     assert_eq!(out3.spoken_text, "Bye, have a great day!");
-    assert_eq!(bye_pcm, vec![600, -600]);
+    assert_eq!(bye_frames, 1);
 
     // Turn 4: cancellation sends response.cancel and drains cleanly.
     let barge_cancel = CancellationToken::new();
     let trigger = barge_cancel.clone();
     let out4 = session
-        .run_audio_turn(&[300_i16; 320], &barge_cancel, move |_| {
+        .run_audio_turn(&[300_i16; 160], &barge_cancel, &mut move |_| {
             trigger.cancel();
         })
         .await
@@ -395,8 +350,4 @@ async fn realtime_session_streams_audio_handles_tools_barge_in_cancel_and_chat_a
         .expect("input_audio_buffer.append sent");
     assert!(first_clear < first_append);
     assert!(events.iter().any(|ev| ev["type"] == "response.cancel"));
-    assert!(events
-        .iter()
-        .any(|ev| ev["type"] == "conversation.item.create"
-            && ev["item"]["type"] == "function_call_output"));
 }

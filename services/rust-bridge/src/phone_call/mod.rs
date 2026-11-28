@@ -12,9 +12,7 @@ pub(crate) mod realtime;
 pub(crate) mod sip;
 pub(crate) mod voice;
 
-mod realtime_loop;
 mod room_attention;
-mod web_search;
 
 use crate::bridge_protocol::{
     BridgeQueueService, BridgeThreadQueueSendRequest, BridgeUiAction, BridgeUiActionStyle,
@@ -2084,7 +2082,7 @@ fn set_call_hold(slot: &ActiveCallSlot, conversation: &mut VoiceConversation, on
 )]
 async fn run_connected_call(mut ctx: ConnectedCallContext) {
     if ctx.voice_client.is_realtime_s2s() {
-        Box::pin(realtime_loop::run_connected_realtime_call(ctx)).await;
+        Box::pin(realtime::run_connected_realtime_call(ctx)).await;
         return;
     }
     let sip_handle = ctx.sip_session.control_handle();
@@ -2571,7 +2569,6 @@ async fn run_connected_call(mut ctx: ConnectedCallContext) {
                                     }
                                     conversation.record_tool_result(tc_id, "Conversation resumed; respond to the recipient now.");
                                 }
-                                VoiceToolCall::WebSearch { .. } => {}
                                 VoiceToolCall::EndCall {
                                     call_id: tc_id,
                                     reason,

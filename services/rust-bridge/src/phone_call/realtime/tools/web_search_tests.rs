@@ -2,11 +2,13 @@ use super::{
     execute_web_search_with_endpoints, parse_ddg_lite_snippets, sanitize_query, SearchFillerBank,
     SEARCH_FILLER_PHRASES,
 };
+use crate::phone_call::realtime::lfm3_strategy::Lfm3AudioStrategy;
 use crate::phone_call::voice::{VoicePipelineClient, VoicePipelineConfig};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::Router;
 use serde_json::json;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -110,7 +112,7 @@ async fn execute_web_search_uses_ddg_falls_back_to_wikipedia_and_answers_self_na
 }
 
 #[tokio::test]
-async fn search_filler_bank_prewarms_pcm24k_clips_and_rotates_round_robin() {
+async fn search_filler_bank_prewarms_via_strategy_and_rotates_round_robin() {
     let pcm_24k: Vec<u8> = [8_000_i16; 960]
         .iter()
         .flat_map(|sample| sample.to_le_bytes())
@@ -137,9 +139,8 @@ async fn search_filler_bank_prewarms_pcm24k_clips_and_rotates_round_robin() {
     })
     .unwrap();
     let cancel = CancellationToken::new();
-    let bank = SearchFillerBank::start_warming(client, cancel);
+    let bank = SearchFillerBank::start_warming(Arc::new(Lfm3AudioStrategy), client, cancel);
 
-    // Wait briefly for all 3 short filler clips to synthesize against the local mock server.
     for _ in 0..50 {
         if bank.clips.lock().unwrap().len() == SEARCH_FILLER_PHRASES.len() {
             break;

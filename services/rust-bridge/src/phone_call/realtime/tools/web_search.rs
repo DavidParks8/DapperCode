@@ -5,11 +5,18 @@
 #[path = "web_search_tests.rs"]
 pub(super) mod tests;
 
-use super::audio::{encode_mulaw, Downsampler24kTo8k, MULAW_SILENCE, RTP_FRAME_SAMPLES};
-use super::voice::VoicePipelineClient;
+use super::{
+    spawn_async_tool, FillerClip, RealtimeTool, ToolDispatch, ToolEffect, ToolExecutionContext,
+    ToolOutcome,
+};
+use crate::phone_call::realtime::strategy::{
+    RealtimeModelStrategy, RealtimeToolInvocation, RealtimeToolSpec,
+};
+use crate::phone_call::voice::VoicePipelineClient;
 use reqwest::header::{CONTENT_TYPE, USER_AGENT};
 use reqwest::Url;
 use serde::Deserialize;
+use serde_json::{json, Value};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
@@ -26,19 +33,14 @@ const MAX_SNIPPET_CHARS: usize = 240;
 const MAX_RESULTS: usize = 3;
 const SEARCH_FILLER_PHRASES: &[&str] = &["One sec.", "Let me check.", "Hold on, checking."];
 
-#[derive(Clone)]
-pub(super) struct SearchFillerClip {
-    pub text: &'static str,
-    pub frames: Vec<[u8; RTP_FRAME_SAMPLES]>,
-}
-
 pub(super) struct SearchFillerBank {
-    clips: Arc<StdMutex<Vec<SearchFillerClip>>>,
+    clips: Arc<StdMutex<Vec<FillerClip>>>,
     next_idx: AtomicUsize,
 }
 
 impl SearchFillerBank {
     pub(super) fn start_warming(
+        strategy: Arc<dyn RealtimeModelStrategy>,
         voice_client: VoicePipelineClient,
         cancel: CancellationToken,
     ) -> Self {
@@ -49,10 +51,12 @@ impl SearchFillerBank {
                 if cancel.is_cancelled() {
                     break;
                 }
-                if let Some(frames) = synthesize_filler_frames(&voice_client, phrase, &cancel).await
+                if let Some(frames) = strategy
+                    .synthesize_filler_frames(&voice_client, phrase, &cancel)
+                    .await
                 {
                     if let Ok(mut guard) = task_clips.lock() {
-                        guard.push(SearchFillerClip {
+                        guard.push(FillerClip {
                             text: phrase,
                             frames,
                         });
@@ -66,7 +70,7 @@ impl SearchFillerBank {
         }
     }
 
-    pub(super) fn next_clip(&self) -> Option<SearchFillerClip> {
+    pub(super) fn next_clip(&self) -> Option<FillerClip> {
         let guard = self.clips.lock().ok()?;
         if guard.is_empty() {
             return None;
@@ -76,35 +80,97 @@ impl SearchFillerBank {
     }
 }
 
-async fn synthesize_filler_frames(
-    voice_client: &VoicePipelineClient,
-    phrase: &str,
-    cancel: &CancellationToken,
-) -> Option<Vec<[u8; RTP_FRAME_SAMPLES]>> {
-    let mut downsampler = Downsampler24kTo8k::new();
-    let mut pcm_8k: Vec<i16> = Vec::new();
-    voice_client
-        .synthesize_speech_pcm24k(phrase, cancel, |samples_24k| {
-            downsampler.push_pcm24k_samples(samples_24k, &mut pcm_8k);
-        })
-        .await
-        .ok()?;
-    encode_filler_pcm8k(&pcm_8k)
+pub struct WebSearchTool {
+    fillers: SearchFillerBank,
+    last_query: StdMutex<Option<String>>,
 }
 
-fn encode_filler_pcm8k(pcm_8k: &[i16]) -> Option<Vec<[u8; RTP_FRAME_SAMPLES]>> {
-    if pcm_8k.is_empty() {
-        return None;
-    }
-    let mut frames = Vec::with_capacity(pcm_8k.len().div_ceil(RTP_FRAME_SAMPLES));
-    for chunk in pcm_8k.chunks(RTP_FRAME_SAMPLES) {
-        let mut out = [MULAW_SILENCE; RTP_FRAME_SAMPLES];
-        for (dst, &src) in out.iter_mut().zip(chunk.iter()) {
-            *dst = encode_mulaw(src / 2);
+impl WebSearchTool {
+    #[must_use]
+    pub fn new(
+        strategy: Arc<dyn RealtimeModelStrategy>,
+        voice_client: VoicePipelineClient,
+        cancel: CancellationToken,
+    ) -> Self {
+        Self {
+            fillers: SearchFillerBank::start_warming(strategy, voice_client, cancel),
+            last_query: StdMutex::new(None),
         }
-        frames.push(out);
     }
-    Some(frames)
+
+    fn is_duplicate_and_record(&self, normalized: &str) -> bool {
+        if normalized.is_empty() {
+            return false;
+        }
+        let Ok(mut guard) = self.last_query.lock() else {
+            return false;
+        };
+        if guard.as_deref() == Some(normalized) {
+            return true;
+        }
+        *guard = Some(normalized.to_string());
+        false
+    }
+}
+
+impl RealtimeTool for WebSearchTool {
+    fn name(&self) -> &'static str {
+        "web_search"
+    }
+
+    fn spec(&self) -> RealtimeToolSpec {
+        RealtimeToolSpec {
+            name: self.name(),
+            description: "Search the web for specific external facts, game mechanics, recipes, trivia, or current events you do not know. Do NOT use for casual chat, opinions, your name, or complaints.",
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Concise factual web search query."
+                    }
+                },
+                "required": ["query"]
+            }),
+        }
+    }
+
+    fn dispatch(
+        self: Arc<Self>,
+        invocation: RealtimeToolInvocation,
+        ctx: &ToolExecutionContext<'_>,
+    ) -> ToolDispatch {
+        let raw_query = invocation
+            .arguments
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let normalized = sanitize_query(raw_query).to_ascii_lowercase();
+        if normalized.is_empty() || self.is_duplicate_and_record(&normalized) {
+            return ToolDispatch::Immediate(ToolOutcome {
+                call_id: invocation.call_id,
+                output: r#"{"ok":true}"#.to_string(),
+                request_spoken_reply: false,
+                effect: ToolEffect::None,
+            });
+        }
+        let filler = self.fillers.next_clip();
+        let http = ctx.http.clone();
+        let query = raw_query.to_string();
+        let call_id = invocation.call_id.clone();
+        let task = spawn_async_tool(invocation.call_id, ctx.call_cancel, move |cancel| {
+            Box::pin(async move {
+                let output = execute_web_search(&http, &query, &cancel).await;
+                ToolOutcome {
+                    call_id,
+                    output,
+                    request_spoken_reply: true,
+                    effect: ToolEffect::None,
+                }
+            })
+        });
+        ToolDispatch::Async { task, filler }
+    }
 }
 
 /// Executes a bounded factual web search for the realtime voice model, returning natural plain-text notes.

@@ -23,8 +23,7 @@ impl VoiceToolCall {
             Self::SendDtmf { call_id, .. }
             | Self::EndCall { call_id, .. }
             | Self::WaitSilently { call_id, .. }
-            | Self::ResumeCall { call_id }
-            | Self::WebSearch { call_id, .. } => call_id,
+            | Self::ResumeCall { call_id } => call_id,
         }
     }
 }
