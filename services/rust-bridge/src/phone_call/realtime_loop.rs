@@ -18,7 +18,9 @@ use super::sip::{InboundRtpAudioFrame, SipCallEvent, SipCallHandle};
 use super::voice::{
     is_substantive_reply, VoiceCallPromptParams, VoiceConversation, VoiceError, VoiceToolCall,
 };
-use super::web_search::{execute_web_search, sanitize_query};
+use super::web_search::{
+    execute_web_search, sanitize_query, SearchFillerBank, SEARCH_FILLER_DELAY,
+};
 use super::{
     is_incomplete_utterance, publish_in_call_card_update, recv_optional_inbound_audio,
     recv_optional_sip_event, set_call_hold, settle_connected_call, sync_shared_transcript,
@@ -66,6 +68,7 @@ struct RealtimeDialogState {
     callee_has_spoken: bool,
     last_callee_text: Option<String>,
     last_search_query: Option<String>,
+    search_fillers: SearchFillerBank,
 }
 
 impl RealtimeDialogState {
@@ -82,6 +85,10 @@ impl RealtimeDialogState {
             conversation.inject_steer(steer);
         }
         sync_shared_transcript(&ctx.slot, conversation.transcript());
+        let search_fillers = SearchFillerBank::start_warming(
+            ctx.voice_client.clone(),
+            ctx.slot.cancel.child_token(),
+        );
         Self {
             conversation,
             prompt_params,
@@ -89,6 +96,7 @@ impl RealtimeDialogState {
             callee_has_spoken: false,
             last_callee_text: None,
             last_search_query: None,
+            search_fillers,
         }
     }
 
@@ -1005,7 +1013,7 @@ async fn apply_realtime_tool_call(
             );
         }
         VoiceToolCall::WebSearch { call_id, query } => {
-            handle_realtime_web_search_tool(ctx, state, call_id, &query).await;
+            handle_realtime_web_search_tool(ctx, sip_handle, state, call_id, &query).await;
         }
         VoiceToolCall::WaitSilently { .. } | VoiceToolCall::ResumeCall { .. } => {}
     }
@@ -1014,6 +1022,7 @@ async fn apply_realtime_tool_call(
 
 async fn handle_realtime_web_search_tool(
     ctx: &ConnectedCallContext,
+    sip_handle: &SipCallHandle,
     state: &mut RealtimeLoopState,
     call_id: String,
     query: &str,
@@ -1028,15 +1037,38 @@ async fn handle_realtime_web_search_tool(
         if !normalized.is_empty() {
             state.dialog.last_search_query = Some(normalized);
         }
-        execute_web_search(ctx.voice_client.http_client(), query, &ctx.slot.cancel)
-            .await
-            .to_string()
+        run_web_search_with_filler(ctx, sip_handle, state, query).await
     };
     state.pending_turn = Some(RealtimeTurnRequest::ToolOutput {
         call_id,
         output,
         request_spoken_reply: true,
     });
+}
+
+async fn run_web_search_with_filler(
+    ctx: &ConnectedCallContext,
+    sip_handle: &SipCallHandle,
+    state: &mut RealtimeLoopState,
+    query: &str,
+) -> String {
+    let search_fut = execute_web_search(ctx.voice_client.http_client(), query, &ctx.slot.cancel);
+    tokio::pin!(search_fut);
+    tokio::select! {
+        biased;
+        result = &mut search_fut => result.to_string(),
+        () = tokio::time::sleep(SEARCH_FILLER_DELAY) => {
+            if let Some(clip) = state.dialog.search_fillers.next_clip() {
+                state
+                    .audio
+                    .echo_tracker
+                    .record_assistant_speech(clip.text, Instant::now());
+                state.audio.last_outbound_at = Some(Instant::now());
+                sip_handle.enqueue_pcmu_frames(clip.frames);
+            }
+            search_fut.await.to_string()
+        }
+    }
 }
 
 fn handle_realtime_end_call_tool(

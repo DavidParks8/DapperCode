@@ -5,10 +5,14 @@
 #[path = "web_search_tests.rs"]
 pub(super) mod tests;
 
+use super::audio::{encode_mulaw, Downsampler24kTo8k, MULAW_SILENCE, RTP_FRAME_SAMPLES};
+use super::voice::VoicePipelineClient;
 use reqwest::header::{CONTENT_TYPE, USER_AGENT};
 use reqwest::Url;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
@@ -21,6 +25,93 @@ const MAX_QUERY_CHARS: usize = 160;
 const MAX_RESPONSE_BYTES: usize = 128 * 1024;
 const MAX_SNIPPET_CHARS: usize = 240;
 const MAX_RESULTS: usize = 4;
+pub(super) const SEARCH_FILLER_DELAY: Duration = Duration::from_millis(400);
+const SEARCH_FILLER_PHRASES: &[&str] = &[
+    "One sec, let me look that up.",
+    "Hold on, let me check that real quick.",
+    "Give me just a second to look that up.",
+];
+
+#[derive(Clone)]
+pub(super) struct SearchFillerClip {
+    pub text: &'static str,
+    pub frames: Vec<[u8; RTP_FRAME_SAMPLES]>,
+}
+
+pub(super) struct SearchFillerBank {
+    clips: Arc<StdMutex<Vec<SearchFillerClip>>>,
+    next_idx: AtomicUsize,
+}
+
+impl SearchFillerBank {
+    pub(super) fn start_warming(
+        voice_client: VoicePipelineClient,
+        cancel: CancellationToken,
+    ) -> Self {
+        let clips = Arc::new(StdMutex::new(Vec::new()));
+        let task_clips = Arc::clone(&clips);
+        tokio::spawn(async move {
+            for &phrase in SEARCH_FILLER_PHRASES {
+                if cancel.is_cancelled() {
+                    break;
+                }
+                if let Some(frames) = synthesize_filler_frames(&voice_client, phrase, &cancel).await
+                {
+                    if let Ok(mut guard) = task_clips.lock() {
+                        guard.push(SearchFillerClip {
+                            text: phrase,
+                            frames,
+                        });
+                    }
+                }
+            }
+        });
+        Self {
+            clips,
+            next_idx: AtomicUsize::new(0),
+        }
+    }
+
+    pub(super) fn next_clip(&self) -> Option<SearchFillerClip> {
+        let guard = self.clips.lock().ok()?;
+        if guard.is_empty() {
+            return None;
+        }
+        let idx = self.next_idx.fetch_add(1, Ordering::Relaxed) % guard.len();
+        Some(guard[idx].clone())
+    }
+}
+
+async fn synthesize_filler_frames(
+    voice_client: &VoicePipelineClient,
+    phrase: &str,
+    cancel: &CancellationToken,
+) -> Option<Vec<[u8; RTP_FRAME_SAMPLES]>> {
+    let mut downsampler = Downsampler24kTo8k::new();
+    let mut pcm_8k: Vec<i16> = Vec::new();
+    voice_client
+        .synthesize_speech_pcm24k(phrase, cancel, |samples_24k| {
+            downsampler.push_pcm24k_samples(samples_24k, &mut pcm_8k);
+        })
+        .await
+        .ok()?;
+    encode_filler_pcm8k(&pcm_8k)
+}
+
+fn encode_filler_pcm8k(pcm_8k: &[i16]) -> Option<Vec<[u8; RTP_FRAME_SAMPLES]>> {
+    if pcm_8k.is_empty() {
+        return None;
+    }
+    let mut frames = Vec::with_capacity(pcm_8k.len().div_ceil(RTP_FRAME_SAMPLES));
+    for chunk in pcm_8k.chunks(RTP_FRAME_SAMPLES) {
+        let mut out = [MULAW_SILENCE; RTP_FRAME_SAMPLES];
+        for (dst, &src) in out.iter_mut().zip(chunk.iter()) {
+            *dst = encode_mulaw(src / 2);
+        }
+        frames.push(out);
+    }
+    Some(frames)
+}
 
 /// Executes a bounded factual web search for the realtime voice model, returning compact JSON.
 pub(super) async fn execute_web_search(

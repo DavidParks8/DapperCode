@@ -1,8 +1,13 @@
-use super::{execute_web_search_with_endpoints, parse_ddg_lite_snippets, sanitize_query};
+use super::{
+    execute_web_search_with_endpoints, parse_ddg_lite_snippets, sanitize_query, SearchFillerBank,
+    SEARCH_FILLER_PHRASES,
+};
+use crate::phone_call::voice::{VoicePipelineClient, VoicePipelineConfig};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::Router;
 use serde_json::json;
+use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
@@ -99,4 +104,57 @@ async fn execute_web_search_uses_ddg_falls_back_to_wikipedia_and_answers_self_na
         wiki_fallback["results"][0],
         "White chocolate: White chocolate is made from cocoa butter, sugar, and milk solids.",
     );
+}
+
+#[tokio::test]
+async fn search_filler_bank_prewarms_pcm24k_clips_and_rotates_round_robin() {
+    let pcm_24k: Vec<u8> = [8_000_i16; 960]
+        .iter()
+        .flat_map(|sample| sample.to_le_bytes())
+        .collect();
+    let app = Router::new().route(
+        "/v1/audio/speech",
+        post(move || {
+            let bytes = pcm_24k.clone();
+            async move { (StatusCode::OK, bytes) }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let base_url = format!("http://{addr}/v1");
+    let client = VoicePipelineClient::new(VoicePipelineConfig {
+        stt_base_url: base_url.clone(),
+        llm_base_url: base_url.clone(),
+        tts_base_url: base_url,
+        ..VoicePipelineConfig::default()
+    })
+    .unwrap();
+    let cancel = CancellationToken::new();
+    let bank = SearchFillerBank::start_warming(client, cancel);
+
+    // Wait briefly for all 3 short filler clips to synthesize against the local mock server.
+    for _ in 0..50 {
+        if bank.clips.lock().unwrap().len() == SEARCH_FILLER_PHRASES.len() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        bank.clips.lock().unwrap().len(),
+        SEARCH_FILLER_PHRASES.len(),
+    );
+
+    let first = bank.next_clip().expect("first clip");
+    let second = bank.next_clip().expect("second clip");
+    let third = bank.next_clip().expect("third clip");
+    let fourth = bank.next_clip().expect("wrapped clip");
+    assert_eq!(first.text, SEARCH_FILLER_PHRASES[0]);
+    assert_eq!(second.text, SEARCH_FILLER_PHRASES[1]);
+    assert_eq!(third.text, SEARCH_FILLER_PHRASES[2]);
+    assert_eq!(fourth.text, SEARCH_FILLER_PHRASES[0]);
+    assert!(!first.frames.is_empty());
 }
