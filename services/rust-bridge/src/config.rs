@@ -7,7 +7,7 @@
 )]
 use crate::phone_call::sip::SipTransportKind;
 use crate::phone_call::voice::{
-    VoicePipelineConfig, DEFAULT_LLM_MODEL, DEFAULT_OLLAMA_OPENAI_BASE_URL, DEFAULT_STT_MODEL,
+    VoicePipelineConfig, DEFAULT_LLM_MODEL, DEFAULT_LOCAL_VOICE_BASE_URL, DEFAULT_STT_MODEL,
     DEFAULT_TTS_MODEL, DEFAULT_TTS_VOICE,
 };
 use axum::http::header::ORIGIN;
@@ -409,15 +409,15 @@ impl PhoneCallRuntimeConfig {
 
         let voice = VoicePipelineConfig {
             stt_base_url: read_optional_env_trimmed("PHONE_CALL_STT_BASE_URL")?
-                .unwrap_or_else(|| DEFAULT_OLLAMA_OPENAI_BASE_URL.to_string()),
+                .unwrap_or_else(|| DEFAULT_LOCAL_VOICE_BASE_URL.to_string()),
             stt_model: read_optional_env_trimmed("PHONE_CALL_STT_MODEL")?
                 .unwrap_or_else(|| DEFAULT_STT_MODEL.to_string()),
             llm_base_url: read_optional_env_trimmed("PHONE_CALL_LLM_BASE_URL")?
-                .unwrap_or_else(|| DEFAULT_OLLAMA_OPENAI_BASE_URL.to_string()),
+                .unwrap_or_else(|| DEFAULT_LOCAL_VOICE_BASE_URL.to_string()),
             llm_model: read_optional_env_trimmed("PHONE_CALL_LLM_MODEL")?
                 .unwrap_or_else(|| DEFAULT_LLM_MODEL.to_string()),
             tts_base_url: read_optional_env_trimmed("PHONE_CALL_TTS_BASE_URL")?
-                .unwrap_or_else(|| DEFAULT_OLLAMA_OPENAI_BASE_URL.to_string()),
+                .unwrap_or_else(|| DEFAULT_LOCAL_VOICE_BASE_URL.to_string()),
             tts_model: read_optional_env_trimmed("PHONE_CALL_TTS_MODEL")?
                 .unwrap_or_else(|| DEFAULT_TTS_MODEL.to_string()),
             tts_voice: read_optional_env_trimmed("PHONE_CALL_TTS_VOICE")?

@@ -977,7 +977,7 @@ fn worker_phone_call_env_requires_both_settings_and_stored_sip_password() {
         llm_model: "gemma4:e4b".to_string(),
         tts_base_url: "http://127.0.0.1:11434/v1".to_string(),
         tts_model: "phonon".to_string(),
-        tts_voice: "default".to_string(),
+        tts_voice: "Harper".to_string(),
     };
     paths
         .update_config(|config| {

@@ -6,12 +6,11 @@ use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_SIP_TRANSPORT: &str = "tls";
 pub const DEFAULT_VOICE_BASE_URL: &str = "http://127.0.0.1:11434/v1";
-pub const DEFAULT_VOICE_STT_MODEL: &str = "gemma4:e4b";
-pub const DEFAULT_VOICE_LLM_MODEL: &str = "gpt-oss:20b";
-pub const DEFAULT_VOICE_TTS_MODEL: &str = "phonon";
-pub const DEFAULT_VOICE_TTS_VOICE: &str = "default";
-const CONVERSATIONAL_FEMALE_TTS_MODEL: &str = "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit";
-const CONVERSATIONAL_FEMALE_TTS_VOICE: &str = "conversational-female";
+pub const DEFAULT_VOICE_AUDIO_BASE_URL: &str = "http://127.0.0.1:8000/v1";
+pub const DEFAULT_VOICE_STT_MODEL: &str = "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0";
+pub const DEFAULT_VOICE_LLM_MODEL: &str = "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0";
+pub const DEFAULT_VOICE_TTS_MODEL: &str = "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0";
+pub const DEFAULT_VOICE_TTS_VOICE: &str = "female";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -29,15 +28,15 @@ pub struct PhoneCallSettings {
     pub sip_username: String,
     pub caller_id: String,
     pub user_display_name: String,
-    #[serde(default = "default_voice_base_url")]
+    #[serde(default = "default_voice_audio_base_url")]
     pub stt_base_url: String,
     #[serde(default = "default_voice_stt_model")]
     pub stt_model: String,
-    #[serde(default = "default_voice_base_url")]
+    #[serde(default = "default_voice_audio_base_url")]
     pub llm_base_url: String,
     #[serde(default = "default_voice_llm_model")]
     pub llm_model: String,
-    #[serde(default = "default_voice_base_url")]
+    #[serde(default = "default_voice_audio_base_url")]
     pub tts_base_url: String,
     #[serde(default = "default_voice_tts_model")]
     pub tts_model: String,
@@ -159,11 +158,6 @@ impl PhoneCallSettings {
         validate_loopback_url("ttsBaseUrl", &self.tts_base_url)?;
         validate_bounded_text("ttsModel", &self.tts_model, 256)?;
         validate_bounded_text("ttsVoice", &self.tts_voice, 256)?;
-        if self.tts_voice.trim() == CONVERSATIONAL_FEMALE_TTS_VOICE
-            && self.tts_model.trim() != CONVERSATIONAL_FEMALE_TTS_MODEL
-        {
-            bail!("{CONVERSATIONAL_FEMALE_TTS_VOICE} requires {CONVERSATIONAL_FEMALE_TTS_MODEL}");
-        }
         Ok(())
     }
 }
@@ -296,8 +290,8 @@ fn validate_loopback_url(field: &str, value: &str) -> Result<()> {
 fn default_sip_transport() -> String {
     DEFAULT_SIP_TRANSPORT.to_string()
 }
-fn default_voice_base_url() -> String {
-    DEFAULT_VOICE_BASE_URL.to_string()
+fn default_voice_audio_base_url() -> String {
+    DEFAULT_VOICE_AUDIO_BASE_URL.to_string()
 }
 fn default_voice_llm_model() -> String {
     DEFAULT_VOICE_LLM_MODEL.to_string()

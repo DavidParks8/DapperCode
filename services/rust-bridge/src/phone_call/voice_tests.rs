@@ -6,14 +6,14 @@ use super::{
     AssistantTurnOutput, CancellationToken, ChatMessage, ClauseChunker, Duration, MessageRole,
     TranscriptEntry, TranscriptSpeaker, Value, VoiceCallPromptParams, VoiceConversation,
     VoiceError, VoicePipelineClient, VoicePipelineConfig, VoiceToolCall, CONTENT_TYPE,
-    CONVERSATIONAL_FEMALE_TTS_MODEL, CONVERSATIONAL_FEMALE_TTS_VOICE, DEFAULT_KEEP_ALIVE,
-    DEFAULT_LLM_MODEL, DEFAULT_OLLAMA_OPENAI_BASE_URL, DEFAULT_STT_LANGUAGE, DEFAULT_STT_MODEL,
-    DEFAULT_TTS_MODEL, DEFAULT_TTS_VOICE, ERROR_BODY_MAX_BYTES, INTERRUPTED_MARKER,
-    LIVE_STEER_PREFIX, PRELOAD_REQUEST_TIMEOUT_SECS, SILENT_PICKUP_USER_CUE, SSE_LINE_MAX_BYTES,
-    STT_PROMPT_MAX_BYTES,
+    DEFAULT_KEEP_ALIVE, DEFAULT_LLM_MODEL, DEFAULT_LOCAL_VOICE_BASE_URL, DEFAULT_STT_LANGUAGE,
+    DEFAULT_STT_MODEL, DEFAULT_TTS_MODEL, DEFAULT_TTS_VOICE, ERROR_BODY_MAX_BYTES,
+    INTERRUPTED_MARKER, LIVE_STEER_PREFIX, PRELOAD_REQUEST_TIMEOUT_SECS, SILENT_PICKUP_USER_CUE,
+    SSE_LINE_MAX_BYTES, STT_PROMPT_MAX_BYTES,
 };
 use futures_util::StreamExt;
 
+const DEFAULT_OLLAMA_OPENAI_BASE_URL: &str = "http://127.0.0.1:11434/v1";
 const TTS_PCM_SAMPLE_RATE_HZ: u32 = 24_000;
 
 impl VoiceToolCall {
@@ -1070,17 +1070,26 @@ async fn native_tool_speech_stays_silent_on_hold_and_rejects_invalid_types_or_ca
 #[test]
 fn defaults_and_loopback_url_security_enforced() {
     let default_cfg = VoicePipelineConfig::default();
-    assert_eq!(default_cfg.stt_base_url, DEFAULT_OLLAMA_OPENAI_BASE_URL);
-    assert_eq!(default_cfg.llm_base_url, DEFAULT_OLLAMA_OPENAI_BASE_URL);
-    assert_eq!(default_cfg.tts_base_url, DEFAULT_OLLAMA_OPENAI_BASE_URL);
+    assert_eq!(default_cfg.stt_base_url, DEFAULT_LOCAL_VOICE_BASE_URL);
+    assert_eq!(default_cfg.stt_base_url, "http://127.0.0.1:8000/v1");
+    assert_eq!(default_cfg.llm_base_url, DEFAULT_LOCAL_VOICE_BASE_URL);
+    assert_eq!(default_cfg.llm_base_url, "http://127.0.0.1:8000/v1");
+    assert_eq!(default_cfg.tts_base_url, DEFAULT_LOCAL_VOICE_BASE_URL);
+    assert_eq!(default_cfg.tts_base_url, "http://127.0.0.1:8000/v1");
+    assert_eq!(DEFAULT_STT_MODEL, "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0");
     assert_eq!(default_cfg.stt_model, DEFAULT_STT_MODEL);
+    assert_eq!(DEFAULT_LLM_MODEL, "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0");
     assert_eq!(default_cfg.llm_model, DEFAULT_LLM_MODEL);
+    assert_eq!(DEFAULT_TTS_MODEL, "LiquidAI/LFM3-Audio-2B-GGUF:Q8_0");
     assert_eq!(default_cfg.tts_model, DEFAULT_TTS_MODEL);
+    assert_eq!(DEFAULT_TTS_VOICE, "female");
     assert_eq!(default_cfg.tts_voice, DEFAULT_TTS_VOICE);
     assert_eq!(TTS_PCM_SAMPLE_RATE_HZ, 24_000);
     default_cfg
         .validate()
         .expect("default config should be valid");
+    let default_client = VoicePipelineClient::new(default_cfg).unwrap();
+    assert!(default_client.is_realtime_s2s());
 
     for accepted in [
         "http://127.0.0.1:11434/v1",
@@ -1188,9 +1197,12 @@ async fn successful_preload_headers_do_not_hide_a_failed_response_body() {
     });
     let client = VoicePipelineClient::new(VoicePipelineConfig {
         stt_base_url: base.clone(),
+        stt_model: "gemma4:e4b".to_string(),
         llm_base_url: base.clone(),
+        llm_model: "gpt-oss:20b".to_string(),
         tts_base_url: base,
-        ..VoicePipelineConfig::default()
+        tts_model: "phonon".to_string(),
+        tts_voice: "Harper".to_string(),
     })
     .unwrap();
     let result = client.preload_models(&CancellationToken::new()).await;
@@ -1277,12 +1289,15 @@ async fn preload_models_warms_deduplicated_ollama_models_and_ignores_404() {
 
     let cfg = VoicePipelineConfig {
         stt_base_url: base_url.clone(),
+        stt_model: "gemma4:e4b".to_string(),
         llm_base_url: base_url.clone(),
+        llm_model: "gpt-oss:20b".to_string(),
         tts_base_url: base_url,
-        ..VoicePipelineConfig::default()
+        tts_model: "phonon".to_string(),
+        tts_voice: "Harper".to_string(),
     };
     let client = VoicePipelineClient::new(cfg).expect("create voice client");
-    assert_eq!(client.config().llm_model, DEFAULT_LLM_MODEL);
+    assert_eq!(client.config().llm_model, "gpt-oss:20b");
 
     let cancel = CancellationToken::new();
     client
@@ -1293,16 +1308,16 @@ async fn preload_models_warms_deduplicated_ollama_models_and_ignores_404() {
     {
         let bodies = state.preload_bodies.lock().await;
         assert_eq!(bodies.len(), 3);
-        assert_eq!(bodies[0]["model"], DEFAULT_STT_MODEL);
+        assert_eq!(bodies[0]["model"], "gemma4:e4b");
         assert_eq!(bodies[0]["keep_alive"], DEFAULT_KEEP_ALIVE);
         assert_eq!(bodies[0]["stream"], false);
-        assert_eq!(bodies[1]["model"], DEFAULT_LLM_MODEL);
+        assert_eq!(bodies[1]["model"], "gpt-oss:20b");
         assert_eq!(bodies[1]["keep_alive"], DEFAULT_KEEP_ALIVE);
-        assert_eq!(bodies[2]["model"], DEFAULT_TTS_MODEL);
+        assert_eq!(bodies[2]["model"], "phonon");
     }
     state.preload_bodies.lock().await.clear();
     VoicePipelineClient::new(VoicePipelineConfig {
-        stt_model: DEFAULT_LLM_MODEL.to_string(),
+        stt_model: "gpt-oss:20b".to_string(),
         ..client.config().clone()
     })
     .unwrap()
@@ -1319,9 +1334,10 @@ async fn preload_models_warms_deduplicated_ollama_models_and_ignores_404() {
             stt_base_url: non_ollama_url.clone(),
             llm_base_url: non_ollama_url.clone(),
             tts_base_url: non_ollama_url,
-            stt_model: DEFAULT_LLM_MODEL.to_string(),
-            tts_model: DEFAULT_LLM_MODEL.to_string(),
-            ..VoicePipelineConfig::default()
+            stt_model: "gpt-oss:20b".to_string(),
+            llm_model: "gpt-oss:20b".to_string(),
+            tts_model: "gpt-oss:20b".to_string(),
+            tts_voice: "Harper".to_string(),
         },
         crate::tls::http_client(),
     )
@@ -1356,9 +1372,12 @@ async fn unsupported_speech_warmup_has_a_bounded_deadline() {
     let base = spawn_mock_voice_server(Arc::clone(&state)).await;
     let client = VoicePipelineClient::new(VoicePipelineConfig {
         stt_base_url: base.clone(),
+        stt_model: "gemma4:e4b".to_string(),
         llm_base_url: base.clone(),
+        llm_model: "gpt-oss:20b".to_string(),
         tts_base_url: base,
-        ..VoicePipelineConfig::default()
+        tts_model: "phonon".to_string(),
+        tts_voice: "Harper".to_string(),
     })
     .unwrap();
     let result = tokio::time::timeout(
@@ -1473,6 +1492,7 @@ async fn streaming_chat_completions_preserves_kv_cache_reassembles_tools_and_tru
 
     let client = VoicePipelineClient::new(VoicePipelineConfig {
         llm_base_url: base_url,
+        llm_model: "gpt-oss:20b".to_string(),
         ..VoicePipelineConfig::default()
     })
     .expect("create voice client");
@@ -1634,7 +1654,7 @@ async fn streaming_chat_completions_preserves_kv_cache_reassembles_tools_and_tru
     let req2 = &recorded_requests[1];
     assert_eq!(req1["reasoning_effort"], "low");
     assert_eq!(req1["stream"], true);
-    assert_eq!(req1["model"], DEFAULT_LLM_MODEL);
+    assert_eq!(req1["model"], "gpt-oss:20b");
     assert!(req1["tools"].is_null());
     assert!(req1["tool_choice"].is_null());
     assert!(req1["parallel_tool_calls"].is_null());
@@ -1727,112 +1747,15 @@ async fn streaming_chat_completions_preserves_kv_cache_reassembles_tools_and_tru
     ));
 }
 
-#[tokio::test]
-#[ignore = "requires an isolated local MLX speech server; use the local E2E resource lease"]
-async fn local_conversational_female_tts_profile() {
-    let base = std::env::var("DAPPERCODE_TEST_VOICE_TTS_BASE_URL")
-        .expect("isolated local TTS endpoint is required");
-    let directory = std::fs::canonicalize(
-        std::env::var_os("DAPPERCODE_TEST_VOICE_AUDIO_DATA_DIR")
-            .expect("scenario-owned output directory is required"),
-    )
-    .unwrap();
-    let client = VoicePipelineClient::new(VoicePipelineConfig {
-        stt_base_url: base.clone(),
-        llm_base_url: base.clone(),
-        tts_base_url: base,
-        tts_model: CONVERSATIONAL_FEMALE_TTS_MODEL.to_string(),
-        tts_voice: CONVERSATIONAL_FEMALE_TTS_VOICE.to_string(),
-        ..VoicePipelineConfig::default()
-    })
-    .unwrap();
-    let cancel = CancellationToken::new();
-    tokio::time::timeout(
-        Duration::from_secs(PRELOAD_REQUEST_TIMEOUT_SECS),
-        client.synthesize_speech_pcm24k("Ready.", &cancel, |_| {}),
-    )
-    .await
-    .expect("real speech preparation must complete within its production deadline")
-    .unwrap();
-    let mut pcm = Vec::new();
-    let count = tokio::time::timeout(
-        Duration::from_secs(180),
-        client.synthesize_speech_pcm24k(
-            "Hi, I'm calling about a table for six this Friday at seven. Would you have anything available?",
-            &cancel,
-            |samples| pcm.extend_from_slice(samples),
-        ),
-    )
-    .await
-    .expect("real HTTP synthesis must settle")
-    .unwrap();
-    assert_eq!(count, pcm.len());
-    assert!(count > 0 && count <= 24_000 * 30);
-    let bytes: Vec<u8> = pcm.iter().flat_map(|sample| sample.to_le_bytes()).collect();
-    let mut output = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(directory.join("female-profile.pcm"))
-        .unwrap();
-    std::io::Write::write_all(&mut output, &bytes).unwrap();
-    println!(
-        "FEMALE_PROFILE_HTTP {}",
-        json!({
-            "model": CONVERSATIONAL_FEMALE_TTS_MODEL,
-            "voice": CONVERSATIONAL_FEMALE_TTS_VOICE,
-            "samples": count,
-            "sample_rate": 24_000,
-            "warmup_discarded": true,
-            "path": "production VoicePipelineClient over real local HTTP",
-        }),
-    );
-}
-
-#[tokio::test]
-async fn conversational_female_profile_sends_private_style_and_english_language() {
-    assert!(matches!(
-        VoicePipelineClient::new(VoicePipelineConfig {
-            tts_voice: CONVERSATIONAL_FEMALE_TTS_VOICE.to_string(),
-            ..VoicePipelineConfig::default()
-        }),
-        Err(VoiceError::InvalidConfig {
-            field: "tts_model",
-            ..
-        })
-    ));
-    let state = MockServerState::new();
-    *state.speech_pcm_chunks.lock().await = vec![[0x40_u8, 0x1F].repeat(480)];
-    let base = spawn_mock_voice_server(Arc::clone(&state)).await;
-    let client = VoicePipelineClient::new(VoicePipelineConfig {
-        tts_base_url: base,
-        tts_model: "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit".to_string(),
-        tts_voice: "conversational-female".to_string(),
-        ..VoicePipelineConfig::default()
-    })
-    .unwrap();
-    let spoken = "Hi, I'm calling about a table for six.";
-    let samples = client
-        .synthesize_speech_pcm24k(spoken, &CancellationToken::new(), |_| {})
-        .await
-        .unwrap();
-    assert_eq!(samples, 480);
-    let requests = state.speech_requests.lock().await;
-    assert_eq!(requests.len(), 1);
-    let request = &requests[0];
-    assert_eq!(request["input"], spoken);
-    assert_eq!(request["lang_code"], "English");
-    let style = request["instruct"].as_str().expect("private speech style");
-    assert!(style.contains("adult woman") && style.contains("General American"));
-    assert!(style.contains("connected phrasing") && style.contains("varied rhythm"));
-    assert!(
-        request.get("voice").is_none(),
-        "voice design has no preset speaker",
-    );
-    assert_eq!(request["temperature"], 0.9);
-    assert_eq!(request["top_p"], 1.0);
-    assert_eq!(request["top_k"], 50);
-    assert_eq!(request["repetition_penalty"], 1.05);
-    assert_eq!(request["max_tokens"], 1024);
+#[test]
+fn clause_chunker_keeps_short_greetings_attached_to_the_next_sentence() {
+    let mut chunker = ClauseChunker::new();
+    assert!(chunker
+        .push_str("Hi! We can talk about whatever you want today. What's")
+        .eq(&vec![
+            "Hi! We can talk about whatever you want today.".to_string(),
+        ]));
+    assert_eq!(chunker.finish(), Some("What's".to_string()));
 }
 
 #[tokio::test]
@@ -1852,6 +1775,8 @@ async fn synthesize_speech_pcm24k_omits_speed_handles_odd_byte_frames_and_aborts
     let base_url = spawn_mock_voice_server(Arc::clone(&state)).await;
     let client = VoicePipelineClient::new(VoicePipelineConfig {
         tts_base_url: base_url,
+        tts_model: "phonon".to_string(),
+        tts_voice: "Harper".to_string(),
         ..VoicePipelineConfig::default()
     })
     .expect("create voice client");
@@ -1879,8 +1804,8 @@ async fn synthesize_speech_pcm24k_omits_speed_handles_odd_byte_frames_and_aborts
             4,
             "ordinary voices retain the legacy request shape",
         );
-        assert_eq!(req_obj.get("model"), Some(&json!(DEFAULT_TTS_MODEL)));
-        assert_eq!(req_obj.get("voice"), Some(&json!(DEFAULT_TTS_VOICE)));
+        assert_eq!(req_obj.get("model"), Some(&json!("phonon")));
+        assert_eq!(req_obj.get("voice"), Some(&json!("Harper")));
         assert_eq!(req_obj.get("response_format"), Some(&json!("pcm")));
         assert_eq!(
             req_obj.get("input"),
@@ -2133,7 +2058,8 @@ fn endpoint_paths_and_prompts_handle_root_paths_credentials_and_blank_fields() {
         context: Some("\t".to_string()),
     });
     assert!(prompt.contains("carrying out a request for the user."));
-    assert!(prompt.contains("I'm calling for the user to book"));
+    assert!(prompt.contains("I'm calling for the user about"));
+    assert!(!prompt.to_ascii_lowercase().contains("book a table"));
     for absent in [
         "Callee:",
         "Call objective:",
@@ -2151,6 +2077,31 @@ fn endpoint_paths_and_prompts_handle_root_paths_credentials_and_blank_fields() {
             if reason.contains("at least one DTMF symbol")
     ));
     assert!(!contains_subslice(b"boundary", b""));
+}
+
+#[test]
+fn system_prompt_avoids_booking_leak_and_forbids_silent_replies_to_questions() {
+    let prompt = build_system_prompt(&VoiceCallPromptParams {
+        user_display_name: "David Parks".to_string(),
+        callee_name: None,
+        objective: "Have a friendly open-ended conversation about whatever the user wants."
+            .to_string(),
+        first_message: Some(
+            "Hi! We can talk about whatever you want today — what's on your mind?".to_string(),
+        ),
+        context: None,
+    });
+    let lower = prompt.to_ascii_lowercase();
+    assert!(
+        !lower.contains("book a table"),
+        "unrelated objective must not see a restaurant booking example: {prompt}",
+    );
+    assert!(prompt.contains("I'm calling for David Parks about <the actual call objective>"));
+    assert!(prompt.contains("If Opening turn guidance is provided below"));
+    assert!(prompt.contains("Opening turn guidance: Hi! We can talk about whatever you want"));
+    assert!(prompt.contains("ONLY for unintelligible noise, empty audio, or trailing silence"));
+    assert!(prompt.contains("Why did you stop talking?"));
+    assert!(prompt.contains("ALWAYS reply briefly in speech rather than staying silent"));
 }
 
 #[test]
@@ -2173,6 +2124,47 @@ fn transcript_cleanup_strips_only_closed_non_speech_annotations() {
             clean_transcription_text(raw).as_deref(),
             expected,
             "cleaning {raw:?}",
+        );
+    }
+}
+
+#[test]
+fn transcript_cleanup_rejects_meta_instruction_hallucinations_while_preserving_real_speech() {
+    for hallucination in [
+        "Follow these specific instructions for formatting the answer.",
+        "[Silence] Follow these specific instructions for formatting the answer.",
+        "Please follow these specific instructions.",
+        "Okay, okay, okay, okay, okay, okay.",
+        "Transcribe the audio verbatim.",
+        "Please transcribe the following audio.",
+        "Here is the transcription:",
+        "Here’s the transcription.",
+        "There is no speech in the audio.",
+        "No speech detected.",
+        "As an AI, I cannot hear any speech.",
+        "I am an AI language model.",
+    ] {
+        assert_eq!(
+            clean_transcription_text(hallucination),
+            None,
+            "expected STT hallucination to be filtered: {hallucination:?}",
+        );
+    }
+
+    for real_speech in [
+        "Can you follow these instructions for me?",
+        "Follow these instructions to find our parking garage.",
+        "Why did you stop talking?",
+        "Hello?",
+        "As an aide to the director, I can help.",
+        "Did you transcribe my voicemail?",
+        "Okay, okay, I understand.",
+        "I can't hear you, can you repeat that?",
+    ] {
+        assert_eq!(
+            clean_transcription_text(real_speech).as_deref(),
+            Some(real_speech),
+            "expected real user speech to be preserved: {real_speech:?}",
         );
     }
 }

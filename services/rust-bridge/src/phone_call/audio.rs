@@ -40,16 +40,17 @@ pub const WAV_HEADER_BYTES: usize = 44;
 
 pub const VAD_PREROLL_FRAMES: usize = 15;
 pub const VAD_SPEECH_ONSET_FRAMES: usize = 7;
-pub const VAD_BARGE_IN_ONSET_FRAMES: usize = 12;
-pub const VAD_DEFAULT_HANGOVER_FRAMES: usize = 50;
+pub const VAD_BARGE_IN_ONSET_FRAMES: usize = 8;
+pub const VAD_DEFAULT_HANGOVER_FRAMES: usize = 40;
 pub const VAD_IVR_HANGOVER_FRAMES: usize = 55;
 pub const VAD_MAX_UTTERANCE_SAMPLES: usize = 200_000;
-pub const VAD_ECHO_MARGIN: u32 = 500;
+pub const VAD_ECHO_MARGIN: u32 = 1_400;
+pub const VAD_ECHO_TAIL_FRAMES: usize = 35;
 
 const VAD_INITIAL_NOISE_FLOOR: u32 = 80;
 const VAD_MIN_NOISE_FLOOR_I64: i64 = 40;
 const VAD_MAX_NOISE_FLOOR_I64: i64 = 1_200;
-const VAD_BASE_SPEECH_MARGIN: u32 = 160;
+const VAD_BASE_SPEECH_MARGIN: u32 = 120;
 
 pub const RFC4733_DEFAULT_VOLUME: u8 = 10;
 pub const RFC4733_END_FLAG: u8 = 0x80;
@@ -330,6 +331,65 @@ pub enum VadEvent {
     UtteranceComplete(Vec<i16>),
 }
 
+#[derive(Debug, Clone)]
+struct EchoEnvelopeTracker {
+    outbound_energy_history: VecDeque<u32>,
+    outbound_tail_frames: usize,
+    last_echo_guard_active: bool,
+}
+
+impl EchoEnvelopeTracker {
+    fn new() -> Self {
+        Self {
+            outbound_energy_history: VecDeque::with_capacity(VAD_ECHO_TAIL_FRAMES),
+            outbound_tail_frames: 0,
+            last_echo_guard_active: false,
+        }
+    }
+
+    #[cfg(test)]
+    fn reset(&mut self) {
+        self.outbound_energy_history.clear();
+        self.outbound_tail_frames = 0;
+        self.last_echo_guard_active = false;
+    }
+
+    fn recent_peak(&self) -> u32 {
+        self.outbound_energy_history
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn is_guard_active(&self, outbound_playing: bool, outbound_mean_abs: u32) -> bool {
+        outbound_playing || outbound_mean_abs > 0 || self.outbound_tail_frames > 0
+    }
+
+    fn echo_threshold(&self, outbound_mean_abs: u32) -> u32 {
+        let effective_outbound_energy = outbound_mean_abs.max(self.recent_peak());
+        (effective_outbound_energy / 4).saturating_add(VAD_ECHO_MARGIN)
+    }
+
+    fn record_frame(&mut self, outbound_playing: bool, outbound_mean_abs: u32) {
+        if self.outbound_energy_history.len() >= VAD_ECHO_TAIL_FRAMES {
+            let _ = self.outbound_energy_history.pop_front();
+        }
+        self.outbound_energy_history.push_back(outbound_mean_abs);
+        if outbound_playing || outbound_mean_abs > 0 {
+            self.outbound_tail_frames = VAD_ECHO_TAIL_FRAMES;
+        } else {
+            self.outbound_tail_frames = self.outbound_tail_frames.saturating_sub(1);
+        }
+    }
+
+    fn update_guard_transition(&mut self, echo_guard_active: bool) -> bool {
+        let changed = echo_guard_active != self.last_echo_guard_active;
+        self.last_echo_guard_active = echo_guard_active;
+        changed
+    }
+}
+
 /// Echo-aware integer EMA voice activity and barge-in detector for 8 kHz 20 ms telephony frames.
 #[derive(Debug, Clone)]
 pub struct TelephonyVad {
@@ -340,7 +400,7 @@ pub struct TelephonyVad {
     speech_streak: usize,
     silence_frames: usize,
     barge_in_emitted: bool,
-    last_outbound_playing: bool,
+    echo_envelope: EchoEnvelopeTracker,
     ivr_mode: bool,
 }
 
@@ -360,7 +420,7 @@ impl TelephonyVad {
             speech_streak: 0,
             silence_frames: 0,
             barge_in_emitted: false,
-            last_outbound_playing: false,
+            echo_envelope: EchoEnvelopeTracker::new(),
             ivr_mode: false,
         }
     }
@@ -374,7 +434,7 @@ impl TelephonyVad {
         self.speech_streak = 0;
         self.silence_frames = 0;
         self.barge_in_emitted = false;
-        self.last_outbound_playing = false;
+        self.echo_envelope.reset();
     }
 
     pub fn set_ivr_mode(&mut self, enabled: bool) {
@@ -411,11 +471,13 @@ impl TelephonyVad {
     pub fn speech_threshold(&self, outbound_playing: bool, outbound_mean_abs: u32) -> u32 {
         let noise_threshold = self
             .noise_floor()
-            .saturating_mul(3)
+            .saturating_mul(2)
             .saturating_add(VAD_BASE_SPEECH_MARGIN);
-        if outbound_playing {
-            let echo_threshold = (outbound_mean_abs / 4).saturating_add(VAD_ECHO_MARGIN);
-            noise_threshold.max(echo_threshold)
+        if self
+            .echo_envelope
+            .is_guard_active(outbound_playing, outbound_mean_abs)
+        {
+            noise_threshold.max(self.echo_envelope.echo_threshold(outbound_mean_abs))
         } else {
             noise_threshold
         }
@@ -480,15 +542,23 @@ impl TelephonyVad {
         outbound_mean_abs: u32,
     ) -> Option<VadEvent> {
         let frame_energy = mean_abs_pcm(frame);
+        let echo_guard_active = self
+            .echo_envelope
+            .is_guard_active(outbound_playing, outbound_mean_abs);
         let threshold = self.speech_threshold(outbound_playing, outbound_mean_abs);
+        self.echo_envelope
+            .record_frame(outbound_playing, outbound_mean_abs);
 
-        if !self.in_speech && outbound_playing != self.last_outbound_playing {
+        if self
+            .echo_envelope
+            .update_guard_transition(echo_guard_active)
+            && !self.in_speech
+        {
             self.speech_streak = 0;
         }
         if !outbound_playing {
             self.barge_in_emitted = false;
         }
-        self.last_outbound_playing = outbound_playing;
 
         if !self.in_speech {
             if frame_energy >= threshold {
@@ -519,11 +589,22 @@ impl TelephonyVad {
                 return None;
             }
 
-            self.speech_streak = 0;
-            if !outbound_playing {
-                self.update_noise_floor(frame_energy);
+            if outbound_playing {
+                self.speech_streak = self.speech_streak.saturating_sub(1);
+                if self.speech_streak == 0 {
+                    self.preroll.clear();
+                } else {
+                    self.push_preroll(frame);
+                }
+            } else {
+                self.speech_streak = 0;
+                if echo_guard_active {
+                    self.preroll.clear();
+                } else {
+                    self.update_noise_floor(frame_energy);
+                    self.push_preroll(frame);
+                }
             }
-            self.push_preroll(frame);
             return None;
         }
 
@@ -545,7 +626,7 @@ impl TelephonyVad {
             }
 
             // Do not accumulate echo frames while outbound TTS plays and barge-in has not triggered.
-            self.speech_streak = 0;
+            self.speech_streak = self.speech_streak.saturating_sub(1);
             self.silence_frames = self.silence_frames.saturating_add(1);
             if self.silence_frames >= self.hangover_frames() {
                 return Some(self.finish_utterance());

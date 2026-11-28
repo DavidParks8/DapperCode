@@ -16,8 +16,12 @@ import {
 } from './report.mjs';
 import {
   DEFAULT_FIRST_MESSAGE,
+  DEFAULT_LLM_MODEL,
   DEFAULT_OBJECTIVE,
+  checkVoiceEndpointsReachable,
+  ensureLlamaRealtimeServer,
   parseArgs,
+  planLlamaRealtimeManagement,
   resolveVoiceConfig,
 } from './run-call.mjs';
 import {
@@ -393,12 +397,172 @@ test('report.mjs builds transcript.json and transcript.md with timings, audio st
   }
 });
 
-test('run-call CLI parsing and voice config resolution apply overrides over saved defaults', () => {
+test('run-call voice config uses LFM3-Audio realtime defaults unless --use-saved-voice is passed', () => {
+  const voice = resolveVoiceConfig(parseArgs([]), null);
+  assert.equal(voice.displayName, 'Local Tester');
+  assert.equal(voice.sttBaseUrl, 'http://127.0.0.1:8000/v1');
+  assert.equal(voice.sttModel, 'LiquidAI/LFM3-Audio-2B-GGUF:Q8_0');
+  assert.equal(voice.llmBaseUrl, 'http://127.0.0.1:8000/v1');
+  assert.equal(voice.llmModel, DEFAULT_LLM_MODEL);
+  assert.equal(voice.ttsBaseUrl, 'http://127.0.0.1:8000/v1');
+  assert.equal(voice.ttsModel, 'LiquidAI/LFM3-Audio-2B-GGUF:Q8_0');
+  assert.equal(voice.ttsVoice, 'female');
+
+  const savedLegacy = {
+    userDisplayName: 'David Parks',
+    sttBaseUrl: 'http://127.0.0.1:11434/v1',
+    sttModel: 'gemma4:e4b',
+    llmModel: 'gemma4:12b',
+    ttsBaseUrl: 'http://127.0.0.1:11434/v1',
+    ttsModel: 'phonon',
+    ttsVoice: 'default',
+  };
+
+  // Default mode uses saved displayName but keeps deterministic LFM3-Audio defaults.
+  const deterministicDefault = resolveVoiceConfig(parseArgs([]), savedLegacy);
+  assert.equal(deterministicDefault.displayName, 'David Parks');
+  assert.equal(deterministicDefault.sttBaseUrl, 'http://127.0.0.1:8000/v1');
+  assert.equal(deterministicDefault.sttModel, 'LiquidAI/LFM3-Audio-2B-GGUF:Q8_0');
+  assert.equal(deterministicDefault.llmModel, DEFAULT_LLM_MODEL);
+  assert.equal(deterministicDefault.ttsBaseUrl, 'http://127.0.0.1:8000/v1');
+  assert.equal(deterministicDefault.ttsModel, 'LiquidAI/LFM3-Audio-2B-GGUF:Q8_0');
+  assert.equal(deterministicDefault.ttsVoice, 'female');
+
+  // --use-saved-voice opts into saved desktop voice settings.
+  const preservedSaved = resolveVoiceConfig(parseArgs(['--use-saved-voice']), savedLegacy);
+  assert.equal(preservedSaved.displayName, 'David Parks');
+  assert.equal(preservedSaved.sttBaseUrl, 'http://127.0.0.1:11434/v1');
+  assert.equal(preservedSaved.sttModel, 'gemma4:e4b');
+  assert.equal(preservedSaved.llmModel, 'gemma4:12b');
+  assert.equal(preservedSaved.ttsBaseUrl, 'http://127.0.0.1:11434/v1');
+  assert.equal(preservedSaved.ttsModel, 'phonon');
+  assert.equal(preservedSaved.ttsVoice, 'default');
+});
+
+test('planLlamaRealtimeManagement enables managed llama serve by default and respects --no-start-llama', () => {
+  const defaultOpts = parseArgs([]);
+  const defaultVoice = resolveVoiceConfig(defaultOpts, null);
+  const llamaPlan = planLlamaRealtimeManagement(defaultVoice, defaultOpts);
+  assert.equal(llamaPlan.manage, true);
+  assert.equal(llamaPlan.targetBaseUrl, 'http://127.0.0.1:8000/v1');
+  assert.equal(llamaPlan.model, 'LiquidAI/LFM3-Audio-2B-GGUF:Q8_0');
+
+  const disabledOpts = parseArgs(['--no-start-llama']);
+  assert.equal(planLlamaRealtimeManagement(defaultVoice, disabledOpts).manage, false);
+
+  const ollamaOnlyOpts = parseArgs([
+    '--stt-base-url',
+    'http://127.0.0.1:11434/v1',
+    '--stt-model',
+    'gemma4:e4b',
+    '--llm-base-url',
+    'http://127.0.0.1:11434/v1',
+    '--llm-model',
+    'gemma4:e4b',
+    '--tts-base-url',
+    'http://127.0.0.1:11434/v1',
+    '--tts-model',
+    'phonon',
+    '--tts-voice',
+    'Harper',
+  ]);
+  const ollamaVoice = resolveVoiceConfig(ollamaOnlyOpts, null);
+  assert.equal(planLlamaRealtimeManagement(ollamaVoice, ollamaOnlyOpts).manage, false);
+});
+
+test('ensureLlamaRealtimeServer reuses running server or spawns managed llama serve', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'llama-realtime-manage-test-'));
+  try {
+    const reuseOpts = parseArgs([]);
+    const reuseVoice = resolveVoiceConfig(reuseOpts, null);
+    let spawned = false;
+    const reuseRes = await ensureLlamaRealtimeServer({
+      voice: reuseVoice,
+      opts: reuseOpts,
+      outDir: tmpDir,
+      fetchImpl: async () => ({ ok: true, status: 200, text: async () => '{}' }),
+      spawnImpl: () => {
+        spawned = true;
+        throw new Error('should not spawn when server is running');
+      },
+    });
+    assert.equal(spawned, false);
+    assert.equal(reuseRes.reused, true);
+    assert.equal(reuseVoice.llmBaseUrl, 'http://127.0.0.1:8000/v1');
+
+    const spawnOpts = parseArgs([]);
+    const spawnVoice = resolveVoiceConfig(spawnOpts, null);
+    const spawnedCmds = [];
+    let fakeChild = null;
+    const spawnRes = await ensureLlamaRealtimeServer({
+      voice: spawnVoice,
+      opts: spawnOpts,
+      outDir: tmpDir,
+      resolveLlama: () => '/opt/homebrew/bin/llama',
+      getPort: async () => 18820,
+      spawnImpl: (bin, args) => {
+        spawnedCmds.push({ bin, args });
+        fakeChild = {
+          exitCode: null,
+          once: () => {},
+          off: () => {},
+          kill: () => {
+            fakeChild.exitCode = 0;
+          },
+        };
+        return fakeChild;
+      },
+      fetchImpl: async (url) => {
+        if (url.startsWith('http://127.0.0.1:8000/')) {
+          throw new Error('ECONNREFUSED');
+        }
+        return { ok: true, status: 200, text: async () => '{}' };
+      },
+    });
+    assert.equal(spawnRes.reused, false);
+    assert.equal(spawnRes.child, fakeChild);
+    assert.deepEqual(spawnedCmds[0], {
+      bin: '/opt/homebrew/bin/llama',
+      args: [
+        'serve',
+        '-hf',
+        'LiquidAI/LFM3-Audio-2B-GGUF:Q8_0',
+        '--host',
+        '127.0.0.1',
+        '--port',
+        '18820',
+        '--temp',
+        '0',
+        '-np',
+        '2',
+      ],
+    });
+    assert.equal(spawnVoice.sttBaseUrl, 'http://127.0.0.1:18820/v1');
+    assert.equal(spawnVoice.llmBaseUrl, 'http://127.0.0.1:18820/v1');
+    assert.equal(spawnVoice.ttsBaseUrl, 'http://127.0.0.1:18820/v1');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('run-call CLI parsing and voice config resolution apply overrides over defaults and saved config', () => {
   const opts = parseArgs([
+    '--display-name',
+    'CLI User',
+    '--stt-base-url',
+    'http://127.0.0.1:18080/v1',
+    '--stt-model',
+    'whisper-large',
+    '--llm-base-url',
+    'http://127.0.0.1:18081/v1',
     '--llm-model',
     'gemma4:12b',
+    '--tts-base-url',
+    'http://127.0.0.1:18082/v1',
+    '--tts-model',
+    'phonon',
     '--tts-voice',
-    'conversational-female',
+    'Harper',
     '--answer-delay',
     '2',
     '--no-interactive',
@@ -408,7 +572,17 @@ test('run-call CLI parsing and voice config resolution apply overrides over save
   assert.equal(opts.answerDelay, 2);
   assert.equal(opts.noInteractive, true);
 
-  const voice = resolveVoiceConfig(opts, {
+  const overDefaults = resolveVoiceConfig(opts, null);
+  assert.equal(overDefaults.displayName, 'CLI User');
+  assert.equal(overDefaults.sttBaseUrl, 'http://127.0.0.1:18080/v1');
+  assert.equal(overDefaults.sttModel, 'whisper-large');
+  assert.equal(overDefaults.llmBaseUrl, 'http://127.0.0.1:18081/v1');
+  assert.equal(overDefaults.llmModel, 'gemma4:12b');
+  assert.equal(overDefaults.ttsBaseUrl, 'http://127.0.0.1:18082/v1');
+  assert.equal(overDefaults.ttsModel, 'phonon');
+  assert.equal(overDefaults.ttsVoice, 'Harper');
+
+  const overSaved = resolveVoiceConfig(opts, {
     userDisplayName: 'David Parks',
     sttBaseUrl: 'http://127.0.0.1:11434/v1',
     sttModel: 'gemma4:e4b',
@@ -418,10 +592,38 @@ test('run-call CLI parsing and voice config resolution apply overrides over save
     ttsModel: 'phonon',
     ttsVoice: 'default',
   });
-  assert.equal(voice.displayName, 'David Parks');
-  assert.equal(voice.sttModel, 'gemma4:e4b');
-  assert.equal(voice.llmModel, 'gemma4:12b');
-  assert.equal(voice.ttsVoice, 'conversational-female');
+  assert.deepEqual(overSaved, overDefaults);
+});
+
+test('checkVoiceEndpointsReachable includes llama serve hint when 127.0.0.1:8000 is unreachable', async () => {
+  const failingFetch = async () => {
+    throw new Error('connect ECONNREFUSED 127.0.0.1:8000');
+  };
+  await assert.rejects(
+    () =>
+      checkVoiceEndpointsReachable(
+        {
+          sttBaseUrl: 'http://127.0.0.1:8000/v1',
+          llmBaseUrl: 'http://127.0.0.1:8000/v1',
+          ttsBaseUrl: 'http://127.0.0.1:8000/v1',
+        },
+        failingFetch,
+      ),
+    /llama serve -hf LiquidAI\/LFM3-Audio-2B-GGUF:Q8_0/,
+  );
+
+  await assert.rejects(
+    () =>
+      checkVoiceEndpointsReachable(
+        {
+          sttBaseUrl: 'http://127.0.0.1:11434/v1',
+          llmBaseUrl: 'http://127.0.0.1:11434/v1',
+          ttsBaseUrl: 'http://127.0.0.1:11434/v1',
+        },
+        failingFetch,
+      ),
+    /Start your local voice server first\./,
+  );
 });
 
 test('createDriverLoop starts exactly one phone call and ignores follow-up session/prompt turns', async () => {

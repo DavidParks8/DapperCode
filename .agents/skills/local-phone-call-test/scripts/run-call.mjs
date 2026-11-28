@@ -35,7 +35,12 @@ export const DEFAULT_CALLEE_NAME = 'User';
 export const DEFAULT_PHONE_NUMBER = '+15550000002';
 export const DEFAULT_CALLER_ID = '+15550000001';
 
-const DEFAULT_OLLAMA_BASE_URL = 'http://127.0.0.1:11434/v1';
+const DEFAULT_VOICE_BASE_URL = 'http://127.0.0.1:8000/v1';
+const DEFAULT_STT_MODEL = 'LiquidAI/LFM3-Audio-2B-GGUF:Q8_0';
+export const DEFAULT_LLM_MODEL = 'LiquidAI/LFM3-Audio-2B-GGUF:Q8_0';
+const DEFAULT_TTS_MODEL = 'LiquidAI/LFM3-Audio-2B-GGUF:Q8_0';
+const DEFAULT_TTS_VOICE = 'female';
+const LLAMA_REALTIME_STARTUP_TIMEOUT_MS = 300_000;
 
 export function parseArgs(argv) {
   const opts = {
@@ -54,6 +59,8 @@ export function parseArgs(argv) {
     ttsBaseUrl: null,
     ttsModel: null,
     ttsVoice: null,
+    useSavedVoice: false,
+    startLlamaServer: true,
     answerDelay: 1,
     maxDurationSec: 900,
     noInteractive: false,
@@ -98,6 +105,10 @@ export function parseArgs(argv) {
       opts.noInteractive = true;
     } else if (arg === '--build') {
       opts.build = true;
+    } else if (arg === '--use-saved-voice') {
+      opts.useSavedVoice = true;
+    } else if (arg === '--no-start-llama') {
+      opts.startLlamaServer = false;
     } else if (valueFlags.has(arg)) {
       const value = argv[++i];
       if (value === undefined) throw new Error(`${arg} requires a value`);
@@ -121,8 +132,9 @@ function printHelp() {
   console.log(`Usage: node .agents/skills/local-phone-call-test/scripts/run-call.mjs [options]
 
 Starts a deterministic, isolated local SIP phone call with the AI ("talk about
-whatever you want" by default), records synchronized audio WAVs (mixed, stereo,
-ai, user) and the full structured transcript + report for analysis.
+whatever you want" by default), auto-starts an isolated local llama.cpp
+LFM3-Audio-2B realtime server when needed, records synchronized audio WAVs
+(mixed, stereo, ai, user), and saves the full structured transcript + report.
 
 Options:
   --out <dir>              Output directory for recordings & transcript
@@ -132,6 +144,9 @@ Options:
   --callee-name <name>     Callee display name (default: "${DEFAULT_CALLEE_NAME}")
   --context <text>         Optional background context for the call
   --display-name <name>    User display name (default: desktop config or "Local Tester")
+  --use-saved-voice        Read STT/LLM/TTS URLs, models, and voice from desktop config.json
+                           instead of using the default LFM3-Audio-2B realtime profile
+  --no-start-llama         Do not auto-start llama serve (use an already-running server)
   --stt-base-url <url>     Override STT OpenAI-compatible loopback URL
   --stt-model <model>      Override STT model ID
   --llm-base-url <url>     Override LLM OpenAI-compatible loopback URL
@@ -181,15 +196,16 @@ export function loadSavedVoiceDefaults(configFile = desktopConfigPath()) {
 }
 
 export function resolveVoiceConfig(opts, saved = loadSavedVoiceDefaults()) {
+  const savedVoice = opts.useSavedVoice ? saved : null;
   return {
     displayName: opts.displayName || saved?.userDisplayName || 'Local Tester',
-    sttBaseUrl: opts.sttBaseUrl || saved?.sttBaseUrl || DEFAULT_OLLAMA_BASE_URL,
-    sttModel: opts.sttModel || saved?.sttModel || 'gemma4:e4b',
-    llmBaseUrl: opts.llmBaseUrl || saved?.llmBaseUrl || DEFAULT_OLLAMA_BASE_URL,
-    llmModel: opts.llmModel || saved?.llmModel || 'gemma4:e4b',
-    ttsBaseUrl: opts.ttsBaseUrl || saved?.ttsBaseUrl || DEFAULT_OLLAMA_BASE_URL,
-    ttsModel: opts.ttsModel || saved?.ttsModel || 'phonon',
-    ttsVoice: opts.ttsVoice || saved?.ttsVoice || 'default',
+    sttBaseUrl: opts.sttBaseUrl || savedVoice?.sttBaseUrl || DEFAULT_VOICE_BASE_URL,
+    sttModel: opts.sttModel || savedVoice?.sttModel || DEFAULT_STT_MODEL,
+    llmBaseUrl: opts.llmBaseUrl || savedVoice?.llmBaseUrl || DEFAULT_VOICE_BASE_URL,
+    llmModel: opts.llmModel || savedVoice?.llmModel || DEFAULT_LLM_MODEL,
+    ttsBaseUrl: opts.ttsBaseUrl || savedVoice?.ttsBaseUrl || DEFAULT_VOICE_BASE_URL,
+    ttsModel: opts.ttsModel || savedVoice?.ttsModel || DEFAULT_TTS_MODEL,
+    ttsVoice: opts.ttsVoice || savedVoice?.ttsVoice || DEFAULT_TTS_VOICE,
   };
 }
 
@@ -295,22 +311,199 @@ function formatRunStamp(date) {
   );
 }
 
-async function checkVoiceEndpointsReachable(voice) {
+function normalizeBaseUrl(url) {
+  return String(url || '').replace(/\/+$/, '');
+}
+
+function isLoopbackHost(hostname) {
+  const cleaned = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  return cleaned === '127.0.0.1' || cleaned === 'localhost' || cleaned === '::1';
+}
+
+function isLfm3RealtimeModel(model) {
+  return typeof model === 'string' && /lfm3[-_]audio/i.test(model.trim());
+}
+
+export function planLlamaRealtimeManagement(voice, opts) {
+  if (!opts.startLlamaServer) {
+    return { manage: false, targetBaseUrl: null, model: null, explicitTargetUrl: false };
+  }
+  if (!isLfm3RealtimeModel(voice.llmModel)) {
+    return { manage: false, targetBaseUrl: null, model: null, explicitTargetUrl: false };
+  }
+  const targetBaseUrl = normalizeBaseUrl(voice.llmBaseUrl);
+  try {
+    const parsed = new URL(targetBaseUrl);
+    if (!isLoopbackHost(parsed.hostname)) {
+      return { manage: false, targetBaseUrl: null, model: null, explicitTargetUrl: false };
+    }
+  } catch {
+    return { manage: false, targetBaseUrl: null, model: null, explicitTargetUrl: false };
+  }
+  return {
+    manage: true,
+    targetBaseUrl,
+    model: voice.llmModel.trim(),
+    explicitTargetUrl: Boolean(opts.llmBaseUrl || opts.sttBaseUrl || opts.ttsBaseUrl),
+  };
+}
+
+async function probeModelsEndpoint(baseUrl, fetchImpl = fetch, timeoutMs = 2500) {
+  const probeUrl = `${normalizeBaseUrl(baseUrl)}/models`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(probeUrl, { signal: controller.signal });
+    return res.status < 500;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function resolveExecutableOnPath(name) {
+  try {
+    const found = execFileSync('which', [name], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return found || null;
+  } catch {
+    return null;
+  }
+}
+
+async function waitForLlamaServerReady(baseUrl, timeoutMs, child, logPath, fetchImpl = fetch) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (child.exitCode !== null) {
+      throw new Error(`llama serve exited early with code ${child.exitCode} (inspect ${logPath})`);
+    }
+    if (await probeModelsEndpoint(baseUrl, fetchImpl, 2000)) {
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`Timed out waiting for llama serve at ${baseUrl} (inspect ${logPath})`);
+}
+
+function findLlamaExecutable() {
+  return (
+    resolveExecutableOnPath('llama') ||
+    resolveExecutableOnPath('llama-server') ||
+    (fs.existsSync('/opt/homebrew/bin/llama') ? '/opt/homebrew/bin/llama' : null)
+  );
+}
+
+export async function ensureLlamaRealtimeServer({
+  voice,
+  opts,
+  outDir,
+  appendEvent = () => {},
+  fetchImpl = fetch,
+  resolveLlama = findLlamaExecutable,
+  spawnImpl = spawn,
+  getPort = getFreeTcpPort,
+}) {
+  const plan = planLlamaRealtimeManagement(voice, opts);
+  if (!plan.manage) {
+    return { child: null, baseUrl: null, reused: false, logPath: null };
+  }
+
+  if (await probeModelsEndpoint(plan.targetBaseUrl, fetchImpl)) {
+    console.log(`[test-call] Reusing running LFM3-Audio server at ${plan.targetBaseUrl}`);
+    appendEvent({ type: 'llama_realtime.reused', baseUrl: plan.targetBaseUrl, model: plan.model });
+    return { child: null, baseUrl: plan.targetBaseUrl, reused: true, logPath: null };
+  }
+
+  const llamaBin = resolveLlama();
+  if (!llamaBin) {
+    throw new Error(
+      'llama.cpp (`llama` / `llama-server` v0.8.0+) is required for LFM3-Audio realtime calls. ' +
+        'Install with: brew install llama.cpp',
+    );
+  }
+
+  const parsedTarget = new URL(plan.targetBaseUrl);
+  const host = parsedTarget.hostname === 'localhost' ? '127.0.0.1' : parsedTarget.hostname;
+  const port = plan.explicitTargetUrl
+    ? Number(parsedTarget.port || (parsedTarget.protocol === 'https:' ? 443 : 80))
+    : await getPort();
+  const basePath = parsedTarget.pathname.replace(/\/+$/, '') || '/v1';
+  const managedBaseUrl = `http://${host}:${port}${basePath}`;
+  const logPath = path.join(outDir, 'llama-server.log');
+
+  const isSubcommandCli = path.basename(llamaBin) === 'llama';
+  const args = [
+    ...(isSubcommandCli ? ['serve'] : []),
+    '-hf',
+    plan.model,
+    '--host',
+    host,
+    '--port',
+    String(port),
+    '--temp',
+    '0',
+    '-np',
+    '2',
+  ];
+
+  console.log(
+    `[test-call] Starting managed llama.cpp LFM3-Audio server (${plan.model}) on http://${host}:${port} ...`,
+  );
+  const logFd = fs.openSync(logPath, 'a');
+  const child = spawnImpl(llamaBin, args, {
+    stdio: ['ignore', logFd, logFd],
+  });
+  fs.closeSync(logFd);
+
+  try {
+    await waitForLlamaServerReady(
+      managedBaseUrl,
+      LLAMA_REALTIME_STARTUP_TIMEOUT_MS,
+      child,
+      logPath,
+      fetchImpl,
+    );
+    appendEvent({
+      type: 'llama_realtime.ready',
+      baseUrl: managedBaseUrl,
+      port,
+      model: plan.model,
+      logPath,
+    });
+  } catch (error) {
+    await terminateProcess(child);
+    throw error;
+  }
+
+  if (normalizeBaseUrl(voice.sttBaseUrl) === plan.targetBaseUrl) voice.sttBaseUrl = managedBaseUrl;
+  if (normalizeBaseUrl(voice.llmBaseUrl) === plan.targetBaseUrl) voice.llmBaseUrl = managedBaseUrl;
+  if (normalizeBaseUrl(voice.ttsBaseUrl) === plan.targetBaseUrl) voice.ttsBaseUrl = managedBaseUrl;
+  return { child, baseUrl: managedBaseUrl, reused: false, logPath };
+}
+
+export async function checkVoiceEndpointsReachable(voice, fetchImpl = fetch) {
   const urls = [...new Set([voice.sttBaseUrl, voice.llmBaseUrl, voice.ttsBaseUrl])];
   for (const baseUrl of urls) {
-    const probeUrl = `${baseUrl.replace(/\/+$/, '')}/models`;
+    const normalized = normalizeBaseUrl(baseUrl);
+    const probeUrl = `${normalized}/models`;
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 5000);
-      const res = await fetch(probeUrl, { signal: controller.signal });
+      const res = await fetchImpl(probeUrl, { signal: controller.signal });
       clearTimeout(timer);
       if (res.status >= 500) {
         throw new Error(`HTTP ${res.status}`);
       }
     } catch (error) {
+      const hint =
+        normalized === DEFAULT_VOICE_BASE_URL
+          ? `Start the local LFM3-Audio server first: llama serve -hf ${DEFAULT_LLM_MODEL} --host 127.0.0.1 --port 8000 --temp 0 -np 2 (or omit --no-start-llama to auto-start it).`
+          : 'Start your local voice server first.';
       throw new Error(
-        `Local voice endpoint ${baseUrl} is not reachable (${error instanceof Error ? error.message : String(error)}). ` +
-          'Start Ollama or your local voice server first.',
+        `Local voice endpoint ${baseUrl} is not reachable (${error instanceof Error ? error.message : String(error)}). ${hint}`,
       );
     }
   }
@@ -505,8 +698,6 @@ async function main() {
     }
   }
 
-  await checkVoiceEndpointsReachable(voice);
-
   const tempRuntimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dappercode-call-test-'));
   const workDir = path.join(tempRuntimeDir, 'workspace');
   fs.mkdirSync(workDir, { recursive: true });
@@ -535,6 +726,7 @@ async function main() {
     fs.appendFileSync(eventsPath, `${JSON.stringify(entry)}\n`, 'utf8');
   };
 
+  let llamaChild = null;
   let baresipChild = null;
   let bridgeChild = null;
   let recorder = null;
@@ -559,6 +751,16 @@ async function main() {
   const observedTranscript = [];
 
   try {
+    const llamaRealtime = await ensureLlamaRealtimeServer({
+      voice,
+      opts,
+      outDir,
+      appendEvent,
+    });
+    llamaChild = llamaRealtime.child;
+
+    await checkVoiceEndpointsReachable(voice);
+
     let upstreamSipPort = opts.sipUpstreamPort;
     if (!upstreamSipPort) {
       upstreamSipPort = await getFreeTcpPort();
@@ -675,6 +877,11 @@ async function main() {
     console.log(
       `[test-call] Voice: STT=${voice.sttModel}, LLM=${voice.llmModel}, TTS=${voice.ttsModel} (${voice.ttsVoice})`,
     );
+    if (!opts.sipUpstreamPort) {
+      console.log(
+        '[test-call] Tip: macOS baresip coreaudio has no built-in AEC; use headphones or moderate speaker volume to minimize acoustic echo.',
+      );
+    }
     console.log('[test-call] Starting deterministic local call (auto-approving)...');
 
     ws = new WebSocket(`ws://127.0.0.1:${bridgePort}/rpc`, {
@@ -934,6 +1141,7 @@ async function main() {
     }
     await terminateProcess(bridgeChild);
     await terminateProcess(baresipChild);
+    await terminateProcess(llamaChild);
     const audioSummary = recorder ? recorder.stop() : null;
     timings.totalMs = Date.now() - startedAtMs;
 

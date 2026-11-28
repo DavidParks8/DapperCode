@@ -1516,9 +1516,12 @@ mod full_audio_validation {
             let base = spawn_mock_voice_http(Arc::clone(&voice)).await;
             let config = VoicePipelineConfig {
                 stt_base_url: base.clone(),
+                stt_model: "gemma4:e4b".to_string(),
                 llm_base_url: base.clone(),
+                llm_model: "gpt-oss:20b".to_string(),
                 tts_base_url: base,
-                ..VoicePipelineConfig::default()
+                tts_model: "phonon".to_string(),
+                tts_voice: "Harper".to_string(),
             };
             let client = VoicePipelineClient::new(config.clone()).unwrap();
             let forwarder = StageForwarder::start(&config).await;
