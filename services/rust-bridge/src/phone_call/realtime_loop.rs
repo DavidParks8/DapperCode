@@ -14,6 +14,7 @@ use super::realtime::{
     build_realtime_instructions, build_realtime_tools, encode_wav_16k_mono,
     transcribe_lfm3_chat_wav, upsample_8k_to_16k, RealtimeSession, RealtimeTurnOutput,
 };
+use super::room_attention::{AttentionDecision, RoomAttentionTracker, UtteranceAcoustics};
 use super::sip::{InboundRtpAudioFrame, SipCallEvent, SipCallHandle};
 use super::voice::{
     is_substantive_reply, VoiceCallPromptParams, VoiceConversation, VoiceError, VoiceToolCall,
@@ -61,6 +62,8 @@ struct ActiveRealtimeTurn {
 
 struct PendingShortCheck {
     samples_8k: Vec<i16>,
+    acoustics: UtteranceAcoustics,
+    captured_at: Instant,
     near_assistant_audio: bool,
     is_short_clip: bool,
     handle: JoinHandle<Result<Option<String>, VoiceError>>,
@@ -76,6 +79,7 @@ struct RealtimeDialogState {
     search_fillers: SearchFillerBank,
     active_search: Option<ActiveWebSearch>,
     cancelled_tool_call_id: Option<String>,
+    attention: RoomAttentionTracker,
 }
 
 impl RealtimeDialogState {
@@ -96,6 +100,7 @@ impl RealtimeDialogState {
             ctx.voice_client.clone(),
             ctx.slot.cancel.child_token(),
         );
+        let attention = RoomAttentionTracker::new(&prompt_params.user_display_name);
         Self {
             conversation,
             prompt_params,
@@ -106,6 +111,7 @@ impl RealtimeDialogState {
             search_fillers,
             active_search: None,
             cancelled_tool_call_id: None,
+            attention,
         }
     }
 
@@ -508,32 +514,43 @@ async fn handle_completed_utterance(
     samples_8k: Vec<i16>,
     near_assistant: bool,
 ) {
+    let now = Instant::now();
+    let acoustics = UtteranceAcoustics::from_pcm_8k(&samples_8k);
+    if state
+        .dialog
+        .attention
+        .should_drop_before_asr(&acoustics, now)
+    {
+        return;
+    }
+
     let overhead_frames = VAD_PREROLL_FRAMES.saturating_add(state.audio.vad.hangover_frames());
     let net_speech_samples = samples_8k
         .len()
         .saturating_sub(overhead_frames.saturating_mul(RTP_FRAME_SAMPLES));
 
-    if should_precheck_utterance(net_speech_samples, near_assistant) {
-        if let Some(old) = state.audio.short_check.take() {
-            old.handle.abort();
-        }
-        let wav = encode_wav_16k_mono(&upsample_8k_to_16k(&samples_8k));
-        let http = ctx.voice_client.http_client().clone();
-        let base = ctx.voice_client.llm_base_url().clone();
-        let model = ctx.voice_client.llm_model().to_string();
-        let cancel = ctx.slot.cancel.child_token();
-        let handle = tokio::spawn(async move {
-            transcribe_lfm3_chat_wav(&http, &base, &model, &wav, &cancel).await
-        });
-        state.audio.short_check = Some(PendingShortCheck {
+    if should_precheck_utterance(net_speech_samples, near_assistant)
+        || state
+            .dialog
+            .attention
+            .should_precheck_for_side_talk(&acoustics, now)
+    {
+        start_short_check(
+            ctx,
+            state,
             samples_8k,
-            near_assistant_audio: near_assistant,
-            is_short_clip: net_speech_samples < SHORT_SPEECH_CHECK_SAMPLES,
-            handle,
-        });
+            acoustics,
+            now,
+            near_assistant,
+            net_speech_samples < SHORT_SPEECH_CHECK_SAMPLES,
+        );
         return;
     }
 
+    state
+        .dialog
+        .attention
+        .note_directed_user_turn(&acoustics, now);
     let combined = combine_with_deferred(&mut state.audio.deferred_audio_8k, samples_8k);
     state.audio.continuation_deadline = None;
     spawn_background_asr(
@@ -545,6 +562,37 @@ async fn handle_completed_utterance(
     enqueue_realtime_audio_turn(ctx, sip_handle, state, combined);
 }
 
+fn start_short_check(
+    ctx: &ConnectedCallContext,
+    state: &mut RealtimeLoopState,
+    samples_8k: Vec<i16>,
+    acoustics: UtteranceAcoustics,
+    captured_at: Instant,
+    near_assistant: bool,
+    is_short_clip: bool,
+) {
+    if let Some(old) = state.audio.short_check.take() {
+        old.handle.abort();
+    }
+    let wav = encode_wav_16k_mono(&upsample_8k_to_16k(&samples_8k));
+    let http = ctx.voice_client.http_client().clone();
+    let base = ctx.voice_client.llm_base_url().clone();
+    let model = ctx.voice_client.llm_model().to_string();
+    let cancel = ctx.slot.cancel.child_token();
+    let handle =
+        tokio::spawn(
+            async move { transcribe_lfm3_chat_wav(&http, &base, &model, &wav, &cancel).await },
+        );
+    state.audio.short_check = Some(PendingShortCheck {
+        samples_8k,
+        acoustics,
+        captured_at,
+        near_assistant_audio: near_assistant,
+        is_short_clip,
+        handle,
+    });
+}
+
 async fn handle_short_check_result(
     ctx: &ConnectedCallContext,
     sip_handle: &SipCallHandle,
@@ -554,25 +602,16 @@ async fn handle_short_check_result(
     let Some(check) = state.audio.short_check.take() else {
         return;
     };
-    let text = match result {
-        Ok(Ok(Some(text))) => text,
-        _ => {
-            if !check.is_short_clip {
-                let combined =
-                    combine_with_deferred(&mut state.audio.deferred_audio_8k, check.samples_8k);
-                state.audio.continuation_deadline = None;
-                enqueue_realtime_audio_turn(ctx, sip_handle, state, combined);
-            }
-            return;
+    let Ok(Ok(Some(text))) = result else {
+        if !check.is_short_clip {
+            let combined =
+                combine_with_deferred(&mut state.audio.deferred_audio_8k, check.samples_8k);
+            state.audio.continuation_deadline = None;
+            enqueue_realtime_audio_turn(ctx, sip_handle, state, combined);
         }
+        return;
     };
-    if state.audio.echo_tracker.matches_self_echo(
-        &text,
-        check.near_assistant_audio,
-        None,
-        Instant::now(),
-    ) || is_side_conversation_utterance(&text)
-    {
+    if is_ignored_precheck_utterance(state, &text, &check) {
         return;
     }
     if state.pending_end.is_some() && !is_substantive_reply(&text) {
@@ -597,6 +636,23 @@ async fn handle_short_check_result(
     let combined = combine_with_deferred(&mut state.audio.deferred_audio_8k, check.samples_8k);
     state.audio.continuation_deadline = None;
     enqueue_realtime_audio_turn(ctx, sip_handle, state, combined);
+}
+
+fn is_ignored_precheck_utterance(
+    state: &mut RealtimeLoopState,
+    text: &str,
+    check: &PendingShortCheck,
+) -> bool {
+    state.audio.echo_tracker.matches_self_echo(
+        text,
+        check.near_assistant_audio,
+        None,
+        Instant::now(),
+    ) || state.dialog.attention.classify_transcribed_utterance(
+        text,
+        &check.acoustics,
+        check.captured_at,
+    ) == AttentionDecision::SideConversation
 }
 
 async fn flush_deferred_audio_turn(
@@ -868,6 +924,11 @@ async fn handle_realtime_turn_done(
     }
     if !had_tools
         && state.pending_end.is_none()
+        && !state
+            .dialog
+            .last_callee_text
+            .as_deref()
+            .is_some_and(|text| state.dialog.attention.is_other_person_address(text))
         && is_mutual_farewell(state.dialog.last_callee_text.as_deref(), &out.spoken_text)
     {
         state.pending_end = Some(PendingCallEnd {
@@ -883,31 +944,9 @@ pub(super) fn is_mutual_farewell(callee_text: Option<&str>, assistant_text: &str
     let Some(callee) = callee_text else {
         return false;
     };
-    !is_side_conversation_utterance(callee)
+    !RoomAttentionTracker::new("").is_other_person_address(callee)
         && is_explicit_farewell(callee)
         && is_assistant_farewell(assistant_text)
-}
-
-/// Detects short room side-conversations addressed to family members (e.g. "I love you, daddy",
-/// "Bye, daddy!") so Lily stays silent instead of chiming in on household chatter.
-pub(super) fn is_side_conversation_utterance(text: &str) -> bool {
-    let normalized = normalize_farewell_text(text);
-    let words: Vec<&str> = normalized.split_whitespace().collect();
-    if words.is_empty() || words.len() > 10 || words.contains(&"lily") {
-        return false;
-    }
-    const FAMILY_VOCATIVES: &[&str] = &["daddy", "mommy", "dad", "mom", "mama", "papa"];
-    const NON_VOCATIVE_PREV: &[&str] = &[
-        "my", "your", "our", "his", "her", "their", "a", "the", "for", "about", "with", "from",
-        "to", "of", "like", "tell", "ask", "call",
-    ];
-    words.iter().enumerate().any(|(idx, word)| {
-        FAMILY_VOCATIVES.contains(word)
-            && idx
-                .checked_sub(1)
-                .and_then(|prev| words.get(prev))
-                .is_none_or(|prev| !NON_VOCATIVE_PREV.contains(prev))
-    })
 }
 
 fn is_explicit_farewell(text: &str) -> bool {
@@ -973,10 +1012,15 @@ async fn record_cancelled_realtime_speech(
     if spoken_text.is_empty() {
         return;
     }
+    let now = Instant::now();
     state
         .audio
         .echo_tracker
-        .record_assistant_speech(spoken_text, Instant::now());
+        .record_assistant_speech(spoken_text, now);
+    state
+        .dialog
+        .attention
+        .note_assistant_turn_finished(spoken_text, now);
     state
         .dialog
         .conversation
@@ -993,10 +1037,15 @@ async fn record_completed_realtime_speech(
     if spoken_text.is_empty() {
         return;
     }
+    let now = Instant::now();
     state
         .audio
         .echo_tracker
-        .note_completed_speech(spoken_text, Instant::now());
+        .note_completed_speech(spoken_text, now);
+    state
+        .dialog
+        .attention
+        .note_assistant_turn_finished(spoken_text, now);
     state
         .dialog
         .conversation

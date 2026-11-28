@@ -13,6 +13,7 @@ pub(crate) mod sip;
 pub(crate) mod voice;
 
 mod realtime_loop;
+mod room_attention;
 mod web_search;
 
 use crate::bridge_protocol::{

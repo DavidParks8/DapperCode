@@ -4,8 +4,7 @@ use super::{
 };
 use crate::phone_call::audio::{decode_mulaw, RTP_FRAME_SAMPLES};
 use crate::phone_call::realtime_loop::{
-    encode_realtime_mulaw_frame, is_mutual_farewell, is_side_conversation_utterance,
-    should_precheck_utterance,
+    encode_realtime_mulaw_frame, is_mutual_farewell, should_precheck_utterance,
 };
 use crate::phone_call::voice::{VoiceCallPromptParams, VoiceToolCall};
 use axum::extract::ws::{Message as AxumWsMsg, WebSocket, WebSocketUpgrade};
@@ -226,30 +225,6 @@ fn realtime_helpers_detect_lfm3_derive_ws_url_upsample_and_forbid_robotic_phrase
         Some("How is white chocolate made?"),
         "Have a great day!",
     ));
-
-    for side_talk in [
-        "I love you, daddy.",
-        "Bye, daddy!",
-        "Mommy, look at this!",
-        "Hey dad, what's for dinner?",
-    ] {
-        assert!(
-            is_side_conversation_utterance(side_talk),
-            "expected side conversation to be filtered: {side_talk:?}",
-        );
-    }
-    for directed_at_lily in [
-        "What's a good gift for my dad?",
-        "My mom makes great soup.",
-        "Can you call mom for me?",
-        "Tell me a joke about a dad.",
-        "Lily, say hi to daddy.",
-    ] {
-        assert!(
-            !is_side_conversation_utterance(directed_at_lily),
-            "must not filter speech directed at Lily: {directed_at_lily:?}",
-        );
-    }
 
     let wav_16k = encode_wav_16k_mono(&[100, -100, 200, -200]);
     assert_eq!(&wav_16k[0..4], b"RIFF");
