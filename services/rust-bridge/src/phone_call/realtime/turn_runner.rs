@@ -1,8 +1,11 @@
 #![forbid(unsafe_code)]
 
-use super::state::{ActiveRealtimeTurn, PendingShortCheck, RealtimeLoopState, RealtimeTurnRequest};
+use super::state::{
+    ActiveRealtimeTurn, PendingShortCheck, RealtimeLoopState, RealtimeTurnRequest,
+    ToolOutputSubmission,
+};
 use super::strategy::{RealtimeModelSession, RealtimeTurnOutput};
-use super::tools::{ActiveToolTask, ToolOutcome};
+use super::tool_loop::submit_tool_outputs_batch;
 use crate::phone_call::audio::{
     mulaw_frame_mean_abs, VadEvent, RTP_FRAME_SAMPLES, VAD_MAX_UTTERANCE_SAMPLES,
     VAD_PREROLL_FRAMES,
@@ -33,10 +36,11 @@ pub(super) fn cancel_active_turn(state: &mut RealtimeLoopState, sip_handle: &Sip
     if let Some(turn) = &state.active_turn {
         turn.cancel.cancel();
     }
-    if let Some(tool_task) = state.dialog.active_tool.take() {
-        tool_task.cancel.cancel();
-        tool_task.handle.abort();
-        state.dialog.cancelled_tool_call_id = Some(tool_task.call_id);
+    if let Some(batch) = state.dialog.pending_tools.take() {
+        state
+            .dialog
+            .cancelled_tool_outputs
+            .extend(batch.cancel_all());
     }
     sip_handle.clear_outbound_audio();
 }
@@ -267,7 +271,7 @@ pub(super) fn enqueue_realtime_audio_turn(
     cancel_active_turn(state, sip_handle);
     state.pending_turn = Some(RealtimeTurnRequest::Audio {
         pcm_8k: samples_8k,
-        cancelled_tool_call_id: state.dialog.cancelled_tool_call_id.take(),
+        cancelled_tool_outputs: std::mem::take(&mut state.dialog.cancelled_tool_outputs),
     });
 }
 
@@ -361,12 +365,12 @@ async fn execute_realtime_turn(
     let result = match request {
         RealtimeTurnRequest::Audio {
             pcm_8k,
-            cancelled_tool_call_id,
+            cancelled_tool_outputs,
         } => {
             run_audio_request(
                 session.as_mut(),
                 &pcm_8k,
-                cancelled_tool_call_id.as_deref(),
+                &cancelled_tool_outputs,
                 &task_cancel,
                 &mut emit_frame,
             )
@@ -380,20 +384,18 @@ async fn execute_realtime_turn(
                 .run_text_turn(&prompt, force_audio, &task_cancel, &mut emit_frame)
                 .await
         }
-        RealtimeTurnRequest::ToolOutput {
-            call_id,
-            output,
+        RealtimeTurnRequest::ToolOutputs {
+            outputs,
             request_spoken_reply,
         } => {
-            session
-                .submit_tool_output(
-                    &call_id,
-                    &output,
-                    request_spoken_reply,
-                    &task_cancel,
-                    &mut emit_frame,
-                )
-                .await
+            submit_tool_outputs_batch(
+                session.as_mut(),
+                &outputs,
+                request_spoken_reply,
+                &task_cancel,
+                &mut emit_frame,
+            )
+            .await
         }
     };
     if let Ok(ref out) = result {
@@ -407,14 +409,20 @@ async fn execute_realtime_turn(
 async fn run_audio_request(
     session: &mut dyn RealtimeModelSession,
     pcm_8k: &[i16],
-    cancelled_tool_call_id: Option<&str>,
+    cancelled_tool_outputs: &[ToolOutputSubmission],
     cancel: &CancellationToken,
     emit_frame: &mut (dyn FnMut([u8; RTP_FRAME_SAMPLES]) + Send),
 ) -> Result<RealtimeTurnOutput, VoiceError> {
-    if let Some(call_id) = cancelled_tool_call_id {
+    for cancelled in cancelled_tool_outputs {
         let mut ignore = |_| {};
         session
-            .submit_tool_output(call_id, r#"{"cancelled":true}"#, false, cancel, &mut ignore)
+            .submit_tool_output(
+                &cancelled.call_id,
+                &cancelled.output,
+                false,
+                cancel,
+                &mut ignore,
+            )
             .await?;
     }
     session.run_audio_turn(pcm_8k, cancel, emit_frame).await
@@ -462,15 +470,6 @@ pub(super) async fn poll_short_check(
 ) -> Result<Result<Option<String>, VoiceError>, tokio::task::JoinError> {
     match slot.as_mut() {
         Some(check) => (&mut check.handle).await,
-        None => std::future::pending().await,
-    }
-}
-
-pub(super) async fn poll_active_tool(
-    slot: &mut Option<ActiveToolTask>,
-) -> Result<ToolOutcome, tokio::task::JoinError> {
-    match slot.as_mut() {
-        Some(task) => (&mut task.handle).await,
         None => std::future::pending().await,
     }
 }

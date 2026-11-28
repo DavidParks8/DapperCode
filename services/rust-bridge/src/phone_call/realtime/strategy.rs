@@ -15,10 +15,16 @@ pub type OnPcmuFrame<'a> = &'a mut (dyn FnMut([u8; RTP_FRAME_SAMPLES]) + Send);
 pub struct RealtimeToolSpec {
     pub name: &'static str,
     pub description: &'static str,
+    pub prompt_guidance: Option<&'static str>,
     pub parameters: Value,
 }
 
 impl RealtimeToolSpec {
+    #[must_use]
+    pub fn guidance(&self) -> &str {
+        self.prompt_guidance.unwrap_or(self.description)
+    }
+
     #[must_use]
     pub fn to_openai_tool_json(&self) -> Value {
         json!({
@@ -89,6 +95,20 @@ pub trait RealtimeModelStrategy: Send + Sync {
     fn id(&self) -> &'static str;
 
     fn matches_model(&self, model: &str) -> bool;
+
+    /// Returns true when this strategy handles the configured model and endpoint topology.
+    /// Defaults to matching on model name alone; strategies requiring a single shared endpoint
+    /// can override this.
+    fn matches_endpoints(&self, model: &str, _llm_base: &Url, _tts_base: &Url) -> bool {
+        self.matches_model(model)
+    }
+
+    /// Checks whether the backing realtime provider is ready before dialing a call.
+    fn check_readiness<'a>(
+        &'a self,
+        voice_client: &'a VoicePipelineClient,
+        cancel: &'a CancellationToken,
+    ) -> BoxFuture<'a, Result<(), VoiceError>>;
 
     fn connect<'a>(
         &'a self,

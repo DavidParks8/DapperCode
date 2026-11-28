@@ -1049,13 +1049,25 @@ impl VoicePipelineClient {
 
     #[must_use]
     pub fn is_realtime_s2s(&self) -> bool {
-        super::realtime::is_realtime_s2s_model(&self.config.llm_model)
-            && self.endpoints.llm_base == self.endpoints.tts_base
+        self.is_realtime_s2s_in(&super::realtime::registry::RealtimeStrategyRegistry::default())
+    }
+
+    #[must_use]
+    pub(crate) fn is_realtime_s2s_in(
+        &self,
+        registry: &super::realtime::registry::RealtimeStrategyRegistry,
+    ) -> bool {
+        registry.resolve_for_client(self).is_some()
     }
 
     #[must_use]
     pub fn llm_base_url(&self) -> &Url {
         &self.endpoints.llm_base
+    }
+
+    #[must_use]
+    pub fn tts_base_url(&self) -> &Url {
+        &self.endpoints.tts_base
     }
 
     #[must_use]
@@ -1068,30 +1080,12 @@ impl VoicePipelineClient {
         &self.http
     }
 
-    async fn probe_realtime_server(&self, cancel: &CancellationToken) -> Result<(), VoiceError> {
-        let models_url = append_endpoint_path(&self.endpoints.llm_base, "models");
-        let request = self
-            .http
-            .get(models_url.clone())
-            .timeout(Duration::from_secs(PRELOAD_REQUEST_TIMEOUT_SECS));
-        let response = tokio::select! {
-            biased;
-            () = cancel.cancelled() => return Err(VoiceError::Cancelled),
-            res = request.send() => res.map_err(|source| VoiceError::Transport {
-                endpoint: models_url.to_string(),
-                source,
-            })?,
-        };
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let body = read_bounded_error_body(response, cancel).await?;
-            return Err(VoiceError::HttpStatus {
-                endpoint: models_url.to_string(),
-                status,
-                body,
-            });
-        }
-        Ok(())
+    pub async fn preload_models(&self, cancel: &CancellationToken) -> Result<(), VoiceError> {
+        self.preload_models_with_registry(
+            &super::realtime::registry::RealtimeStrategyRegistry::default(),
+            cancel,
+        )
+        .await
     }
 
     #[cfg_attr(
@@ -1101,12 +1095,16 @@ impl VoicePipelineClient {
             reason = "existing bridge function predates perfectionist structural caps; keep ratcheted until split"
         )
     )]
-    pub async fn preload_models(&self, cancel: &CancellationToken) -> Result<(), VoiceError> {
+    pub(crate) async fn preload_models_with_registry(
+        &self,
+        registry: &super::realtime::registry::RealtimeStrategyRegistry,
+        cancel: &CancellationToken,
+    ) -> Result<(), VoiceError> {
         if cancel.is_cancelled() {
             return Err(VoiceError::Cancelled);
         }
-        if self.is_realtime_s2s() {
-            return self.probe_realtime_server(cancel).await;
+        if let Some(strategy) = registry.resolve_for_client(self) {
+            return strategy.check_readiness(self, cancel).await;
         }
 
         let candidates = [

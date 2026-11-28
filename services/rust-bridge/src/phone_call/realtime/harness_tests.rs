@@ -6,8 +6,9 @@ use crate::phone_call::realtime::strategy::{
     RealtimeTurnOutput,
 };
 use crate::phone_call::realtime::turn_runner::should_precheck_utterance;
-use crate::phone_call::voice::{VoiceError, VoicePipelineClient};
+use crate::phone_call::voice::{VoiceError, VoicePipelineClient, VoicePipelineConfig};
 use reqwest::Url;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -66,7 +67,10 @@ impl RealtimeModelSession for FakeCustomRealtimeSession {
     }
 }
 
-struct FakeCustomRealtimeStrategy;
+#[derive(Default)]
+struct FakeCustomRealtimeStrategy {
+    readiness_checks: AtomicUsize,
+}
 
 impl RealtimeModelStrategy for FakeCustomRealtimeStrategy {
     fn id(&self) -> &'static str {
@@ -75,6 +79,15 @@ impl RealtimeModelStrategy for FakeCustomRealtimeStrategy {
 
     fn matches_model(&self, model: &str) -> bool {
         model.starts_with("custom-realtime/")
+    }
+
+    fn check_readiness<'a>(
+        &'a self,
+        _voice_client: &'a VoicePipelineClient,
+        _cancel: &'a CancellationToken,
+    ) -> BoxFuture<'a, Result<(), VoiceError>> {
+        self.readiness_checks.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Ok(()) })
     }
 
     fn connect<'a>(
@@ -106,18 +119,46 @@ impl RealtimeModelStrategy for FakeCustomRealtimeStrategy {
     }
 }
 
-#[test]
-fn strategy_registry_swaps_models_without_touching_harness() {
+#[tokio::test]
+async fn strategy_registry_swaps_models_routing_and_readiness_without_touching_voice_client() {
     let default_registry = RealtimeStrategyRegistry::default();
     assert!(default_registry.supports_model("LiquidAI/LFM3-Audio-2B-GGUF:Q8_0"));
     assert!(!default_registry.supports_model("custom-realtime/v1"));
 
-    let custom_registry = RealtimeStrategyRegistry::new(vec![Arc::new(FakeCustomRealtimeStrategy)]);
+    // LFM3 requires llm_base == tts_base, whereas custom strategies can use distinct endpoints
+    // and custom readiness probes (e.g. without a `/models` HTTP route).
+    let split_lfm3 = VoicePipelineClient::new(VoicePipelineConfig {
+        llm_base_url: "http://127.0.0.1:8000/v1".to_string(),
+        tts_base_url: "http://127.0.0.1:9000/v1".to_string(),
+        ..VoicePipelineConfig::default()
+    })
+    .unwrap();
+    assert!(!split_lfm3.is_realtime_s2s_in(&default_registry));
+
+    let custom_strategy = Arc::new(FakeCustomRealtimeStrategy::default());
+    let strategy_arc: Arc<dyn RealtimeModelStrategy> = custom_strategy.clone();
+    let custom_registry = RealtimeStrategyRegistry::new(vec![strategy_arc]);
+    let split_custom = VoicePipelineClient::new(VoicePipelineConfig {
+        llm_base_url: "http://127.0.0.1:19991/v1".to_string(),
+        llm_model: "custom-realtime/v1".to_string(),
+        tts_base_url: "http://127.0.0.1:19992/v1".to_string(),
+        tts_model: "separate-tts".to_string(),
+        ..VoicePipelineConfig::default()
+    })
+    .unwrap();
+    assert!(split_custom.is_realtime_s2s_in(&custom_registry));
     let resolved = custom_registry
-        .resolve("custom-realtime/v1")
+        .resolve_for_client(&split_custom)
         .expect("custom strategy resolved");
     assert_eq!(resolved.id(), "fake-custom-realtime");
     assert!(!custom_registry.supports_model("LiquidAI/LFM3-Audio-2B-GGUF:Q8_0"));
+
+    // Production preload path delegates to the registered strategy instead of probing `/models`.
+    split_custom
+        .preload_models_with_registry(&custom_registry, &CancellationToken::new())
+        .await
+        .expect("custom strategy readiness succeeds without /models server");
+    assert_eq!(custom_strategy.readiness_checks.load(Ordering::SeqCst), 1);
 }
 
 #[test]

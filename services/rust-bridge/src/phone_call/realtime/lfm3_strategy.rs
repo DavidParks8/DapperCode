@@ -7,8 +7,8 @@ pub(super) mod tests;
 
 use super::lfm3_audio::{
     build_lfm3_instructions, decode_audio_delta, derive_realtime_ws_url, encode_wav_16k_mono,
-    parse_raw_tool_calls, realtime_error, synthesize_lfm3_filler_frames, transcribe_lfm3_chat_wav,
-    upsample_8k_to_16k, Lfm3OutputEncoder,
+    parse_raw_tool_calls, probe_lfm3_server_readiness, realtime_error,
+    synthesize_lfm3_filler_frames, transcribe_lfm3_chat_wav, upsample_8k_to_16k, Lfm3OutputEncoder,
 };
 use super::strategy::{
     BoxFuture, OnPcmuFrame, RealtimeConnectConfig, RealtimeModelSession, RealtimeModelStrategy,
@@ -48,14 +48,29 @@ impl RealtimeModelStrategy for Lfm3AudioStrategy {
         lower.contains("lfm3-audio") || lower.contains("lfm3_audio")
     }
 
+    fn matches_endpoints(&self, model: &str, llm_base: &Url, tts_base: &Url) -> bool {
+        self.matches_model(model) && llm_base == tts_base
+    }
+
+    fn check_readiness<'a>(
+        &'a self,
+        voice_client: &'a VoicePipelineClient,
+        cancel: &'a CancellationToken,
+    ) -> BoxFuture<'a, Result<(), VoiceError>> {
+        Box::pin(probe_lfm3_server_readiness(voice_client, cancel))
+    }
+
     fn connect<'a>(
         &'a self,
         config: &'a RealtimeConnectConfig,
         cancel: &'a CancellationToken,
     ) -> BoxFuture<'a, Result<Box<dyn RealtimeModelSession>, VoiceError>> {
         Box::pin(async move {
-            let instructions =
-                build_lfm3_instructions(&config.prompt_params, &config.initial_steers);
+            let instructions = build_lfm3_instructions(
+                &config.prompt_params,
+                &config.initial_steers,
+                &config.tools,
+            );
             let tools = Value::Array(
                 config
                     .tools

@@ -1,13 +1,58 @@
 #![forbid(unsafe_code)]
 
 use super::state::RealtimeLoopState;
+use super::turn_runner::cancel_active_turn;
 use crate::phone_call::room_attention::RoomAttentionTracker;
+use crate::phone_call::sip::SipCallHandle;
 use crate::phone_call::voice::AssistantTurnOutput;
 use crate::phone_call::{
-    publish_in_call_card_update, sync_shared_transcript, ConnectedCallContext, PendingCallEnd,
-    END_CALL_QUIET_GRACE,
+    publish_in_call_card_update, sync_shared_transcript, CallLoopExit, ConnectedCallContext,
+    EndTrigger, PendingCallEnd, END_CALL_QUIET_GRACE,
 };
 use std::time::Instant;
+
+pub(super) async fn finish_cancelled_call(
+    ctx: &ConnectedCallContext,
+    sip_handle: &SipCallHandle,
+    state: &mut RealtimeLoopState,
+) -> CallLoopExit {
+    cancel_active_turn(state, sip_handle);
+    let _ = sip_handle.hangup().await;
+    let end_reason = match ctx.slot.end_trigger.get().copied() {
+        Some(EndTrigger::MobileHangup) => "mobile_hangup",
+        Some(EndTrigger::AgentHangup) => "agent_hangup",
+        Some(EndTrigger::ThreadRetired) => "thread_retired",
+        Some(EndTrigger::Shutdown) | None => "bridge_shutdown",
+    };
+    CallLoopExit::Completed {
+        end_reason: end_reason.to_string(),
+        outcome_summary: None,
+    }
+}
+
+pub(super) async fn finish_deadline_call(
+    sip_handle: &SipCallHandle,
+    state: &mut RealtimeLoopState,
+) -> CallLoopExit {
+    cancel_active_turn(state, sip_handle);
+    let _ = sip_handle.hangup().await;
+    CallLoopExit::Completed {
+        end_reason: "max_duration_reached".to_string(),
+        outcome_summary: Some("Maximum call duration reached.".to_string()),
+    }
+}
+
+pub(super) async fn finish_pending_end(
+    sip_handle: &SipCallHandle,
+    state: &mut RealtimeLoopState,
+) -> CallLoopExit {
+    let end = state.pending_end.take().expect("guarded by is_some");
+    let _ = sip_handle.hangup().await;
+    CallLoopExit::Completed {
+        end_reason: end.reason,
+        outcome_summary: Some(end.summary),
+    }
+}
 
 pub(super) async fn record_cancelled_speech(
     ctx: &ConnectedCallContext,

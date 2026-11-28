@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use super::strategy::RealtimeToolInvocation;
+use super::strategy::{RealtimeToolInvocation, RealtimeToolSpec};
 use crate::phone_call::audio::{
     encode_mulaw, Downsampler24kTo8k, MULAW_SILENCE, RTP_FRAME_SAMPLES,
 };
@@ -17,6 +17,8 @@ use tokio_util::sync::CancellationToken;
 
 const LFM3_ASR_TIMEOUT_SECS: u64 = 6;
 const LFM3_ASR_MAX_TOKENS: u32 = 64;
+const LFM3_READINESS_TIMEOUT_SECS: u64 = 30;
+const LFM3_ERROR_BODY_MAX_BYTES: usize = 4_096;
 
 /// Upsamples 8 kHz telephony PCM to LFM3-Audio's native 16 kHz input rate.
 #[must_use]
@@ -139,7 +141,11 @@ impl Lfm3OutputEncoder {
 }
 
 #[must_use]
-pub fn build_lfm3_instructions(params: &VoiceCallPromptParams, steers: &[String]) -> String {
+pub fn build_lfm3_instructions(
+    params: &VoiceCallPromptParams,
+    steers: &[String],
+    tools: &[RealtimeToolSpec],
+) -> String {
     let caller_name = {
         let trimmed = params.user_display_name.trim();
         if trimmed.is_empty() {
@@ -157,11 +163,18 @@ pub fn build_lfm3_instructions(params: &VoiceCallPromptParams, steers: &[String]
          Always share your own fun personal take, opinion, or concrete topic idea when asked instead of deflecting back to the listener. \
          Keep most turns as reactions or statements rather than ending every turn with a question. \
          Only say you are an AI if directly asked, and never pretend to be {caller_name}.\n\
-         If they criticize your voice, pacing, or answers, apologize briefly, adjust, and keep talking.\n\
-         Tools: Call send_dtmf only for automated phone menus. \
-         Use web_search ONLY for specific external facts, game mechanics, recipes, trivia, or current events you do not know (never for casual chat, choosing dinner, opinions, your name, or complaints). \
-         Call end_call immediately when the other person says goodbye, bye, asks to hang up or stop, refuses to talk, says it is a wrong number, or reports an emergency.",
+         If they criticize your voice, pacing, or answers, apologize briefly, adjust, and keep talking.",
     );
+    let guidance: Vec<&str> = tools
+        .iter()
+        .map(RealtimeToolSpec::guidance)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .collect();
+    if !guidance.is_empty() {
+        prompt.push_str("\nTools: ");
+        prompt.push_str(&guidance.join(" "));
+    }
     append_optional_line(&mut prompt, "Callee", params.callee_name.as_deref());
     append_optional_line(&mut prompt, "Call objective", Some(&params.objective));
     append_optional_line(
@@ -183,6 +196,46 @@ fn append_optional_line(target: &mut String, label: &str, value: Option<&str>) {
         target.push_str(": ");
         target.push_str(trimmed);
     }
+}
+
+/// Verifies that the local `llama.cpp` server hosting LFM3-Audio responds on `/models`.
+pub async fn probe_lfm3_server_readiness(
+    voice_client: &VoicePipelineClient,
+    cancel: &CancellationToken,
+) -> Result<(), VoiceError> {
+    if cancel.is_cancelled() {
+        return Err(VoiceError::Cancelled);
+    }
+    let mut models_url = voice_client.llm_base_url().clone();
+    let prefix = models_url.path().trim_end_matches('/');
+    models_url.set_path(&format!("{prefix}/models"));
+    let request = voice_client
+        .http_client()
+        .get(models_url.clone())
+        .timeout(Duration::from_secs(LFM3_READINESS_TIMEOUT_SECS));
+    let response = tokio::select! {
+        biased;
+        () = cancel.cancelled() => return Err(VoiceError::Cancelled),
+        res = request.send() => res.map_err(|source| VoiceError::Transport {
+            endpoint: models_url.to_string(),
+            source,
+        })?,
+    };
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let bytes = tokio::select! {
+            biased;
+            () = cancel.cancelled() => return Err(VoiceError::Cancelled),
+            res = response.bytes() => res.unwrap_or_default(),
+        };
+        let bounded = &bytes[..bytes.len().min(LFM3_ERROR_BODY_MAX_BYTES)];
+        return Err(VoiceError::HttpStatus {
+            endpoint: models_url.to_string(),
+            status,
+            body: String::from_utf8_lossy(bounded).into_owned(),
+        });
+    }
+    Ok(())
 }
 
 pub async fn synthesize_lfm3_filler_frames(

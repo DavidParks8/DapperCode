@@ -5,8 +5,11 @@ use crate::phone_call::realtime::lfm3_audio::{
     transcribe_lfm3_chat_wav, upsample_8k_to_16k,
 };
 use crate::phone_call::realtime::strategy::{
-    RealtimeModelSession, RealtimeModelStrategy, RealtimeToolInvocation,
+    RealtimeModelSession, RealtimeModelStrategy, RealtimeToolInvocation, RealtimeToolSpec,
 };
+use crate::phone_call::realtime::tools::end_call::EndCallTool;
+use crate::phone_call::realtime::tools::send_dtmf::SendDtmfTool;
+use crate::phone_call::realtime::tools::RealtimeTool;
 use crate::phone_call::voice::VoiceCallPromptParams;
 use axum::extract::ws::{Message as AxumWsMsg, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
@@ -200,23 +203,45 @@ fn lfm3_helpers_match_models_derive_ws_url_upsample_encode_and_build_instruction
     let decoded = decode_mulaw(encoded[0]);
     assert!((4_500..=5_500).contains(&decoded), "decoded={decoded}");
 
+    let prompt_params = VoiceCallPromptParams {
+        user_display_name: "David Parks".to_string(),
+        callee_name: Some("User".to_string()),
+        objective: "Open conversation".to_string(),
+        first_message: Some("Hi! What's on your mind?".to_string()),
+        context: None,
+    };
+    let default_specs = vec![SendDtmfTool.spec(), EndCallTool.spec()];
     let instructions = build_lfm3_instructions(
-        &VoiceCallPromptParams {
-            user_display_name: "David Parks".to_string(),
-            callee_name: Some("User".to_string()),
-            objective: "Open conversation".to_string(),
-            first_message: Some("Hi! What's on your mind?".to_string()),
-            context: None,
-        },
+        &prompt_params,
         &["Keep it upbeat".to_string()],
+        &default_specs,
     );
     assert!(
         instructions.starts_with("Respond with function calls, and interleaved text and audio."),
     );
     assert!(instructions.contains("Your own name is Lily"));
     assert!(instructions.contains("instead of over-simplifying"));
-    assert!(instructions.contains("Use web_search ONLY for specific external facts"));
+    assert!(instructions.contains("Call send_dtmf only for automated phone menus."));
+    assert!(instructions.contains("Call end_call immediately when the other person says goodbye"));
+    assert!(!instructions.contains("Use web_search ONLY"));
     assert!(instructions.contains("Private live instruction: Keep it upbeat"));
+
+    // Custom/non-default tool registry only injects guidance for registered tools.
+    let custom_specs = vec![RealtimeToolSpec {
+        name: "lookup_calendar",
+        description: "Check today's calendar events.",
+        prompt_guidance: Some("Call lookup_calendar when asked about today's schedule."),
+        parameters: json!({ "type": "object", "properties": {} }),
+    }];
+    let custom_instructions = build_lfm3_instructions(&prompt_params, &[], &custom_specs);
+    assert!(custom_instructions.contains("Call lookup_calendar when asked about today's schedule."));
+    assert!(!custom_instructions.contains("send_dtmf"));
+    assert!(!custom_instructions.contains("web_search"));
+    assert!(!custom_instructions.contains("end_call"));
+
+    // Empty tool list omits the Tools section altogether.
+    let no_tools_instructions = build_lfm3_instructions(&prompt_params, &[], &[]);
+    assert!(!no_tools_instructions.contains("\nTools:"));
 }
 
 #[tokio::test]
@@ -350,4 +375,12 @@ async fn lfm3_realtime_session_streams_pcmu_handles_tools_cancel_and_chat_asr() 
         .expect("input_audio_buffer.append sent");
     assert!(first_clear < first_append);
     assert!(events.iter().any(|ev| ev["type"] == "response.cancel"));
+    let tool_output = events
+        .iter()
+        .find(|ev| {
+            ev["type"] == "conversation.item.create" && ev["item"]["type"] == "function_call_output"
+        })
+        .expect("function_call_output event sent");
+    assert_eq!(tool_output["item"]["call_id"], "call_end_1");
+    assert_eq!(tool_output["item"]["output"], r#"{"ok":true}"#);
 }

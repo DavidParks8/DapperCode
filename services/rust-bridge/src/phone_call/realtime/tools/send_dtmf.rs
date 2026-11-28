@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use super::{RealtimeTool, ToolDispatch, ToolEffect, ToolExecutionContext, ToolOutcome};
+use super::{RealtimeTool, ToolDispatch, ToolExecutionContext, ToolOutcome};
 use crate::phone_call::realtime::strategy::{RealtimeToolInvocation, RealtimeToolSpec};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -16,6 +16,7 @@ impl RealtimeTool for SendDtmfTool {
         RealtimeToolSpec {
             name: self.name(),
             description: "Press keypad digits ONLY when an automated IVR phone menu asks you to press a number.",
+            prompt_guidance: Some("Call send_dtmf only for automated phone menus."),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -32,30 +33,33 @@ impl RealtimeTool for SendDtmfTool {
     fn dispatch(
         self: Arc<Self>,
         invocation: RealtimeToolInvocation,
-        ctx: &ToolExecutionContext<'_>,
+        ctx: &mut ToolExecutionContext<'_>,
     ) -> ToolDispatch {
         let normalized = normalize_dtmf_digits(&invocation.arguments);
         if normalized.is_empty() {
             return ToolDispatch::Immediate(ToolOutcome {
                 call_id: invocation.call_id,
                 output: r#"{"ok":false,"reason":"no valid DTMF digits"}"#.to_string(),
-                request_spoken_reply: false,
-                effect: ToolEffect::None,
+                request_spoken_reply: true,
             });
         }
-        match ctx.dtmf.transmit(&normalized) {
-            Ok(()) => ToolDispatch::Immediate(ToolOutcome {
-                call_id: invocation.call_id,
-                output: format!("Sent DTMF digits: {normalized}"),
-                request_spoken_reply: false,
-                effect: ToolEffect::SetIvrMode(true),
-            }),
-            Err(err) => ToolDispatch::Immediate(ToolOutcome {
-                call_id: invocation.call_id,
-                output: format!("Failed to send DTMF: {err}"),
-                request_spoken_reply: false,
-                effect: ToolEffect::FailCall(err),
-            }),
+        match ctx.host.transmit_dtmf(&normalized) {
+            Ok(()) => {
+                ctx.host.set_ivr_mode(true);
+                ToolDispatch::Immediate(ToolOutcome {
+                    call_id: invocation.call_id,
+                    output: format!("Sent DTMF digits: {normalized}"),
+                    request_spoken_reply: false,
+                })
+            }
+            Err(err) => {
+                ctx.host.fail_call(err.clone());
+                ToolDispatch::Immediate(ToolOutcome {
+                    call_id: invocation.call_id,
+                    output: format!("Failed to send DTMF: {err}"),
+                    request_spoken_reply: false,
+                })
+            }
         }
     }
 }

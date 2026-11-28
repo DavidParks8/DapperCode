@@ -24,19 +24,10 @@ pub struct FillerClip {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ToolEffect {
-    None,
-    SetIvrMode(bool),
-    ScheduleCallEnd { reason: String, summary: String },
-    FailCall(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolOutcome {
     pub call_id: String,
     pub output: String,
     pub request_spoken_reply: bool,
-    pub effect: ToolEffect,
 }
 
 pub struct ActiveToolTask {
@@ -53,17 +44,26 @@ pub enum ToolDispatch {
     },
 }
 
-/// Abstraction for transmitting DTMF tones so `SendDtmfTool` does not depend on SIP internals.
-pub trait DtmfTransmitter: Send + Sync {
-    fn transmit(&self, digits: &str) -> Result<(), String>;
+/// Extensible call-control capabilities exposed to self-contained realtime tools so tools execute
+/// their own side effects directly without a closed effect enum in the tool loop.
+pub trait ToolHost: Send {
+    fn callee_has_spoken(&self) -> bool;
+
+    fn assistant_spoke_in_turn(&self) -> bool;
+
+    fn transmit_dtmf(&mut self, digits: &str) -> Result<(), String>;
+
+    fn set_ivr_mode(&mut self, enabled: bool);
+
+    fn schedule_call_end(&mut self, reason: String, summary: String);
+
+    fn fail_call(&mut self, error: String);
 }
 
 /// Shared execution context passed to self-contained realtime tools.
 pub struct ToolExecutionContext<'a> {
     pub http: &'a reqwest::Client,
-    pub dtmf: &'a dyn DtmfTransmitter,
-    pub callee_has_spoken: bool,
-    pub assistant_spoke_in_turn: bool,
+    pub host: &'a mut dyn ToolHost,
     pub call_cancel: &'a CancellationToken,
 }
 
@@ -76,7 +76,7 @@ pub trait RealtimeTool: Send + Sync {
     fn dispatch(
         self: Arc<Self>,
         invocation: RealtimeToolInvocation,
-        ctx: &ToolExecutionContext<'_>,
+        ctx: &mut ToolExecutionContext<'_>,
     ) -> ToolDispatch;
 }
 
@@ -122,14 +122,13 @@ impl RealtimeToolRegistry {
     pub fn dispatch(
         &self,
         invocation: RealtimeToolInvocation,
-        ctx: &ToolExecutionContext<'_>,
+        ctx: &mut ToolExecutionContext<'_>,
     ) -> ToolDispatch {
         let Some(tool) = self.by_name.get(invocation.name.as_str()).cloned() else {
             return ToolDispatch::Immediate(ToolOutcome {
                 call_id: invocation.call_id,
-                output: r#"{"error":"unknown_tool"}"#.to_string(),
-                request_spoken_reply: false,
-                effect: ToolEffect::None,
+                output: r#"{"error":"unknown_tool","message":"That tool is not available. Respond naturally to the caller without calling it."}"#.to_string(),
+                request_spoken_reply: true,
             });
         };
         tool.dispatch(invocation, ctx)

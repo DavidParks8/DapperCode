@@ -1,7 +1,8 @@
 #![forbid(unsafe_code)]
 
 use super::strategy::{RealtimeModelSession, RealtimeModelStrategy, RealtimeTurnOutput};
-use super::tools::{ActiveToolTask, RealtimeToolRegistry};
+use super::tool_loop::PendingToolBatch;
+use super::tools::RealtimeToolRegistry;
 use crate::phone_call::audio::TelephonyVad;
 use crate::phone_call::room_attention::{RoomAttentionTracker, UtteranceAcoustics};
 use crate::phone_call::voice::{VoiceCallPromptParams, VoiceConversation, VoiceError};
@@ -16,18 +17,23 @@ use tokio_util::sync::CancellationToken;
 
 const REALTIME_ECHO_WINDOW: Duration = Duration::from_millis(1_000);
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ToolOutputSubmission {
+    pub call_id: String,
+    pub output: String,
+}
+
 pub(super) enum RealtimeTurnRequest {
     Audio {
         pcm_8k: Vec<i16>,
-        cancelled_tool_call_id: Option<String>,
+        cancelled_tool_outputs: Vec<ToolOutputSubmission>,
     },
     Text {
         prompt: String,
         force_audio: bool,
     },
-    ToolOutput {
-        call_id: String,
-        output: String,
+    ToolOutputs {
+        outputs: Vec<ToolOutputSubmission>,
         request_spoken_reply: bool,
     },
 }
@@ -56,8 +62,8 @@ pub(super) struct RealtimeDialogState {
     pub prompt_params: VoiceCallPromptParams,
     pub callee_has_spoken: bool,
     pub last_callee_text: Option<String>,
-    pub active_tool: Option<ActiveToolTask>,
-    pub cancelled_tool_call_id: Option<String>,
+    pub pending_tools: Option<PendingToolBatch>,
+    pub cancelled_tool_outputs: Vec<ToolOutputSubmission>,
     pub attention: RoomAttentionTracker,
 }
 
@@ -87,8 +93,8 @@ impl RealtimeDialogState {
             prompt_params,
             callee_has_spoken: false,
             last_callee_text: None,
-            active_tool: None,
-            cancelled_tool_call_id: None,
+            pending_tools: None,
+            cancelled_tool_outputs: Vec::new(),
             attention,
         }
     }

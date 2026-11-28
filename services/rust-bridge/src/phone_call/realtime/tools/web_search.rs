@@ -6,8 +6,7 @@
 pub(super) mod tests;
 
 use super::{
-    spawn_async_tool, FillerClip, RealtimeTool, ToolDispatch, ToolEffect, ToolExecutionContext,
-    ToolOutcome,
+    spawn_async_tool, FillerClip, RealtimeTool, ToolDispatch, ToolExecutionContext, ToolOutcome,
 };
 use crate::phone_call::realtime::strategy::{
     RealtimeModelStrategy, RealtimeToolInvocation, RealtimeToolSpec,
@@ -122,6 +121,7 @@ impl RealtimeTool for WebSearchTool {
         RealtimeToolSpec {
             name: self.name(),
             description: "Search the web for specific external facts, game mechanics, recipes, trivia, or current events you do not know. Do NOT use for casual chat, opinions, your name, or complaints.",
+            prompt_guidance: Some("Use web_search ONLY for specific external facts, game mechanics, recipes, trivia, or current events you do not know (never for casual chat, choosing dinner, opinions, your name, or complaints)."),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -138,7 +138,7 @@ impl RealtimeTool for WebSearchTool {
     fn dispatch(
         self: Arc<Self>,
         invocation: RealtimeToolInvocation,
-        ctx: &ToolExecutionContext<'_>,
+        ctx: &mut ToolExecutionContext<'_>,
     ) -> ToolDispatch {
         let raw_query = invocation
             .arguments
@@ -151,7 +151,6 @@ impl RealtimeTool for WebSearchTool {
                 call_id: invocation.call_id,
                 output: r#"{"ok":true}"#.to_string(),
                 request_spoken_reply: false,
-                effect: ToolEffect::None,
             });
         }
         let filler = self.fillers.next_clip();
@@ -165,7 +164,6 @@ impl RealtimeTool for WebSearchTool {
                     call_id,
                     output,
                     request_spoken_reply: true,
-                    effect: ToolEffect::None,
                 }
             })
         });

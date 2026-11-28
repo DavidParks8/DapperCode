@@ -6,7 +6,8 @@
 pub(super) mod tests;
 
 use super::farewell::{
-    maybe_arm_mutual_farewell, record_cancelled_speech, record_completed_speech,
+    finish_cancelled_call, finish_deadline_call, finish_pending_end, maybe_arm_mutual_farewell,
+    record_cancelled_speech, record_completed_speech,
 };
 use super::registry::RealtimeStrategyRegistry;
 use super::state::{
@@ -15,13 +16,14 @@ use super::state::{
 use super::strategy::{
     RealtimeConnectConfig, RealtimeModelSession, RealtimeModelStrategy, RealtimeTurnOutput,
 };
-use super::tool_loop::{dispatch_tool_calls, handle_active_tool_done, ToolJoinResult};
+use super::tool_loop::{
+    dispatch_tool_calls, handle_pending_tool_done, poll_pending_tools, ToolJoinResult,
+};
 use super::tools::RealtimeToolRegistry;
 use super::turn_runner::{
     cancel_active_turn, flush_deferred_audio_turn, handle_completed_utterance,
     handle_short_check_result, maybe_dispatch_pending_turn, poll_active_realtime_turn,
-    poll_active_tool, poll_short_check, process_inbound_frame, queue_opening_greeting,
-    record_user_text,
+    poll_short_check, process_inbound_frame, queue_opening_greeting, record_user_text,
 };
 use crate::phone_call::audio::VadEvent;
 use crate::phone_call::sip::{InboundRtpAudioFrame, SipCallEvent, SipCallHandle};
@@ -29,7 +31,7 @@ use crate::phone_call::voice::VoiceError;
 use crate::phone_call::{
     publish_in_call_card_update, recv_optional_inbound_audio, recv_optional_sip_event,
     requests_immediate_speech_stop, set_call_hold, settle_connected_call, sync_shared_transcript,
-    wait_for_pending_end, CallLoopExit, ConnectedCallContext, EndTrigger,
+    wait_for_pending_end, CallLoopExit, ConnectedCallContext,
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -55,7 +57,7 @@ enum HarnessEvent {
     SpeechQuiet,
     ContinuationDue,
     ShortCheckDone(ShortCheckJoinResult),
-    ToolDone(ToolJoinResult),
+    ToolDone(usize, ToolJoinResult),
     TurnDone(TurnJoinResult),
     OpeningDue,
 }
@@ -65,7 +67,7 @@ enum HarnessEvent {
 pub(in crate::phone_call) async fn run_connected_realtime_call(mut ctx: ConnectedCallContext) {
     let registry = RealtimeStrategyRegistry::default();
     let sip_handle = ctx.sip_session.control_handle();
-    let Some(strategy) = registry.resolve(ctx.voice_client.llm_model()) else {
+    let Some(strategy) = registry.resolve_for_client(&ctx.voice_client) else {
         let _ = sip_handle.hangup().await;
         settle_connected_call(
             &ctx,
@@ -215,8 +217,10 @@ async fn poll_next_event(
     opening_deadline: tokio::time::Instant,
     call_deadline: tokio::time::Instant,
 ) -> HarnessEvent {
-    let pending_end_ready =
-        state.pending_end.is_some() && state.active_turn.is_none() && state.pending_turn.is_none();
+    let pending_end_ready = state.pending_end.is_some()
+        && state.active_turn.is_none()
+        && state.pending_turn.is_none()
+        && state.dialog.pending_tools.is_none();
     let opening_ready = state.opening_greeting_pending
         && !state.opening_window_elapsed
         && state.active_turn.is_none();
@@ -234,7 +238,7 @@ async fn poll_next_event(
         () = tokio::time::sleep_until(quiet_at), if state.audio.speech_quiet_deadline.is_some() => HarnessEvent::SpeechQuiet,
         () = tokio::time::sleep_until(cont_at), if state.audio.continuation_deadline.is_some() => HarnessEvent::ContinuationDue,
         res = poll_short_check(&mut state.audio.short_check), if state.audio.short_check.is_some() => HarnessEvent::ShortCheckDone(res),
-        res = poll_active_tool(&mut state.dialog.active_tool), if state.dialog.active_tool.is_some() => HarnessEvent::ToolDone(res),
+        (idx, res) = poll_pending_tools(&mut state.dialog.pending_tools), if state.dialog.pending_tools.is_some() => HarnessEvent::ToolDone(idx, res),
         res = poll_active_realtime_turn(&mut state.active_turn), if state.active_turn.is_some() => HarnessEvent::TurnDone(res),
         () = tokio::time::sleep_until(opening_deadline), if opening_ready => HarnessEvent::OpeningDue,
     }
@@ -287,56 +291,16 @@ async fn handle_harness_event(
             handle_short_check_result(ctx, sip_handle, state, res).await;
             None
         }
-        HarnessEvent::ToolDone(res) => handle_active_tool_done(sip_handle, state, res).await,
+        HarnessEvent::ToolDone(idx, res) => {
+            handle_pending_tool_done(state, idx, res);
+            None
+        }
         HarnessEvent::TurnDone(res) => handle_realtime_turn_done(ctx, sip_handle, state, res).await,
         HarnessEvent::OpeningDue => {
             state.opening_window_elapsed = true;
             queue_opening_greeting(state);
             None
         }
-    }
-}
-
-async fn finish_cancelled_call(
-    ctx: &ConnectedCallContext,
-    sip_handle: &SipCallHandle,
-    state: &mut RealtimeLoopState,
-) -> CallLoopExit {
-    cancel_active_turn(state, sip_handle);
-    let _ = sip_handle.hangup().await;
-    let end_reason = match ctx.slot.end_trigger.get().copied() {
-        Some(EndTrigger::MobileHangup) => "mobile_hangup",
-        Some(EndTrigger::AgentHangup) => "agent_hangup",
-        Some(EndTrigger::ThreadRetired) => "thread_retired",
-        Some(EndTrigger::Shutdown) | None => "bridge_shutdown",
-    };
-    CallLoopExit::Completed {
-        end_reason: end_reason.to_string(),
-        outcome_summary: None,
-    }
-}
-
-async fn finish_deadline_call(
-    sip_handle: &SipCallHandle,
-    state: &mut RealtimeLoopState,
-) -> CallLoopExit {
-    cancel_active_turn(state, sip_handle);
-    let _ = sip_handle.hangup().await;
-    CallLoopExit::Completed {
-        end_reason: "max_duration_reached".to_string(),
-        outcome_summary: Some("Maximum call duration reached.".to_string()),
-    }
-}
-
-async fn finish_pending_end(
-    sip_handle: &SipCallHandle,
-    state: &mut RealtimeLoopState,
-) -> CallLoopExit {
-    let end = state.pending_end.take().expect("guarded by is_some");
-    let _ = sip_handle.hangup().await;
-    CallLoopExit::Completed {
-        end_reason: end.reason,
-        outcome_summary: Some(end.summary),
     }
 }
 
