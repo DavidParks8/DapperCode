@@ -18,9 +18,7 @@ use super::sip::{InboundRtpAudioFrame, SipCallEvent, SipCallHandle};
 use super::voice::{
     is_substantive_reply, VoiceCallPromptParams, VoiceConversation, VoiceError, VoiceToolCall,
 };
-use super::web_search::{
-    execute_web_search, sanitize_query, SearchFillerBank, SEARCH_FILLER_DELAY,
-};
+use super::web_search::{execute_web_search, sanitize_query, SearchFillerBank};
 use super::{
     is_incomplete_utterance, publish_in_call_card_update, recv_optional_inbound_audio,
     recv_optional_sip_event, set_call_hold, settle_connected_call, sync_shared_transcript,
@@ -29,7 +27,7 @@ use super::{
     INCOMPLETE_UTTERANCE_DEFER,
 };
 
-const SHORT_SPEECH_CHECK_SAMPLES: usize = 12_000; // 1.5 s of net speech @ 8 kHz
+const SHORT_SPEECH_CHECK_SAMPLES: usize = 16_000; // 2.0 s of net speech @ 8 kHz
 const MAX_ECHO_PRECHECK_SAMPLES: usize = 40_000; // 5.0 s: longer clips are unambiguously human speech
 const REALTIME_ECHO_WINDOW: Duration = Duration::from_millis(1_000);
 const MAX_DEFERRED_AUDIO_SAMPLES: usize = VAD_MAX_UTTERANCE_SAMPLES;
@@ -37,6 +35,7 @@ const MAX_DEFERRED_AUDIO_SAMPLES: usize = VAD_MAX_UTTERANCE_SAMPLES;
 enum RealtimeTurnRequest {
     Audio {
         pcm_16k: Vec<i16>,
+        cancelled_tool_call_id: Option<String>,
     },
     Text {
         prompt: String,
@@ -47,6 +46,12 @@ enum RealtimeTurnRequest {
         output: String,
         request_spoken_reply: bool,
     },
+}
+
+struct ActiveWebSearch {
+    cancel: CancellationToken,
+    call_id: String,
+    handle: JoinHandle<String>,
 }
 
 struct ActiveRealtimeTurn {
@@ -69,6 +74,8 @@ struct RealtimeDialogState {
     last_callee_text: Option<String>,
     last_search_query: Option<String>,
     search_fillers: SearchFillerBank,
+    active_search: Option<ActiveWebSearch>,
+    cancelled_tool_call_id: Option<String>,
 }
 
 impl RealtimeDialogState {
@@ -97,6 +104,8 @@ impl RealtimeDialogState {
             last_callee_text: None,
             last_search_query: None,
             search_fillers,
+            active_search: None,
+            cancelled_tool_call_id: None,
         }
     }
 
@@ -347,6 +356,9 @@ async fn run_realtime_select_loop(
             check_res = poll_short_check(&mut state.audio.short_check), if state.audio.short_check.is_some() => {
                 handle_short_check_result(ctx, sip_handle, state, check_res).await;
             }
+            search_res = poll_active_search(&mut state.dialog.active_search), if state.dialog.active_search.is_some() => {
+                handle_active_search_done(state, search_res);
+            }
             turn_res = poll_active_realtime_turn(&mut state.active_turn), if state.active_turn.is_some() => {
                 if let Some(exit) = handle_realtime_turn_done(ctx, sip_handle, state, turn_res).await {
                     return exit;
@@ -369,6 +381,11 @@ async fn run_realtime_select_loop(
 fn cancel_active_turn(state: &mut RealtimeLoopState, sip_handle: &SipCallHandle) {
     if let Some(turn) = &state.active_turn {
         turn.cancel.cancel();
+    }
+    if let Some(search) = state.dialog.active_search.take() {
+        search.cancel.cancel();
+        search.handle.abort();
+        state.dialog.cancelled_tool_call_id = Some(search.call_id);
     }
     sip_handle.clear_outbound_audio();
 }
@@ -462,10 +479,7 @@ async fn process_inbound_frame(
         Some(VadEvent::BargeIn) => {
             state.audio.echo_tracker.note_vad_pending(true, now);
             state.audio.utterance_near_outbound = true;
-            if let Some(turn) = &state.active_turn {
-                turn.cancel.cancel();
-            }
-            sip_handle.clear_outbound_audio();
+            cancel_active_turn(state, sip_handle);
             publish_in_call_card_update(ctx, state.dialog.conversation.transcript()).await;
             None
         }
@@ -557,7 +571,8 @@ async fn handle_short_check_result(
         check.near_assistant_audio,
         None,
         Instant::now(),
-    ) {
+    ) || is_side_conversation_utterance(&text)
+    {
         return;
     }
     if state.pending_end.is_some() && !is_substantive_reply(&text) {
@@ -614,6 +629,7 @@ fn enqueue_realtime_audio_turn(
     cancel_active_turn(state, sip_handle);
     state.pending_turn = Some(RealtimeTurnRequest::Audio {
         pcm_16k: upsample_8k_to_16k(&samples_8k),
+        cancelled_tool_call_id: state.dialog.cancelled_tool_call_id.take(),
     });
 }
 
@@ -723,7 +739,15 @@ async fn dispatch_realtime_request<OnAudio: FnMut(&[i16])>(
     mut on_audio_24k: OnAudio,
 ) -> Result<RealtimeTurnOutput, VoiceError> {
     match request {
-        RealtimeTurnRequest::Audio { pcm_16k } => {
+        RealtimeTurnRequest::Audio {
+            pcm_16k,
+            cancelled_tool_call_id,
+        } => {
+            if let Some(call_id) = cancelled_tool_call_id {
+                session
+                    .submit_tool_output(&call_id, r#"{"cancelled":true}"#, false, cancel, |_| {})
+                    .await?;
+            }
             session
                 .run_audio_turn(&pcm_16k, cancel, &mut on_audio_24k)
                 .await
@@ -859,7 +883,31 @@ pub(super) fn is_mutual_farewell(callee_text: Option<&str>, assistant_text: &str
     let Some(callee) = callee_text else {
         return false;
     };
-    is_explicit_farewell(callee) && is_assistant_farewell(assistant_text)
+    !is_side_conversation_utterance(callee)
+        && is_explicit_farewell(callee)
+        && is_assistant_farewell(assistant_text)
+}
+
+/// Detects short room side-conversations addressed to family members (e.g. "I love you, daddy",
+/// "Bye, daddy!") so Lily stays silent instead of chiming in on household chatter.
+pub(super) fn is_side_conversation_utterance(text: &str) -> bool {
+    let normalized = normalize_farewell_text(text);
+    let words: Vec<&str> = normalized.split_whitespace().collect();
+    if words.is_empty() || words.len() > 10 || words.contains(&"lily") {
+        return false;
+    }
+    const FAMILY_VOCATIVES: &[&str] = &["daddy", "mommy", "dad", "mom", "mama", "papa"];
+    const NON_VOCATIVE_PREV: &[&str] = &[
+        "my", "your", "our", "his", "her", "their", "a", "the", "for", "about", "with", "from",
+        "to", "of", "like", "tell", "ask", "call",
+    ];
+    words.iter().enumerate().any(|(idx, word)| {
+        FAMILY_VOCATIVES.contains(word)
+            && idx
+                .checked_sub(1)
+                .and_then(|prev| words.get(prev))
+                .is_none_or(|prev| !NON_VOCATIVE_PREV.contains(prev))
+    })
 }
 
 fn is_explicit_farewell(text: &str) -> bool {
@@ -1013,14 +1061,14 @@ async fn apply_realtime_tool_call(
             );
         }
         VoiceToolCall::WebSearch { call_id, query } => {
-            handle_realtime_web_search_tool(ctx, sip_handle, state, call_id, &query).await;
+            handle_realtime_web_search_tool(ctx, sip_handle, state, call_id, &query);
         }
         VoiceToolCall::WaitSilently { .. } | VoiceToolCall::ResumeCall { .. } => {}
     }
     None
 }
 
-async fn handle_realtime_web_search_tool(
+fn handle_realtime_web_search_tool(
     ctx: &ConnectedCallContext,
     sip_handle: &SipCallHandle,
     state: &mut RealtimeLoopState,
@@ -1028,46 +1076,64 @@ async fn handle_realtime_web_search_tool(
     query: &str,
 ) {
     let normalized = sanitize_query(query).to_ascii_lowercase();
-    let output = if !normalized.is_empty()
+    if !normalized.is_empty()
         && state.dialog.last_search_query.as_deref() == Some(normalized.as_str())
     {
-        r#"{"note":"Already searched that earlier. Reply directly to what the listener just said."}"#
-            .to_string()
-    } else {
-        if !normalized.is_empty() {
-            state.dialog.last_search_query = Some(normalized);
-        }
-        run_web_search_with_filler(ctx, sip_handle, state, query).await
+        state.pending_turn = Some(RealtimeTurnRequest::ToolOutput {
+            call_id,
+            output: r#"{"ok":true}"#.to_string(),
+            request_spoken_reply: false,
+        });
+        return;
+    }
+    if !normalized.is_empty() {
+        state.dialog.last_search_query = Some(normalized);
+    }
+    if let Some(clip) = state.dialog.search_fillers.next_clip() {
+        state
+            .audio
+            .echo_tracker
+            .record_assistant_speech(clip.text, Instant::now());
+        state.audio.last_outbound_at = Some(Instant::now());
+        sip_handle.enqueue_pcmu_frames(clip.frames);
+    }
+    let search_cancel = ctx.slot.cancel.child_token();
+    let task_cancel = search_cancel.clone();
+    let http = ctx.voice_client.http_client().clone();
+    let query_owned = query.to_string();
+    let handle =
+        tokio::spawn(async move { execute_web_search(&http, &query_owned, &task_cancel).await });
+    state.dialog.active_search = Some(ActiveWebSearch {
+        cancel: search_cancel,
+        call_id,
+        handle,
+    });
+}
+
+fn handle_active_search_done(
+    state: &mut RealtimeLoopState,
+    result: Result<String, tokio::task::JoinError>,
+) {
+    let Some(search) = state.dialog.active_search.take() else {
+        return;
+    };
+    let Ok(output) = result else {
+        state.dialog.cancelled_tool_call_id = Some(search.call_id);
+        return;
     };
     state.pending_turn = Some(RealtimeTurnRequest::ToolOutput {
-        call_id,
+        call_id: search.call_id,
         output,
         request_spoken_reply: true,
     });
 }
 
-async fn run_web_search_with_filler(
-    ctx: &ConnectedCallContext,
-    sip_handle: &SipCallHandle,
-    state: &mut RealtimeLoopState,
-    query: &str,
-) -> String {
-    let search_fut = execute_web_search(ctx.voice_client.http_client(), query, &ctx.slot.cancel);
-    tokio::pin!(search_fut);
-    tokio::select! {
-        biased;
-        result = &mut search_fut => result.to_string(),
-        () = tokio::time::sleep(SEARCH_FILLER_DELAY) => {
-            if let Some(clip) = state.dialog.search_fillers.next_clip() {
-                state
-                    .audio
-                    .echo_tracker
-                    .record_assistant_speech(clip.text, Instant::now());
-                state.audio.last_outbound_at = Some(Instant::now());
-                sip_handle.enqueue_pcmu_frames(clip.frames);
-            }
-            search_fut.await.to_string()
-        }
+async fn poll_active_search(
+    slot: &mut Option<ActiveWebSearch>,
+) -> Result<String, tokio::task::JoinError> {
+    match slot.as_mut() {
+        Some(search) => (&mut search.handle).await,
+        None => std::future::pending().await,
     }
 }
 

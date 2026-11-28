@@ -10,7 +10,6 @@ use super::voice::VoicePipelineClient;
 use reqwest::header::{CONTENT_TYPE, USER_AGENT};
 use reqwest::Url;
 use serde::Deserialize;
-use serde_json::{json, Value};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
@@ -24,13 +23,8 @@ const SEARCH_TIMEOUT_SECS: u64 = 4;
 const MAX_QUERY_CHARS: usize = 160;
 const MAX_RESPONSE_BYTES: usize = 128 * 1024;
 const MAX_SNIPPET_CHARS: usize = 240;
-const MAX_RESULTS: usize = 4;
-pub(super) const SEARCH_FILLER_DELAY: Duration = Duration::from_millis(400);
-const SEARCH_FILLER_PHRASES: &[&str] = &[
-    "One sec, let me look that up.",
-    "Hold on, let me check that real quick.",
-    "Give me just a second to look that up.",
-];
+const MAX_RESULTS: usize = 3;
+const SEARCH_FILLER_PHRASES: &[&str] = &["One sec.", "Let me check.", "Hold on, checking."];
 
 #[derive(Clone)]
 pub(super) struct SearchFillerClip {
@@ -113,12 +107,12 @@ fn encode_filler_pcm8k(pcm_8k: &[i16]) -> Option<Vec<[u8; RTP_FRAME_SAMPLES]>> {
     Some(frames)
 }
 
-/// Executes a bounded factual web search for the realtime voice model, returning compact JSON.
+/// Executes a bounded factual web search for the realtime voice model, returning natural plain-text notes.
 pub(super) async fn execute_web_search(
     http: &reqwest::Client,
     raw_query: &str,
     cancel: &CancellationToken,
-) -> Value {
+) -> String {
     execute_web_search_with_endpoints(http, raw_query, DDG_LITE_URL, WIKIPEDIA_API_URL, cancel)
         .await
 }
@@ -129,29 +123,37 @@ pub(super) async fn execute_web_search_with_endpoints(
     ddg_url: &str,
     wiki_url: &str,
     cancel: &CancellationToken,
-) -> Value {
+) -> String {
     let query = sanitize_query(raw_query);
     if query.is_empty() {
-        return json!({ "results": [] });
+        return "No background notes found. Reply naturally from what you know.".to_string();
     }
     if is_self_name_query(&query) {
-        return json!({ "answer": "Your name is Lily." });
+        return "Your name is Lily.".to_string();
     }
     if let Some(snippets) = fetch_ddg_lite_snippets(http, ddg_url, &query, cancel).await {
         if !snippets.is_empty() {
-            return json!({ "query": query, "results": snippets });
+            return format_search_notes(&snippets);
         }
     }
     if let Some(snippets) = fetch_wikipedia_snippets(http, wiki_url, &query, cancel).await {
         if !snippets.is_empty() {
-            return json!({ "query": query, "results": snippets });
+            return format_search_notes(&snippets);
         }
     }
-    json!({
-        "query": query,
-        "results": [],
-        "note": "No search results found right now.",
-    })
+    "No background notes found. Answer naturally from what you know or say you are not sure."
+        .to_string()
+}
+
+fn format_search_notes(snippets: &[String]) -> String {
+    let mut out = String::from(
+        r#"Background notes (answer naturally in your own words without saying "search results"):"#,
+    );
+    for snippet in snippets {
+        out.push_str("\n- ");
+        out.push_str(snippet);
+    }
+    out
 }
 
 pub(super) fn sanitize_query(raw: &str) -> String {

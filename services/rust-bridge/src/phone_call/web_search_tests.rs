@@ -21,7 +21,7 @@ fn parse_ddg_lite_snippets_strips_tags_decodes_entities_and_bounds_count() {
         <tr><td class="result-snippet">Fifth result ignored</td></tr>
     "#;
     let parsed = parse_ddg_lite_snippets(html);
-    assert_eq!(parsed.len(), 4);
+    assert_eq!(parsed.len(), 3);
     assert_eq!(
         parsed[0],
         r#"End cities & ships spawn in chunks 0-8 "infinitely"."#,
@@ -77,7 +77,7 @@ async fn execute_web_search_uses_ddg_falls_back_to_wikipedia_and_answers_self_na
         &cancel,
     )
     .await;
-    assert_eq!(self_name["answer"], "Your name is Lily.");
+    assert_eq!(self_name, "Your name is Lily.");
 
     let ddg_res = execute_web_search_with_endpoints(
         &http,
@@ -87,10 +87,11 @@ async fn execute_web_search_uses_ddg_falls_back_to_wikipedia_and_answers_self_na
         &cancel,
     )
     .await;
-    assert_eq!(
-        ddg_res["results"][0],
-        "End cities generate infinitely across the outer End islands.",
+    assert!(
+        ddg_res.contains("End cities generate infinitely across the outer End islands."),
+        "ddg_res={ddg_res:?}",
     );
+    assert!(ddg_res.starts_with("Background notes"));
 
     let wiki_fallback = execute_web_search_with_endpoints(
         &http,
@@ -100,9 +101,11 @@ async fn execute_web_search_uses_ddg_falls_back_to_wikipedia_and_answers_self_na
         &cancel,
     )
     .await;
-    assert_eq!(
-        wiki_fallback["results"][0],
-        "White chocolate: White chocolate is made from cocoa butter, sugar, and milk solids.",
+    assert!(
+        wiki_fallback.contains(
+            "White chocolate: White chocolate is made from cocoa butter, sugar, and milk solids.",
+        ),
+        "wiki_fallback={wiki_fallback:?}",
     );
 }
 
